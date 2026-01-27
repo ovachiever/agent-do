@@ -35,11 +35,14 @@ INTERACTION (Visual/Interactive):
   screenshot [path]              Take screenshot (returns path)
   screenrecord <path> [duration] Record screen video
   tap <x> <y>                    Tap at coordinates
+  tap-label <label>              Tap element by accessibility label
+  tap-button <title>             Tap button by title
   swipe <x1> <y1> <x2> <y2>      Swipe gesture
   type <text>                    Type text into focused field
   keypress <key>                 Press special key (home, lock, etc.)
   shake                          Shake device gesture
-  snapshot [--interactive]       Get UI element tree (for automation)
+  tree [--json]                  Get UI element tree (uses idb)
+  find <label>                   Find element by label (returns coords)
 
 MEDIA & DATA:
   addmedia <files...>            Add photos/videos to library
@@ -77,7 +80,11 @@ Examples:
   agent-ios statusbar --time "9:41" --battery 100
   agent-ios location 37.7749 -122.4194
   agent-ios privacy grant location-always com.myapp.id
-  agent-ios snapshot --interactive
+  agent-ios tree
+  agent-ios tree --json
+  agent-ios tap-label "Meal Plan, tab, 2 of 7"
+  agent-ios tap-button "Sign In"
+  agent-ios find "Search"
 EOF
 }
 
@@ -465,10 +472,12 @@ cmd_tap() {
         return 1
     fi
 
-    # Use simctl io input for more reliable tap
-    # First try the newer input method
-    if xcrun simctl io "$udid" input tap "$x" "$y" 2>/dev/null; then
+    # Prefer idb for consistent coordinate system with idb ui describe-all
+    if command -v idb &>/dev/null; then
+        idb ui tap --udid "$udid" "$x" "$y" 2>/dev/null
         echo "Tapped at ($x, $y)"
+    elif xcrun simctl io "$udid" input tap "$x" "$y" 2>/dev/null; then
+        echo "Tapped at ($x, $y) [simctl]"
     else
         # Fallback to AppleScript click
         osascript << EOF
@@ -482,7 +491,7 @@ tell application "System Events"
     end tell
 end tell
 EOF
-        echo "Tapped at ($x, $y)"
+        echo "Tapped at ($x, $y) [applescript]"
     fi
 }
 
@@ -576,22 +585,141 @@ cmd_shake() {
     echo "Device shaken"
 }
 
-cmd_snapshot() {
-    local interactive="${1:-}"
+# Get UI tree using idb (Facebook iOS Development Bridge)
+cmd_tree() {
+    local format="${1:-}"
     local udid=$(require_booted) || return 1
-
-    if [[ "$interactive" == "--interactive" ]] || [[ "$interactive" == "-i" ]]; then
-        # Get accessibility hierarchy for automation
-        echo "UI Element Tree (for automation):"
-        xcrun simctl ui "$udid" describe 2>/dev/null || {
-            echo "Note: UI description requires newer simulator. Taking screenshot instead."
-            cmd_screenshot
-        }
+    
+    # Check if idb is available
+    if ! command -v idb &>/dev/null; then
+        echo "Error: idb not installed. Install with:"
+        echo "  brew tap facebook/fb && brew install idb-companion"
+        echo "  pip3 install fb-idb"
+        return 1
+    fi
+    
+    if [[ "$format" == "--json" ]] || [[ "$format" == "-j" ]]; then
+        # Raw JSON output
+        idb ui describe-all --udid "$udid" 2>/dev/null
     else
-        # Just take screenshot with element overlay info
-        local screenshot_path=$(cmd_screenshot)
-        echo "Screenshot: $screenshot_path"
-        echo "Use --interactive for UI element tree"
+        # Pretty printed tree
+        idb ui describe-all --udid "$udid" 2>/dev/null | python3 -c '
+import sys, json
+data = json.load(sys.stdin)
+for el in data:
+    label = el.get("AXLabel") or "(no label)"
+    role = el.get("role", "").replace("AX", "")
+    frame = el.get("frame", {})
+    x, y = int(frame.get("x", 0)), int(frame.get("y", 0))
+    w, h = int(frame.get("width", 0)), int(frame.get("height", 0))
+    el_type = el.get("type", "")
+    # Show actionable elements prominently
+    if el_type in ("Button", "TextField", "Link", "Image"):
+        print(f"[{el_type:12}] {label}")
+        print(f"              @ ({x}, {y}) {w}x{h}")
+    elif label != "(no label)":
+        print(f"[{el_type:12}] {label} @ ({x}, {y})")
+'
+    fi
+}
+
+# Find element by label and return coordinates
+cmd_find() {
+    local search="${1:-}"
+    local udid=$(require_booted) || return 1
+    
+    if [[ -z "$search" ]]; then
+        echo "Usage: agent-ios find <label>"
+        return 1
+    fi
+    
+    if ! command -v idb &>/dev/null; then
+        echo "Error: idb not installed"
+        return 1
+    fi
+    
+    idb ui describe-all --udid "$udid" 2>/dev/null | python3 -c "
+import sys, json
+search = '''$search'''.lower()
+data = json.load(sys.stdin)
+found = []
+for el in data:
+    label = el.get('AXLabel') or ''
+    if search in label.lower():
+        frame = el.get('frame', {})
+        x = frame.get('x', 0) + frame.get('width', 0) / 2
+        y = frame.get('y', 0) + frame.get('height', 0) / 2
+        found.append((label, int(x), int(y), el.get('type', '')))
+
+if found:
+    for label, x, y, el_type in found:
+        print(f'{el_type}: \"{label}\" at ({x}, {y})')
+else:
+    print(f'No element found matching: {search}')
+    sys.exit(1)
+"
+}
+
+# Tap element by accessibility label
+cmd_tap_label() {
+    local label="${1:-}"
+    local udid=$(require_booted) || return 1
+    
+    if [[ -z "$label" ]]; then
+        echo "Usage: agent-ios tap-label <label>"
+        return 1
+    fi
+    
+    if ! command -v idb &>/dev/null; then
+        echo "Error: idb not installed"
+        return 1
+    fi
+    
+    # Find element and get center coordinates
+    local coords
+    coords=$(idb ui describe-all --udid "$udid" 2>/dev/null | python3 -c "
+import sys, json
+search = '''$label'''.lower()
+data = json.load(sys.stdin)
+for el in data:
+    el_label = el.get('AXLabel') or ''
+    if search in el_label.lower():
+        frame = el.get('frame', {})
+        x = int(frame.get('x', 0) + frame.get('width', 0) / 2)
+        y = int(frame.get('y', 0) + frame.get('height', 0) / 2)
+        print(f'{x} {y}')
+        sys.exit(0)
+sys.exit(1)
+")
+    
+    if [[ -z "$coords" ]]; then
+        echo "Error: Element not found: $label"
+        return 1
+    fi
+    
+    local x y
+    read -r x y <<< "$coords"
+    echo "Found '$label' at ($x, $y)"
+    cmd_tap "$x" "$y"
+}
+
+# Tap button by title (convenience wrapper)
+cmd_tap_button() {
+    local title="${1:-}"
+    if [[ -z "$title" ]]; then
+        echo "Usage: agent-ios tap-button <button-title>"
+        return 1
+    fi
+    cmd_tap_label "$title"
+}
+
+# Legacy snapshot command - redirects to tree
+cmd_snapshot() {
+    local arg="${1:-}"
+    if [[ "$arg" == "--interactive" ]] || [[ "$arg" == "-i" ]]; then
+        cmd_tree
+    else
+        cmd_tree "$@"
     fi
 }
 
@@ -962,6 +1090,18 @@ case "${1:-help}" in
         ;;
     snapshot|describe|elements)
         shift; cmd_snapshot "$@"
+        ;;
+    tree)
+        shift; cmd_tree "$@"
+        ;;
+    find)
+        shift; cmd_find "$@"
+        ;;
+    tap-label)
+        shift; cmd_tap_label "$@"
+        ;;
+    tap-button)
+        shift; cmd_tap_button "$@"
         ;;
 
     # Media & Data
