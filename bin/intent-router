@@ -108,7 +108,7 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
 
     if result.get('clarification_needed'):
         if json_output:
-            # Structured output for orchestrators - exit 2 means "needs input"
+            # Structured output for orchestrators
             output = {
                 "status": "needs_input",
                 "question": result['clarification_needed'],
@@ -120,10 +120,12 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
                 }
             }
             print(json.dumps(output))
-            return 2  # Exit 2 = needs clarification (not error)
         else:
             print(f"? {result['clarification_needed']}")
-            return 1
+            if result.get('explanation'):
+                print(f"  (Hint: {result['explanation']})")
+            print(f"\nRetry with: agent-do --context \"your answer\" \"original request\"")
+        return 2  # Exit 2 = needs clarification (not error) - ALWAYS
 
     if not result.get('tool'):
         if json_output:
