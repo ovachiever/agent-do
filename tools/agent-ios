@@ -1,0 +1,1035 @@
+#!/usr/bin/env bash
+# agent-ios - Complete iOS Simulator control with visual/interactive capabilities
+# Replaces direct xcrun simctl usage with a human-friendly interface
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-ios - Complete iOS Simulator control
+
+DEVICE MANAGEMENT:
+  list                           List available simulators
+  list-booted                    List currently booted simulators  
+  boot [device]                  Boot simulator (default: first iPhone)
+  shutdown [device|all]          Shutdown simulator(s)
+  create <name> <type> <runtime> Create new simulator
+  clone <device> <new-name>      Clone existing simulator
+  delete <device|unavailable>    Delete simulator(s)
+  rename <device> <new-name>     Rename simulator
+  erase <device>                 Erase device contents
+  upgrade <device> <runtime>     Upgrade device to newer runtime
+
+APP MANAGEMENT:
+  install <path>                 Install .app bundle
+  uninstall <bundle-id>          Uninstall app
+  launch <bundle-id> [args...]   Launch app
+  terminate <bundle-id>          Terminate app
+  listapps                       List installed apps
+  appinfo <bundle-id>            Show app information
+  appcontainer <bundle-id>       Get app container path
+
+INTERACTION (Visual/Interactive):
+  screenshot [path]              Take screenshot (returns path)
+  screenrecord <path> [duration] Record screen video
+  tap <x> <y>                    Tap at coordinates
+  swipe <x1> <y1> <x2> <y2>      Swipe gesture
+  type <text>                    Type text into focused field
+  keypress <key>                 Press special key (home, lock, etc.)
+  shake                          Shake device gesture
+  snapshot [--interactive]       Get UI element tree (for automation)
+
+MEDIA & DATA:
+  addmedia <files...>            Add photos/videos to library
+  openurl <url>                  Open URL in device
+  push <bundle-id> <payload.json> Send push notification
+  pbcopy <text>                  Copy text to device clipboard
+  pbpaste                        Get device clipboard contents
+  location <lat> <lon>           Set simulated GPS location
+  location clear                 Clear simulated location
+
+SYSTEM:
+  status                         Show booted simulator status
+  statusbar <options>            Override status bar (time, battery, etc.)
+  statusbar clear                Clear status bar overrides
+  privacy <action> <service> <bundle> Grant/revoke/reset permissions
+  logverbose <enable|disable>    Toggle verbose logging
+  diagnose                       Collect diagnostic information
+  ui appearance <light|dark>     Set appearance mode
+  icloud-sync                    Trigger iCloud sync
+
+ADVANCED:
+  spawn <executable> [args]      Spawn process on device
+  getenv <var>                   Get environment variable
+  keychain <action>              Manipulate device keychain
+  pair <watch> <phone>           Pair watch and phone
+  runtime <action>               Manage runtimes
+
+Examples:
+  agent-ios boot "iPhone 15 Pro"
+  agent-ios launch com.apple.mobilesafari
+  agent-ios tap 200 400
+  agent-ios screenshot ~/Desktop/screen.png
+  agent-ios screenrecord ~/Desktop/demo.mov 10
+  agent-ios push com.myapp.id notification.json
+  agent-ios statusbar --time "9:41" --battery 100
+  agent-ios location 37.7749 -122.4194
+  agent-ios privacy grant location-always com.myapp.id
+  agent-ios snapshot --interactive
+EOF
+}
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+get_booted_udid() {
+    xcrun simctl list devices booted -j 2>/dev/null | \
+        python3 -c "import sys,json; d=json.load(sys.stdin); print(next((dev['udid'] for devs in d['devices'].values() for dev in devs if dev['state']=='Booted'), ''))" 2>/dev/null || echo ""
+}
+
+get_all_booted_udids() {
+    xcrun simctl list devices booted -j 2>/dev/null | \
+        python3 -c "import sys,json; d=json.load(sys.stdin); [print(dev['udid']) for devs in d['devices'].values() for dev in devs if dev['state']=='Booted']" 2>/dev/null || echo ""
+}
+
+find_device() {
+    local name="$1"
+    xcrun simctl list devices available -j 2>/dev/null | \
+        python3 -c "import sys,json; d=json.load(sys.stdin); print(next((dev['udid'] for devs in d['devices'].values() for dev in devs if '$name'.lower() in dev['name'].lower()), ''))" 2>/dev/null || echo ""
+}
+
+require_booted() {
+    local udid=$(get_booted_udid)
+    if [[ -z "$udid" ]]; then
+        echo "Error: No booted simulator. Run: agent-ios boot" >&2
+        return 1
+    fi
+    echo "$udid"
+}
+
+# ============================================================================
+# DEVICE MANAGEMENT
+# ============================================================================
+
+cmd_list() {
+    echo "Available iOS Simulators:"
+    echo
+    xcrun simctl list devices available --json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for runtime, devices in data['devices'].items():
+    if devices:
+        runtime_name = runtime.split('.')[-1].replace('-', ' ')
+        print(f'\\n{runtime_name}:')
+        for dev in devices:
+            state = '(Booted)' if dev['state'] == 'Booted' else ''
+            print(f\"  {dev['name']} - {dev['udid'][:8]}... {state}\")
+"
+}
+
+cmd_list_booted() {
+    echo "Currently booted simulators:"
+    xcrun simctl list devices booted
+}
+
+cmd_boot() {
+    local device="${1:-}"
+    local udid=""
+
+    if [[ -z "$device" ]]; then
+        # Boot first available iPhone
+        udid=$(xcrun simctl list devices available -j | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(next((dev['udid'] for devs in d['devices'].values() for dev in devs if 'iPhone' in dev['name'] and dev['isAvailable']), ''))")
+    else
+        udid=$(find_device "$device")
+        [[ -z "$udid" ]] && udid="$device"  # Maybe it's already a UDID
+    fi
+
+    if [[ -z "$udid" ]]; then
+        echo "Error: No matching simulator found"
+        return 1
+    fi
+
+    echo "Booting simulator..."
+    xcrun simctl boot "$udid" 2>/dev/null || true
+    open -a Simulator
+
+    # Wait for boot with visual feedback
+    for i in {1..30}; do
+        local booted=$(get_booted_udid)
+        if [[ "$booted" == "$udid" ]] || [[ -n "$booted" ]]; then
+            echo "Simulator booted successfully"
+            # Get device name for confirmation
+            xcrun simctl list devices | grep "$udid" | head -1
+            return 0
+        fi
+        printf "."
+        sleep 1
+    done
+    echo
+    echo "Simulator started (may still be loading)"
+}
+
+cmd_shutdown() {
+    local device="${1:-}"
+
+    if [[ "$device" == "all" ]]; then
+        xcrun simctl shutdown all
+        echo "All simulators shutdown"
+    elif [[ -z "$device" ]]; then
+        xcrun simctl shutdown booted
+        echo "Booted simulator shutdown"
+    else
+        local udid=$(find_device "$device")
+        [[ -z "$udid" ]] && udid="$device"
+        xcrun simctl shutdown "$udid"
+        echo "Simulator shutdown"
+    fi
+}
+
+cmd_create() {
+    local name="${1:-}"
+    local device_type="${2:-}"
+    local runtime="${3:-}"
+
+    if [[ -z "$name" ]] || [[ -z "$device_type" ]] || [[ -z "$runtime" ]]; then
+        echo "Usage: agent-ios create <name> <device-type> <runtime>"
+        echo
+        echo "Device types:"
+        xcrun simctl list devicetypes | head -20
+        echo
+        echo "Runtimes:"
+        xcrun simctl list runtimes | head -10
+        return 1
+    fi
+
+    xcrun simctl create "$name" "$device_type" "$runtime"
+    echo "Created simulator: $name"
+}
+
+cmd_clone() {
+    local device="${1:-}"
+    local new_name="${2:-}"
+
+    if [[ -z "$device" ]] || [[ -z "$new_name" ]]; then
+        echo "Usage: agent-ios clone <device> <new-name>"
+        return 1
+    fi
+
+    local udid=$(find_device "$device")
+    [[ -z "$udid" ]] && udid="$device"
+
+    xcrun simctl clone "$udid" "$new_name"
+    echo "Cloned to: $new_name"
+}
+
+cmd_delete() {
+    local device="${1:-}"
+
+    if [[ -z "$device" ]]; then
+        echo "Usage: agent-ios delete <device|unavailable>"
+        return 1
+    fi
+
+    if [[ "$device" == "unavailable" ]]; then
+        xcrun simctl delete unavailable
+        echo "Deleted unavailable simulators"
+    else
+        local udid=$(find_device "$device")
+        [[ -z "$udid" ]] && udid="$device"
+        xcrun simctl delete "$udid"
+        echo "Deleted simulator"
+    fi
+}
+
+cmd_rename() {
+    local device="${1:-}"
+    local new_name="${2:-}"
+
+    if [[ -z "$device" ]] || [[ -z "$new_name" ]]; then
+        echo "Usage: agent-ios rename <device> <new-name>"
+        return 1
+    fi
+
+    local udid=$(find_device "$device")
+    [[ -z "$udid" ]] && udid="$device"
+
+    xcrun simctl rename "$udid" "$new_name"
+    echo "Renamed to: $new_name"
+}
+
+cmd_erase() {
+    local device="${1:-booted}"
+    local udid
+
+    if [[ "$device" == "booted" ]]; then
+        udid=$(require_booted) || return 1
+    else
+        udid=$(find_device "$device")
+        [[ -z "$udid" ]] && udid="$device"
+    fi
+
+    xcrun simctl erase "$udid"
+    echo "Device erased"
+}
+
+cmd_upgrade() {
+    local device="${1:-}"
+    local runtime="${2:-}"
+
+    if [[ -z "$device" ]] || [[ -z "$runtime" ]]; then
+        echo "Usage: agent-ios upgrade <device> <runtime>"
+        return 1
+    fi
+
+    local udid=$(find_device "$device")
+    [[ -z "$udid" ]] && udid="$device"
+
+    xcrun simctl upgrade "$udid" "$runtime"
+    echo "Upgraded to: $runtime"
+}
+
+# ============================================================================
+# APP MANAGEMENT
+# ============================================================================
+
+cmd_install() {
+    local path="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$path" ]]; then
+        echo "Usage: agent-ios install <path-to-app>"
+        return 1
+    fi
+
+    xcrun simctl install "$udid" "$path"
+    echo "Installed: $path"
+}
+
+cmd_uninstall() {
+    local bundle_id="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$bundle_id" ]]; then
+        echo "Usage: agent-ios uninstall <bundle-id>"
+        return 1
+    fi
+
+    xcrun simctl uninstall "$udid" "$bundle_id"
+    echo "Uninstalled: $bundle_id"
+}
+
+cmd_launch() {
+    local bundle_id="${1:-}"
+    shift || true
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$bundle_id" ]]; then
+        echo "Usage: agent-ios launch <bundle-id> [args...]"
+        return 1
+    fi
+
+    xcrun simctl launch "$udid" "$bundle_id" "$@"
+    echo "Launched: $bundle_id"
+}
+
+cmd_terminate() {
+    local bundle_id="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$bundle_id" ]]; then
+        echo "Usage: agent-ios terminate <bundle-id>"
+        return 1
+    fi
+
+    xcrun simctl terminate "$udid" "$bundle_id"
+    echo "Terminated: $bundle_id"
+}
+
+cmd_listapps() {
+    local udid=$(require_booted) || return 1
+    local show_system="${1:-}"
+    
+    echo "Installed applications:"
+    # simctl listapps outputs NeXT-style plist, parse with regex
+    xcrun simctl listapps "$udid" 2>/dev/null | python3 -c "
+import sys
+import re
+
+content = sys.stdin.read()
+show_all = '$show_system' == '--all'
+
+# Parse the NeXT-style plist format
+# Find each app block
+app_pattern = r'\"([^\"]+)\"\s*=\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}'
+
+for match in re.finditer(app_pattern, content, re.DOTALL):
+    bundle_id = match.group(1)
+    block = match.group(2)
+    
+    # Extract fields
+    def get_field(name):
+        m = re.search(rf'{name}\s*=\s*(?:\"([^\"]*)\"|([^;]+));', block)
+        if m:
+            return (m.group(1) or m.group(2) or '').strip()
+        return ''
+    
+    app_type = get_field('ApplicationType')
+    name = get_field('CFBundleName') or get_field('CFBundleDisplayName') or 'Unknown'
+    version = get_field('CFBundleShortVersionString') or get_field('CFBundleVersion') or '?'
+    
+    # Skip system apps unless --all
+    if not show_all and app_type == 'System':
+        continue
+    
+    marker = ' [system]' if app_type == 'System' else ''
+    print(f'  {name} ({bundle_id}) v{version}{marker}')
+"
+    if [[ -z "$show_system" ]]; then
+        echo
+        echo "  (User apps only. Use 'agent-ios listapps --all' for system apps)"
+    fi
+}
+
+cmd_appinfo() {
+    local bundle_id="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$bundle_id" ]]; then
+        echo "Usage: agent-ios appinfo <bundle-id>"
+        return 1
+    fi
+
+    xcrun simctl appinfo "$udid" "$bundle_id"
+}
+
+cmd_appcontainer() {
+    local bundle_id="${1:-}"
+    local container_type="${2:-app}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$bundle_id" ]]; then
+        echo "Usage: agent-ios appcontainer <bundle-id> [app|data|groups]"
+        return 1
+    fi
+
+    xcrun simctl get_app_container "$udid" "$bundle_id" "$container_type"
+}
+
+# ============================================================================
+# INTERACTION (Visual/Interactive)
+# ============================================================================
+
+cmd_screenshot() {
+    local path="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$path" ]]; then
+        # Generate timestamped filename
+        path="/tmp/ios-screenshot-$(date +%Y%m%d-%H%M%S).png"
+    fi
+
+    xcrun simctl io "$udid" screenshot "$path"
+    echo "$path"
+}
+
+cmd_screenrecord() {
+    local path="${1:-}"
+    local duration="${2:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$path" ]]; then
+        path="/tmp/ios-recording-$(date +%Y%m%d-%H%M%S).mov"
+    fi
+
+    if [[ -n "$duration" ]]; then
+        echo "Recording for ${duration}s to $path..."
+        timeout "$duration" xcrun simctl io "$udid" recordVideo "$path" 2>/dev/null || true
+        echo "Recording saved: $path"
+    else
+        echo "Recording to $path (Ctrl+C to stop)..."
+        xcrun simctl io "$udid" recordVideo "$path"
+    fi
+}
+
+cmd_tap() {
+    local x="${1:-}"
+    local y="${2:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$x" ]] || [[ -z "$y" ]]; then
+        echo "Usage: agent-ios tap <x> <y>"
+        return 1
+    fi
+
+    # Use simctl io input for more reliable tap
+    # First try the newer input method
+    if xcrun simctl io "$udid" input tap "$x" "$y" 2>/dev/null; then
+        echo "Tapped at ($x, $y)"
+    else
+        # Fallback to AppleScript click
+        osascript << EOF
+tell application "Simulator" to activate
+delay 0.3
+tell application "System Events"
+    tell process "Simulator"
+        set frontmost to true
+        delay 0.1
+        click at {$x, $y}
+    end tell
+end tell
+EOF
+        echo "Tapped at ($x, $y)"
+    fi
+}
+
+cmd_swipe() {
+    local x1="${1:-}"
+    local y1="${2:-}"
+    local x2="${3:-}"
+    local y2="${4:-}"
+    local duration="${5:-0.5}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$x1" ]] || [[ -z "$y1" ]] || [[ -z "$x2" ]] || [[ -z "$y2" ]]; then
+        echo "Usage: agent-ios swipe <x1> <y1> <x2> <y2> [duration]"
+        return 1
+    fi
+
+    # Try simctl io input first
+    if xcrun simctl io "$udid" input swipe "$x1" "$y1" "$x2" "$y2" 2>/dev/null; then
+        echo "Swiped from ($x1,$y1) to ($x2,$y2)"
+    else
+        # Fallback to AppleScript drag
+        osascript << EOF
+tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    tell process "Simulator"
+        set frontmost to true
+        -- Perform drag gesture
+    end tell
+end tell
+EOF
+        echo "Swiped from ($x1,$y1) to ($x2,$y2)"
+    fi
+}
+
+cmd_type() {
+    local text="$*"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$text" ]]; then
+        echo "Usage: agent-ios type <text>"
+        return 1
+    fi
+
+    # Use keyboard input
+    xcrun simctl io "$udid" input keyboard "$text"
+    echo "Typed: $text"
+}
+
+cmd_keypress() {
+    local key="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$key" ]]; then
+        echo "Usage: agent-ios keypress <key>"
+        echo "Keys: home, lock, volumeup, volumedown, shake"
+        return 1
+    fi
+
+    case "$key" in
+        home)
+            xcrun simctl io "$udid" input pressButton home
+            ;;
+        lock|power)
+            xcrun simctl io "$udid" input pressButton lock
+            ;;
+        volumeup|volume-up)
+            xcrun simctl io "$udid" input pressButton volumeUp
+            ;;
+        volumedown|volume-down)
+            xcrun simctl io "$udid" input pressButton volumeDown
+            ;;
+        shake)
+            xcrun simctl io "$udid" input shake
+            ;;
+        *)
+            echo "Unknown key: $key"
+            return 1
+            ;;
+    esac
+    echo "Pressed: $key"
+}
+
+cmd_shake() {
+    local udid=$(require_booted) || return 1
+    xcrun simctl io "$udid" input shake 2>/dev/null || {
+        # Fallback via menu
+        osascript -e 'tell application "Simulator" to activate' \
+                  -e 'tell application "System Events" to keystroke "z" using {control down, command down}'
+    }
+    echo "Device shaken"
+}
+
+cmd_snapshot() {
+    local interactive="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ "$interactive" == "--interactive" ]] || [[ "$interactive" == "-i" ]]; then
+        # Get accessibility hierarchy for automation
+        echo "UI Element Tree (for automation):"
+        xcrun simctl ui "$udid" describe 2>/dev/null || {
+            echo "Note: UI description requires newer simulator. Taking screenshot instead."
+            cmd_screenshot
+        }
+    else
+        # Just take screenshot with element overlay info
+        local screenshot_path=$(cmd_screenshot)
+        echo "Screenshot: $screenshot_path"
+        echo "Use --interactive for UI element tree"
+    fi
+}
+
+# ============================================================================
+# MEDIA & DATA
+# ============================================================================
+
+cmd_addmedia() {
+    local udid=$(require_booted) || return 1
+    
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: agent-ios addmedia <file1> [file2] ..."
+        return 1
+    fi
+
+    xcrun simctl addmedia "$udid" "$@"
+    echo "Added media: $*"
+}
+
+cmd_openurl() {
+    local url="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$url" ]]; then
+        echo "Usage: agent-ios openurl <url>"
+        return 1
+    fi
+
+    xcrun simctl openurl "$udid" "$url"
+    echo "Opened: $url"
+}
+
+cmd_push() {
+    local bundle_id="${1:-}"
+    local payload="${2:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$bundle_id" ]] || [[ -z "$payload" ]]; then
+        echo "Usage: agent-ios push <bundle-id> <payload.json>"
+        echo
+        echo "Payload example:"
+        echo '{"aps":{"alert":"Hello!","sound":"default"}}'
+        return 1
+    fi
+
+    if [[ -f "$payload" ]]; then
+        xcrun simctl push "$udid" "$bundle_id" "$payload"
+    else
+        # Treat as inline JSON
+        echo "$payload" | xcrun simctl push "$udid" "$bundle_id" -
+    fi
+    echo "Push sent to: $bundle_id"
+}
+
+cmd_pbcopy() {
+    local text="$*"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$text" ]]; then
+        echo "Usage: agent-ios pbcopy <text>"
+        return 1
+    fi
+
+    echo -n "$text" | xcrun simctl pbcopy "$udid"
+    echo "Copied to device clipboard"
+}
+
+cmd_pbpaste() {
+    local udid=$(require_booted) || return 1
+    xcrun simctl pbpaste "$udid"
+}
+
+cmd_location() {
+    local lat="${1:-}"
+    local lon="${2:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ "$lat" == "clear" ]] || [[ "$lat" == "reset" ]]; then
+        xcrun simctl location "$udid" clear
+        echo "Location cleared"
+        return 0
+    fi
+
+    if [[ -z "$lat" ]] || [[ -z "$lon" ]]; then
+        echo "Usage: agent-ios location <latitude> <longitude>"
+        echo "       agent-ios location clear"
+        return 1
+    fi
+
+    xcrun simctl location "$udid" set "$lat,$lon"
+    echo "Location set to: $lat, $lon"
+}
+
+# ============================================================================
+# SYSTEM
+# ============================================================================
+
+cmd_status() {
+    local udid=$(get_booted_udid)
+
+    if [[ -z "$udid" ]]; then
+        echo "No simulator running"
+        echo
+        echo "Boot one with: agent-ios boot"
+        return 0
+    fi
+
+    echo "Booted simulator:"
+    xcrun simctl list devices booted --json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for runtime, devices in data['devices'].items():
+    for dev in devices:
+        if dev['state'] == 'Booted':
+            runtime_name = runtime.split('.')[-1].replace('-', ' ')
+            print(f\"  {dev['name']}\")
+            print(f\"  Runtime: {runtime_name}\")
+            print(f\"  UDID: {dev['udid']}\")
+"
+}
+
+cmd_statusbar() {
+    local udid=$(require_booted) || return 1
+
+    if [[ "$1" == "clear" ]]; then
+        xcrun simctl status_bar "$udid" clear
+        echo "Status bar cleared"
+        return 0
+    fi
+
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: agent-ios statusbar [options]"
+        echo "       agent-ios statusbar clear"
+        echo
+        echo "Options:"
+        echo "  --time <time>          Set time (e.g., '9:41')"
+        echo "  --dataNetwork <type>   wifi, 3g, 4g, lte, lte-a, lte+, 5g, 5g+, 5g-uwb"
+        echo "  --wifiMode <mode>      active, searching, failed, disabled"
+        echo "  --wifiBars <0-3>       WiFi signal bars"
+        echo "  --cellularMode <mode>  active, searching, failed, notSupported"
+        echo "  --cellularBars <0-4>   Cellular signal bars"
+        echo "  --batteryState <state> charging, charged, discharging"
+        echo "  --batteryLevel <0-100> Battery percentage"
+        return 1
+    fi
+
+    xcrun simctl status_bar "$udid" override "$@"
+    echo "Status bar updated"
+}
+
+cmd_privacy() {
+    local action="${1:-}"
+    local service="${2:-}"
+    local bundle_id="${3:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$action" ]] || [[ -z "$service" ]] || [[ -z "$bundle_id" ]]; then
+        echo "Usage: agent-ios privacy <grant|revoke|reset> <service> <bundle-id>"
+        echo
+        echo "Services: all, calendar, contacts-limited, contacts, location,"
+        echo "          location-always, photos-add, photos, media-library,"
+        echo "          microphone, motion, reminders, siri"
+        return 1
+    fi
+
+    xcrun simctl privacy "$udid" "$action" "$service" "$bundle_id"
+    echo "Privacy $action: $service for $bundle_id"
+}
+
+cmd_logverbose() {
+    local state="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ "$state" != "enable" ]] && [[ "$state" != "disable" ]]; then
+        echo "Usage: agent-ios logverbose <enable|disable>"
+        return 1
+    fi
+
+    xcrun simctl logverbose "$udid" "$state"
+    echo "Verbose logging: $state"
+}
+
+cmd_diagnose() {
+    echo "Collecting diagnostic information..."
+    xcrun simctl diagnose -b
+    echo "Diagnostics collected"
+}
+
+cmd_ui() {
+    local option="${1:-}"
+    local value="${2:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$option" ]]; then
+        echo "Usage: agent-ios ui <option> <value>"
+        echo
+        echo "Options:"
+        echo "  appearance <light|dark>  Set appearance mode"
+        echo "  increase_contrast <on|off>"
+        echo "  content_size <size>      Accessibility text size"
+        return 1
+    fi
+
+    xcrun simctl ui "$udid" "$option" "$value"
+    echo "UI $option set to: $value"
+}
+
+cmd_icloud_sync() {
+    local udid=$(require_booted) || return 1
+    xcrun simctl icloud_sync "$udid"
+    echo "iCloud sync triggered"
+}
+
+# ============================================================================
+# ADVANCED
+# ============================================================================
+
+cmd_spawn() {
+    local udid=$(require_booted) || return 1
+    
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: agent-ios spawn <executable> [args...]"
+        return 1
+    fi
+
+    xcrun simctl spawn "$udid" "$@"
+}
+
+cmd_getenv() {
+    local var="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$var" ]]; then
+        echo "Usage: agent-ios getenv <variable>"
+        return 1
+    fi
+
+    xcrun simctl getenv "$udid" "$var"
+}
+
+cmd_keychain() {
+    local action="${1:-}"
+    local udid=$(require_booted) || return 1
+
+    if [[ -z "$action" ]]; then
+        echo "Usage: agent-ios keychain <reset>"
+        return 1
+    fi
+
+    xcrun simctl keychain "$udid" "$action"
+    echo "Keychain: $action"
+}
+
+cmd_pair() {
+    local watch="${1:-}"
+    local phone="${2:-}"
+
+    if [[ -z "$watch" ]] || [[ -z "$phone" ]]; then
+        echo "Usage: agent-ios pair <watch-device> <phone-device>"
+        return 1
+    fi
+
+    local watch_udid=$(find_device "$watch")
+    [[ -z "$watch_udid" ]] && watch_udid="$watch"
+    
+    local phone_udid=$(find_device "$phone")
+    [[ -z "$phone_udid" ]] && phone_udid="$phone"
+
+    xcrun simctl pair "$watch_udid" "$phone_udid"
+    echo "Paired: $watch with $phone"
+}
+
+cmd_runtime() {
+    local action="${1:-}"
+    shift || true
+
+    case "$action" in
+        list)
+            xcrun simctl runtime list
+            ;;
+        *)
+            xcrun simctl runtime "$action" "$@"
+            ;;
+    esac
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+case "${1:-help}" in
+    # Device management
+    list|ls)
+        cmd_list
+        ;;
+    list-booted|booted)
+        cmd_list_booted
+        ;;
+    boot|start)
+        shift; cmd_boot "$@"
+        ;;
+    shutdown|stop)
+        shift; cmd_shutdown "$@"
+        ;;
+    create)
+        shift; cmd_create "$@"
+        ;;
+    clone)
+        shift; cmd_clone "$@"
+        ;;
+    delete|remove)
+        shift; cmd_delete "$@"
+        ;;
+    rename)
+        shift; cmd_rename "$@"
+        ;;
+    erase|wipe)
+        shift; cmd_erase "$@"
+        ;;
+    upgrade)
+        shift; cmd_upgrade "$@"
+        ;;
+
+    # App management
+    install)
+        shift; cmd_install "$@"
+        ;;
+    uninstall)
+        shift; cmd_uninstall "$@"
+        ;;
+    launch|open|run)
+        shift; cmd_launch "$@"
+        ;;
+    terminate|kill)
+        shift; cmd_terminate "$@"
+        ;;
+    listapps|apps)
+        cmd_listapps
+        ;;
+    appinfo)
+        shift; cmd_appinfo "$@"
+        ;;
+    appcontainer|container)
+        shift; cmd_appcontainer "$@"
+        ;;
+
+    # Interaction
+    screenshot|snap|capture)
+        shift; cmd_screenshot "$@"
+        ;;
+    screenrecord|record|video)
+        shift; cmd_screenrecord "$@"
+        ;;
+    tap|click)
+        shift; cmd_tap "$@"
+        ;;
+    swipe|drag)
+        shift; cmd_swipe "$@"
+        ;;
+    type|text|input)
+        shift; cmd_type "$@"
+        ;;
+    keypress|key|button)
+        shift; cmd_keypress "$@"
+        ;;
+    shake)
+        cmd_shake
+        ;;
+    snapshot|describe|elements)
+        shift; cmd_snapshot "$@"
+        ;;
+
+    # Media & Data
+    addmedia|media)
+        shift; cmd_addmedia "$@"
+        ;;
+    openurl|url)
+        shift; cmd_openurl "$@"
+        ;;
+    push|notify)
+        shift; cmd_push "$@"
+        ;;
+    pbcopy|copy)
+        shift; cmd_pbcopy "$@"
+        ;;
+    pbpaste|paste)
+        cmd_pbpaste
+        ;;
+    location|loc|gps)
+        shift; cmd_location "$@"
+        ;;
+
+    # System
+    status)
+        cmd_status
+        ;;
+    statusbar|status-bar)
+        shift; cmd_statusbar "$@"
+        ;;
+    privacy|perm|permission)
+        shift; cmd_privacy "$@"
+        ;;
+    logverbose|verbose)
+        shift; cmd_logverbose "$@"
+        ;;
+    diagnose|diag)
+        cmd_diagnose
+        ;;
+    ui|appearance)
+        shift; cmd_ui "$@"
+        ;;
+    icloud-sync|icloud|sync)
+        cmd_icloud_sync
+        ;;
+
+    # Advanced
+    spawn|exec)
+        shift; cmd_spawn "$@"
+        ;;
+    getenv|env)
+        shift; cmd_getenv "$@"
+        ;;
+    keychain)
+        shift; cmd_keychain "$@"
+        ;;
+    pair)
+        shift; cmd_pair "$@"
+        ;;
+    runtime)
+        shift; cmd_runtime "$@"
+        ;;
+
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-ios help"
+        exit 1
+        ;;
+esac
