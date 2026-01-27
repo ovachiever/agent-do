@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent-do - Natural language automation CLI
+# agent-do - Automation CLI with structured API (AI) and natural language (human)
 
 set -euo pipefail
 
@@ -14,41 +14,128 @@ export PATH="$SCRIPT_DIR/tools:$PATH"
 
 show_help() {
     cat << 'EOF'
-agent-do - Natural language automation
+agent-do - Automation CLI
 
-Usage: agent-do "what you want to do"
+STRUCTURED API (for AI/scripts - no LLM, instant execution):
+  agent-do <tool> <command> [args...]
 
-Examples:
-  agent-do "take a screenshot of the iOS simulator"
-  agent-do "send 'x = 42' to my python REPL"
-  agent-do "click Save in Photoshop"
-  agent-do "post 'deploy complete' to #engineering on Slack"
-  agent-do "what's using port 3000"
+  Examples:
+    agent-do ios screenshot ~/Downloads/screen.png
+    agent-do tui spawn htop --session my-htop
+    agent-do browse open https://example.com
+    agent-do network scan --port 3000
+    agent-do slack send '#engineering' 'deploy complete'
 
-Options:
+NATURAL LANGUAGE (for humans - uses LLM routing):
+  agent-do -n "what you want to do"
+  agent-do --natural "description of intent"
+
+  Examples:
+    agent-do -n "take a screenshot of the iOS simulator"
+    agent-do -n "what's using port 3000"
+    agent-do -n "post deploy complete to engineering slack"
+
+OPTIONS:
   --help, -h     Show this help
+  --list, -l     List available tools
   --status       Show active sessions and state
-  --how          Explain how to do something without doing it
-  --raw          Pass through to tool directly (power user)
-  --dry-run      Show what would be executed
-  --offline      Use offline pattern matching only (no LLM)
+  --how          Explain how to do something (uses LLM)
+  --dry-run      Show what would be executed (uses LLM)
+  --offline      Natural language with offline pattern matching only
+  -n, --natural  Enable natural language mode (uses LLM)
   --json         Output structured JSON (for orchestrator integration)
-  --context      Provide additional context or answer to clarifying question
+  --context      Provide additional context for natural language
 
-Exit codes:
+EXIT CODES:
   0 = success
   1 = error
-  2 = needs clarification (check JSON output for question)
+  2 = needs clarification (natural language mode only)
 
-Environment:
+ENVIRONMENT:
   AGENT_DO_HOME      Config/state directory (default: ~/.agent-do)
-  ANTHROPIC_API_KEY  Required for intent routing (unless --offline)
+  ANTHROPIC_API_KEY  Required for natural language mode
 EOF
+}
+
+# List available tools
+list_tools() {
+    echo "Available tools:"
+    echo ""
+    for tool_path in "$SCRIPT_DIR/tools"/agent-*; do
+        tool_name=$(basename "$tool_path" | sed 's/^agent-//')
+        tool_exec=""
+        # Check for directory with executable inside (e.g., agent-browse/agent-browse)
+        if [[ -d "$tool_path" && -x "$tool_path/agent-$tool_name" ]]; then
+            tool_exec="$tool_path/agent-$tool_name"
+        elif [[ -x "$tool_path" && ! -d "$tool_path" ]]; then
+            tool_exec="$tool_path"
+        fi
+        if [[ -n "$tool_exec" ]]; then
+            # Get first line of help if available
+            desc=$("$tool_exec" --help 2>/dev/null | head -1 || echo "")
+            printf "  %-12s %s\n" "$tool_name" "$desc"
+        fi
+    done
+    echo ""
+    echo "Use: agent-do <tool> --help  for tool-specific help"
+}
+
+# Check if first arg is a known tool (structured API mode)
+is_tool() {
+    local tool="$1"
+    # Check for executable file or directory with executable inside
+    [[ -x "$SCRIPT_DIR/tools/agent-$tool" && ! -d "$SCRIPT_DIR/tools/agent-$tool" ]] ||
+    [[ -x "$SCRIPT_DIR/tools/agent-$tool/agent-$tool" ]] ||
+    command -v "agent-$tool" &>/dev/null
+}
+
+# Execute tool directly (no LLM)
+exec_tool() {
+    local tool="$1"
+    shift
+    local tool_path="$SCRIPT_DIR/tools/agent-$tool"
+    # Check for directory with executable inside (e.g., agent-browse/agent-browse)
+    if [[ -d "$tool_path" && -x "$tool_path/agent-$tool" ]]; then
+        exec "$tool_path/agent-$tool" "$@"
+    elif [[ -x "$tool_path" ]]; then
+        exec "$tool_path" "$@"
+    else
+        exec "agent-$tool" "$@"
+    fi
+}
+
+# Natural language routing (uses LLM)
+natural_route() {
+    local json_mode="$1"
+    local context="$2"
+    shift 2
+    local intent="$*"
+    
+    local args=()
+    [[ "$json_mode" == "true" ]] && args+=(--json)
+    [[ -n "$context" ]] && args+=(--context "$context")
+    
+    "$SCRIPT_DIR/bin/intent-router" "${args[@]}" "$intent"
+    local exit_code=$?
+    
+    # Handle clarification needed (exit code 2)
+    if [[ $exit_code -eq 2 && "$json_mode" != "true" ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "ORCHESTRATOR: You must answer this question and retry."
+        echo "Do not proceed with other tasks until resolved."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+    
+    exit $exit_code
 }
 
 case "${1:-}" in
     --help|-h)
         show_help
+        ;;
+    --list|-l)
+        list_tools
         ;;
     --status)
         exec "$SCRIPT_DIR/bin/status"
@@ -60,22 +147,6 @@ case "${1:-}" in
             exit 1
         fi
         exec "$SCRIPT_DIR/bin/intent-router" --explain "$*"
-        ;;
-    --raw)
-        shift
-        if [[ -z "${1:-}" ]]; then
-            echo "Usage: agent-do --raw <tool> [args...]"
-            exit 1
-        fi
-        tool="$1"
-        shift
-        tool_path="$SCRIPT_DIR/tools/agent-$tool"
-        if [[ -x "$tool_path" ]]; then
-            exec "$tool_path" "$@"
-        else
-            # Try PATH
-            exec "agent-$tool" "$@"
-        fi
         ;;
     --dry-run)
         shift
@@ -115,7 +186,30 @@ case "${1:-}" in
             exec "agent-$tool" $cmd $args
         fi
         ;;
+    -n|--natural)
+        # Natural language mode (human-friendly)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do -n \"what you want to do\""
+            exit 1
+        fi
+        # Check for --context
+        context=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --context)
+                    context="$2"
+                    shift 2
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+        natural_route "false" "$context" "$@"
+        ;;
     --json)
+        # JSON mode for orchestrators (uses LLM)
         shift
         if [[ -z "${1:-}" ]]; then
             echo '{"status":"error","error":"no_intent","message":"Usage: agent-do --json \"what you want\""}'
@@ -137,26 +231,25 @@ case "${1:-}" in
             esac
         done
         intent="${intent# }"  # Trim leading space
-        if [[ -n "$context" ]]; then
-            exec "$SCRIPT_DIR/bin/intent-router" --json --context "$context" "$intent"
-        else
-            exec "$SCRIPT_DIR/bin/intent-router" --json "$intent"
-        fi
+        natural_route "true" "$context" "$intent"
         ;;
     --context)
-        # --context without --json - append context to intent for normal mode
+        # --context without -n implies natural language mode
         shift
         context="$1"
         shift
         if [[ -z "${1:-}" ]]; then
-            echo "Usage: agent-do --context \"answer\" \"original intent\""
+            echo "Usage: agent-do --context \"answer\" -n \"original intent\""
             exit 1
         fi
-        exec "$SCRIPT_DIR/bin/intent-router" --context "$context" "$*"
+        # Skip -n if present
+        [[ "${1:-}" == "-n" || "${1:-}" == "--natural" ]] && shift
+        natural_route "false" "$context" "$@"
         ;;
     "")
-        echo "Usage: agent-do \"what you want to do\""
-        echo "Try: agent-do --help"
+        echo "Usage: agent-do <tool> <command> [args...]"
+        echo "       agent-do -n \"natural language\""
+        echo "Try: agent-do --help or agent-do --list"
         exit 1
         ;;
     -*)
@@ -165,7 +258,17 @@ case "${1:-}" in
         exit 1
         ;;
     *)
-        # Main path: natural language intent
-        exec "$SCRIPT_DIR/bin/intent-router" "$*"
+        # Check if first arg is a tool name (structured API)
+        if is_tool "$1"; then
+            exec_tool "$@"
+        else
+            # Not a known tool - show helpful error
+            echo "Unknown tool: $1"
+            echo ""
+            echo "Did you mean:"
+            echo "  agent-do -n \"$*\"     (natural language mode)"
+            echo "  agent-do --list       (see available tools)"
+            exit 1
+        fi
         ;;
 esac
