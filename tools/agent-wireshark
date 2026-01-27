@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+# agent-wireshark - Network packet capture and analysis
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-wireshark - Network packet capture and analysis
+
+Commands:
+  capture <interface>      Start packet capture
+  read <file>              Read pcap file
+  filter <file> <filter>   Filter packets
+  stats <file>             Show capture statistics
+  extract <file>           Extract files/data
+  live <interface>         Live capture with tshark
+  interfaces               List available interfaces
+
+Requirements:
+  - Wireshark/tshark
+
+Examples:
+  agent-wireshark interfaces
+  agent-wireshark capture en0 --output capture.pcap
+  agent-wireshark read capture.pcap --filter "http"
+  agent-wireshark stats capture.pcap
+  agent-wireshark extract capture.pcap --type http
+EOF
+}
+
+cmd_interfaces() {
+    if command -v tshark &> /dev/null; then
+        tshark -D
+    elif command -v tcpdump &> /dev/null; then
+        tcpdump -D
+    else
+        # List network interfaces
+        if [[ "$(uname)" == "Darwin" ]]; then
+            networksetup -listallhardwareports
+        else
+            ip link show
+        fi
+    fi
+}
+
+cmd_capture() {
+    local interface="${1:-}"
+    local output="capture-$(date +%Y%m%d-%H%M%S).pcap"
+    local duration=""
+    local filter=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --output|-o) output="$2"; shift 2 ;;
+            --duration|-d) duration="$2"; shift 2 ;;
+            --filter|-f) filter="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$interface" ]]; then
+        echo "Error: Interface required"
+        echo "Run: agent-wireshark interfaces"
+        return 1
+    fi
+
+    local cmd=""
+    if command -v tshark &> /dev/null; then
+        cmd="tshark -i $interface -w $output"
+        [[ -n "$duration" ]] && cmd="$cmd -a duration:$duration"
+        [[ -n "$filter" ]] && cmd="$cmd -f \"$filter\""
+    elif command -v tcpdump &> /dev/null; then
+        cmd="sudo tcpdump -i $interface -w $output"
+        [[ -n "$filter" ]] && cmd="$cmd $filter"
+    else
+        echo "Error: tshark or tcpdump required"
+        return 1
+    fi
+
+    echo "Capturing on $interface → $output"
+    echo "Press Ctrl+C to stop"
+    eval "$cmd"
+}
+
+cmd_read() {
+    local file="${1:-}"
+    local filter=""
+    local count=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --filter|-f) filter="$2"; shift 2 ;;
+            --count|-c) count="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid pcap file required"
+        return 1
+    fi
+
+    if command -v tshark &> /dev/null; then
+        local cmd="tshark -r $file"
+        [[ -n "$filter" ]] && cmd="$cmd -Y \"$filter\""
+        [[ -n "$count" ]] && cmd="$cmd -c $count"
+        eval "$cmd"
+    elif command -v tcpdump &> /dev/null; then
+        local cmd="tcpdump -r $file"
+        [[ -n "$count" ]] && cmd="$cmd -c $count"
+        [[ -n "$filter" ]] && cmd="$cmd $filter"
+        eval "$cmd"
+    else
+        echo "Error: tshark or tcpdump required"
+        return 1
+    fi
+}
+
+cmd_filter() {
+    local file="${1:-}"
+    local filter="${2:-}"
+    local output="${3:-filtered.pcap}"
+
+    if [[ -z "$file" ]] || [[ -z "$filter" ]]; then
+        echo "Error: File and filter required"
+        echo "Usage: agent-wireshark filter <file> <filter> [output]"
+        return 1
+    fi
+
+    if command -v tshark &> /dev/null; then
+        tshark -r "$file" -Y "$filter" -w "$output"
+        echo "Filtered packets saved to: $output"
+    else
+        echo "Error: tshark required"
+        return 1
+    fi
+}
+
+cmd_stats() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid pcap file required"
+        return 1
+    fi
+
+    if command -v capinfos &> /dev/null; then
+        capinfos "$file"
+    elif command -v tshark &> /dev/null; then
+        echo "=== Capture Statistics ==="
+        echo
+        echo "Packet count:"
+        tshark -r "$file" | wc -l
+
+        echo
+        echo "Protocol hierarchy:"
+        tshark -r "$file" -q -z io,phs
+
+        echo
+        echo "Conversations:"
+        tshark -r "$file" -q -z conv,ip | head -20
+
+        echo
+        echo "Endpoints:"
+        tshark -r "$file" -q -z endpoints,ip | head -20
+    else
+        echo "Error: tshark or capinfos required"
+        return 1
+    fi
+}
+
+cmd_extract() {
+    local file="${1:-}"
+    local type="http"
+    local output_dir="extracted"
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --type|-t) type="$2"; shift 2 ;;
+            --output|-o) output_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid pcap file required"
+        return 1
+    fi
+
+    mkdir -p "$output_dir"
+
+    case "$type" in
+        http)
+            if command -v tshark &> /dev/null; then
+                tshark -r "$file" --export-objects "http,$output_dir"
+                echo "HTTP objects extracted to: $output_dir"
+            fi
+            ;;
+        smb)
+            if command -v tshark &> /dev/null; then
+                tshark -r "$file" --export-objects "smb,$output_dir"
+                echo "SMB objects extracted to: $output_dir"
+            fi
+            ;;
+        ftp)
+            if command -v tshark &> /dev/null; then
+                tshark -r "$file" --export-objects "ftp-data,$output_dir"
+                echo "FTP data extracted to: $output_dir"
+            fi
+            ;;
+        credentials)
+            echo "Searching for credentials..."
+            tshark -r "$file" -Y "http.authorization or ftp.request.command == \"PASS\" or smtp.auth.password" -T fields -e http.authorization -e ftp.request.arg -e smtp.auth.password 2>/dev/null | grep -v "^$"
+            ;;
+        *)
+            echo "Unknown type: $type"
+            echo "Supported: http, smb, ftp, credentials"
+            return 1
+            ;;
+    esac
+}
+
+cmd_live() {
+    local interface="${1:-any}"
+    local filter=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --filter|-f) filter="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if command -v tshark &> /dev/null; then
+        local cmd="tshark -i $interface"
+        [[ -n "$filter" ]] && cmd="$cmd -Y \"$filter\""
+        echo "Live capture on $interface (Ctrl+C to stop)..."
+        eval "$cmd"
+    else
+        echo "Error: tshark required"
+        return 1
+    fi
+}
+
+cmd_follow() {
+    local file="${1:-}"
+    local stream="${2:-tcp}"
+    local index="${3:-0}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid pcap file required"
+        return 1
+    fi
+
+    if command -v tshark &> /dev/null; then
+        tshark -r "$file" -q -z "follow,$stream,ascii,$index"
+    else
+        echo "Error: tshark required"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    interfaces|iface|list)
+        cmd_interfaces
+        ;;
+    capture|cap|sniff)
+        shift
+        cmd_capture "$@"
+        ;;
+    read|view|show)
+        shift
+        cmd_read "$@"
+        ;;
+    filter)
+        shift
+        cmd_filter "$@"
+        ;;
+    stats|info|summary)
+        shift
+        cmd_stats "$@"
+        ;;
+    extract|export)
+        shift
+        cmd_extract "$@"
+        ;;
+    live|monitor)
+        shift
+        cmd_live "$@"
+        ;;
+    follow|stream)
+        shift
+        cmd_follow "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-wireshark help"
+        exit 1
+        ;;
+esac

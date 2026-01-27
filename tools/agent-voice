@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+# agent-voice - Voice synthesis and recognition
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-voice - Voice synthesis and recognition
+
+Commands:
+  speak <text>             Text-to-speech
+  listen                   Speech-to-text (record and transcribe)
+  voices                   List available voices
+  record <file>            Record audio
+  transcribe <file>        Transcribe audio file
+
+Options:
+  --voice <name>           Voice to use for speech
+  --rate <speed>           Speech rate (0.5-2.0)
+  --lang <code>            Language code (en-US, es-ES, etc.)
+
+Requirements:
+  - macOS: Built-in say command
+  - Linux: espeak, festival, or pico2wave
+  - Whisper for transcription (optional)
+
+Examples:
+  agent-voice speak "Hello, world"
+  agent-voice speak "Bonjour" --voice Thomas --lang fr-FR
+  agent-voice listen
+  agent-voice transcribe recording.wav
+EOF
+}
+
+cmd_speak() {
+    local text="$*"
+    local voice=""
+    local rate=""
+    local output=""
+
+    # Parse flags from text
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --voice|-v) voice="$2"; shift 2 ;;
+            --rate|-r) rate="$2"; shift 2 ;;
+            --output|-o) output="$2"; shift 2 ;;
+            --lang|-l) shift 2 ;; # Handled by voice selection
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    text="${args[*]}"
+
+    if [[ -z "$text" ]]; then
+        echo "Error: Text required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS - use say command
+        local cmd="say"
+        [[ -n "$voice" ]] && cmd="$cmd -v \"$voice\""
+        [[ -n "$rate" ]] && cmd="$cmd -r $((200 * ${rate%.*:-1}))"
+        [[ -n "$output" ]] && cmd="$cmd -o \"$output\""
+        cmd="$cmd \"$text\""
+        eval "$cmd"
+    else
+        # Linux - try various TTS engines
+        if command -v espeak &> /dev/null; then
+            local cmd="espeak"
+            [[ -n "$voice" ]] && cmd="$cmd -v $voice"
+            [[ -n "$rate" ]] && cmd="$cmd -s $((175 * ${rate%.*:-1}))"
+            cmd="$cmd \"$text\""
+            eval "$cmd"
+        elif command -v pico2wave &> /dev/null; then
+            local tmpfile="/tmp/voice_$$.wav"
+            pico2wave -w "$tmpfile" "$text"
+            aplay "$tmpfile" 2>/dev/null || paplay "$tmpfile"
+            rm -f "$tmpfile"
+        elif command -v festival &> /dev/null; then
+            echo "$text" | festival --tts
+        else
+            echo "Error: No TTS engine found"
+            echo "Install: espeak, pico2wave, or festival"
+            return 1
+        fi
+    fi
+}
+
+cmd_voices() {
+    echo "Available voices:"
+    echo
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        say -v '?' | head -30
+        echo
+        echo "(showing first 30, run 'say -v ?' for full list)"
+    else
+        if command -v espeak &> /dev/null; then
+            espeak --voices | head -20
+        else
+            echo "Install espeak to see available voices"
+        fi
+    fi
+}
+
+cmd_listen() {
+    local duration="${1:-5}"
+    local lang="${2:-en-US}"
+    local tmpfile="/tmp/voice_recording_$$.wav"
+
+    echo "Recording for $duration seconds..."
+
+    # Record audio
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # Use sox or afrecord
+        if command -v sox &> /dev/null; then
+            sox -d -r 16000 -c 1 "$tmpfile" trim 0 "$duration"
+        else
+            # Use macOS built-in
+            afrecord -d "$duration" -f 'WAVE' -c 1 -r 16000 "$tmpfile" 2>/dev/null || {
+                echo "Recording with QuickTime..."
+                osascript << EOF
+tell application "QuickTime Player"
+    set newRec to new audio recording
+    start newRec
+    delay $duration
+    stop newRec
+    export document 1 in POSIX file "$tmpfile" using settings preset "Audio Only"
+    close document 1 saving no
+end tell
+EOF
+            }
+        fi
+    else
+        if command -v arecord &> /dev/null; then
+            arecord -d "$duration" -f S16_LE -r 16000 -c 1 "$tmpfile"
+        elif command -v sox &> /dev/null; then
+            sox -d -r 16000 -c 1 "$tmpfile" trim 0 "$duration"
+        else
+            echo "Error: No recording tool found"
+            return 1
+        fi
+    fi
+
+    echo "Recording complete. Transcribing..."
+
+    # Transcribe
+    cmd_transcribe "$tmpfile"
+    rm -f "$tmpfile"
+}
+
+cmd_record() {
+    local output="${1:-recording.wav}"
+    local duration="${2:-}"
+
+    echo "Recording to $output..."
+    if [[ -n "$duration" ]]; then
+        echo "Duration: $duration seconds"
+    else
+        echo "Press Ctrl+C to stop"
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v sox &> /dev/null; then
+            if [[ -n "$duration" ]]; then
+                sox -d -r 16000 -c 1 "$output" trim 0 "$duration"
+            else
+                sox -d -r 16000 -c 1 "$output"
+            fi
+        else
+            echo "Install sox for recording: brew install sox"
+            return 1
+        fi
+    else
+        if command -v arecord &> /dev/null; then
+            if [[ -n "$duration" ]]; then
+                arecord -d "$duration" -f S16_LE -r 16000 -c 1 "$output"
+            else
+                arecord -f S16_LE -r 16000 -c 1 "$output"
+            fi
+        else
+            echo "Error: arecord not found"
+            return 1
+        fi
+    fi
+
+    echo "Saved: $output"
+}
+
+cmd_transcribe() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid audio file required"
+        return 1
+    fi
+
+    # Try Whisper first (best quality)
+    if command -v whisper &> /dev/null; then
+        whisper "$file" --model base --output_format txt
+        return
+    fi
+
+    # Try whisper.cpp
+    if command -v whisper-cpp &> /dev/null; then
+        whisper-cpp -m ~/.whisper/ggml-base.bin -f "$file"
+        return
+    fi
+
+    # Try OpenAI Whisper API
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+        echo "Using OpenAI Whisper API..."
+        curl -s https://api.openai.com/v1/audio/transcriptions \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: multipart/form-data" \
+            -F file="@$file" \
+            -F model="whisper-1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))"
+        return
+    fi
+
+    # macOS built-in (limited)
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "For transcription, install Whisper: pip install openai-whisper"
+        echo "Or set OPENAI_API_KEY for API transcription"
+        return 1
+    fi
+
+    echo "Error: No transcription engine available"
+    echo "Install: pip install openai-whisper"
+    return 1
+}
+
+cmd_convert() {
+    local input="${1:-}"
+    local output="${2:-}"
+
+    if [[ -z "$input" ]] || [[ -z "$output" ]]; then
+        echo "Error: Input and output files required"
+        return 1
+    fi
+
+    if command -v ffmpeg &> /dev/null; then
+        ffmpeg -i "$input" "$output"
+    elif command -v sox &> /dev/null; then
+        sox "$input" "$output"
+    else
+        echo "Error: ffmpeg or sox required"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    speak|say|tts)
+        shift
+        cmd_speak "$@"
+        ;;
+    voices|list)
+        cmd_voices
+        ;;
+    listen|stt|recognize)
+        shift || true
+        cmd_listen "$@"
+        ;;
+    record|rec)
+        shift
+        cmd_record "$@"
+        ;;
+    transcribe|whisper)
+        shift
+        cmd_transcribe "$@"
+        ;;
+    convert)
+        shift
+        cmd_convert "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-voice help"
+        exit 1
+        ;;
+esac

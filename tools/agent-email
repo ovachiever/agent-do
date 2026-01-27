@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# agent-email - Email operations
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-email - Email operations
+
+Commands:
+  send <to> <subject>        Send email
+  read [folder]              Read inbox (or specified folder)
+  search <query>             Search emails
+  count                      Count unread emails
+
+Options:
+  --body <text>              Email body
+  --file <path>              Read body from file
+  --attach <path>            Attach file
+  --cc <email>               CC recipient
+  --bcc <email>              BCC recipient
+  --from <email>             From address (if supported)
+
+Environment:
+  SMTP_HOST                  SMTP server
+  SMTP_PORT                  SMTP port (default: 587)
+  SMTP_USER                  SMTP username
+  SMTP_PASS                  SMTP password
+  EMAIL_FROM                 Default from address
+
+Examples:
+  agent-email send user@example.com "Hello" --body "Hi there!"
+  agent-email send user@example.com "Report" --file report.txt --attach data.csv
+  agent-email read
+  agent-email search "invoice"
+EOF
+}
+
+# Send email using Python (cross-platform)
+send_email_python() {
+    local to="$1"
+    local subject="$2"
+    local body="$3"
+    local attach="${4:-}"
+    local cc="${5:-}"
+
+    python3 << PYTHON
+import smtplib
+import os
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+
+smtp_host = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
+smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+smtp_user = os.environ.get('SMTP_USER', '')
+smtp_pass = os.environ.get('SMTP_PASS', '')
+email_from = os.environ.get('EMAIL_FROM', smtp_user)
+
+if not smtp_user or not smtp_pass:
+    print("Error: SMTP_USER and SMTP_PASS required")
+    exit(1)
+
+msg = MIMEMultipart()
+msg['From'] = email_from
+msg['To'] = "$to"
+msg['Subject'] = "$subject"
+if "$cc":
+    msg['Cc'] = "$cc"
+
+msg.attach(MIMEText('''$body''', 'plain'))
+
+# Attachment
+attach_path = "$attach"
+if attach_path and os.path.isfile(attach_path):
+    with open(attach_path, 'rb') as f:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(attach_path)}"')
+    msg.attach(part)
+
+try:
+    server = smtplib.SMTP(smtp_host, smtp_port)
+    server.starttls()
+    server.login(smtp_user, smtp_pass)
+
+    recipients = ["$to"]
+    if "$cc":
+        recipients.append("$cc")
+
+    server.sendmail(email_from, recipients, msg.as_string())
+    server.quit()
+    print(f"Email sent to $to")
+except Exception as e:
+    print(f"Error: {e}")
+    exit(1)
+PYTHON
+}
+
+# Send email using mail command (simple)
+send_email_mail() {
+    local to="$1"
+    local subject="$2"
+    local body="$3"
+
+    if command -v mail &> /dev/null; then
+        echo "$body" | mail -s "$subject" "$to"
+        echo "Email sent to $to"
+    else
+        echo "Error: mail command not found"
+        return 1
+    fi
+}
+
+# macOS: Open Mail.app
+send_email_macos() {
+    local to="$1"
+    local subject="$2"
+    local body="$3"
+
+    osascript << EOF
+tell application "Mail"
+    set newMessage to make new outgoing message with properties {subject:"$subject", content:"$body", visible:true}
+    tell newMessage
+        make new to recipient with properties {address:"$to"}
+    end tell
+    activate
+end tell
+EOF
+    echo "Email composed in Mail.app"
+}
+
+cmd_send() {
+    local to=""
+    local subject=""
+    local body=""
+    local body_file=""
+    local attach=""
+    local cc=""
+    local method="auto"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --body|-b) body="$2"; shift 2 ;;
+            --file|-f) body_file="$2"; shift 2 ;;
+            --attach|-a) attach="$2"; shift 2 ;;
+            --cc) cc="$2"; shift 2 ;;
+            --method) method="$2"; shift 2 ;;
+            -*)
+                echo "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                if [[ -z "$to" ]]; then
+                    to="$1"
+                elif [[ -z "$subject" ]]; then
+                    subject="$1"
+                else
+                    body="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$to" ]] || [[ -z "$subject" ]]; then
+        echo "Error: Recipient and subject required"
+        echo "Usage: agent-email send <to> <subject> --body <text>"
+        return 1
+    fi
+
+    # Read body from file if specified
+    if [[ -n "$body_file" ]] && [[ -f "$body_file" ]]; then
+        body=$(cat "$body_file")
+    fi
+
+    [[ -z "$body" ]] && body="(No body)"
+
+    case "$method" in
+        smtp|python)
+            send_email_python "$to" "$subject" "$body" "$attach" "$cc"
+            ;;
+        mail)
+            send_email_mail "$to" "$subject" "$body"
+            ;;
+        macos|app)
+            send_email_macos "$to" "$subject" "$body"
+            ;;
+        auto)
+            if [[ -n "${SMTP_USER:-}" ]]; then
+                send_email_python "$to" "$subject" "$body" "$attach" "$cc"
+            elif [[ "$(uname)" == "Darwin" ]]; then
+                send_email_macos "$to" "$subject" "$body"
+            else
+                send_email_mail "$to" "$subject" "$body"
+            fi
+            ;;
+    esac
+}
+
+cmd_read() {
+    local folder="${1:-INBOX}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # Open Mail.app
+        osascript -e 'tell application "Mail" to activate'
+        echo "Opened Mail.app"
+    else
+        echo "Email reading requires platform-specific setup"
+        echo "For CLI reading, consider: mutt, neomutt, or alpine"
+    fi
+}
+
+cmd_search() {
+    local query="$*"
+
+    if [[ -z "$query" ]]; then
+        echo "Error: Search query required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # Search using Spotlight
+        mdfind -onlyin ~/Library/Mail "kMDItemTextContent == '*$query*'"
+    else
+        echo "Email search requires platform-specific setup"
+    fi
+}
+
+cmd_count() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript -e 'tell application "Mail" to return unread count of inbox'
+    else
+        echo "Unread count requires platform-specific setup"
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    send|compose|write)
+        shift
+        cmd_send "$@"
+        ;;
+    read|inbox|open)
+        shift || true
+        cmd_read "$@"
+        ;;
+    search|find)
+        shift
+        cmd_search "$@"
+        ;;
+    count|unread)
+        cmd_count
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-email help"
+        exit 1
+        ;;
+esac

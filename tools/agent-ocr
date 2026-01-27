@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# agent-ocr - OCR and screen text extraction
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-ocr - OCR and screen text extraction
+
+Commands:
+  screen                     Extract text from entire screen
+  region <x> <y> <w> <h>     Extract text from screen region
+  file <path>                Extract text from image file
+  find <text>                Find text location on screen
+
+Options:
+  --lang <lang>              Language (default: eng)
+  --json                     Output as JSON
+
+Requirements:
+  - macOS: Built-in Vision framework (no install needed)
+  - Linux: tesseract-ocr package
+
+Examples:
+  agent-ocr screen
+  agent-ocr file document.png
+  agent-ocr find "Submit"
+EOF
+}
+
+# macOS OCR using Vision framework via Python
+macos_ocr() {
+    local image_path="$1"
+
+    python3 << PYTHON
+import Vision
+import Quartz
+from Foundation import NSURL
+
+def perform_ocr(image_path):
+    # Load image
+    image_url = NSURL.fileURLWithPath_(image_path)
+    image_source = Quartz.CGImageSourceCreateWithURL(image_url, None)
+    if not image_source:
+        print(f"Error: Could not load image: {image_path}")
+        return
+
+    cg_image = Quartz.CGImageSourceCreateImageAtIndex(image_source, 0, None)
+    if not cg_image:
+        print("Error: Could not create image")
+        return
+
+    # Create request
+    request = Vision.VNRecognizeTextRequest.alloc().init()
+    request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+
+    # Create handler and perform
+    handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
+    success = handler.performRequests_error_([request], None)
+
+    if success and request.results():
+        for observation in request.results():
+            text = observation.topCandidates_(1)[0].string()
+            print(text)
+
+perform_ocr("$image_path")
+PYTHON
+}
+
+# Linux OCR using tesseract
+linux_ocr() {
+    local image_path="$1"
+    local lang="${2:-eng}"
+
+    if ! command -v tesseract &> /dev/null; then
+        echo "Error: tesseract not found. Install with: apt install tesseract-ocr"
+        return 1
+    fi
+
+    tesseract "$image_path" stdout -l "$lang" 2>/dev/null
+}
+
+# Take screenshot
+take_screenshot() {
+    local output="${1:-/tmp/ocr-screen.png}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        screencapture -x "$output"
+    elif command -v scrot &> /dev/null; then
+        scrot "$output"
+    elif command -v gnome-screenshot &> /dev/null; then
+        gnome-screenshot -f "$output"
+    elif command -v import &> /dev/null; then
+        import -window root "$output"
+    else
+        echo "Error: No screenshot tool found"
+        return 1
+    fi
+}
+
+# Take region screenshot
+take_region_screenshot() {
+    local x="$1"
+    local y="$2"
+    local w="$3"
+    local h="$4"
+    local output="${5:-/tmp/ocr-region.png}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        screencapture -x -R "${x},${y},${w},${h}" "$output"
+    elif command -v scrot &> /dev/null; then
+        scrot -a "${x},${y},${w},${h}" "$output"
+    elif command -v import &> /dev/null; then
+        import -window root -crop "${w}x${h}+${x}+${y}" "$output"
+    else
+        echo "Error: No screenshot tool found"
+        return 1
+    fi
+}
+
+cmd_screen() {
+    local lang="eng"
+    local json=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --lang) lang="$2"; shift 2 ;;
+            --json) json=1; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local tmp_file="/tmp/ocr-screen-$$.png"
+    take_screenshot "$tmp_file"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_ocr "$tmp_file"
+    else
+        linux_ocr "$tmp_file" "$lang"
+    fi
+
+    rm -f "$tmp_file"
+}
+
+cmd_region() {
+    local x="${1:-}"
+    local y="${2:-}"
+    local w="${3:-}"
+    local h="${4:-}"
+    local lang="eng"
+
+    shift 4 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --lang) lang="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$x" ]] || [[ -z "$y" ]] || [[ -z "$w" ]] || [[ -z "$h" ]]; then
+        echo "Error: Region coordinates required"
+        echo "Usage: agent-ocr region <x> <y> <width> <height>"
+        return 1
+    fi
+
+    local tmp_file="/tmp/ocr-region-$$.png"
+    take_region_screenshot "$x" "$y" "$w" "$h" "$tmp_file"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_ocr "$tmp_file"
+    else
+        linux_ocr "$tmp_file" "$lang"
+    fi
+
+    rm -f "$tmp_file"
+}
+
+cmd_file() {
+    local file="${1:-}"
+    local lang="eng"
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --lang) lang="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_ocr "$file"
+    else
+        linux_ocr "$file" "$lang"
+    fi
+}
+
+cmd_find() {
+    local text="${1:-}"
+
+    if [[ -z "$text" ]]; then
+        echo "Error: Text to find required"
+        return 1
+    fi
+
+    # This is a simplified version - full implementation would need
+    # bounding box information from the OCR
+    echo "Searching for '$text' on screen..."
+
+    local tmp_file="/tmp/ocr-find-$$.png"
+    take_screenshot "$tmp_file"
+
+    local result
+    if [[ "$(uname)" == "Darwin" ]]; then
+        result=$(macos_ocr "$tmp_file")
+    else
+        result=$(linux_ocr "$tmp_file")
+    fi
+
+    rm -f "$tmp_file"
+
+    if echo "$result" | grep -qi "$text"; then
+        echo "Found: '$text'"
+        echo "Note: Exact coordinates require Vision/tesseract bounding box API"
+    else
+        echo "Not found: '$text'"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    screen|s)
+        shift || true
+        cmd_screen "$@"
+        ;;
+    region|r)
+        shift
+        cmd_region "$@"
+        ;;
+    file|f)
+        shift
+        cmd_file "$@"
+        ;;
+    find|search)
+        shift
+        cmd_find "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-ocr help"
+        exit 1
+        ;;
+esac

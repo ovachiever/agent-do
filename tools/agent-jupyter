@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# agent-jupyter - Jupyter notebook control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-jupyter - Jupyter notebook control
+
+Commands:
+  start [dir]                Start Jupyter server
+  stop                       Stop Jupyter server
+  list                       List running servers
+  open <notebook>            Open notebook in browser
+  run <notebook>             Execute notebook
+  convert <notebook> <fmt>   Convert notebook (html, pdf, py, md)
+  create <name>              Create new notebook
+
+Options:
+  --port <port>              Server port (default: 8888)
+  --no-browser               Don't open browser
+
+Formats for convert:
+  html, pdf, latex, markdown, script (py), slides
+
+Examples:
+  agent-jupyter start
+  agent-jupyter run analysis.ipynb
+  agent-jupyter convert report.ipynb html
+  agent-jupyter create "New Analysis"
+EOF
+}
+
+cmd_start() {
+    local dir="${1:-.}"
+    local port=8888
+    local no_browser=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --port|-p) port="$2"; shift 2 ;;
+            --no-browser) no_browser="--no-browser"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if command -v jupyter &> /dev/null; then
+        jupyter notebook --notebook-dir="$dir" --port="$port" $no_browser &
+        echo "Jupyter started on port $port"
+        echo "URL: http://localhost:$port"
+    elif command -v jupyter-notebook &> /dev/null; then
+        jupyter-notebook --notebook-dir="$dir" --port="$port" $no_browser &
+        echo "Jupyter started on port $port"
+    else
+        echo "Error: jupyter not found"
+        echo "Install with: pip install jupyter"
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if command -v jupyter &> /dev/null; then
+        jupyter notebook stop
+    else
+        # Kill by process
+        pkill -f "jupyter-notebook" || pkill -f "jupyter notebook" || echo "No Jupyter server running"
+    fi
+    echo "Jupyter server stopped"
+}
+
+cmd_list() {
+    if command -v jupyter &> /dev/null; then
+        jupyter notebook list
+    else
+        echo "Error: jupyter not found"
+        return 1
+    fi
+}
+
+cmd_open() {
+    local notebook="${1:-}"
+
+    if [[ -z "$notebook" ]]; then
+        echo "Error: Notebook path required"
+        return 1
+    fi
+
+    if [[ ! -f "$notebook" ]]; then
+        echo "Error: Notebook not found: $notebook"
+        return 1
+    fi
+
+    # Get running server URL
+    local server_url
+    if command -v jupyter &> /dev/null; then
+        server_url=$(jupyter notebook list 2>/dev/null | grep "http" | head -1 | awk '{print $1}')
+    fi
+
+    if [[ -n "$server_url" ]]; then
+        local notebook_name=$(basename "$notebook")
+        open "${server_url}notebooks/${notebook_name}"
+    else
+        # Start server and open
+        jupyter notebook "$notebook" &
+    fi
+}
+
+cmd_run() {
+    local notebook="${1:-}"
+    local output=""
+    local inplace=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            --inplace|-i) inplace="--inplace"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$notebook" ]]; then
+        echo "Error: Notebook path required"
+        return 1
+    fi
+
+    if ! command -v jupyter &> /dev/null; then
+        echo "Error: jupyter not found"
+        return 1
+    fi
+
+    local args=(nbconvert --to notebook --execute)
+    [[ -n "$inplace" ]] && args+=(--inplace)
+    [[ -n "$output" ]] && args+=(--output "$output")
+
+    jupyter "${args[@]}" "$notebook"
+    echo "Executed: $notebook"
+}
+
+cmd_convert() {
+    local notebook="${1:-}"
+    local format="${2:-html}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$notebook" ]]; then
+        echo "Error: Notebook path required"
+        return 1
+    fi
+
+    if ! command -v jupyter &> /dev/null; then
+        echo "Error: jupyter not found"
+        return 1
+    fi
+
+    # Map format aliases
+    case "$format" in
+        py|python) format="script" ;;
+        md) format="markdown" ;;
+    esac
+
+    local args=(nbconvert --to "$format")
+    [[ -n "$output" ]] && args+=(--output "$output")
+
+    jupyter "${args[@]}" "$notebook"
+    echo "Converted to $format"
+}
+
+cmd_create() {
+    local name="${1:-Untitled}"
+
+    # Ensure .ipynb extension
+    [[ ! "$name" =~ \.ipynb$ ]] && name="${name}.ipynb"
+
+    # Create minimal notebook
+    cat > "$name" << 'EOF'
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python",
+   "version": "3.10.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
+EOF
+
+    echo "Created: $name"
+}
+
+cmd_kernels() {
+    if command -v jupyter &> /dev/null; then
+        jupyter kernelspec list
+    else
+        echo "Error: jupyter not found"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    start|serve)
+        shift || true
+        cmd_start "$@"
+        ;;
+    stop|shutdown)
+        cmd_stop
+        ;;
+    list|ls|servers)
+        cmd_list
+        ;;
+    open|view)
+        shift
+        cmd_open "$@"
+        ;;
+    run|execute|exec)
+        shift
+        cmd_run "$@"
+        ;;
+    convert|export)
+        shift
+        cmd_convert "$@"
+        ;;
+    create|new)
+        shift || true
+        cmd_create "$@"
+        ;;
+    kernels)
+        cmd_kernels
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-jupyter help"
+        exit 1
+        ;;
+esac

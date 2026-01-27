@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# agent-docker - Docker container management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-docker - Docker container management
+
+Commands:
+  ps               List running containers
+  ps -a            List all containers
+  logs <name>      View container logs
+  logs -f <name>   Follow container logs
+  shell <name>     Open shell in container
+  exec <name> cmd  Run command in container
+  start <name>     Start container
+  stop <name>      Stop container
+  restart <name>   Restart container
+  images           List images
+  compose up       Start compose stack
+  compose down     Stop compose stack
+
+Examples:
+  agent-docker ps
+  agent-docker logs postgres
+  agent-docker shell my-app
+  agent-docker exec my-app ls -la
+EOF
+}
+
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo "Error: docker not found"
+        exit 1
+    fi
+}
+
+cmd_ps() {
+    check_docker
+    local all_flag=""
+    [[ "${1:-}" == "-a" ]] && all_flag="-a"
+    docker ps $all_flag --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+}
+
+cmd_logs() {
+    check_docker
+    local follow=""
+    local name=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow="-f"; shift ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-docker logs [-f] <container>"
+        return 1
+    fi
+
+    docker logs $follow "$name"
+}
+
+cmd_shell() {
+    check_docker
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-docker shell <container>"
+        return 1
+    fi
+
+    # Try bash first, fall back to sh
+    docker exec -it "$name" bash 2>/dev/null || docker exec -it "$name" sh
+}
+
+cmd_exec() {
+    check_docker
+    local name="${1:-}"
+    shift || true
+
+    if [[ -z "$name" ]] || [[ $# -eq 0 ]]; then
+        echo "Usage: agent-docker exec <container> <command>"
+        return 1
+    fi
+
+    docker exec -it "$name" "$@"
+}
+
+cmd_start() {
+    check_docker
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-docker start <container>"
+        return 1
+    fi
+    docker start "$name"
+}
+
+cmd_stop() {
+    check_docker
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-docker stop <container>"
+        return 1
+    fi
+    docker stop "$name"
+}
+
+cmd_restart() {
+    check_docker
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-docker restart <container>"
+        return 1
+    fi
+    docker restart "$name"
+}
+
+cmd_images() {
+    check_docker
+    docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"
+}
+
+cmd_compose() {
+    check_docker
+    local subcmd="${1:-}"
+    shift || true
+
+    case "$subcmd" in
+        up)
+            docker compose up -d "$@"
+            ;;
+        down)
+            docker compose down "$@"
+            ;;
+        logs)
+            docker compose logs "$@"
+            ;;
+        ps)
+            docker compose ps "$@"
+            ;;
+        *)
+            docker compose "$subcmd" "$@"
+            ;;
+    esac
+}
+
+# Main
+case "${1:-help}" in
+    ps)
+        shift || true
+        cmd_ps "$@"
+        ;;
+    logs)
+        shift
+        cmd_logs "$@"
+        ;;
+    shell|sh)
+        shift
+        cmd_shell "$@"
+        ;;
+    exec)
+        shift
+        cmd_exec "$@"
+        ;;
+    start)
+        shift
+        cmd_start "$@"
+        ;;
+    stop)
+        shift
+        cmd_stop "$@"
+        ;;
+    restart)
+        shift
+        cmd_restart "$@"
+        ;;
+    images)
+        cmd_images
+        ;;
+    compose|dc)
+        shift
+        cmd_compose "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-docker help"
+        exit 1
+        ;;
+esac

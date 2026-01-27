@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# agent-ci - CI/CD pipeline management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-ci - CI/CD pipeline management
+
+Commands:
+  status [workflow]          Show workflow status
+  runs [workflow]            List recent runs
+  trigger <workflow>         Trigger workflow
+  logs <run-id>              View run logs
+  cancel <run-id>            Cancel running workflow
+  artifacts <run-id>         Download artifacts
+  secrets                    List secrets (names only)
+
+Supported platforms:
+  - GitHub Actions (auto-detected via gh CLI)
+
+Examples:
+  agent-ci status
+  agent-ci runs deploy
+  agent-ci trigger deploy.yml
+  agent-ci logs 12345
+  agent-ci artifacts 12345
+EOF
+}
+
+# Check for gh CLI
+check_gh() {
+    if ! command -v gh &> /dev/null; then
+        echo "Error: gh CLI not found"
+        echo "Install: brew install gh"
+        exit 1
+    fi
+}
+
+# Get repo from git remote
+get_repo() {
+    git remote get-url origin 2>/dev/null | sed -E 's/.*github.com[:/]([^/]+\/[^.]+)(\.git)?/\1/'
+}
+
+cmd_status() {
+    check_gh
+    local workflow="${1:-}"
+    local repo=$(get_repo)
+
+    if [[ -z "$repo" ]]; then
+        echo "Error: Not in a git repository with GitHub remote"
+        return 1
+    fi
+
+    if [[ -n "$workflow" ]]; then
+        gh run list --workflow "$workflow" --limit 5 --repo "$repo"
+    else
+        gh run list --limit 10 --repo "$repo"
+    fi
+}
+
+cmd_runs() {
+    check_gh
+    local workflow="${1:-}"
+    local repo=$(get_repo)
+
+    if [[ -z "$repo" ]]; then
+        echo "Error: Not in a git repository with GitHub remote"
+        return 1
+    fi
+
+    local args=(--limit 20 --repo "$repo")
+    [[ -n "$workflow" ]] && args+=(--workflow "$workflow")
+
+    gh run list "${args[@]}"
+}
+
+cmd_trigger() {
+    check_gh
+    local workflow="${1:-}"
+    local ref="${2:-$(git branch --show-current)}"
+    local repo=$(get_repo)
+
+    if [[ -z "$workflow" ]]; then
+        echo "Error: Workflow file required"
+        echo "Usage: agent-ci trigger <workflow.yml> [ref]"
+        return 1
+    fi
+
+    if [[ -z "$repo" ]]; then
+        echo "Error: Not in a git repository with GitHub remote"
+        return 1
+    fi
+
+    gh workflow run "$workflow" --ref "$ref" --repo "$repo"
+    echo "Triggered $workflow on $ref"
+}
+
+cmd_logs() {
+    check_gh
+    local run_id="${1:-}"
+    local repo=$(get_repo)
+
+    if [[ -z "$run_id" ]]; then
+        # Get latest run
+        run_id=$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId' --repo "$repo")
+        if [[ -z "$run_id" ]]; then
+            echo "Error: No runs found"
+            return 1
+        fi
+        echo "Showing logs for latest run: $run_id"
+    fi
+
+    gh run view "$run_id" --log --repo "$repo"
+}
+
+cmd_cancel() {
+    check_gh
+    local run_id="${1:-}"
+    local repo=$(get_repo)
+
+    if [[ -z "$run_id" ]]; then
+        echo "Error: Run ID required"
+        return 1
+    fi
+
+    gh run cancel "$run_id" --repo "$repo"
+    echo "Cancelled run $run_id"
+}
+
+cmd_artifacts() {
+    check_gh
+    local run_id="${1:-}"
+    local output="${2:-.}"
+    local repo=$(get_repo)
+
+    if [[ -z "$run_id" ]]; then
+        echo "Error: Run ID required"
+        return 1
+    fi
+
+    gh run download "$run_id" --dir "$output" --repo "$repo"
+    echo "Downloaded artifacts to $output"
+}
+
+cmd_secrets() {
+    check_gh
+    local repo=$(get_repo)
+
+    if [[ -z "$repo" ]]; then
+        echo "Error: Not in a git repository with GitHub remote"
+        return 1
+    fi
+
+    echo "Repository secrets:"
+    gh secret list --repo "$repo"
+}
+
+cmd_watch() {
+    check_gh
+    local run_id="${1:-}"
+    local repo=$(get_repo)
+
+    if [[ -z "$run_id" ]]; then
+        # Get latest in-progress run
+        run_id=$(gh run list --status in_progress --limit 1 --json databaseId --jq '.[0].databaseId' --repo "$repo")
+        if [[ -z "$run_id" ]]; then
+            echo "No in-progress runs"
+            return 0
+        fi
+    fi
+
+    gh run watch "$run_id" --repo "$repo"
+}
+
+# Main
+case "${1:-help}" in
+    status|st)
+        shift || true
+        cmd_status "$@"
+        ;;
+    runs|list|ls)
+        shift || true
+        cmd_runs "$@"
+        ;;
+    trigger|run|start)
+        shift
+        cmd_trigger "$@"
+        ;;
+    logs|log|view)
+        shift || true
+        cmd_logs "$@"
+        ;;
+    cancel|stop|abort)
+        shift
+        cmd_cancel "$@"
+        ;;
+    artifacts|download)
+        shift
+        cmd_artifacts "$@"
+        ;;
+    secrets)
+        cmd_secrets
+        ;;
+    watch|follow)
+        shift || true
+        cmd_watch "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-ci help"
+        exit 1
+        ;;
+esac

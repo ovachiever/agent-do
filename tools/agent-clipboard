@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# agent-clipboard - Clipboard management tool
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-clipboard - Clipboard management
+
+Commands:
+  copy <text>      Copy text to clipboard
+  paste            Print clipboard contents
+  clear            Clear clipboard
+  file <path>      Copy file contents to clipboard
+
+Examples:
+  agent-clipboard copy "Hello, World!"
+  agent-clipboard paste
+  agent-clipboard file ~/.ssh/id_rsa.pub
+EOF
+}
+
+# Detect clipboard command
+get_clipboard_cmd() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "pbcopy:pbpaste"
+    elif command -v xclip &> /dev/null; then
+        echo "xclip -selection clipboard:xclip -selection clipboard -o"
+    elif command -v xsel &> /dev/null; then
+        echo "xsel --clipboard --input:xsel --clipboard --output"
+    elif command -v wl-copy &> /dev/null; then
+        echo "wl-copy:wl-paste"
+    else
+        echo ""
+    fi
+}
+
+cmd_copy() {
+    local text="$*"
+    if [[ -z "$text" ]]; then
+        echo "Usage: agent-clipboard copy <text>"
+        return 1
+    fi
+
+    local cmds
+    cmds=$(get_clipboard_cmd)
+    if [[ -z "$cmds" ]]; then
+        echo "Error: No clipboard command found (install xclip, xsel, or wl-clipboard)"
+        return 1
+    fi
+
+    local copy_cmd="${cmds%%:*}"
+    echo -n "$text" | $copy_cmd
+    echo "Copied to clipboard: ${text:0:50}$([ ${#text} -gt 50 ] && echo '...')"
+}
+
+cmd_paste() {
+    local cmds
+    cmds=$(get_clipboard_cmd)
+    if [[ -z "$cmds" ]]; then
+        echo "Error: No clipboard command found"
+        return 1
+    fi
+
+    local paste_cmd="${cmds##*:}"
+    $paste_cmd
+}
+
+cmd_clear() {
+    local cmds
+    cmds=$(get_clipboard_cmd)
+    if [[ -z "$cmds" ]]; then
+        echo "Error: No clipboard command found"
+        return 1
+    fi
+
+    local copy_cmd="${cmds%%:*}"
+    echo -n "" | $copy_cmd
+    echo "Clipboard cleared"
+}
+
+cmd_file() {
+    local path="${1:-}"
+    if [[ -z "$path" ]]; then
+        echo "Usage: agent-clipboard file <path>"
+        return 1
+    fi
+
+    if [[ ! -f "$path" ]]; then
+        echo "Error: File not found: $path"
+        return 1
+    fi
+
+    local cmds
+    cmds=$(get_clipboard_cmd)
+    if [[ -z "$cmds" ]]; then
+        echo "Error: No clipboard command found"
+        return 1
+    fi
+
+    local copy_cmd="${cmds%%:*}"
+    cat "$path" | $copy_cmd
+    local bytes
+    bytes=$(wc -c < "$path" | tr -d ' ')
+    echo "Copied $bytes bytes from $path to clipboard"
+}
+
+# Main
+case "${1:-help}" in
+    copy|cp)
+        shift
+        cmd_copy "$@"
+        ;;
+    paste|get)
+        cmd_paste
+        ;;
+    clear)
+        cmd_clear
+        ;;
+    file)
+        shift
+        cmd_file "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-clipboard help"
+        exit 1
+        ;;
+esac

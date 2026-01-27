@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# agent-bluetooth - Bluetooth control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-bluetooth - Bluetooth control
+
+Commands:
+  status                     Show Bluetooth status
+  on                         Turn Bluetooth on
+  off                        Turn Bluetooth off
+  devices                    List paired devices
+  scan                       Scan for devices
+  connect <device>           Connect to device
+  disconnect <device>        Disconnect device
+
+Requirements:
+  - macOS: blueutil (brew install blueutil)
+  - Linux: bluetoothctl
+
+Examples:
+  agent-bluetooth status
+  agent-bluetooth devices
+  agent-bluetooth scan
+  agent-bluetooth connect "AirPods Pro"
+EOF
+}
+
+# macOS using blueutil
+macos_status() {
+    if command -v blueutil &> /dev/null; then
+        local power=$(blueutil -p)
+        local discoverable=$(blueutil -d)
+        echo "Power: $([ "$power" -eq 1 ] && echo 'On' || echo 'Off')"
+        echo "Discoverable: $([ "$discoverable" -eq 1 ] && echo 'Yes' || echo 'No')"
+    else
+        echo "Error: blueutil required (brew install blueutil)"
+        return 1
+    fi
+}
+
+macos_on() {
+    if command -v blueutil &> /dev/null; then
+        blueutil -p 1
+        echo "Bluetooth enabled"
+    else
+        # Try System Preferences
+        osascript -e 'tell application "System Preferences" to reveal pane "com.apple.preferences.Bluetooth"'
+        echo "Opening Bluetooth preferences..."
+    fi
+}
+
+macos_off() {
+    if command -v blueutil &> /dev/null; then
+        blueutil -p 0
+        echo "Bluetooth disabled"
+    else
+        echo "Error: blueutil required"
+        return 1
+    fi
+}
+
+macos_devices() {
+    if command -v blueutil &> /dev/null; then
+        echo "Paired devices:"
+        blueutil --paired
+    else
+        system_profiler SPBluetoothDataType 2>/dev/null | grep -A 5 "Devices (Paired)"
+    fi
+}
+
+macos_scan() {
+    if command -v blueutil &> /dev/null; then
+        echo "Scanning for devices (10 seconds)..."
+        blueutil --inquiry 10
+    else
+        echo "Error: blueutil required for scanning"
+        return 1
+    fi
+}
+
+macos_connect() {
+    local device="$1"
+
+    if command -v blueutil &> /dev/null; then
+        # Try to find device by name
+        local address
+        address=$(blueutil --paired | grep -i "$device" | awk '{print $2}' | head -1)
+
+        if [[ -n "$address" ]]; then
+            blueutil --connect "$address"
+            echo "Connecting to $device..."
+        else
+            # Try as address directly
+            blueutil --connect "$device"
+        fi
+    else
+        echo "Error: blueutil required"
+        return 1
+    fi
+}
+
+macos_disconnect() {
+    local device="$1"
+
+    if command -v blueutil &> /dev/null; then
+        local address
+        address=$(blueutil --paired | grep -i "$device" | awk '{print $2}' | head -1)
+
+        if [[ -n "$address" ]]; then
+            blueutil --disconnect "$address"
+            echo "Disconnected from $device"
+        else
+            blueutil --disconnect "$device"
+        fi
+    else
+        echo "Error: blueutil required"
+        return 1
+    fi
+}
+
+# Linux using bluetoothctl
+linux_status() {
+    bluetoothctl show | grep -E "Powered|Discoverable|Name"
+}
+
+linux_on() {
+    bluetoothctl power on
+    echo "Bluetooth enabled"
+}
+
+linux_off() {
+    bluetoothctl power off
+    echo "Bluetooth disabled"
+}
+
+linux_devices() {
+    echo "Paired devices:"
+    bluetoothctl devices
+}
+
+linux_scan() {
+    echo "Scanning for 10 seconds..."
+    timeout 10 bluetoothctl scan on
+    bluetoothctl devices
+}
+
+linux_connect() {
+    local device="$1"
+    bluetoothctl connect "$device"
+}
+
+linux_disconnect() {
+    local device="$1"
+    bluetoothctl disconnect "$device"
+}
+
+# Main dispatch
+cmd_status() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_status
+    else
+        linux_status
+    fi
+}
+
+cmd_on() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_on
+    else
+        linux_on
+    fi
+}
+
+cmd_off() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_off
+    else
+        linux_off
+    fi
+}
+
+cmd_devices() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_devices
+    else
+        linux_devices
+    fi
+}
+
+cmd_scan() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_scan
+    else
+        linux_scan
+    fi
+}
+
+cmd_connect() {
+    local device="${1:-}"
+    if [[ -z "$device" ]]; then
+        echo "Error: Device name or address required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_connect "$device"
+    else
+        linux_connect "$device"
+    fi
+}
+
+cmd_disconnect() {
+    local device="${1:-}"
+    if [[ -z "$device" ]]; then
+        echo "Error: Device name or address required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_disconnect "$device"
+    else
+        linux_disconnect "$device"
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    status|stat)
+        cmd_status
+        ;;
+    on|enable)
+        cmd_on
+        ;;
+    off|disable)
+        cmd_off
+        ;;
+    devices|paired|list)
+        cmd_devices
+        ;;
+    scan|discover)
+        cmd_scan
+        ;;
+    connect|pair)
+        shift
+        cmd_connect "$@"
+        ;;
+    disconnect|unpair)
+        shift
+        cmd_disconnect "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-bluetooth help"
+        exit 1
+        ;;
+esac

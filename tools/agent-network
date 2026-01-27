@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# agent-network - Network diagnostics tool
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-network - Network diagnostics
+
+Commands:
+  scan [--port <port>]     Find what's using a port (or list listening ports)
+  ping <host>              Ping a host
+  trace <host>             Trace route to host
+  whois <domain>           WHOIS lookup
+  dns <domain> [type]      DNS lookup (A, AAAA, MX, TXT, etc.)
+  interfaces               List network interfaces
+  connections              List active connections
+
+Examples:
+  agent-network scan --port 3000
+  agent-network ping google.com
+  agent-network dns example.com MX
+EOF
+}
+
+cmd_scan() {
+    local port=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --port|-p) port="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -n "$port" ]]; then
+        echo "Processes using port $port:"
+        echo
+        if command -v lsof &> /dev/null; then
+            lsof -i :"$port" 2>/dev/null || echo "No process found using port $port"
+        elif command -v netstat &> /dev/null; then
+            netstat -an | grep ":$port " || echo "No process found using port $port"
+        else
+            echo "Error: lsof or netstat required"
+            return 1
+        fi
+    else
+        echo "Listening ports:"
+        echo
+        if command -v lsof &> /dev/null; then
+            lsof -i -P -n | grep LISTEN | head -30
+        elif command -v netstat &> /dev/null; then
+            netstat -an | grep LISTEN | head -30
+        else
+            echo "Error: lsof or netstat required"
+            return 1
+        fi
+    fi
+}
+
+cmd_ping() {
+    local host="${1:-}"
+    if [[ -z "$host" ]]; then
+        echo "Usage: agent-network ping <host>"
+        return 1
+    fi
+    ping -c 4 "$host"
+}
+
+cmd_trace() {
+    local host="${1:-}"
+    if [[ -z "$host" ]]; then
+        echo "Usage: agent-network trace <host>"
+        return 1
+    fi
+    if command -v traceroute &> /dev/null; then
+        traceroute "$host"
+    elif command -v tracepath &> /dev/null; then
+        tracepath "$host"
+    else
+        echo "Error: traceroute or tracepath required"
+        return 1
+    fi
+}
+
+cmd_whois() {
+    local domain="${1:-}"
+    if [[ -z "$domain" ]]; then
+        echo "Usage: agent-network whois <domain>"
+        return 1
+    fi
+    if command -v whois &> /dev/null; then
+        whois "$domain"
+    else
+        echo "Error: whois command not found"
+        return 1
+    fi
+}
+
+cmd_dns() {
+    local domain="${1:-}"
+    local record_type="${2:-A}"
+    if [[ -z "$domain" ]]; then
+        echo "Usage: agent-network dns <domain> [type]"
+        return 1
+    fi
+    if command -v dig &> /dev/null; then
+        dig "$domain" "$record_type" +short
+    elif command -v nslookup &> /dev/null; then
+        nslookup -type="$record_type" "$domain"
+    elif command -v host &> /dev/null; then
+        host -t "$record_type" "$domain"
+    else
+        echo "Error: dig, nslookup, or host required"
+        return 1
+    fi
+}
+
+cmd_interfaces() {
+    if command -v ip &> /dev/null; then
+        ip addr
+    elif command -v ifconfig &> /dev/null; then
+        ifconfig
+    else
+        echo "Error: ip or ifconfig required"
+        return 1
+    fi
+}
+
+cmd_connections() {
+    if command -v ss &> /dev/null; then
+        ss -tuln
+    elif command -v netstat &> /dev/null; then
+        netstat -an | grep -E "^(tcp|udp)" | head -30
+    else
+        echo "Error: ss or netstat required"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    scan)
+        shift
+        cmd_scan "$@"
+        ;;
+    ping)
+        shift
+        cmd_ping "$@"
+        ;;
+    trace|traceroute)
+        shift
+        cmd_trace "$@"
+        ;;
+    whois)
+        shift
+        cmd_whois "$@"
+        ;;
+    dns|lookup)
+        shift
+        cmd_dns "$@"
+        ;;
+    interfaces|if)
+        cmd_interfaces
+        ;;
+    connections|conn)
+        cmd_connections
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-network help"
+        exit 1
+        ;;
+esac

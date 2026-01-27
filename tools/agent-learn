@@ -1,0 +1,429 @@
+#!/usr/bin/env bash
+# agent-learn - Learning and pattern improvement
+
+set -euo pipefail
+
+LEARN_DIR="${AGENT_DO_HOME:-$HOME/.agent-do}/learning"
+mkdir -p "$LEARN_DIR"
+
+show_help() {
+    cat << 'EOF'
+agent-learn - Learning and pattern improvement
+
+Commands:
+  correct <intent>         Correct a routing mistake
+  feedback <rating>        Rate last response (1-5)
+  patterns                 Show learned patterns
+  stats                    Show learning statistics
+  export                   Export learned data
+  reset                    Reset learning data
+
+Learning improves:
+  - Intent routing accuracy
+  - Tool selection
+  - Parameter inference
+  - User preference adaptation
+
+Examples:
+  agent-learn correct "screenshot ios" --should "agent-ios screenshot"
+  agent-learn feedback 5 --comment "Perfect!"
+  agent-learn patterns
+  agent-learn stats
+EOF
+}
+
+cmd_correct() {
+    local intent=""
+    local should=""
+    local instead=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --should|-s) should="$2"; shift 2 ;;
+            --instead|-i) instead="$2"; shift 2 ;;
+            *) intent="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$intent" ]]; then
+        echo "Error: Intent required"
+        return 1
+    fi
+
+    if [[ -z "$should" ]]; then
+        read -p "What should this run? " should
+    fi
+
+    python3 << PYTHON
+import json
+import os
+from datetime import datetime
+
+corrections_file = "$LEARN_DIR/corrections.json"
+
+if os.path.exists(corrections_file):
+    with open(corrections_file) as f:
+        corrections = json.load(f)
+else:
+    corrections = []
+
+corrections.append({
+    'intent': '''$intent''',
+    'should': '''$should''',
+    'instead': '''$instead''' or None,
+    'timestamp': datetime.now().isoformat()
+})
+
+with open(corrections_file, 'w') as f:
+    json.dump(corrections, f, indent=2)
+
+# Also add to pattern cache for immediate effect
+cache_dir = os.path.expanduser("~/.agent-do/cache")
+os.makedirs(cache_dir, exist_ok=True)
+
+# Parse the command
+parts = '''$should'''.split()
+if parts and parts[0].startswith('agent-'):
+    tool = parts[0].replace('agent-', '')
+    command = parts[1] if len(parts) > 1 else ''
+    args = parts[2:] if len(parts) > 2 else []
+
+    # Update pattern cache
+    import sqlite3
+    db_path = os.path.join(cache_dir, "patterns.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute('''CREATE TABLE IF NOT EXISTS patterns
+                    (intent TEXT PRIMARY KEY, result TEXT, hits INTEGER DEFAULT 1)''')
+
+    result = json.dumps({
+        'tool': tool,
+        'command': command,
+        'args': args,
+        'flags': {},
+        'confidence': 1.0,
+        'explanation': 'User correction'
+    })
+
+    conn.execute('''INSERT OR REPLACE INTO patterns (intent, result, hits)
+                    VALUES (?, ?, COALESCE((SELECT hits FROM patterns WHERE intent = ?) + 1, 1))''',
+                 ('''$intent'''.lower(), result, '''$intent'''.lower()))
+    conn.commit()
+    conn.close()
+
+print(f"Learned: '{intent}' → '{should}'")
+print("This correction will be used for future similar requests.")
+PYTHON
+}
+
+cmd_feedback() {
+    local rating="${1:-}"
+    local comment=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --comment|-c) comment="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$rating" ]] || [[ ! "$rating" =~ ^[1-5]$ ]]; then
+        echo "Error: Rating required (1-5)"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+import os
+from datetime import datetime
+
+feedback_file = "$LEARN_DIR/feedback.json"
+
+if os.path.exists(feedback_file):
+    with open(feedback_file) as f:
+        feedback = json.load(f)
+else:
+    feedback = []
+
+# Get last command from history if available
+history_file = os.path.expanduser("~/.agent-do/state.yaml")
+last_command = "unknown"
+if os.path.exists(history_file):
+    import yaml
+    with open(history_file) as f:
+        state = yaml.safe_load(f) or {}
+    last_command = state.get('last_command', 'unknown')
+
+feedback.append({
+    'rating': int('$rating'),
+    'comment': '''$comment''' or None,
+    'command': last_command,
+    'timestamp': datetime.now().isoformat()
+})
+
+with open(feedback_file, 'w') as f:
+    json.dump(feedback, f, indent=2)
+
+print(f"Feedback recorded: {$rating}/5")
+if '''$comment''':
+    print(f"Comment: $comment")
+PYTHON
+}
+
+cmd_patterns() {
+    python3 << PYTHON
+import sqlite3
+import os
+import json
+
+cache_dir = os.path.expanduser("~/.agent-do/cache")
+db_path = os.path.join(cache_dir, "patterns.db")
+
+if not os.path.exists(db_path):
+    print("No learned patterns yet.")
+    exit(0)
+
+conn = sqlite3.connect(db_path)
+cursor = conn.execute("SELECT intent, result, hits FROM patterns ORDER BY hits DESC LIMIT 20")
+rows = cursor.fetchall()
+conn.close()
+
+if not rows:
+    print("No learned patterns yet.")
+    exit(0)
+
+print("Learned patterns (top 20 by usage):")
+print()
+for intent, result_json, hits in rows:
+    result = json.loads(result_json)
+    tool = result.get('tool', '?')
+    command = result.get('command', '')
+    print(f"  \"{intent}\" → agent-{tool} {command}")
+    print(f"    (used {hits} times)")
+PYTHON
+}
+
+cmd_stats() {
+    python3 << PYTHON
+import json
+import os
+import sqlite3
+from datetime import datetime, timedelta
+
+print("Learning Statistics")
+print("=" * 40)
+
+# Corrections
+corrections_file = "$LEARN_DIR/corrections.json"
+if os.path.exists(corrections_file):
+    with open(corrections_file) as f:
+        corrections = json.load(f)
+    print(f"\nCorrections: {len(corrections)}")
+
+    # Recent corrections
+    recent = [c for c in corrections
+              if datetime.fromisoformat(c['timestamp']) > datetime.now() - timedelta(days=7)]
+    print(f"  Last 7 days: {len(recent)}")
+
+# Feedback
+feedback_file = "$LEARN_DIR/feedback.json"
+if os.path.exists(feedback_file):
+    with open(feedback_file) as f:
+        feedback = json.load(f)
+
+    ratings = [f['rating'] for f in feedback]
+    avg = sum(ratings) / len(ratings) if ratings else 0
+    print(f"\nFeedback entries: {len(feedback)}")
+    print(f"  Average rating: {avg:.1f}/5")
+    print(f"  Distribution: ", end="")
+    for i in range(1, 6):
+        count = ratings.count(i)
+        print(f"{i}★:{count} ", end="")
+    print()
+
+# Pattern cache
+cache_dir = os.path.expanduser("~/.agent-do/cache")
+db_path = os.path.join(cache_dir, "patterns.db")
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute("SELECT COUNT(*), SUM(hits) FROM patterns")
+    count, total_hits = cursor.fetchone()
+    conn.close()
+
+    print(f"\nCached patterns: {count or 0}")
+    print(f"  Total cache hits: {total_hits or 0}")
+
+# Improvement metrics
+print("\n" + "=" * 40)
+if os.path.exists(corrections_file) and os.path.exists(feedback_file):
+    recent_feedback = [f for f in feedback
+                       if datetime.fromisoformat(f['timestamp']) > datetime.now() - timedelta(days=30)]
+    if len(recent_feedback) >= 5:
+        recent_avg = sum(f['rating'] for f in recent_feedback[-10:]) / min(10, len(recent_feedback))
+        old_avg = sum(f['rating'] for f in recent_feedback[:10]) / min(10, len(recent_feedback))
+        if recent_avg > old_avg:
+            print(f"📈 Improving! Recent: {recent_avg:.1f} vs Earlier: {old_avg:.1f}")
+        else:
+            print(f"Steady performance: {recent_avg:.1f}/5")
+PYTHON
+}
+
+cmd_export() {
+    local output="${1:-learning_data.json}"
+
+    python3 << PYTHON
+import json
+import os
+import sqlite3
+
+data = {
+    'corrections': [],
+    'feedback': [],
+    'patterns': []
+}
+
+# Corrections
+corrections_file = "$LEARN_DIR/corrections.json"
+if os.path.exists(corrections_file):
+    with open(corrections_file) as f:
+        data['corrections'] = json.load(f)
+
+# Feedback
+feedback_file = "$LEARN_DIR/feedback.json"
+if os.path.exists(feedback_file):
+    with open(feedback_file) as f:
+        data['feedback'] = json.load(f)
+
+# Patterns from cache
+cache_dir = os.path.expanduser("~/.agent-do/cache")
+db_path = os.path.join(cache_dir, "patterns.db")
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute("SELECT intent, result, hits FROM patterns")
+    for intent, result, hits in cursor.fetchall():
+        data['patterns'].append({
+            'intent': intent,
+            'result': json.loads(result),
+            'hits': hits
+        })
+    conn.close()
+
+with open('$output', 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Exported to: $output")
+print(f"  Corrections: {len(data['corrections'])}")
+print(f"  Feedback: {len(data['feedback'])}")
+print(f"  Patterns: {len(data['patterns'])}")
+PYTHON
+}
+
+cmd_reset() {
+    local force=false
+    [[ "${1:-}" == "--force" ]] && force=true
+
+    if ! $force; then
+        read -p "Reset all learning data? [y/N] " -n 1 -r
+        echo
+        [[ ! $REPLY =~ ^[Yy]$ ]] && return 0
+    fi
+
+    rm -f "$LEARN_DIR"/*.json
+    rm -f "$HOME/.agent-do/cache/patterns.db"
+    echo "Learning data reset"
+}
+
+cmd_import() {
+    local input="${1:-}"
+
+    if [[ -z "$input" ]] || [[ ! -f "$input" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+import os
+import sqlite3
+
+with open('$input') as f:
+    data = json.load(f)
+
+# Import corrections
+if data.get('corrections'):
+    corrections_file = "$LEARN_DIR/corrections.json"
+    existing = []
+    if os.path.exists(corrections_file):
+        with open(corrections_file) as f:
+            existing = json.load(f)
+    existing.extend(data['corrections'])
+    with open(corrections_file, 'w') as f:
+        json.dump(existing, f, indent=2)
+    print(f"Imported {len(data['corrections'])} corrections")
+
+# Import feedback
+if data.get('feedback'):
+    feedback_file = "$LEARN_DIR/feedback.json"
+    existing = []
+    if os.path.exists(feedback_file):
+        with open(feedback_file) as f:
+            existing = json.load(f)
+    existing.extend(data['feedback'])
+    with open(feedback_file, 'w') as f:
+        json.dump(existing, f, indent=2)
+    print(f"Imported {len(data['feedback'])} feedback entries")
+
+# Import patterns
+if data.get('patterns'):
+    cache_dir = os.path.expanduser("~/.agent-do/cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    db_path = os.path.join(cache_dir, "patterns.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute('''CREATE TABLE IF NOT EXISTS patterns
+                    (intent TEXT PRIMARY KEY, result TEXT, hits INTEGER DEFAULT 1)''')
+    for p in data['patterns']:
+        conn.execute('''INSERT OR REPLACE INTO patterns (intent, result, hits) VALUES (?, ?, ?)''',
+                     (p['intent'], json.dumps(p['result']), p.get('hits', 1)))
+    conn.commit()
+    conn.close()
+    print(f"Imported {len(data['patterns'])} patterns")
+PYTHON
+}
+
+# Main
+case "${1:-help}" in
+    correct|fix)
+        shift
+        cmd_correct "$@"
+        ;;
+    feedback|rate)
+        shift
+        cmd_feedback "$@"
+        ;;
+    patterns|learned)
+        cmd_patterns
+        ;;
+    stats|statistics)
+        cmd_stats
+        ;;
+    export)
+        shift || true
+        cmd_export "$@"
+        ;;
+    import)
+        shift
+        cmd_import "$@"
+        ;;
+    reset|clear)
+        shift || true
+        cmd_reset "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-learn help"
+        exit 1
+        ;;
+esac

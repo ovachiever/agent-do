@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# agent-figma - Figma integration
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-figma - Figma design tool integration
+
+Commands:
+  files                      List recent files
+  file <key>                 Get file info
+  export <key> <node-ids>    Export nodes as images
+  comments <key>             List comments on file
+  styles <key>               List styles in file
+
+Environment:
+  FIGMA_TOKEN                Personal access token
+
+Notes:
+  - File key is from URL: figma.com/file/{KEY}/...
+  - Node IDs from the Figma URL after ?node-id=
+
+Examples:
+  agent-figma files
+  agent-figma file abc123def
+  agent-figma export abc123def "1:2,1:3" --format png
+  agent-figma comments abc123def
+EOF
+}
+
+FIGMA_API="https://api.figma.com/v1"
+
+figma_request() {
+    local endpoint="$1"
+    local token="${FIGMA_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: FIGMA_TOKEN not set"
+        return 1
+    fi
+
+    curl -s -H "X-Figma-Token: $token" "${FIGMA_API}${endpoint}"
+}
+
+cmd_files() {
+    figma_request "/me" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'email' in r:
+    print(f\"User: {r['email']}\")
+    print('Use: agent-figma file <key> to view a specific file')
+else:
+    print(f'Error: {r}')
+"
+
+    # Note: Figma API doesn't have a direct "list files" endpoint
+    # Users need to provide file keys from URLs
+    echo ""
+    echo "Note: Figma API requires file keys from URLs."
+    echo "Get the key from: figma.com/file/{KEY}/..."
+}
+
+cmd_file() {
+    local file_key="${1:-}"
+
+    if [[ -z "$file_key" ]]; then
+        echo "Error: File key required"
+        return 1
+    fi
+
+    figma_request "/files/${file_key}" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'name' in r:
+    print(f\"Name: {r['name']}\")
+    print(f\"Last Modified: {r['lastModified']}\")
+    print(f\"Version: {r['version']}\")
+    print()
+    print('Pages:')
+    for page in r.get('document', {}).get('children', []):
+        print(f\"  - {page['name']} ({page['id']})\")
+        for child in page.get('children', [])[:5]:
+            print(f\"    - {child['name']} ({child['id']})\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_export() {
+    local file_key="${1:-}"
+    local node_ids="${2:-}"
+    local format="png"
+    local scale="2"
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --format|-f) format="$2"; shift 2 ;;
+            --scale|-s) scale="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file_key" ]] || [[ -z "$node_ids" ]]; then
+        echo "Error: File key and node IDs required"
+        echo "Usage: agent-figma export <file-key> <node-ids> [--format png|svg|pdf]"
+        return 1
+    fi
+
+    # URL encode node IDs
+    local encoded_ids=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$node_ids'))")
+
+    figma_request "/images/${file_key}?ids=${encoded_ids}&format=${format}&scale=${scale}" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'images' in r:
+    for node_id, url in r['images'].items():
+        if url:
+            print(f'{node_id}: {url}')
+        else:
+            print(f'{node_id}: Export failed')
+elif 'err' in r:
+    print(f\"Error: {r['err']}\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_comments() {
+    local file_key="${1:-}"
+
+    if [[ -z "$file_key" ]]; then
+        echo "Error: File key required"
+        return 1
+    fi
+
+    figma_request "/files/${file_key}/comments" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'comments' in r:
+    for comment in r['comments']:
+        user = comment.get('user', {}).get('handle', 'Unknown')
+        text = comment.get('message', '')
+        resolved = ' [resolved]' if comment.get('resolved_at') else ''
+        print(f\"@{user}{resolved}: {text}\")
+        print()
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_styles() {
+    local file_key="${1:-}"
+
+    if [[ -z "$file_key" ]]; then
+        echo "Error: File key required"
+        return 1
+    fi
+
+    figma_request "/files/${file_key}/styles" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'meta' in r and 'styles' in r['meta']:
+    for style in r['meta']['styles']:
+        print(f\"{style['style_type']}: {style['name']} ({style['key']})\")
+else:
+    print(f'Error or no styles: {r}')
+"
+}
+
+# Main
+case "${1:-help}" in
+    files|list)
+        cmd_files
+        ;;
+    file|get|info)
+        shift
+        cmd_file "$@"
+        ;;
+    export|image|render)
+        shift
+        cmd_export "$@"
+        ;;
+    comments)
+        shift
+        cmd_comments "$@"
+        ;;
+    styles)
+        shift
+        cmd_styles "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-figma help"
+        exit 1
+        ;;
+esac

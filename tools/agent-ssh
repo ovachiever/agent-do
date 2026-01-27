@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# agent-ssh - SSH session management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-ssh - SSH session management
+
+Commands:
+  connect <host>             Connect to host (interactive)
+  exec <host> <cmd>          Execute command on host
+  upload <host> <src> <dst>  Upload file to host
+  download <host> <src> <dst> Download file from host
+  tunnel <host> <local:remote> Create SSH tunnel
+  list                       List SSH config hosts
+  test <host>                Test connection
+
+Options:
+  -i, --identity <key>       Identity file
+  -p, --port <port>          SSH port
+  -u, --user <user>          Username
+
+Environment:
+  SSH_CONFIG                 Custom SSH config file
+
+Examples:
+  agent-ssh connect prod
+  agent-ssh exec prod "df -h"
+  agent-ssh upload prod ./file.txt /tmp/
+  agent-ssh tunnel prod 8080:localhost:80
+  agent-ssh list
+EOF
+}
+
+# Parse SSH config for hosts
+list_hosts() {
+    local config="${SSH_CONFIG:-$HOME/.ssh/config}"
+    if [[ -f "$config" ]]; then
+        grep -i "^Host " "$config" | awk '{print $2}' | grep -v '*'
+    fi
+}
+
+cmd_connect() {
+    local host=""
+    local identity=""
+    local port=""
+    local user=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--identity) identity="-i $2"; shift 2 ;;
+            -p|--port) port="-p $2"; shift 2 ;;
+            -u|--user) user="$2@"; shift 2 ;;
+            *) host="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$host" ]]; then
+        echo "Error: Host required"
+        return 1
+    fi
+
+    ssh $identity $port "${user}${host}"
+}
+
+cmd_exec() {
+    local host=""
+    local cmd=""
+    local identity=""
+    local port=""
+    local user=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--identity) identity="-i $2"; shift 2 ;;
+            -p|--port) port="-p $2"; shift 2 ;;
+            -u|--user) user="$2@"; shift 2 ;;
+            *)
+                if [[ -z "$host" ]]; then
+                    host="$1"
+                else
+                    cmd="$*"
+                    break
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$host" ]] || [[ -z "$cmd" ]]; then
+        echo "Error: Host and command required"
+        echo "Usage: agent-ssh exec <host> <command>"
+        return 1
+    fi
+
+    ssh $identity $port "${user}${host}" "$cmd"
+}
+
+cmd_upload() {
+    local host=""
+    local src=""
+    local dst=""
+    local identity=""
+    local port=""
+    local user=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--identity) identity="-i $2"; shift 2 ;;
+            -p|--port) port="-P $2"; shift 2 ;;
+            -u|--user) user="$2@"; shift 2 ;;
+            *)
+                if [[ -z "$host" ]]; then
+                    host="$1"
+                elif [[ -z "$src" ]]; then
+                    src="$1"
+                else
+                    dst="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$host" ]] || [[ -z "$src" ]]; then
+        echo "Error: Host and source file required"
+        echo "Usage: agent-ssh upload <host> <source> [destination]"
+        return 1
+    fi
+
+    [[ -z "$dst" ]] && dst="~/"
+
+    scp $identity $port -r "$src" "${user}${host}:${dst}"
+    echo "Uploaded $src to ${host}:${dst}"
+}
+
+cmd_download() {
+    local host=""
+    local src=""
+    local dst=""
+    local identity=""
+    local port=""
+    local user=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--identity) identity="-i $2"; shift 2 ;;
+            -p|--port) port="-P $2"; shift 2 ;;
+            -u|--user) user="$2@"; shift 2 ;;
+            *)
+                if [[ -z "$host" ]]; then
+                    host="$1"
+                elif [[ -z "$src" ]]; then
+                    src="$1"
+                else
+                    dst="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$host" ]] || [[ -z "$src" ]]; then
+        echo "Error: Host and source path required"
+        echo "Usage: agent-ssh download <host> <source> [destination]"
+        return 1
+    fi
+
+    [[ -z "$dst" ]] && dst="./"
+
+    scp $identity $port -r "${user}${host}:${src}" "$dst"
+    echo "Downloaded ${host}:${src} to $dst"
+}
+
+cmd_tunnel() {
+    local host=""
+    local mapping=""
+    local identity=""
+    local port=""
+    local user=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--identity) identity="-i $2"; shift 2 ;;
+            -p|--port) port="-p $2"; shift 2 ;;
+            -u|--user) user="$2@"; shift 2 ;;
+            *)
+                if [[ -z "$host" ]]; then
+                    host="$1"
+                else
+                    mapping="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$host" ]] || [[ -z "$mapping" ]]; then
+        echo "Error: Host and port mapping required"
+        echo "Usage: agent-ssh tunnel <host> <local:remote>"
+        echo "Example: agent-ssh tunnel prod 8080:localhost:80"
+        return 1
+    fi
+
+    # Parse mapping (local:remote or local:host:remote)
+    local local_port="${mapping%%:*}"
+    local remote="${mapping#*:}"
+
+    echo "Creating tunnel: localhost:$local_port -> $host -> $remote"
+    echo "Press Ctrl+C to close tunnel"
+
+    ssh $identity $port -N -L "${local_port}:${remote}" "${user}${host}"
+}
+
+cmd_list() {
+    echo "SSH Hosts (from ~/.ssh/config):"
+    echo
+    list_hosts | while read -r host; do
+        echo "  $host"
+    done
+}
+
+cmd_test() {
+    local host="${1:-}"
+
+    if [[ -z "$host" ]]; then
+        echo "Error: Host required"
+        return 1
+    fi
+
+    echo "Testing connection to $host..."
+    if ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "echo 'Connection successful'" 2>/dev/null; then
+        echo "✓ Connection to $host successful"
+    else
+        echo "✗ Connection to $host failed"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    connect|c)
+        shift
+        cmd_connect "$@"
+        ;;
+    exec|run|e)
+        shift
+        cmd_exec "$@"
+        ;;
+    upload|up|put)
+        shift
+        cmd_upload "$@"
+        ;;
+    download|down|get)
+        shift
+        cmd_download "$@"
+        ;;
+    tunnel|tun)
+        shift
+        cmd_tunnel "$@"
+        ;;
+    list|ls)
+        cmd_list
+        ;;
+    test|check)
+        shift
+        cmd_test "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-ssh help"
+        exit 1
+        ;;
+esac

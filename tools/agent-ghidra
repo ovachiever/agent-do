@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+# agent-ghidra - Ghidra reverse engineering automation
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-ghidra - Ghidra reverse engineering automation
+
+Commands:
+  analyze <binary>         Analyze a binary file
+  decompile <binary> <fn>  Decompile a function
+  strings <binary>         Extract strings
+  functions <binary>       List functions
+  imports <binary>         List imports
+  exports <binary>         List exports
+  search <binary> <term>   Search in binary
+
+Requirements:
+  - Ghidra (https://ghidra-sre.org/)
+  - GHIDRA_INSTALL_DIR environment variable
+
+Examples:
+  agent-ghidra analyze program.exe
+  agent-ghidra decompile program.exe main
+  agent-ghidra functions program.exe
+  agent-ghidra strings program.exe --min 10
+EOF
+}
+
+GHIDRA_HOME="${GHIDRA_INSTALL_DIR:-$HOME/ghidra}"
+GHIDRA_PROJECT="${GHIDRA_PROJECT:-/tmp/ghidra_projects}"
+
+check_ghidra() {
+    if [[ ! -d "$GHIDRA_HOME" ]]; then
+        echo "Error: Ghidra not found at $GHIDRA_HOME"
+        echo "Set GHIDRA_INSTALL_DIR environment variable"
+        return 1
+    fi
+}
+
+run_headless() {
+    local script="$1"
+    shift
+    "$GHIDRA_HOME/support/analyzeHeadless" "$@" -scriptPath /tmp -postScript "$script"
+}
+
+cmd_analyze() {
+    local binary="${1:-}"
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    check_ghidra || return 1
+
+    local project_name="agent_$(basename "$binary" | tr '.' '_')"
+    mkdir -p "$GHIDRA_PROJECT"
+
+    echo "Analyzing $binary..."
+    "$GHIDRA_HOME/support/analyzeHeadless" \
+        "$GHIDRA_PROJECT" "$project_name" \
+        -import "$binary" \
+        -overwrite
+
+    echo "Analysis complete. Project: $GHIDRA_PROJECT/$project_name"
+}
+
+cmd_decompile() {
+    local binary="${1:-}"
+    local function="${2:-main}"
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    check_ghidra || return 1
+
+    # Create decompile script
+    cat > /tmp/decompile.py << 'PYTHON'
+# Ghidra script to decompile a function
+from ghidra.app.decompiler import DecompInterface
+from ghidra.util.task import ConsoleTaskMonitor
+
+function_name = getScriptArgs()[0] if getScriptArgs() else "main"
+
+decomp = DecompInterface()
+decomp.openProgram(currentProgram)
+
+func_manager = currentProgram.getFunctionManager()
+functions = func_manager.getFunctions(True)
+
+for func in functions:
+    if function_name.lower() in func.getName().lower():
+        print(f"=== {func.getName()} @ {func.getEntryPoint()} ===")
+        results = decomp.decompileFunction(func, 60, ConsoleTaskMonitor())
+        if results.decompileCompleted():
+            print(results.getDecompiledFunction().getC())
+        break
+else:
+    print(f"Function '{function_name}' not found")
+PYTHON
+
+    local project_name="agent_$(basename "$binary" | tr '.' '_')"
+    mkdir -p "$GHIDRA_PROJECT"
+
+    "$GHIDRA_HOME/support/analyzeHeadless" \
+        "$GHIDRA_PROJECT" "$project_name" \
+        -import "$binary" \
+        -overwrite \
+        -postScript /tmp/decompile.py "$function" \
+        2>/dev/null | grep -v "^INFO\|^WARN" || true
+}
+
+cmd_strings() {
+    local binary="${1:-}"
+    local min_length=4
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --min|-m) min_length="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    # Use the system strings command (faster than Ghidra for this)
+    strings -n "$min_length" "$binary"
+}
+
+cmd_functions() {
+    local binary="${1:-}"
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    # Try radare2 first (faster for quick listing)
+    if command -v r2 &> /dev/null; then
+        r2 -q -c "aaa; afl" "$binary" 2>/dev/null
+        return
+    fi
+
+    # Try objdump
+    if command -v objdump &> /dev/null; then
+        objdump -t "$binary" 2>/dev/null | grep -E "\.text|F " | head -50
+        return
+    fi
+
+    # Fall back to Ghidra
+    check_ghidra || return 1
+
+    cat > /tmp/list_functions.py << 'PYTHON'
+func_manager = currentProgram.getFunctionManager()
+functions = func_manager.getFunctions(True)
+for func in functions:
+    print(f"{func.getEntryPoint()}: {func.getName()}")
+PYTHON
+
+    local project_name="agent_$(basename "$binary" | tr '.' '_')"
+    mkdir -p "$GHIDRA_PROJECT"
+
+    "$GHIDRA_HOME/support/analyzeHeadless" \
+        "$GHIDRA_PROJECT" "$project_name" \
+        -import "$binary" \
+        -overwrite \
+        -postScript /tmp/list_functions.py \
+        2>/dev/null | grep "^[0-9a-f]" || true
+}
+
+cmd_imports() {
+    local binary="${1:-}"
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    # Try objdump first
+    if command -v objdump &> /dev/null; then
+        objdump -T "$binary" 2>/dev/null || objdump -p "$binary" 2>/dev/null | grep -A 100 "IMPORT"
+        return
+    fi
+
+    # Try nm
+    if command -v nm &> /dev/null; then
+        nm -u "$binary" 2>/dev/null
+        return
+    fi
+
+    echo "Error: objdump or nm required"
+    return 1
+}
+
+cmd_exports() {
+    local binary="${1:-}"
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    if command -v nm &> /dev/null; then
+        nm -g "$binary" 2>/dev/null | grep " T "
+        return
+    fi
+
+    if command -v objdump &> /dev/null; then
+        objdump -T "$binary" 2>/dev/null | grep "\.text"
+        return
+    fi
+
+    echo "Error: nm or objdump required"
+    return 1
+}
+
+cmd_search() {
+    local binary="${1:-}"
+    local term="${2:-}"
+
+    if [[ -z "$binary" ]] || [[ -z "$term" ]]; then
+        echo "Error: Binary and search term required"
+        return 1
+    fi
+
+    echo "=== Strings containing '$term' ==="
+    strings "$binary" | grep -i "$term" || true
+
+    echo
+    echo "=== Symbol table matches ==="
+    if command -v nm &> /dev/null; then
+        nm "$binary" 2>/dev/null | grep -i "$term" || true
+    fi
+}
+
+cmd_info() {
+    local binary="${1:-}"
+
+    if [[ -z "$binary" ]] || [[ ! -f "$binary" ]]; then
+        echo "Error: Valid binary file required"
+        return 1
+    fi
+
+    echo "File: $binary"
+    file "$binary"
+    echo
+
+    if command -v readelf &> /dev/null; then
+        readelf -h "$binary" 2>/dev/null || true
+    elif command -v objdump &> /dev/null; then
+        objdump -f "$binary" 2>/dev/null || true
+    fi
+
+    if command -v size &> /dev/null; then
+        echo
+        echo "Section sizes:"
+        size "$binary" 2>/dev/null || true
+    fi
+}
+
+cmd_open() {
+    local binary="${1:-}"
+
+    check_ghidra || return 1
+
+    if [[ -n "$binary" ]] && [[ -f "$binary" ]]; then
+        "$GHIDRA_HOME/ghidraRun" "$binary" &
+    else
+        "$GHIDRA_HOME/ghidraRun" &
+    fi
+
+    echo "Launching Ghidra..."
+}
+
+# Main
+case "${1:-help}" in
+    analyze|analyse)
+        shift
+        cmd_analyze "$@"
+        ;;
+    decompile|decom)
+        shift
+        cmd_decompile "$@"
+        ;;
+    strings|str)
+        shift
+        cmd_strings "$@"
+        ;;
+    functions|funcs|fn)
+        shift
+        cmd_functions "$@"
+        ;;
+    imports|imp)
+        shift
+        cmd_imports "$@"
+        ;;
+    exports|exp)
+        shift
+        cmd_exports "$@"
+        ;;
+    search|find|grep)
+        shift
+        cmd_search "$@"
+        ;;
+    info)
+        shift
+        cmd_info "$@"
+        ;;
+    open|gui|launch)
+        shift
+        cmd_open "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-ghidra help"
+        exit 1
+        ;;
+esac

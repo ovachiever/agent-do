@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# agent-notion - Notion integration
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-notion - Notion integration
+
+Commands:
+  search <query>             Search pages and databases
+  page <id>                  Get page content
+  create <title>             Create new page
+  append <id> <text>         Append text to page
+  databases                  List databases
+
+Environment:
+  NOTION_TOKEN               Integration token (secret_xxx)
+  NOTION_DATABASE_ID         Default database ID
+
+Examples:
+  agent-notion search "meeting notes"
+  agent-notion create "New Page"
+  agent-notion append abc123 "Added content"
+EOF
+}
+
+NOTION_API="https://api.notion.com/v1"
+
+notion_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+    local token="${NOTION_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: NOTION_TOKEN not set"
+        return 1
+    fi
+
+    local args=(-s -X "$method")
+    args+=(-H "Authorization: Bearer $token")
+    args+=(-H "Content-Type: application/json")
+    args+=(-H "Notion-Version: 2022-06-28")
+
+    [[ -n "$data" ]] && args+=(-d "$data")
+
+    curl "${args[@]}" "${NOTION_API}${endpoint}"
+}
+
+cmd_search() {
+    local query="$*"
+
+    if [[ -z "$query" ]]; then
+        echo "Error: Search query required"
+        return 1
+    fi
+
+    notion_request POST "/search" "{\"query\": \"$query\"}" | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'results' in r:
+    for item in r['results'][:10]:
+        title = ''
+        if item['object'] == 'page':
+            props = item.get('properties', {})
+            for key, val in props.items():
+                if val.get('type') == 'title':
+                    titles = val.get('title', [])
+                    if titles:
+                        title = titles[0].get('plain_text', '')
+                    break
+        elif item['object'] == 'database':
+            titles = item.get('title', [])
+            if titles:
+                title = titles[0].get('plain_text', '')
+        print(f\"{item['object']}: {title} ({item['id']})\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_page() {
+    local page_id="${1:-}"
+
+    if [[ -z "$page_id" ]]; then
+        echo "Error: Page ID required"
+        return 1
+    fi
+
+    # Get page blocks
+    notion_request GET "/blocks/${page_id}/children" | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'results' in r:
+    for block in r['results']:
+        btype = block.get('type', '')
+        content = block.get(btype, {})
+        if 'rich_text' in content:
+            for rt in content['rich_text']:
+                print(rt.get('plain_text', ''), end='')
+            print()
+        elif 'text' in content:
+            print(content['text'])
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_create() {
+    local title="$*"
+    local database_id="${NOTION_DATABASE_ID:-}"
+
+    if [[ -z "$title" ]]; then
+        echo "Error: Title required"
+        return 1
+    fi
+
+    local data
+    if [[ -n "$database_id" ]]; then
+        data="{
+            \"parent\": {\"database_id\": \"$database_id\"},
+            \"properties\": {
+                \"Name\": {\"title\": [{\"text\": {\"content\": \"$title\"}}]}
+            }
+        }"
+    else
+        # Create as top-level page (needs workspace parent)
+        echo "Error: NOTION_DATABASE_ID required for creating pages"
+        return 1
+    fi
+
+    notion_request POST "/pages" "$data" | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'id' in r:
+    print(f\"Created page: {r['id']}\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_append() {
+    local page_id="${1:-}"
+    shift || true
+    local text="$*"
+
+    if [[ -z "$page_id" ]] || [[ -z "$text" ]]; then
+        echo "Error: Page ID and text required"
+        return 1
+    fi
+
+    local data="{
+        \"children\": [{
+            \"object\": \"block\",
+            \"type\": \"paragraph\",
+            \"paragraph\": {
+                \"rich_text\": [{\"type\": \"text\", \"text\": {\"content\": \"$text\"}}]
+            }
+        }]
+    }"
+
+    notion_request PATCH "/blocks/${page_id}/children" "$data" | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'results' in r:
+    print('Appended text to page')
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_databases() {
+    notion_request POST "/search" '{"filter": {"property": "object", "value": "database"}}' | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'results' in r:
+    for db in r['results']:
+        titles = db.get('title', [])
+        title = titles[0].get('plain_text', 'Untitled') if titles else 'Untitled'
+        print(f\"{title}: {db['id']}\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+# Main
+case "${1:-help}" in
+    search|find)
+        shift
+        cmd_search "$@"
+        ;;
+    page|get|read)
+        shift
+        cmd_page "$@"
+        ;;
+    create|new)
+        shift
+        cmd_create "$@"
+        ;;
+    append|add)
+        shift
+        cmd_append "$@"
+        ;;
+    databases|dbs)
+        cmd_databases
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-notion help"
+        exit 1
+        ;;
+esac

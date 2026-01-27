@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# agent-lab - JupyterLab management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-lab - JupyterLab management
+
+Commands:
+  start                    Start JupyterLab server
+  stop                     Stop JupyterLab server
+  status                   Show server status
+  list                     List running servers
+  open [notebook]          Open in browser
+  install <extension>      Install extension
+  extensions               List installed extensions
+
+Requirements:
+  - JupyterLab (pip install jupyterlab)
+
+Examples:
+  agent-lab start
+  agent-lab start --port 8889 --no-browser
+  agent-lab open analysis.ipynb
+  agent-lab install @jupyterlab/git
+EOF
+}
+
+cmd_start() {
+    local port="8888"
+    local no_browser=false
+    local notebook_dir="."
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --port|-p) port="$2"; shift 2 ;;
+            --no-browser) no_browser=true; shift ;;
+            --dir|-d) notebook_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if ! command -v jupyter &> /dev/null; then
+        echo "Error: JupyterLab not installed"
+        echo "Install: pip install jupyterlab"
+        return 1
+    fi
+
+    local cmd="jupyter lab --port=$port --notebook-dir=\"$notebook_dir\""
+    $no_browser && cmd="$cmd --no-browser"
+
+    echo "Starting JupyterLab on port $port..."
+    eval "$cmd"
+}
+
+cmd_stop() {
+    local port="${1:-}"
+
+    if [[ -n "$port" ]]; then
+        jupyter server stop "$port" 2>/dev/null || \
+            jupyter notebook stop "$port" 2>/dev/null || \
+            echo "No server found on port $port"
+    else
+        # Stop all servers
+        jupyter server list 2>/dev/null | grep -oE 'localhost:[0-9]+' | while read -r addr; do
+            local p="${addr#*:}"
+            echo "Stopping server on port $p..."
+            jupyter server stop "$p" 2>/dev/null || true
+        done
+        echo "All servers stopped"
+    fi
+}
+
+cmd_status() {
+    echo "JupyterLab Servers:"
+    echo
+    jupyter server list 2>/dev/null || jupyter notebook list 2>/dev/null || \
+        echo "No running servers"
+}
+
+cmd_list() {
+    cmd_status
+}
+
+cmd_open() {
+    local notebook="${1:-}"
+
+    # Check for running server
+    local server_url
+    server_url=$(jupyter server list 2>/dev/null | grep -oE 'http://[^ ]+' | head -1)
+
+    if [[ -z "$server_url" ]]; then
+        echo "No running JupyterLab server. Starting one..."
+        cmd_start --no-browser &
+        sleep 3
+        server_url=$(jupyter server list 2>/dev/null | grep -oE 'http://[^ ]+' | head -1)
+    fi
+
+    if [[ -n "$server_url" ]]; then
+        local url="$server_url"
+        if [[ -n "$notebook" ]]; then
+            # Get relative path
+            local rel_path="$(realpath --relative-to="$(pwd)" "$notebook" 2>/dev/null || echo "$notebook")"
+            url="${server_url}lab/tree/${rel_path}"
+        fi
+        echo "Opening: $url"
+        open "$url" 2>/dev/null || xdg-open "$url"
+    else
+        echo "Error: Could not start JupyterLab"
+        return 1
+    fi
+}
+
+cmd_install() {
+    local extension="${1:-}"
+
+    if [[ -z "$extension" ]]; then
+        echo "Error: Extension name required"
+        return 1
+    fi
+
+    if jupyter labextension install "$extension" 2>/dev/null; then
+        echo "Installed: $extension"
+    else
+        # Try pip install for newer extensions
+        pip install "$extension"
+        echo "Installed via pip: $extension"
+    fi
+}
+
+cmd_extensions() {
+    echo "Installed JupyterLab extensions:"
+    echo
+    jupyter labextension list 2>/dev/null || \
+        jupyter server extension list 2>/dev/null || \
+        echo "No extensions found"
+}
+
+cmd_new() {
+    local name="${1:-Untitled}"
+    local kernel="${2:-python3}"
+
+    python3 << PYTHON
+import json
+
+notebook = {
+    "cells": [
+        {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": []
+        }
+    ],
+    "metadata": {
+        "kernelspec": {
+            "display_name": "Python 3",
+            "language": "python",
+            "name": "$kernel"
+        },
+        "language_info": {
+            "name": "python",
+            "version": "3.9"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 4
+}
+
+filename = "${name}.ipynb"
+with open(filename, 'w') as f:
+    json.dump(notebook, f, indent=2)
+print(f"Created: {filename}")
+PYTHON
+}
+
+cmd_kernels() {
+    echo "Available kernels:"
+    jupyter kernelspec list 2>/dev/null || echo "No kernels found"
+}
+
+cmd_config() {
+    local config_dir
+    config_dir=$(jupyter --config-dir)
+    echo "Config directory: $config_dir"
+    echo
+
+    if [[ -f "$config_dir/jupyter_lab_config.py" ]]; then
+        echo "Lab config:"
+        head -50 "$config_dir/jupyter_lab_config.py"
+    else
+        echo "No lab config found. Generate with:"
+        echo "  jupyter lab --generate-config"
+    fi
+}
+
+cmd_export() {
+    local notebook="${1:-}"
+    local format="${2:-html}"
+
+    if [[ -z "$notebook" ]] || [[ ! -f "$notebook" ]]; then
+        echo "Error: Valid notebook file required"
+        return 1
+    fi
+
+    jupyter nbconvert --to "$format" "$notebook"
+    echo "Exported to $format"
+}
+
+# Main
+case "${1:-help}" in
+    start|run|serve)
+        shift
+        cmd_start "$@"
+        ;;
+    stop|kill)
+        shift || true
+        cmd_stop "$@"
+        ;;
+    status)
+        cmd_status
+        ;;
+    list|ls|servers)
+        cmd_list
+        ;;
+    open|launch)
+        shift || true
+        cmd_open "$@"
+        ;;
+    install|add)
+        shift
+        cmd_install "$@"
+        ;;
+    extensions|ext)
+        cmd_extensions
+        ;;
+    new|create)
+        shift
+        cmd_new "$@"
+        ;;
+    kernels)
+        cmd_kernels
+        ;;
+    config)
+        cmd_config
+        ;;
+    export|convert)
+        shift
+        cmd_export "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-lab help"
+        exit 1
+        ;;
+esac

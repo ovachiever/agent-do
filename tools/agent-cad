@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+# agent-cad - CAD file operations
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-cad - CAD file operations
+
+Commands:
+  view <file>              Open CAD file
+  convert <in> <out>       Convert between formats
+  info <file>              Show file information
+  export <file> <format>   Export to common formats
+  measure <file>           Get measurements/dimensions
+
+Supported formats:
+  - DXF, DWG (AutoCAD)
+  - STEP, IGES (exchange formats)
+  - STL, OBJ (mesh export)
+
+Requirements:
+  - FreeCAD (for viewing/conversion)
+  - LibreCAD (for 2D DXF)
+  - ezdxf (Python, for DXF parsing)
+
+Examples:
+  agent-cad view drawing.dxf
+  agent-cad convert part.step part.stl
+  agent-cad info assembly.step
+  agent-cad export model.FCStd stl
+EOF
+}
+
+cmd_view() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid CAD file required"
+        return 1
+    fi
+
+    local ext="${file##*.}"
+    ext="${ext,,}"  # lowercase
+
+    case "$ext" in
+        dxf|dwg)
+            if command -v librecad &> /dev/null; then
+                librecad "$file" &
+            elif command -v freecad &> /dev/null; then
+                freecad "$file" &
+            elif [[ "$(uname)" == "Darwin" ]]; then
+                open "$file"
+            else
+                echo "Error: No CAD viewer available (install FreeCAD or LibreCAD)"
+                return 1
+            fi
+            ;;
+        step|stp|iges|igs|fcstd)
+            if command -v freecad &> /dev/null; then
+                freecad "$file" &
+            elif [[ "$(uname)" == "Darwin" ]]; then
+                open "$file"
+            else
+                echo "Error: FreeCAD required for STEP/IGES files"
+                return 1
+            fi
+            ;;
+        *)
+            echo "Unknown format: $ext"
+            return 1
+            ;;
+    esac
+
+    echo "Opened: $file"
+}
+
+cmd_convert() {
+    local input="${1:-}"
+    local output="${2:-}"
+
+    if [[ -z "$input" ]] || [[ -z "$output" ]]; then
+        echo "Error: Input and output files required"
+        return 1
+    fi
+
+    if [[ ! -f "$input" ]]; then
+        echo "Error: Input file not found: $input"
+        return 1
+    fi
+
+    local in_ext="${input##*.}"
+    local out_ext="${output##*.}"
+    in_ext="${in_ext,,}"
+    out_ext="${out_ext,,}"
+
+    # Use FreeCAD for most conversions
+    if command -v freecad &> /dev/null || command -v freecadcmd &> /dev/null; then
+        local freecad_cmd="freecadcmd"
+        command -v freecadcmd &> /dev/null || freecad_cmd="freecad"
+
+        $freecad_cmd -c "
+import FreeCAD
+import Part
+import Mesh
+
+doc = FreeCAD.newDocument()
+
+# Import
+if '$in_ext' in ['step', 'stp']:
+    Part.insert('$input', doc.Name)
+elif '$in_ext' in ['iges', 'igs']:
+    Part.insert('$input', doc.Name)
+elif '$in_ext' == 'dxf':
+    import importDXF
+    importDXF.insert('$input', doc.Name)
+
+# Export
+if '$out_ext' in ['step', 'stp']:
+    Part.export(doc.Objects, '$output')
+elif '$out_ext' in ['stl']:
+    Mesh.export(doc.Objects, '$output')
+elif '$out_ext' in ['obj']:
+    Mesh.export(doc.Objects, '$output')
+elif '$out_ext' == 'dxf':
+    import importDXF
+    importDXF.export(doc.Objects, '$output')
+
+print('Converted: $input → $output')
+" 2>/dev/null
+    elif python3 -c "import ezdxf" 2>/dev/null && [[ "$in_ext" == "dxf" || "$out_ext" == "dxf" ]]; then
+        python3 << PYTHON
+import ezdxf
+# Basic DXF operations
+doc = ezdxf.readfile('$input')
+doc.saveas('$output')
+print(f"Converted: $input → $output")
+PYTHON
+    else
+        echo "Error: FreeCAD required for CAD conversion"
+        echo "Install: brew install freecad (macOS) or apt install freecad (Linux)"
+        return 1
+    fi
+}
+
+cmd_info() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid CAD file required"
+        return 1
+    fi
+
+    echo "File: $file"
+    echo "Size: $(du -h "$file" | cut -f1)"
+    echo "Format: ${file##*.}"
+    echo
+
+    local ext="${file##*.}"
+    ext="${ext,,}"
+
+    case "$ext" in
+        dxf)
+            if python3 -c "import ezdxf" 2>/dev/null; then
+                python3 << PYTHON
+import ezdxf
+doc = ezdxf.readfile('$file')
+print(f"DXF Version: {doc.dxfversion}")
+print(f"Layers: {len(doc.layers)}")
+msp = doc.modelspace()
+entities = list(msp)
+print(f"Entities: {len(entities)}")
+# Count by type
+from collections import Counter
+types = Counter(e.dxftype() for e in entities)
+for t, c in types.most_common(10):
+    print(f"  {t}: {c}")
+PYTHON
+            else
+                echo "(Install ezdxf for detailed info: pip install ezdxf)"
+            fi
+            ;;
+        step|stp)
+            # Basic STEP header parsing
+            head -50 "$file" | grep -E "FILE_DESCRIPTION|FILE_NAME|FILE_SCHEMA" || true
+            ;;
+        *)
+            echo "Basic info only for this format"
+            ;;
+    esac
+}
+
+cmd_export() {
+    local file="${1:-}"
+    local format="${2:-stl}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid CAD file required"
+        return 1
+    fi
+
+    local basename="${file%.*}"
+    local output="${basename}.${format}"
+
+    cmd_convert "$file" "$output"
+}
+
+cmd_measure() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid CAD file required"
+        return 1
+    fi
+
+    if command -v freecadcmd &> /dev/null || command -v freecad &> /dev/null; then
+        local freecad_cmd="freecadcmd"
+        command -v freecadcmd &> /dev/null || freecad_cmd="freecad"
+
+        $freecad_cmd -c "
+import FreeCAD
+import Part
+
+doc = FreeCAD.newDocument()
+Part.insert('$file', doc.Name)
+
+for obj in doc.Objects:
+    if hasattr(obj, 'Shape'):
+        shape = obj.Shape
+        print(f'Object: {obj.Name}')
+        print(f'  Bounding Box: {shape.BoundBox}')
+        print(f'  Volume: {shape.Volume:.2f} mm³')
+        print(f'  Area: {shape.Area:.2f} mm²')
+        if hasattr(shape, 'CenterOfMass'):
+            print(f'  Center of Mass: {shape.CenterOfMass}')
+" 2>/dev/null
+    else
+        echo "Error: FreeCAD required for measurements"
+        return 1
+    fi
+}
+
+cmd_layers() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid DXF file required"
+        return 1
+    fi
+
+    if python3 -c "import ezdxf" 2>/dev/null; then
+        python3 << PYTHON
+import ezdxf
+doc = ezdxf.readfile('$file')
+print("Layers:")
+for layer in doc.layers:
+    print(f"  {layer.dxf.name}")
+PYTHON
+    else
+        echo "Error: ezdxf required (pip install ezdxf)"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    view|open)
+        shift
+        cmd_view "$@"
+        ;;
+    convert)
+        shift
+        cmd_convert "$@"
+        ;;
+    info|inspect)
+        shift
+        cmd_info "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    measure|dimensions)
+        shift
+        cmd_measure "$@"
+        ;;
+    layers)
+        shift
+        cmd_layers "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-cad help"
+        exit 1
+        ;;
+esac

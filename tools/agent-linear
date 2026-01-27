@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# agent-linear - Linear issue tracking
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-linear - Linear issue tracking
+
+Commands:
+  list                       List issues
+  create <title>             Create issue
+  view <id>                  View issue details
+  update <id> <status>       Update issue status
+  search <query>             Search issues
+  teams                      List teams
+
+Options:
+  --team <team>              Team key/name
+  --assignee <user>          Assignee
+  --priority <1-4>           Priority (1=urgent, 4=low)
+  --label <label>            Add label
+  --description <text>       Issue description
+
+Environment:
+  LINEAR_API_KEY             API key
+
+Examples:
+  agent-linear list
+  agent-linear create "Fix login bug" --team ENG --priority 2
+  agent-linear update ABC-123 "In Progress"
+EOF
+}
+
+LINEAR_API="https://api.linear.app/graphql"
+
+linear_request() {
+    local query="$1"
+    local token="${LINEAR_API_KEY:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: LINEAR_API_KEY not set"
+        return 1
+    fi
+
+    curl -s -X POST "$LINEAR_API" \
+        -H "Authorization: $token" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\": \"$query\"}"
+}
+
+cmd_list() {
+    local team=""
+    local assignee=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --team) team="$2"; shift 2 ;;
+            --assignee|--mine) assignee="me"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local filter=""
+    [[ -n "$team" ]] && filter="team: {key: {eq: \\\"$team\\\"}}"
+    [[ "$assignee" == "me" ]] && filter="assignee: {isMe: {eq: true}}"
+
+    local query="query { issues(first: 20${filter:+, filter: {$filter}}) { nodes { identifier title state { name } priority assignee { name } } } }"
+
+    linear_request "$query" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'data' in r and r['data']['issues']:
+    for issue in r['data']['issues']['nodes']:
+        priority = ['', '🔴', '🟠', '🟡', '⚪'][issue.get('priority', 0)]
+        assignee = issue.get('assignee', {})
+        assignee_name = assignee.get('name', 'Unassigned') if assignee else 'Unassigned'
+        print(f\"{issue['identifier']} {priority} [{issue['state']['name']}] {issue['title']} (@{assignee_name})\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_create() {
+    local title=""
+    local team=""
+    local priority=""
+    local description=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --team) team="$2"; shift 2 ;;
+            --priority|-p) priority="$2"; shift 2 ;;
+            --description|--desc|-d) description="$2"; shift 2 ;;
+            *) title="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$title" ]]; then
+        echo "Error: Title required"
+        return 1
+    fi
+
+    if [[ -z "$team" ]]; then
+        echo "Error: --team required"
+        return 1
+    fi
+
+    # Get team ID
+    local team_query="query { teams(filter: {key: {eq: \\\"$team\\\"}}) { nodes { id } } }"
+    local team_id
+    team_id=$(linear_request "$team_query" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('data', {}).get('teams', {}).get('nodes'):
+    print(r['data']['teams']['nodes'][0]['id'])
+")
+
+    if [[ -z "$team_id" ]]; then
+        echo "Error: Team '$team' not found"
+        return 1
+    fi
+
+    local mutation="mutation { issueCreate(input: {teamId: \\\"$team_id\\\", title: \\\"$title\\\"${priority:+, priority: $priority}${description:+, description: \\\"$description\\\"}}) { success issue { identifier url } } }"
+
+    linear_request "$mutation" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('data', {}).get('issueCreate', {}).get('success'):
+    issue = r['data']['issueCreate']['issue']
+    print(f\"Created: {issue['identifier']}\")
+    print(f\"URL: {issue['url']}\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+cmd_view() {
+    local id="${1:-}"
+
+    if [[ -z "$id" ]]; then
+        echo "Error: Issue ID required"
+        return 1
+    fi
+
+    # Extract team key and number
+    local query="query { issue(id: \\\"$id\\\") { identifier title description state { name } priority assignee { name } createdAt url } }"
+
+    # Try by identifier first
+    query="query { issues(filter: {number: {eq: ${id##*-}}}) { nodes { identifier title description state { name } priority assignee { name } createdAt url } } }"
+
+    linear_request "$query" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+issues = r.get('data', {}).get('issues', {}).get('nodes', [])
+if issues:
+    issue = issues[0]
+    print(f\"Issue: {issue['identifier']}\")
+    print(f\"Title: {issue['title']}\")
+    print(f\"Status: {issue['state']['name']}\")
+    print(f\"Priority: {issue.get('priority', 'None')}\")
+    assignee = issue.get('assignee')
+    print(f\"Assignee: {assignee['name'] if assignee else 'Unassigned'}\")
+    print(f\"URL: {issue['url']}\")
+    if issue.get('description'):
+        print(f\"\nDescription:\n{issue['description']}\")
+else:
+    print(f'Issue not found')
+"
+}
+
+cmd_search() {
+    local query="$*"
+
+    if [[ -z "$query" ]]; then
+        echo "Error: Search query required"
+        return 1
+    fi
+
+    local gql="query { issueSearch(query: \\\"$query\\\", first: 20) { nodes { identifier title state { name } } } }"
+
+    linear_request "$gql" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('data', {}).get('issueSearch', {}).get('nodes'):
+    for issue in r['data']['issueSearch']['nodes']:
+        print(f\"{issue['identifier']} [{issue['state']['name']}] {issue['title']}\")
+else:
+    print('No results')
+"
+}
+
+cmd_teams() {
+    local query="query { teams { nodes { key name } } }"
+
+    linear_request "$query" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('data', {}).get('teams', {}).get('nodes'):
+    for team in r['data']['teams']['nodes']:
+        print(f\"{team['key']}: {team['name']}\")
+else:
+    print(f'Error: {r}')
+"
+}
+
+# Main
+case "${1:-help}" in
+    list|ls)
+        shift || true
+        cmd_list "$@"
+        ;;
+    create|new|add)
+        shift
+        cmd_create "$@"
+        ;;
+    view|show|get)
+        shift
+        cmd_view "$@"
+        ;;
+    search|find)
+        shift
+        cmd_search "$@"
+        ;;
+    teams)
+        cmd_teams
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-linear help"
+        exit 1
+        ;;
+esac

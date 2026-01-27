@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# agent-pdf - PDF operations
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-pdf - PDF operations
+
+Commands:
+  read <file>                Extract text from PDF
+  info <file>                Show PDF info
+  merge <files...> <output>  Merge PDFs
+  split <file> [pages]       Split PDF by pages
+  compress <file>            Compress PDF
+  images <file>              Extract images from PDF
+  pages <file>               Count pages
+
+Examples:
+  agent-pdf read document.pdf
+  agent-pdf merge file1.pdf file2.pdf combined.pdf
+  agent-pdf split document.pdf 1-5
+  agent-pdf compress large.pdf
+EOF
+}
+
+# Check for PDF tools
+check_tools() {
+    if command -v pdftotext &> /dev/null; then
+        echo "poppler"
+    elif command -v pdf2txt.py &> /dev/null; then
+        echo "pdfminer"
+    else
+        echo ""
+    fi
+}
+
+cmd_read() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid PDF file required"
+        return 1
+    fi
+
+    if command -v pdftotext &> /dev/null; then
+        pdftotext -layout "$file" -
+    elif command -v pdf2txt.py &> /dev/null; then
+        pdf2txt.py "$file"
+    elif command -v python3 &> /dev/null; then
+        # Try with PyMuPDF
+        python3 << PYTHON
+try:
+    import fitz
+    doc = fitz.open("$file")
+    for page in doc:
+        print(page.get_text())
+except ImportError:
+    print("Error: Install poppler-utils, pdfminer, or PyMuPDF")
+    exit(1)
+PYTHON
+    else
+        echo "Error: No PDF reader found (install poppler-utils)"
+        return 1
+    fi
+}
+
+cmd_info() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid PDF file required"
+        return 1
+    fi
+
+    if command -v pdfinfo &> /dev/null; then
+        pdfinfo "$file"
+    elif command -v exiftool &> /dev/null; then
+        exiftool "$file"
+    else
+        echo "File: $file"
+        echo "Size: $(stat -f%z "$file" 2>/dev/null || stat -c%s "$file") bytes"
+        # Try to get page count with python
+        if command -v python3 &> /dev/null; then
+            python3 << PYTHON
+try:
+    import fitz
+    doc = fitz.open("$file")
+    print(f"Pages: {doc.page_count}")
+except:
+    pass
+PYTHON
+        fi
+    fi
+}
+
+cmd_merge() {
+    local files=()
+    local output=""
+
+    while [[ $# -gt 0 ]]; do
+        if [[ $# -eq 1 ]]; then
+            output="$1"
+        else
+            files+=("$1")
+        fi
+        shift
+    done
+
+    if [[ ${#files[@]} -lt 2 ]] || [[ -z "$output" ]]; then
+        echo "Error: At least 2 input files and output file required"
+        echo "Usage: agent-pdf merge file1.pdf file2.pdf output.pdf"
+        return 1
+    fi
+
+    if command -v pdfunite &> /dev/null; then
+        pdfunite "${files[@]}" "$output"
+        echo "Merged to $output"
+    elif command -v gs &> /dev/null; then
+        gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile="$output" "${files[@]}"
+        echo "Merged to $output"
+    else
+        echo "Error: pdfunite or ghostscript required"
+        return 1
+    fi
+}
+
+cmd_split() {
+    local file="${1:-}"
+    local pages="${2:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid PDF file required"
+        return 1
+    fi
+
+    local basename="${file%.pdf}"
+
+    if command -v pdfseparate &> /dev/null; then
+        pdfseparate "$file" "${basename}-%d.pdf"
+        echo "Split into ${basename}-*.pdf"
+    elif command -v gs &> /dev/null; then
+        if [[ -n "$pages" ]]; then
+            gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite \
+               -dFirstPage="${pages%%-*}" -dLastPage="${pages##*-}" \
+               -sOutputFile="${basename}-${pages}.pdf" "$file"
+        else
+            echo "Ghostscript split requires page range. Use: agent-pdf split file.pdf 1-5"
+        fi
+    else
+        echo "Error: pdfseparate or ghostscript required"
+        return 1
+    fi
+}
+
+cmd_compress() {
+    local file="${1:-}"
+    local output="${file%.pdf}-compressed.pdf"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid PDF file required"
+        return 1
+    fi
+
+    if command -v gs &> /dev/null; then
+        gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 \
+           -dPDFSETTINGS=/ebook -dNOPAUSE -dQUIET -dBATCH \
+           -sOutputFile="$output" "$file"
+
+        local orig_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file")
+        local new_size=$(stat -f%z "$output" 2>/dev/null || stat -c%s "$output")
+        echo "Compressed: $orig_size -> $new_size bytes"
+        echo "Output: $output"
+    else
+        echo "Error: ghostscript required for compression"
+        return 1
+    fi
+}
+
+cmd_images() {
+    local file="${1:-}"
+    local output_dir="${2:-.}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid PDF file required"
+        return 1
+    fi
+
+    if command -v pdfimages &> /dev/null; then
+        pdfimages -all "$file" "${output_dir}/image"
+        echo "Extracted images to ${output_dir}/"
+    else
+        echo "Error: pdfimages (poppler-utils) required"
+        return 1
+    fi
+}
+
+cmd_pages() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid PDF file required"
+        return 1
+    fi
+
+    if command -v pdfinfo &> /dev/null; then
+        pdfinfo "$file" | grep "Pages:" | awk '{print $2}'
+    elif command -v python3 &> /dev/null; then
+        python3 << PYTHON
+try:
+    import fitz
+    doc = fitz.open("$file")
+    print(doc.page_count)
+except ImportError:
+    print("Error: Install poppler-utils or PyMuPDF")
+    exit(1)
+PYTHON
+    else
+        echo "Error: pdfinfo required"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    read|extract|text)
+        shift
+        cmd_read "$@"
+        ;;
+    info|i)
+        shift
+        cmd_info "$@"
+        ;;
+    merge|join|combine)
+        shift
+        cmd_merge "$@"
+        ;;
+    split)
+        shift
+        cmd_split "$@"
+        ;;
+    compress|shrink)
+        shift
+        cmd_compress "$@"
+        ;;
+    images|img)
+        shift
+        cmd_images "$@"
+        ;;
+    pages|count)
+        shift
+        cmd_pages "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-pdf help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# agent-git - Enhanced git operations
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-git - Enhanced git operations
+
+Commands:
+  status           Show working tree status (compact)
+  diff             Show diff of changes
+  log [n]          Show recent commits (default: 10)
+  commit [msg]     Commit staged changes (auto-generates message if not provided)
+  branch           List branches
+  branch <name>    Create and switch to branch
+  stash            Stash changes
+  stash pop        Pop stashed changes
+  pull             Pull with rebase
+  push             Push to remote
+  sync             Pull and push (sync with remote)
+
+Examples:
+  agent-git status
+  agent-git log 5
+  agent-git commit "fix: resolve login issue"
+  agent-git branch feature/new-thing
+EOF
+}
+
+cmd_status() {
+    git status --short --branch
+}
+
+cmd_diff() {
+    if git diff --cached --quiet 2>/dev/null; then
+        # No staged changes, show unstaged
+        git diff
+    else
+        # Show staged changes
+        git diff --cached
+    fi
+}
+
+cmd_log() {
+    local count="${1:-10}"
+    git log --oneline -n "$count"
+}
+
+cmd_commit() {
+    local msg="$*"
+
+    # Check if there are changes to commit
+    if git diff --cached --quiet 2>/dev/null; then
+        # Nothing staged, stage all
+        git add -A
+    fi
+
+    if git diff --cached --quiet 2>/dev/null; then
+        echo "No changes to commit"
+        return 0
+    fi
+
+    if [[ -z "$msg" ]]; then
+        # Auto-generate commit message from diff
+        echo "Generating commit message..."
+        local diff_summary
+        diff_summary=$(git diff --cached --stat | tail -1)
+        local files_changed
+        files_changed=$(git diff --cached --name-only | head -5 | tr '\n' ', ' | sed 's/,$//')
+        msg="Update: $files_changed ($diff_summary)"
+    fi
+
+    git commit -m "$msg"
+}
+
+cmd_branch() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        git branch -a
+    else
+        git checkout -b "$name" 2>/dev/null || git checkout "$name"
+    fi
+}
+
+cmd_stash() {
+    local subcmd="${1:-push}"
+
+    case "$subcmd" in
+        pop)
+            git stash pop
+            ;;
+        list)
+            git stash list
+            ;;
+        push|"")
+            git stash push -m "agent-git stash $(date '+%Y-%m-%d %H:%M:%S')"
+            ;;
+        *)
+            git stash "$@"
+            ;;
+    esac
+}
+
+cmd_pull() {
+    git pull --rebase
+}
+
+cmd_push() {
+    local branch
+    branch=$(git branch --show-current)
+
+    # Check if remote tracking branch exists
+    if ! git rev-parse --abbrev-ref "$branch@{upstream}" &>/dev/null; then
+        echo "Setting upstream to origin/$branch"
+        git push -u origin "$branch"
+    else
+        git push
+    fi
+}
+
+cmd_sync() {
+    echo "Pulling..."
+    git pull --rebase
+    echo "Pushing..."
+    cmd_push
+    echo "Synced!"
+}
+
+# Main
+case "${1:-help}" in
+    status|st)
+        cmd_status
+        ;;
+    diff|d)
+        cmd_diff
+        ;;
+    log|l)
+        shift
+        cmd_log "$@"
+        ;;
+    commit|ci)
+        shift
+        cmd_commit "$@"
+        ;;
+    branch|br)
+        shift
+        cmd_branch "$@"
+        ;;
+    stash)
+        shift
+        cmd_stash "$@"
+        ;;
+    pull)
+        cmd_pull
+        ;;
+    push)
+        cmd_push
+        ;;
+    sync)
+        cmd_sync
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-git help"
+        exit 1
+        ;;
+esac

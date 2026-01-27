@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# agent-calendar - Calendar operations
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-calendar - Calendar operations
+
+Commands:
+  list [days]                List events (default: 7 days)
+  today                      Show today's events
+  tomorrow                   Show tomorrow's events
+  create <title>             Create event
+  search <query>             Search events
+
+Options:
+  --date <date>              Event date (YYYY-MM-DD)
+  --time <time>              Start time (HH:MM)
+  --duration <minutes>       Duration in minutes
+  --location <loc>           Event location
+  --notes <text>             Event notes
+  --calendar <name>          Target calendar
+
+Examples:
+  agent-calendar today
+  agent-calendar list 14
+  agent-calendar create "Meeting" --date 2024-01-20 --time 14:00 --duration 60
+  agent-calendar search "standup"
+EOF
+}
+
+# macOS Calendar via AppleScript
+macos_list_events() {
+    local days="${1:-7}"
+
+    osascript << EOF
+set output to ""
+set today to current date
+set endDate to today + ($days * days)
+
+tell application "Calendar"
+    repeat with cal in calendars
+        set calEvents to (every event of cal whose start date ≥ today and start date ≤ endDate)
+        repeat with evt in calEvents
+            set evtDate to start date of evt
+            set evtTitle to summary of evt
+            set output to output & (evtDate as string) & " - " & evtTitle & "\n"
+        end repeat
+    end repeat
+end tell
+
+return output
+EOF
+}
+
+macos_today() {
+    osascript << 'EOF'
+set output to ""
+set today to current date
+set tomorrow to today + 1 * days
+
+tell application "Calendar"
+    repeat with cal in calendars
+        set calEvents to (every event of cal whose start date ≥ today and start date < tomorrow)
+        repeat with evt in calEvents
+            set evtTime to time string of (start date of evt)
+            set evtTitle to summary of evt
+            set output to output & evtTime & " - " & evtTitle & "\n"
+        end repeat
+    end repeat
+end tell
+
+return output
+EOF
+}
+
+macos_create_event() {
+    local title="$1"
+    local date="$2"
+    local time="$3"
+    local duration="$4"
+    local location="${5:-}"
+    local calendar="${6:-}"
+
+    # Parse date and time
+    local start_date="$date $time"
+
+    osascript << EOF
+tell application "Calendar"
+    set targetCal to first calendar
+    if "$calendar" is not "" then
+        set targetCal to calendar "$calendar"
+    end if
+
+    set startDate to date "$start_date"
+    set endDate to startDate + ($duration * minutes)
+
+    tell targetCal
+        set newEvent to make new event with properties {summary:"$title", start date:startDate, end date:endDate}
+        if "$location" is not "" then
+            set location of newEvent to "$location"
+        end if
+    end tell
+end tell
+
+return "Event created: $title"
+EOF
+}
+
+macos_search() {
+    local query="$1"
+
+    osascript << EOF
+set output to ""
+set today to current date
+set futureDate to today + 365 * days
+
+tell application "Calendar"
+    repeat with cal in calendars
+        set calEvents to (every event of cal whose summary contains "$query" and start date ≥ today)
+        repeat with evt in calEvents
+            set evtDate to start date of evt
+            set evtTitle to summary of evt
+            set output to output & (evtDate as string) & " - " & evtTitle & "\n"
+        end repeat
+    end repeat
+end tell
+
+return output
+EOF
+}
+
+cmd_list() {
+    local days="${1:-7}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "Events in next $days days:"
+        echo
+        macos_list_events "$days"
+    else
+        echo "Calendar integration requires macOS or gcalcli"
+        if command -v gcalcli &> /dev/null; then
+            gcalcli agenda --nocolor
+        fi
+    fi
+}
+
+cmd_today() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "Today's events:"
+        echo
+        macos_today
+    else
+        if command -v gcalcli &> /dev/null; then
+            gcalcli agenda --nocolor "today" "tomorrow"
+        else
+            echo "Calendar integration requires macOS or gcalcli"
+        fi
+    fi
+}
+
+cmd_tomorrow() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << 'EOF'
+set output to ""
+set tomorrow to (current date) + 1 * days
+set dayAfter to tomorrow + 1 * days
+
+tell application "Calendar"
+    repeat with cal in calendars
+        set calEvents to (every event of cal whose start date ≥ tomorrow and start date < dayAfter)
+        repeat with evt in calEvents
+            set evtTime to time string of (start date of evt)
+            set evtTitle to summary of evt
+            set output to output & evtTime & " - " & evtTitle & "\n"
+        end repeat
+    end repeat
+end tell
+
+return output
+EOF
+    else
+        if command -v gcalcli &> /dev/null; then
+            gcalcli agenda --nocolor "tomorrow" "$(date -d '+2 days' +%Y-%m-%d)"
+        fi
+    fi
+}
+
+cmd_create() {
+    local title=""
+    local date=""
+    local time="09:00"
+    local duration="60"
+    local location=""
+    local calendar=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --date|-d) date="$2"; shift 2 ;;
+            --time|-t) time="$2"; shift 2 ;;
+            --duration|--dur) duration="$2"; shift 2 ;;
+            --location|-l) location="$2"; shift 2 ;;
+            --calendar|-c) calendar="$2"; shift 2 ;;
+            *) title="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$title" ]]; then
+        echo "Error: Event title required"
+        return 1
+    fi
+
+    [[ -z "$date" ]] && date=$(date +%Y-%m-%d)
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        macos_create_event "$title" "$date" "$time" "$duration" "$location" "$calendar"
+    else
+        if command -v gcalcli &> /dev/null; then
+            gcalcli add --title "$title" --when "$date $time" --duration "$duration" --where "$location"
+        else
+            echo "Calendar creation requires macOS or gcalcli"
+        fi
+    fi
+}
+
+cmd_search() {
+    local query="$*"
+
+    if [[ -z "$query" ]]; then
+        echo "Error: Search query required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "Events matching '$query':"
+        echo
+        macos_search "$query"
+    else
+        if command -v gcalcli &> /dev/null; then
+            gcalcli search "$query"
+        else
+            echo "Calendar search requires macOS or gcalcli"
+        fi
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    list|ls|agenda)
+        shift || true
+        cmd_list "$@"
+        ;;
+    today)
+        cmd_today
+        ;;
+    tomorrow)
+        cmd_tomorrow
+        ;;
+    create|add|new)
+        shift
+        cmd_create "$@"
+        ;;
+    search|find)
+        shift
+        cmd_search "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-calendar help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# agent-repl - REPL session management (uses agent-tui under the hood)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_TUI="${SCRIPT_DIR}/agent-tui"
+
+show_help() {
+    cat << 'EOF'
+agent-repl - REPL session management
+
+Commands:
+  spawn <type>               Start a REPL (python, node, ruby, psql, etc.)
+  send <session> <code>      Send code to REPL
+  read <session>             Read REPL output
+  list                       List active REPLs
+  kill <session>             Kill a REPL session
+
+Supported REPLs:
+  python, python3, ipython   Python
+  node, nodejs               Node.js
+  ruby, irb                  Ruby
+  psql                       PostgreSQL
+  mysql                      MySQL
+  sqlite3                    SQLite
+  lua                        Lua
+  ghci                       Haskell
+
+Examples:
+  agent-repl spawn python
+  agent-repl send 1 "x = 42"
+  agent-repl send 1 "print(x)"
+  agent-repl read 1
+EOF
+}
+
+# Map REPL type to command
+get_repl_cmd() {
+    local type="$1"
+    case "$type" in
+        python|python3|py) echo "python3" ;;
+        ipython) echo "ipython" ;;
+        node|nodejs|js) echo "node" ;;
+        ruby|irb) echo "irb" ;;
+        psql|postgres) echo "psql" ;;
+        mysql) echo "mysql" ;;
+        sqlite|sqlite3) echo "sqlite3" ;;
+        lua) echo "lua" ;;
+        ghci|haskell) echo "ghci" ;;
+        *) echo "$type" ;;  # Use as-is
+    esac
+}
+
+cmd_spawn() {
+    local type="${1:-python}"
+    local cmd=$(get_repl_cmd "$type")
+
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "Error: $cmd not found"
+        return 1
+    fi
+
+    # Use agent-tui to spawn
+    "$AGENT_TUI" spawn "$cmd"
+}
+
+cmd_send() {
+    local session="${1:-}"
+    shift || true
+    local code="$*"
+
+    if [[ -z "$session" ]] || [[ -z "$code" ]]; then
+        echo "Error: Session and code required"
+        echo "Usage: agent-repl send <session> <code>"
+        return 1
+    fi
+
+    # Send code followed by Enter
+    "$AGENT_TUI" type "$code" --session "$session"
+    "$AGENT_TUI" press Enter --session "$session"
+}
+
+cmd_read() {
+    local session="${1:-}"
+
+    if [[ -z "$session" ]]; then
+        echo "Error: Session required"
+        return 1
+    fi
+
+    "$AGENT_TUI" snapshot --session "$session"
+}
+
+cmd_list() {
+    "$AGENT_TUI" list
+}
+
+cmd_kill() {
+    local session="${1:-}"
+
+    if [[ -z "$session" ]]; then
+        echo "Error: Session required"
+        return 1
+    fi
+
+    "$AGENT_TUI" kill --session "$session"
+}
+
+# Main
+case "${1:-help}" in
+    spawn|start|new)
+        shift
+        cmd_spawn "$@"
+        ;;
+    send|exec|run)
+        shift
+        cmd_send "$@"
+        ;;
+    read|output|snapshot)
+        shift
+        cmd_read "$@"
+        ;;
+    list|ls)
+        cmd_list
+        ;;
+    kill|stop)
+        shift
+        cmd_kill "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-repl help"
+        exit 1
+        ;;
+esac

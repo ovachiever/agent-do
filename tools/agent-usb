@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# agent-usb - USB device management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-usb - USB device management
+
+Commands:
+  list                       List USB devices
+  tree                       Show USB device tree
+  info <device>              Show device info
+  eject <device>             Safely eject device
+  mount <device>             Mount USB storage
+  unmount <device>           Unmount USB storage
+
+Examples:
+  agent-usb list
+  agent-usb tree
+  agent-usb eject "USB Flash Drive"
+  agent-usb mount /dev/disk2s1
+EOF
+}
+
+cmd_list() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        system_profiler SPUSBDataType 2>/dev/null | grep -E "^\s+(Product ID|Vendor ID|Manufacturer|Speed|Serial Number|[A-Za-z].*:$)" | head -50
+    else
+        if command -v lsusb &> /dev/null; then
+            lsusb
+        else
+            ls -la /sys/bus/usb/devices/ 2>/dev/null || echo "Error: lsusb not found"
+        fi
+    fi
+}
+
+cmd_tree() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        system_profiler SPUSBDataType 2>/dev/null
+    else
+        if command -v lsusb &> /dev/null; then
+            lsusb -t
+        else
+            echo "Error: lsusb not found"
+            return 1
+        fi
+    fi
+}
+
+cmd_info() {
+    local device="${1:-}"
+
+    if [[ -z "$device" ]]; then
+        echo "Error: Device name or ID required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        system_profiler SPUSBDataType 2>/dev/null | grep -A 20 -i "$device"
+    else
+        if command -v lsusb &> /dev/null; then
+            lsusb -v 2>/dev/null | grep -A 30 -i "$device" || lsusb | grep -i "$device"
+        else
+            echo "Error: lsusb not found"
+            return 1
+        fi
+    fi
+}
+
+cmd_eject() {
+    local device="$*"
+
+    if [[ -z "$device" ]]; then
+        echo "Error: Device name required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # Try by name first using diskutil
+        if [[ "$device" =~ ^/dev/ ]]; then
+            diskutil eject "$device"
+        else
+            # Find the device by volume name
+            local disk
+            disk=$(diskutil list | grep -i "$device" | awk '{print $NF}' | head -1)
+            if [[ -n "$disk" ]]; then
+                diskutil eject "$disk"
+            else
+                # Try osascript
+                osascript -e "tell application \"Finder\" to eject \"$device\"" 2>/dev/null || \
+                    echo "Error: Could not find device: $device"
+            fi
+        fi
+    else
+        if [[ "$device" =~ ^/dev/ ]]; then
+            udisksctl unmount -b "$device" 2>/dev/null && \
+            udisksctl power-off -b "$device" 2>/dev/null || \
+            umount "$device"
+        else
+            echo "Error: Provide device path (e.g., /dev/sdb1)"
+            return 1
+        fi
+    fi
+
+    echo "Ejected: $device"
+}
+
+cmd_mount() {
+    local device="${1:-}"
+    local mount_point="${2:-}"
+
+    if [[ -z "$device" ]]; then
+        echo "Error: Device required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        diskutil mount "$device"
+    else
+        if [[ -z "$mount_point" ]]; then
+            # Use udisks if available
+            if command -v udisksctl &> /dev/null; then
+                udisksctl mount -b "$device"
+            else
+                echo "Error: Mount point required"
+                return 1
+            fi
+        else
+            mkdir -p "$mount_point"
+            mount "$device" "$mount_point"
+        fi
+    fi
+}
+
+cmd_unmount() {
+    local device="${1:-}"
+
+    if [[ -z "$device" ]]; then
+        echo "Error: Device required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        diskutil unmount "$device"
+    else
+        if command -v udisksctl &> /dev/null; then
+            udisksctl unmount -b "$device"
+        else
+            umount "$device"
+        fi
+    fi
+
+    echo "Unmounted: $device"
+}
+
+cmd_disks() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        diskutil list
+    else
+        lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,LABEL 2>/dev/null || fdisk -l 2>/dev/null
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    list|ls|devices)
+        cmd_list
+        ;;
+    tree)
+        cmd_tree
+        ;;
+    info|show)
+        shift
+        cmd_info "$@"
+        ;;
+    eject|safely-remove)
+        shift
+        cmd_eject "$@"
+        ;;
+    mount)
+        shift
+        cmd_mount "$@"
+        ;;
+    unmount|umount)
+        shift
+        cmd_unmount "$@"
+        ;;
+    disks|volumes)
+        cmd_disks
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-usb help"
+        exit 1
+        ;;
+esac

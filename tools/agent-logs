@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# agent-logs - Log aggregation and viewing
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-logs - Log viewing and searching
+
+Commands:
+  tail <path>                Tail a log file
+  search <pattern> [path]    Search logs for pattern
+  follow <path>              Follow log file (like tail -f)
+  recent [path] [lines]      Show recent log entries
+  errors [path]              Show only errors/warnings
+
+Options:
+  -n, --lines <n>            Number of lines
+  -f, --follow               Follow mode
+  --since <time>             Show logs since time (journalctl style)
+  --json                     Parse JSON logs
+
+Common log locations:
+  /var/log/                  System logs
+  ~/.pm2/logs/               PM2 application logs
+  ./logs/                    Application logs
+
+Examples:
+  agent-logs tail /var/log/system.log
+  agent-logs search "error" /var/log/
+  agent-logs errors ./logs/app.log
+  agent-logs recent --lines 50
+EOF
+}
+
+# Detect if journalctl is available
+has_journalctl() {
+    command -v journalctl &> /dev/null
+}
+
+cmd_tail() {
+    local path="${1:-}"
+    local lines=50
+    local follow=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--lines) lines="$2"; shift 2 ;;
+            -f|--follow) follow="-f"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$path" ]]; then
+        # Default to common log locations
+        if [[ "$(uname)" == "Darwin" ]]; then
+            path="/var/log/system.log"
+        elif has_journalctl; then
+            journalctl -n "$lines" $follow
+            return
+        else
+            path="/var/log/syslog"
+        fi
+    fi
+
+    if [[ -f "$path" ]]; then
+        tail -n "$lines" $follow "$path"
+    elif [[ -d "$path" ]]; then
+        # If directory, tail all .log files
+        tail -n "$lines" $follow "$path"/*.log 2>/dev/null || echo "No log files in $path"
+    else
+        echo "Error: $path not found"
+        return 1
+    fi
+}
+
+cmd_search() {
+    local pattern="${1:-}"
+    local path="${2:-}"
+    local context=2
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -C|--context) context="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$pattern" ]]; then
+        echo "Error: Search pattern required"
+        return 1
+    fi
+
+    if [[ -z "$path" ]]; then
+        # Search common locations
+        if [[ "$(uname)" == "Darwin" ]]; then
+            path="/var/log"
+        elif has_journalctl; then
+            journalctl --no-pager | grep -i -C "$context" "$pattern"
+            return
+        else
+            path="/var/log"
+        fi
+    fi
+
+    if [[ -f "$path" ]]; then
+        grep -i -C "$context" "$pattern" "$path" || echo "No matches found"
+    elif [[ -d "$path" ]]; then
+        grep -ri -C "$context" "$pattern" "$path" --include="*.log" 2>/dev/null || echo "No matches found"
+    else
+        echo "Error: $path not found"
+        return 1
+    fi
+}
+
+cmd_follow() {
+    local path="${1:-}"
+
+    if [[ -z "$path" ]]; then
+        if has_journalctl; then
+            journalctl -f
+            return
+        fi
+        echo "Error: Path required"
+        return 1
+    fi
+
+    if [[ -f "$path" ]]; then
+        tail -f "$path"
+    else
+        echo "Error: $path not found"
+        return 1
+    fi
+}
+
+cmd_recent() {
+    local path=""
+    local lines=100
+    local since=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--lines) lines="$2"; shift 2 ;;
+            --since) since="$2"; shift 2 ;;
+            -*) shift ;;
+            *) path="$1"; shift ;;
+        esac
+    done
+
+    if has_journalctl && [[ -z "$path" ]]; then
+        local args=(-n "$lines")
+        [[ -n "$since" ]] && args+=(--since "$since")
+        journalctl "${args[@]}"
+        return
+    fi
+
+    if [[ -z "$path" ]]; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            path="/var/log/system.log"
+        else
+            path="/var/log/syslog"
+        fi
+    fi
+
+    if [[ -f "$path" ]]; then
+        tail -n "$lines" "$path"
+    else
+        echo "Error: $path not found"
+        return 1
+    fi
+}
+
+cmd_errors() {
+    local path="${1:-}"
+    local lines=100
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--lines) lines="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local pattern="(error|warn|fail|fatal|exception|critical)"
+
+    if has_journalctl && [[ -z "$path" ]]; then
+        journalctl -p err -n "$lines"
+        return
+    fi
+
+    if [[ -z "$path" ]]; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            path="/var/log/system.log"
+        else
+            path="/var/log/syslog"
+        fi
+    fi
+
+    if [[ -f "$path" ]]; then
+        grep -iE "$pattern" "$path" | tail -n "$lines"
+    elif [[ -d "$path" ]]; then
+        grep -riE "$pattern" "$path" --include="*.log" 2>/dev/null | tail -n "$lines"
+    else
+        echo "Error: $path not found"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    tail|t)
+        shift
+        cmd_tail "$@"
+        ;;
+    search|grep|s)
+        shift
+        cmd_search "$@"
+        ;;
+    follow|f)
+        shift
+        cmd_follow "$@"
+        ;;
+    recent|r)
+        shift
+        cmd_recent "$@"
+        ;;
+    errors|err|e)
+        shift
+        cmd_errors "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it looks like a path, tail it
+        if [[ -f "$1" ]] || [[ -d "$1" ]]; then
+            cmd_tail "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-logs help"
+            exit 1
+        fi
+        ;;
+esac

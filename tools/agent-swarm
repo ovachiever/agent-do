@@ -1,0 +1,492 @@
+#!/usr/bin/env bash
+# agent-swarm - Multi-agent orchestration
+
+set -euo pipefail
+
+SWARM_DIR="${AGENT_DO_HOME:-$HOME/.agent-do}/swarm"
+mkdir -p "$SWARM_DIR"
+
+show_help() {
+    cat << 'EOF'
+agent-swarm - Multi-agent orchestration
+
+Commands:
+  spawn <n> <task>         Spawn n agents for task
+  parallel <tasks...>      Run tasks in parallel
+  pipeline <tasks...>      Run tasks in sequence
+  status                   Show swarm status
+  results                  Show completed results
+  kill <id>                Kill agent or swarm
+  coordinate <file>        Run coordination spec
+
+Coordination spec (YAML):
+  agents:
+    - name: researcher
+      task: "Find information about {{topic}}"
+    - name: writer
+      task: "Write summary based on research"
+      depends_on: researcher
+    - name: reviewer
+      task: "Review and improve the summary"
+      depends_on: writer
+
+Examples:
+  agent-swarm spawn 3 "search for Python best practices"
+  agent-swarm parallel "test api" "lint code" "build docs"
+  agent-swarm pipeline "design" "implement" "test"
+  agent-swarm coordinate workflow.yaml
+EOF
+}
+
+cmd_spawn() {
+    local count="${1:-1}"
+    local task="${2:-}"
+
+    if [[ -z "$task" ]]; then
+        echo "Error: Task required"
+        return 1
+    fi
+
+    if ! [[ "$count" =~ ^[0-9]+$ ]] || [[ "$count" -lt 1 ]]; then
+        echo "Error: Count must be a positive integer"
+        return 1
+    fi
+
+    local swarm_id="swarm_$(date +%s)"
+    local swarm_file="$SWARM_DIR/${swarm_id}.json"
+
+    echo "Spawning $count agents for: $task"
+    echo "Swarm ID: $swarm_id"
+
+    python3 << PYTHON
+import json
+import subprocess
+import os
+import threading
+from datetime import datetime
+
+swarm = {
+    'id': '$swarm_id',
+    'task': '''$task''',
+    'count': $count,
+    'started': datetime.now().isoformat(),
+    'status': 'running',
+    'agents': []
+}
+
+def run_agent(agent_id, task):
+    """Run a single agent"""
+    try:
+        # Use agent-do to run the task
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        agent_do = os.path.join(script_dir, 'agent-do')
+
+        if not os.path.exists(agent_do):
+            agent_do = 'agent-do'
+
+        result = subprocess.run(
+            [agent_do, '--dry-run', task],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+
+        return {
+            'id': agent_id,
+            'status': 'completed' if result.returncode == 0 else 'failed',
+            'output': result.stdout,
+            'error': result.stderr,
+            'returncode': result.returncode
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            'id': agent_id,
+            'status': 'timeout',
+            'output': '',
+            'error': 'Task timed out',
+            'returncode': -1
+        }
+    except Exception as e:
+        return {
+            'id': agent_id,
+            'status': 'error',
+            'output': '',
+            'error': str(e),
+            'returncode': -1
+        }
+
+threads = []
+results = []
+
+for i in range($count):
+    agent_id = f"agent_{i+1}"
+    swarm['agents'].append({
+        'id': agent_id,
+        'status': 'running',
+        'started': datetime.now().isoformat()
+    })
+    print(f"  Starting {agent_id}...")
+
+# Save initial state
+with open('$swarm_file', 'w') as f:
+    json.dump(swarm, f, indent=2)
+
+# Run agents in parallel
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+with ThreadPoolExecutor(max_workers=$count) as executor:
+    futures = {executor.submit(run_agent, f"agent_{i+1}", '''$task'''): i
+               for i in range($count)}
+
+    for future in as_completed(futures):
+        result = future.result()
+        idx = futures[future]
+        swarm['agents'][idx].update(result)
+        swarm['agents'][idx]['completed'] = datetime.now().isoformat()
+        print(f"  {result['id']}: {result['status']}")
+
+        # Update file
+        with open('$swarm_file', 'w') as f:
+            json.dump(swarm, f, indent=2)
+
+# Final status
+completed = sum(1 for a in swarm['agents'] if a['status'] == 'completed')
+swarm['status'] = 'completed'
+swarm['completed'] = datetime.now().isoformat()
+swarm['summary'] = f"{completed}/{$count} agents completed successfully"
+
+with open('$swarm_file', 'w') as f:
+    json.dump(swarm, f, indent=2)
+
+print()
+print(f"Swarm complete: {completed}/{$count} succeeded")
+print(f"Results: agent-swarm results $swarm_id")
+PYTHON
+}
+
+cmd_parallel() {
+    if [[ $# -lt 2 ]]; then
+        echo "Error: At least 2 tasks required"
+        return 1
+    fi
+
+    local swarm_id="parallel_$(date +%s)"
+    echo "Running ${#@} tasks in parallel"
+    echo "ID: $swarm_id"
+
+    # Run all tasks in background
+    local pids=()
+    local tasks=("$@")
+
+    for task in "${tasks[@]}"; do
+        (
+            # Get the directory of this script
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+            "$SCRIPT_DIR/../agent-do" --dry-run "$task" 2>&1
+        ) &
+        pids+=($!)
+        echo "  Started: $task (PID: ${pids[-1]})"
+    done
+
+    # Wait for all
+    local failed=0
+    for i in "${!pids[@]}"; do
+        if wait "${pids[$i]}"; then
+            echo "  ✓ Completed: ${tasks[$i]}"
+        else
+            echo "  ✗ Failed: ${tasks[$i]}"
+            ((failed++))
+        fi
+    done
+
+    echo
+    echo "Parallel execution complete: $((${#tasks[@]} - failed))/${#tasks[@]} succeeded"
+}
+
+cmd_pipeline() {
+    if [[ $# -lt 2 ]]; then
+        echo "Error: At least 2 tasks required"
+        return 1
+    fi
+
+    local swarm_id="pipeline_$(date +%s)"
+    echo "Running ${#@} tasks in sequence"
+    echo "ID: $swarm_id"
+
+    local tasks=("$@")
+    local step=1
+    local failed=false
+
+    for task in "${tasks[@]}"; do
+        echo
+        echo "Step $step/${#tasks[@]}: $task"
+
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if "$SCRIPT_DIR/../agent-do" --dry-run "$task"; then
+            echo "  ✓ Completed"
+        else
+            echo "  ✗ Failed"
+            failed=true
+            break
+        fi
+
+        ((step++))
+    done
+
+    echo
+    if $failed; then
+        echo "Pipeline failed at step $step"
+        return 1
+    else
+        echo "Pipeline complete: all ${#tasks[@]} steps succeeded"
+    fi
+}
+
+cmd_status() {
+    echo "Swarm Status"
+    echo "============"
+
+    local found=false
+    for f in "$SWARM_DIR"/*.json; do
+        [[ -f "$f" ]] || continue
+        found=true
+
+        python3 << PYTHON
+import json
+with open('$f') as file:
+    swarm = json.load(file)
+
+status_icon = "🏃" if swarm['status'] == 'running' else "✓" if swarm['status'] == 'completed' else "✗"
+print(f"\n{status_icon} {swarm['id']}")
+print(f"   Task: {swarm.get('task', 'N/A')[:50]}...")
+print(f"   Status: {swarm['status']}")
+if 'agents' in swarm:
+    completed = sum(1 for a in swarm['agents'] if a.get('status') == 'completed')
+    print(f"   Agents: {completed}/{len(swarm['agents'])}")
+PYTHON
+    done
+
+    if ! $found; then
+        echo "No active swarms"
+    fi
+}
+
+cmd_results() {
+    local swarm_id="${1:-}"
+
+    if [[ -z "$swarm_id" ]]; then
+        # Show all results
+        cmd_status
+        return
+    fi
+
+    local swarm_file="$SWARM_DIR/${swarm_id}.json"
+    if [[ ! -f "$swarm_file" ]]; then
+        # Try partial match
+        swarm_file=$(ls "$SWARM_DIR"/*"$swarm_id"*.json 2>/dev/null | head -1)
+    fi
+
+    if [[ ! -f "$swarm_file" ]]; then
+        echo "Error: Swarm not found: $swarm_id"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+with open('$swarm_file') as f:
+    swarm = json.load(f)
+
+print(f"Swarm: {swarm['id']}")
+print(f"Task: {swarm.get('task', 'N/A')}")
+print(f"Status: {swarm['status']}")
+print(f"Started: {swarm.get('started', 'N/A')}")
+if 'completed' in swarm:
+    print(f"Completed: {swarm['completed']}")
+print()
+
+for agent in swarm.get('agents', []):
+    status_icon = "✓" if agent.get('status') == 'completed' else "✗"
+    print(f"{status_icon} {agent['id']}: {agent.get('status', 'unknown')}")
+    if agent.get('output'):
+        print(f"   Output: {agent['output'][:200]}")
+    if agent.get('error'):
+        print(f"   Error: {agent['error'][:100]}")
+PYTHON
+}
+
+cmd_kill() {
+    local swarm_id="${1:-}"
+
+    if [[ -z "$swarm_id" ]]; then
+        echo "Error: Swarm ID required"
+        return 1
+    fi
+
+    local swarm_file="$SWARM_DIR/${swarm_id}.json"
+    if [[ ! -f "$swarm_file" ]]; then
+        swarm_file=$(ls "$SWARM_DIR"/*"$swarm_id"*.json 2>/dev/null | head -1)
+    fi
+
+    if [[ -f "$swarm_file" ]]; then
+        python3 << PYTHON
+import json
+with open('$swarm_file') as f:
+    swarm = json.load(f)
+swarm['status'] = 'killed'
+with open('$swarm_file', 'w') as f:
+    json.dump(swarm, f, indent=2)
+print(f"Killed swarm: {swarm['id']}")
+PYTHON
+    else
+        echo "Swarm not found: $swarm_id"
+        return 1
+    fi
+}
+
+cmd_coordinate() {
+    local spec_file="${1:-}"
+
+    if [[ -z "$spec_file" ]] || [[ ! -f "$spec_file" ]]; then
+        echo "Error: Valid specification file required"
+        return 1
+    fi
+
+    echo "Running coordination spec: $spec_file"
+
+    python3 << PYTHON
+import yaml
+import json
+import subprocess
+import os
+from datetime import datetime
+from collections import defaultdict
+
+with open('$spec_file') as f:
+    spec = yaml.safe_load(f)
+
+agents = spec.get('agents', [])
+variables = spec.get('variables', {})
+
+# Build dependency graph
+deps = defaultdict(list)
+for agent in agents:
+    if 'depends_on' in agent:
+        dep = agent['depends_on']
+        if isinstance(dep, str):
+            deps[agent['name']].append(dep)
+        else:
+            deps[agent['name']].extend(dep)
+
+results = {}
+completed = set()
+
+def can_run(agent_name):
+    return all(d in completed for d in deps[agent_name])
+
+def run_agent(agent):
+    task = agent['task']
+    # Substitute variables and results
+    for var, val in variables.items():
+        task = task.replace(f'{{{{{var}}}}}', str(val))
+    for name, result in results.items():
+        task = task.replace(f'{{{{{name}}}}}', str(result.get('output', '')))
+
+    print(f"  Running {agent['name']}: {task[:50]}...")
+
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    agent_do = os.path.join(script_dir, 'agent-do')
+
+    try:
+        result = subprocess.run(
+            [agent_do, '--dry-run', task],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        return {
+            'status': 'completed' if result.returncode == 0 else 'failed',
+            'output': result.stdout,
+            'error': result.stderr
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'output': '',
+            'error': str(e)
+        }
+
+# Execute in dependency order
+max_iterations = len(agents) * 2
+iteration = 0
+
+while len(completed) < len(agents) and iteration < max_iterations:
+    iteration += 1
+    for agent in agents:
+        if agent['name'] in completed:
+            continue
+        if can_run(agent['name']):
+            results[agent['name']] = run_agent(agent)
+            completed.add(agent['name'])
+            status = results[agent['name']]['status']
+            print(f"    → {status}")
+
+            if status != 'completed':
+                print(f"Error: {agent['name']} failed, stopping pipeline")
+                break
+
+print()
+print(f"Coordination complete: {len(completed)}/{len(agents)} agents finished")
+PYTHON
+}
+
+cmd_clean() {
+    local days="${1:-7}"
+
+    echo "Cleaning swarms older than $days days..."
+
+    find "$SWARM_DIR" -name "*.json" -mtime +"$days" -delete
+    echo "Done"
+}
+
+# Main
+case "${1:-help}" in
+    spawn|start)
+        shift
+        cmd_spawn "$@"
+        ;;
+    parallel|par)
+        shift
+        cmd_parallel "$@"
+        ;;
+    pipeline|pipe|seq)
+        shift
+        cmd_pipeline "$@"
+        ;;
+    status|ps)
+        cmd_status
+        ;;
+    results|show)
+        shift || true
+        cmd_results "$@"
+        ;;
+    kill|stop)
+        shift
+        cmd_kill "$@"
+        ;;
+    coordinate|coord|run)
+        shift
+        cmd_coordinate "$@"
+        ;;
+    clean)
+        shift || true
+        cmd_clean "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-swarm help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# agent-android - Android Emulator control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-android - Android Emulator control
+
+Commands:
+  list                       List available AVDs
+  start [avd]                Start emulator
+  stop                       Stop emulator
+  screenshot [path]          Take screenshot
+  tap <x> <y>                Tap at coordinates
+  swipe <x1> <y1> <x2> <y2>  Swipe gesture
+  type <text>                Type text
+  key <keycode>              Send key event (home, back, menu, etc.)
+  launch <package>           Launch app by package
+  install <apk>              Install APK
+  uninstall <package>        Uninstall app
+  shell <cmd>                Run adb shell command
+  logcat [filter]            View logs
+
+Examples:
+  agent-android start Pixel_5
+  agent-android screenshot ~/Desktop/android.png
+  agent-android tap 500 1000
+  agent-android launch com.android.chrome
+  agent-android key back
+  agent-android shell "pm list packages"
+EOF
+}
+
+# Check for adb
+check_adb() {
+    if ! command -v adb &> /dev/null; then
+        echo "Error: adb not found (install Android SDK)"
+        exit 1
+    fi
+}
+
+# Get connected device
+get_device() {
+    adb devices | grep -v "List" | grep "device$" | head -1 | awk '{print $1}'
+}
+
+cmd_list() {
+    if command -v emulator &> /dev/null; then
+        emulator -list-avds
+    elif command -v avdmanager &> /dev/null; then
+        avdmanager list avd -c
+    else
+        echo "Error: emulator or avdmanager not found"
+        return 1
+    fi
+}
+
+cmd_start() {
+    local avd="${1:-}"
+
+    if [[ -z "$avd" ]]; then
+        # Get first available AVD
+        avd=$(cmd_list | head -1)
+        if [[ -z "$avd" ]]; then
+            echo "Error: No AVD found"
+            return 1
+        fi
+    fi
+
+    if ! command -v emulator &> /dev/null; then
+        echo "Error: emulator not found"
+        return 1
+    fi
+
+    echo "Starting $avd..."
+    emulator -avd "$avd" &>/dev/null &
+
+    # Wait for device
+    echo "Waiting for device..."
+    adb wait-for-device
+
+    # Wait for boot
+    local timeout=60
+    while [[ $timeout -gt 0 ]]; do
+        local boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+        if [[ "$boot" == "1" ]]; then
+            echo "Emulator started: $avd"
+            return 0
+        fi
+        sleep 2
+        ((timeout-=2))
+    done
+
+    echo "Emulator started (may still be booting)"
+}
+
+cmd_stop() {
+    check_adb
+    local device=$(get_device)
+
+    if [[ -z "$device" ]]; then
+        echo "No emulator running"
+        return 0
+    fi
+
+    adb -s "$device" emu kill
+    echo "Emulator stopped"
+}
+
+cmd_screenshot() {
+    check_adb
+    local output="${1:-/tmp/android-screenshot.png}"
+
+    adb shell screencap -p /sdcard/screenshot.png
+    adb pull /sdcard/screenshot.png "$output"
+    adb shell rm /sdcard/screenshot.png
+
+    echo "Screenshot saved to $output"
+}
+
+cmd_tap() {
+    check_adb
+    local x="${1:-}"
+    local y="${2:-}"
+
+    if [[ -z "$x" ]] || [[ -z "$y" ]]; then
+        echo "Error: Coordinates required"
+        echo "Usage: agent-android tap <x> <y>"
+        return 1
+    fi
+
+    adb shell input tap "$x" "$y"
+    echo "Tapped at ($x, $y)"
+}
+
+cmd_swipe() {
+    check_adb
+    local x1="${1:-}"
+    local y1="${2:-}"
+    local x2="${3:-}"
+    local y2="${4:-}"
+    local duration="${5:-300}"
+
+    if [[ -z "$x1" ]] || [[ -z "$y1" ]] || [[ -z "$x2" ]] || [[ -z "$y2" ]]; then
+        echo "Error: All coordinates required"
+        echo "Usage: agent-android swipe <x1> <y1> <x2> <y2> [duration_ms]"
+        return 1
+    fi
+
+    adb shell input swipe "$x1" "$y1" "$x2" "$y2" "$duration"
+    echo "Swiped from ($x1,$y1) to ($x2,$y2)"
+}
+
+cmd_type() {
+    check_adb
+    local text="$*"
+
+    if [[ -z "$text" ]]; then
+        echo "Error: Text required"
+        return 1
+    fi
+
+    # Escape special characters for adb
+    text="${text// /%s}"
+    adb shell input text "$text"
+    echo "Typed: ${text//%s/ }"
+}
+
+cmd_key() {
+    check_adb
+    local key="${1:-}"
+
+    if [[ -z "$key" ]]; then
+        echo "Error: Key required"
+        echo "Keys: home, back, menu, enter, tab, space, del, volup, voldown, power"
+        return 1
+    fi
+
+    local keycode
+    case "$key" in
+        home) keycode=3 ;;
+        back) keycode=4 ;;
+        menu|recent) keycode=187 ;;
+        enter|return) keycode=66 ;;
+        tab) keycode=61 ;;
+        space) keycode=62 ;;
+        del|delete|backspace) keycode=67 ;;
+        volup|volumeup) keycode=24 ;;
+        voldown|volumedown) keycode=25 ;;
+        power) keycode=26 ;;
+        camera) keycode=27 ;;
+        *) keycode="$key" ;;
+    esac
+
+    adb shell input keyevent "$keycode"
+    echo "Sent key: $key"
+}
+
+cmd_launch() {
+    check_adb
+    local package="${1:-}"
+
+    if [[ -z "$package" ]]; then
+        echo "Error: Package name required"
+        return 1
+    fi
+
+    # Get launch activity
+    local activity
+    activity=$(adb shell cmd package resolve-activity --brief "$package" 2>/dev/null | tail -1)
+
+    if [[ -n "$activity" ]]; then
+        adb shell am start -n "$activity"
+    else
+        adb shell monkey -p "$package" -c android.intent.category.LAUNCHER 1
+    fi
+
+    echo "Launched: $package"
+}
+
+cmd_install() {
+    check_adb
+    local apk="${1:-}"
+
+    if [[ -z "$apk" ]] || [[ ! -f "$apk" ]]; then
+        echo "Error: Valid APK file required"
+        return 1
+    fi
+
+    adb install -r "$apk"
+    echo "Installed: $apk"
+}
+
+cmd_uninstall() {
+    check_adb
+    local package="${1:-}"
+
+    if [[ -z "$package" ]]; then
+        echo "Error: Package name required"
+        return 1
+    fi
+
+    adb uninstall "$package"
+    echo "Uninstalled: $package"
+}
+
+cmd_shell() {
+    check_adb
+    local cmd="$*"
+
+    if [[ -z "$cmd" ]]; then
+        # Interactive shell
+        adb shell
+    else
+        adb shell "$cmd"
+    fi
+}
+
+cmd_logcat() {
+    check_adb
+    local filter="${1:-*:I}"
+
+    adb logcat "$filter"
+}
+
+# Main
+case "${1:-help}" in
+    list|avds)
+        cmd_list
+        ;;
+    start|boot)
+        shift || true
+        cmd_start "$@"
+        ;;
+    stop|kill|shutdown)
+        cmd_stop
+        ;;
+    screenshot|snap|capture)
+        shift || true
+        cmd_screenshot "$@"
+        ;;
+    tap|click)
+        shift
+        cmd_tap "$@"
+        ;;
+    swipe|drag)
+        shift
+        cmd_swipe "$@"
+        ;;
+    type|text|input)
+        shift
+        cmd_type "$@"
+        ;;
+    key|keyevent)
+        shift
+        cmd_key "$@"
+        ;;
+    launch|open|start-app)
+        shift
+        cmd_launch "$@"
+        ;;
+    install)
+        shift
+        cmd_install "$@"
+        ;;
+    uninstall|remove)
+        shift
+        cmd_uninstall "$@"
+        ;;
+    shell|sh)
+        shift || true
+        cmd_shell "$@"
+        ;;
+    logcat|logs)
+        shift || true
+        cmd_logcat "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-android help"
+        exit 1
+        ;;
+esac

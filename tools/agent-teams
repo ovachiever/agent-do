@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# agent-teams - Microsoft Teams control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-teams - Microsoft Teams control
+
+Commands:
+  join <url>               Join a meeting
+  new                      Start new meeting
+  call <user>              Start call with user
+  chat <user> <message>    Send chat message
+  mute                     Toggle microphone
+  video                    Toggle camera
+  share                    Start screen share
+  status <status>          Set availability status
+  end                      End call/meeting
+
+Requirements:
+  - Microsoft Teams desktop app
+
+Examples:
+  agent-teams join "https://teams.microsoft.com/l/meetup-join/..."
+  agent-teams new
+  agent-teams call "john@company.com"
+  agent-teams status busy
+EOF
+}
+
+# Check if Teams is running
+check_teams() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        pgrep -x "Microsoft Teams" > /dev/null 2>&1 || \
+            pgrep -x "Teams" > /dev/null 2>&1
+    else
+        pgrep -x "teams" > /dev/null 2>&1
+    fi
+}
+
+# Launch Teams if not running
+launch_teams() {
+    if ! check_teams; then
+        echo "Starting Microsoft Teams..."
+        if [[ "$(uname)" == "Darwin" ]]; then
+            open -a "Microsoft Teams" 2>/dev/null || open -a "Teams"
+        else
+            teams &
+        fi
+        sleep 3
+    fi
+}
+
+# Send keystrokes to Teams (macOS)
+send_keystroke() {
+    local key="$1"
+    local modifiers="${2:-}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << EOF
+tell application "Microsoft Teams"
+    activate
+end tell
+delay 0.3
+tell application "System Events"
+    keystroke "$key" using {$modifiers}
+end tell
+EOF
+    else
+        if command -v xdotool &> /dev/null; then
+            xdotool search --name "Teams" windowactivate --sync 2>/dev/null || true
+            if [[ -n "$modifiers" ]]; then
+                xdotool key "$modifiers+$key"
+            else
+                xdotool key "$key"
+            fi
+        fi
+    fi
+}
+
+cmd_join() {
+    local url="${1:-}"
+
+    if [[ -z "$url" ]]; then
+        echo "Error: Meeting URL required"
+        return 1
+    fi
+
+    echo "Joining meeting..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        open "$url"
+    else
+        xdg-open "$url"
+    fi
+}
+
+cmd_new() {
+    launch_teams
+
+    echo "Starting new meeting..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << 'EOF'
+tell application "Microsoft Teams" to activate
+delay 0.5
+tell application "System Events"
+    -- Ctrl+Shift+M to start instant meeting
+    keystroke "m" using {control down, shift down}
+end tell
+EOF
+    else
+        send_keystroke "m" "ctrl+shift"
+    fi
+}
+
+cmd_call() {
+    local user="${1:-}"
+
+    if [[ -z "$user" ]]; then
+        echo "Error: User email or name required"
+        return 1
+    fi
+
+    launch_teams
+
+    echo "Initiating call to: $user"
+    # Open search and type user
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << EOF
+tell application "Microsoft Teams" to activate
+delay 0.5
+tell application "System Events"
+    -- Ctrl+E to open search
+    keystroke "e" using {command down}
+    delay 0.5
+    keystroke "$user"
+    delay 1
+    keystroke return
+end tell
+EOF
+    fi
+    echo "Note: Select the user and click 'Call' to initiate"
+}
+
+cmd_chat() {
+    local user="${1:-}"
+    shift || true
+    local message="$*"
+
+    if [[ -z "$user" ]]; then
+        echo "Error: User required"
+        return 1
+    fi
+
+    launch_teams
+
+    echo "Opening chat with: $user"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << EOF
+tell application "Microsoft Teams" to activate
+delay 0.5
+tell application "System Events"
+    -- Ctrl+N for new chat
+    keystroke "n" using {command down}
+    delay 0.5
+    keystroke "$user"
+    delay 1
+    keystroke return
+    delay 0.5
+end tell
+EOF
+        if [[ -n "$message" ]]; then
+            osascript << EOF
+tell application "System Events"
+    keystroke "$message"
+    keystroke return
+end tell
+EOF
+            echo "Sent: $message"
+        fi
+    fi
+}
+
+cmd_mute() {
+    if ! check_teams; then
+        echo "Teams is not running"
+        return 1
+    fi
+
+    echo "Toggling microphone..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "m" "command down, shift down"
+    else
+        send_keystroke "m" "ctrl+shift"
+    fi
+}
+
+cmd_video() {
+    if ! check_teams; then
+        echo "Teams is not running"
+        return 1
+    fi
+
+    echo "Toggling camera..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "o" "command down, shift down"
+    else
+        send_keystroke "o" "ctrl+shift"
+    fi
+}
+
+cmd_share() {
+    if ! check_teams; then
+        echo "Teams is not running"
+        return 1
+    fi
+
+    echo "Starting screen share..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "e" "command down, shift down"
+    else
+        send_keystroke "e" "ctrl+shift"
+    fi
+}
+
+cmd_status() {
+    local status="${1:-}"
+
+    case "$status" in
+        available|online)
+            echo "Setting status to Available..."
+            ;;
+        busy|dnd)
+            echo "Setting status to Busy..."
+            ;;
+        away)
+            echo "Setting status to Away..."
+            ;;
+        offline|invisible)
+            echo "Setting status to Appear Offline..."
+            ;;
+        *)
+            echo "Available statuses: available, busy, away, offline"
+            return 1
+            ;;
+    esac
+
+    # Status requires clicking through the UI
+    launch_teams
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << 'EOF'
+tell application "Microsoft Teams" to activate
+delay 0.5
+tell application "System Events"
+    -- Click on profile picture area (varies by version)
+    keystroke "," using {command down}
+end tell
+EOF
+    fi
+    echo "Note: Select '$status' from the status dropdown in Settings"
+}
+
+cmd_end() {
+    if ! check_teams; then
+        echo "Teams is not running"
+        return 1
+    fi
+
+    echo "Ending call..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "h" "command down, shift down"
+    else
+        send_keystroke "h" "ctrl+shift"
+    fi
+}
+
+cmd_raise() {
+    if ! check_teams; then
+        echo "Teams is not running"
+        return 1
+    fi
+
+    echo "Toggling hand raise..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "k" "command down, shift down"
+    else
+        send_keystroke "k" "ctrl+shift"
+    fi
+}
+
+cmd_launch() {
+    launch_teams
+    echo "Teams is running"
+}
+
+cmd_shortcuts() {
+    echo "Microsoft Teams Keyboard Shortcuts:"
+    echo
+    echo "  Cmd/Ctrl + Shift + M    Toggle mute"
+    echo "  Cmd/Ctrl + Shift + O    Toggle video"
+    echo "  Cmd/Ctrl + Shift + E    Share screen"
+    echo "  Cmd/Ctrl + Shift + K    Raise/lower hand"
+    echo "  Cmd/Ctrl + Shift + H    Hang up"
+    echo "  Cmd/Ctrl + E            Search"
+    echo "  Cmd/Ctrl + N            New chat"
+    echo "  Cmd/Ctrl + ,            Settings"
+}
+
+# Main
+case "${1:-help}" in
+    join)
+        shift
+        cmd_join "$@"
+        ;;
+    new|start|meeting)
+        cmd_new
+        ;;
+    call)
+        shift
+        cmd_call "$@"
+        ;;
+    chat|message|msg)
+        shift
+        cmd_chat "$@"
+        ;;
+    mute|mic)
+        cmd_mute
+        ;;
+    video|camera|cam)
+        cmd_video
+        ;;
+    share|screen|present)
+        cmd_share
+        ;;
+    status|presence)
+        shift
+        cmd_status "$@"
+        ;;
+    end|leave|hangup)
+        cmd_end
+        ;;
+    raise|hand)
+        cmd_raise
+        ;;
+    launch|open)
+        cmd_launch
+        ;;
+    shortcuts|keys)
+        cmd_shortcuts
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-teams help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+# agent-zoom - Zoom meeting control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-zoom - Zoom meeting control
+
+Commands:
+  join <meeting-id>        Join a meeting
+  start                    Start instant meeting
+  schedule <topic>         Schedule a meeting
+  list                     List scheduled meetings
+  end                      End current meeting
+  mute                     Toggle mute
+  video                    Toggle video
+  share                    Start screen share
+  record                   Start/stop recording
+  chat <message>           Send chat message
+
+Requirements:
+  - Zoom desktop app
+  - Zoom API credentials (for scheduling)
+
+Environment:
+  ZOOM_API_KEY             API key for scheduling
+  ZOOM_API_SECRET          API secret
+
+Examples:
+  agent-zoom join 123-456-789
+  agent-zoom start
+  agent-zoom schedule "Team Meeting" --time "2024-01-15 10:00"
+  agent-zoom mute
+EOF
+}
+
+ZOOM_API_BASE="https://api.zoom.us/v2"
+
+# Check if Zoom is running
+check_zoom() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        pgrep -x "zoom.us" > /dev/null
+    else
+        pgrep -x "zoom" > /dev/null
+    fi
+}
+
+# Send keystrokes to Zoom (macOS)
+send_keystroke() {
+    local key="$1"
+    local modifiers="${2:-}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if [[ -n "$modifiers" ]]; then
+            osascript -e "tell application \"zoom.us\" to activate" \
+                      -e "tell application \"System Events\" to keystroke \"$key\" using {$modifiers}"
+        else
+            osascript -e "tell application \"zoom.us\" to activate" \
+                      -e "tell application \"System Events\" to keystroke \"$key\""
+        fi
+    else
+        # Linux - use xdotool
+        if command -v xdotool &> /dev/null; then
+            xdotool search --name "Zoom" windowactivate --sync
+            if [[ -n "$modifiers" ]]; then
+                xdotool key "$modifiers+$key"
+            else
+                xdotool key "$key"
+            fi
+        fi
+    fi
+}
+
+cmd_join() {
+    local meeting_id="${1:-}"
+    local password="${2:-}"
+
+    if [[ -z "$meeting_id" ]]; then
+        echo "Error: Meeting ID required"
+        return 1
+    fi
+
+    # Clean meeting ID (remove dashes/spaces)
+    meeting_id="${meeting_id//[-[:space:]]/}"
+
+    local url="zoommtg://zoom.us/join?confno=$meeting_id"
+    [[ -n "$password" ]] && url="$url&pwd=$password"
+
+    echo "Joining meeting: $meeting_id"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        open "$url"
+    else
+        xdg-open "$url" 2>/dev/null || \
+            echo "Open: $url"
+    fi
+}
+
+cmd_start() {
+    echo "Starting instant meeting..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        open "zoommtg://zoom.us/start?confno=&zc=0"
+    else
+        xdg-open "zoommtg://zoom.us/start" 2>/dev/null || \
+            echo "Open Zoom and click 'New Meeting'"
+    fi
+}
+
+cmd_schedule() {
+    local topic="${1:-Meeting}"
+    local start_time=""
+    local duration="60"
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --time|-t) start_time="$2"; shift 2 ;;
+            --duration|-d) duration="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "${ZOOM_API_KEY:-}" ]] || [[ -z "${ZOOM_API_SECRET:-}" ]]; then
+        echo "Error: ZOOM_API_KEY and ZOOM_API_SECRET required"
+        echo "Get credentials at: https://marketplace.zoom.us/"
+        return 1
+    fi
+
+    # Generate JWT token
+    local header='{"alg":"HS256","typ":"JWT"}'
+    local payload="{\"iss\":\"$ZOOM_API_KEY\",\"exp\":$(($(date +%s) + 3600))}"
+
+    # This is simplified - real implementation needs proper JWT signing
+    echo "Scheduling: $topic"
+    echo "Note: Full scheduling requires JWT implementation"
+    echo "Visit: https://zoom.us/meeting/schedule"
+}
+
+cmd_list() {
+    if [[ -z "${ZOOM_API_KEY:-}" ]]; then
+        echo "List upcoming meetings at: https://zoom.us/meeting"
+        return
+    fi
+
+    # API call would go here
+    echo "Scheduled meetings require API access"
+}
+
+cmd_end() {
+    if ! check_zoom; then
+        echo "Zoom is not running"
+        return 1
+    fi
+
+    echo "Ending meeting..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << 'EOF'
+tell application "zoom.us"
+    activate
+end tell
+tell application "System Events"
+    keystroke "w" using {command down}
+    delay 0.5
+    keystroke return
+end tell
+EOF
+    else
+        send_keystroke "w" "ctrl"
+    fi
+}
+
+cmd_mute() {
+    if ! check_zoom; then
+        echo "Zoom is not running"
+        return 1
+    fi
+
+    echo "Toggling mute..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "a" "command down, shift down"
+    else
+        send_keystroke "a" "alt"
+    fi
+}
+
+cmd_video() {
+    if ! check_zoom; then
+        echo "Zoom is not running"
+        return 1
+    fi
+
+    echo "Toggling video..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "v" "command down, shift down"
+    else
+        send_keystroke "v" "alt"
+    fi
+}
+
+cmd_share() {
+    if ! check_zoom; then
+        echo "Zoom is not running"
+        return 1
+    fi
+
+    echo "Starting screen share..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "s" "command down, shift down"
+    else
+        send_keystroke "s" "alt"
+    fi
+}
+
+cmd_record() {
+    if ! check_zoom; then
+        echo "Zoom is not running"
+        return 1
+    fi
+
+    echo "Toggling recording..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "r" "command down, shift down"
+    else
+        send_keystroke "r" "alt"
+    fi
+}
+
+cmd_chat() {
+    local message="$*"
+
+    if ! check_zoom; then
+        echo "Zoom is not running"
+        return 1
+    fi
+
+    if [[ -z "$message" ]]; then
+        # Just open chat panel
+        echo "Opening chat..."
+        if [[ "$(uname)" == "Darwin" ]]; then
+            send_keystroke "h" "command down, shift down"
+        fi
+    else
+        # Type message
+        echo "Sending: $message"
+        if [[ "$(uname)" == "Darwin" ]]; then
+            osascript << EOF
+tell application "zoom.us" to activate
+tell application "System Events"
+    keystroke "h" using {command down, shift down}
+    delay 0.3
+    keystroke "$message"
+    keystroke return
+end tell
+EOF
+        fi
+    fi
+}
+
+cmd_launch() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        open -a "zoom.us"
+    else
+        zoom &
+    fi
+    echo "Launching Zoom..."
+}
+
+cmd_status() {
+    if check_zoom; then
+        echo "Zoom is running"
+        # Try to get meeting status
+        if [[ "$(uname)" == "Darwin" ]]; then
+            osascript -e 'tell application "zoom.us" to get name of windows' 2>/dev/null || true
+        fi
+    else
+        echo "Zoom is not running"
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    join)
+        shift
+        cmd_join "$@"
+        ;;
+    start|new)
+        cmd_start
+        ;;
+    schedule)
+        shift
+        cmd_schedule "$@"
+        ;;
+    list|meetings)
+        cmd_list
+        ;;
+    end|leave)
+        cmd_end
+        ;;
+    mute|unmute)
+        cmd_mute
+        ;;
+    video|camera)
+        cmd_video
+        ;;
+    share|screen)
+        cmd_share
+        ;;
+    record|recording)
+        cmd_record
+        ;;
+    chat|message)
+        shift
+        cmd_chat "$@"
+        ;;
+    launch|open)
+        cmd_launch
+        ;;
+    status)
+        cmd_status
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-zoom help"
+        exit 1
+        ;;
+esac

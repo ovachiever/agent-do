@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# agent-3d - 3D modeling and rendering control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-3d - 3D modeling and rendering control
+
+Commands:
+  view <file>              Open 3D file in viewer
+  convert <in> <out>       Convert between formats
+  render <file>            Render to image
+  info <file>              Show model information
+  screenshot <file>        Capture current view
+
+Supported formats:
+  - OBJ, STL, FBX, GLTF/GLB, PLY, 3DS
+
+Requirements:
+  - Blender (for rendering/conversion)
+  - open3d or trimesh (Python, for viewing)
+
+Examples:
+  agent-3d view model.obj
+  agent-3d convert model.stl model.obj
+  agent-3d render scene.blend --output render.png
+  agent-3d info model.gltf
+EOF
+}
+
+cmd_view() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid 3D file required"
+        return 1
+    fi
+
+    # Try different viewers
+    if command -v open &> /dev/null && [[ "$(uname)" == "Darwin" ]]; then
+        # macOS - try Preview or Quick Look
+        qlmanage -p "$file" 2>/dev/null || open "$file"
+    elif command -v meshlab &> /dev/null; then
+        meshlab "$file" &
+    elif python3 -c "import open3d" 2>/dev/null; then
+        python3 << PYTHON
+import open3d as o3d
+mesh = o3d.io.read_triangle_mesh("$file")
+o3d.visualization.draw_geometries([mesh])
+PYTHON
+    elif python3 -c "import trimesh" 2>/dev/null; then
+        python3 -c "import trimesh; trimesh.load('$file').show()"
+    else
+        echo "Error: No 3D viewer available"
+        echo "Install: meshlab, or pip install open3d trimesh"
+        return 1
+    fi
+}
+
+cmd_convert() {
+    local input="${1:-}"
+    local output="${2:-}"
+
+    if [[ -z "$input" ]] || [[ -z "$output" ]]; then
+        echo "Error: Input and output files required"
+        return 1
+    fi
+
+    if [[ ! -f "$input" ]]; then
+        echo "Error: Input file not found: $input"
+        return 1
+    fi
+
+    if command -v blender &> /dev/null; then
+        blender --background --python-expr "
+import bpy
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.obj(filepath='$input') if '$input'.endswith('.obj') else \
+bpy.ops.import_mesh.stl(filepath='$input') if '$input'.endswith('.stl') else \
+bpy.ops.import_scene.gltf(filepath='$input') if '$input'.endswith(('.gltf', '.glb')) else None
+bpy.ops.export_scene.obj(filepath='$output') if '$output'.endswith('.obj') else \
+bpy.ops.export_mesh.stl(filepath='$output') if '$output'.endswith('.stl') else \
+bpy.ops.export_scene.gltf(filepath='$output') if '$output'.endswith(('.gltf', '.glb')) else None
+" 2>/dev/null
+        echo "Converted: $input → $output"
+    elif python3 -c "import trimesh" 2>/dev/null; then
+        python3 << PYTHON
+import trimesh
+mesh = trimesh.load('$input')
+mesh.export('$output')
+print(f"Converted: $input → $output")
+PYTHON
+    else
+        echo "Error: Blender or trimesh required"
+        return 1
+    fi
+}
+
+cmd_render() {
+    local file="${1:-}"
+    local output="render.png"
+    shift || true
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --output|-o) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid 3D file required"
+        return 1
+    fi
+
+    if command -v blender &> /dev/null; then
+        if [[ "$file" == *.blend ]]; then
+            blender -b "$file" -o "${output%.*}" -f 1
+        else
+            blender --background --python-expr "
+import bpy
+bpy.ops.wm.read_factory_settings(use_empty=True)
+# Import the file
+if '$file'.endswith('.obj'):
+    bpy.ops.import_scene.obj(filepath='$file')
+elif '$file'.endswith('.stl'):
+    bpy.ops.import_mesh.stl(filepath='$file')
+elif '$file'.endswith(('.gltf', '.glb')):
+    bpy.ops.import_scene.gltf(filepath='$file')
+# Setup camera and render
+bpy.ops.object.camera_add(location=(5, -5, 5))
+cam = bpy.context.object
+cam.rotation_euler = (1.1, 0, 0.8)
+bpy.context.scene.camera = cam
+bpy.context.scene.render.filepath = '$output'
+bpy.context.scene.render.image_settings.file_format = 'PNG'
+bpy.ops.render.render(write_still=True)
+" 2>/dev/null
+        fi
+        echo "Rendered: $output"
+    else
+        echo "Error: Blender required for rendering"
+        return 1
+    fi
+}
+
+cmd_info() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid 3D file required"
+        return 1
+    fi
+
+    echo "File: $file"
+    echo "Size: $(du -h "$file" | cut -f1)"
+    echo "Format: ${file##*.}"
+    echo
+
+    if python3 -c "import trimesh" 2>/dev/null; then
+        python3 << PYTHON
+import trimesh
+mesh = trimesh.load('$file')
+if hasattr(mesh, 'vertices'):
+    print(f"Vertices: {len(mesh.vertices)}")
+    print(f"Faces: {len(mesh.faces)}")
+    print(f"Bounds: {mesh.bounds}")
+    print(f"Watertight: {mesh.is_watertight}")
+    print(f"Volume: {mesh.volume if mesh.is_watertight else 'N/A'}")
+else:
+    print(f"Type: {type(mesh).__name__}")
+PYTHON
+    else
+        # Basic parsing for common formats
+        case "${file##*.}" in
+            obj)
+                echo "Vertices: $(grep -c '^v ' "$file" 2>/dev/null || echo 'unknown')"
+                echo "Faces: $(grep -c '^f ' "$file" 2>/dev/null || echo 'unknown')"
+                ;;
+            stl)
+                echo "Triangles: $(grep -c 'facet normal' "$file" 2>/dev/null || echo 'binary format')"
+                ;;
+            *)
+                echo "(Install trimesh for detailed info: pip install trimesh)"
+                ;;
+        esac
+    fi
+}
+
+cmd_screenshot() {
+    local file="${1:-}"
+    local output="${2:-screenshot.png}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid 3D file required"
+        return 1
+    fi
+
+    if python3 -c "import open3d" 2>/dev/null; then
+        python3 << PYTHON
+import open3d as o3d
+mesh = o3d.io.read_triangle_mesh("$file")
+mesh.compute_vertex_normals()
+vis = o3d.visualization.Visualizer()
+vis.create_window(visible=False)
+vis.add_geometry(mesh)
+vis.poll_events()
+vis.update_renderer()
+vis.capture_screen_image("$output")
+vis.destroy_window()
+print(f"Screenshot saved: $output")
+PYTHON
+    else
+        echo "Error: open3d required for screenshots"
+        echo "Install: pip install open3d"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    view|open|show)
+        shift
+        cmd_view "$@"
+        ;;
+    convert|export)
+        shift
+        cmd_convert "$@"
+        ;;
+    render)
+        shift
+        cmd_render "$@"
+        ;;
+    info|inspect)
+        shift
+        cmd_info "$@"
+        ;;
+    screenshot|capture)
+        shift
+        cmd_screenshot "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-3d help"
+        exit 1
+        ;;
+esac

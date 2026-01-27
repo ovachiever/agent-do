@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# agent-cloud - Cloud provider CLI wrapper (AWS, GCP, Azure)
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-cloud - Cloud provider management
+
+Commands:
+  aws <cmd>                  Run AWS CLI command
+  gcp <cmd>                  Run gcloud command
+  azure <cmd>                Run az command
+
+  list <resource>            List resources (ec2, s3, gcs, vms, etc.)
+  regions                    List available regions
+  whoami                     Show current identity
+
+Resource shortcuts:
+  ec2, instances             List EC2/compute instances
+  s3, buckets                List S3/GCS buckets
+  lambda, functions          List Lambda/Cloud Functions
+  rds, databases             List databases
+
+Examples:
+  agent-cloud aws s3 ls
+  agent-cloud gcp compute instances list
+  agent-cloud list ec2
+  agent-cloud list s3
+  agent-cloud whoami
+EOF
+}
+
+# Detect which cloud CLIs are available
+detect_cloud() {
+    if command -v aws &> /dev/null; then
+        echo "aws"
+    elif command -v gcloud &> /dev/null; then
+        echo "gcp"
+    elif command -v az &> /dev/null; then
+        echo "azure"
+    else
+        echo ""
+    fi
+}
+
+cmd_aws() {
+    if ! command -v aws &> /dev/null; then
+        echo "Error: AWS CLI not found"
+        return 1
+    fi
+    aws "$@"
+}
+
+cmd_gcp() {
+    if ! command -v gcloud &> /dev/null; then
+        echo "Error: gcloud CLI not found"
+        return 1
+    fi
+    gcloud "$@"
+}
+
+cmd_azure() {
+    if ! command -v az &> /dev/null; then
+        echo "Error: Azure CLI not found"
+        return 1
+    fi
+    az "$@"
+}
+
+cmd_list() {
+    local resource="${1:-}"
+    local cloud=$(detect_cloud)
+
+    if [[ -z "$cloud" ]]; then
+        echo "Error: No cloud CLI found (aws, gcloud, or az)"
+        return 1
+    fi
+
+    case "$resource" in
+        ec2|instances)
+            if [[ "$cloud" == "aws" ]]; then
+                aws ec2 describe-instances --query 'Reservations[*].Instances[*].[InstanceId,State.Name,InstanceType,PublicIpAddress]' --output table
+            elif [[ "$cloud" == "gcp" ]]; then
+                gcloud compute instances list
+            elif [[ "$cloud" == "azure" ]]; then
+                az vm list -o table
+            fi
+            ;;
+        s3|buckets|storage)
+            if [[ "$cloud" == "aws" ]]; then
+                aws s3 ls
+            elif [[ "$cloud" == "gcp" ]]; then
+                gcloud storage buckets list
+            elif [[ "$cloud" == "azure" ]]; then
+                az storage account list -o table
+            fi
+            ;;
+        lambda|functions)
+            if [[ "$cloud" == "aws" ]]; then
+                aws lambda list-functions --query 'Functions[*].[FunctionName,Runtime,LastModified]' --output table
+            elif [[ "$cloud" == "gcp" ]]; then
+                gcloud functions list
+            elif [[ "$cloud" == "azure" ]]; then
+                az functionapp list -o table
+            fi
+            ;;
+        rds|databases|db)
+            if [[ "$cloud" == "aws" ]]; then
+                aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,DBInstanceStatus,Engine]' --output table
+            elif [[ "$cloud" == "gcp" ]]; then
+                gcloud sql instances list
+            elif [[ "$cloud" == "azure" ]]; then
+                az sql server list -o table
+            fi
+            ;;
+        *)
+            echo "Unknown resource: $resource"
+            echo "Try: ec2, s3, lambda, rds"
+            return 1
+            ;;
+    esac
+}
+
+cmd_regions() {
+    local cloud=$(detect_cloud)
+
+    if [[ -z "$cloud" ]]; then
+        echo "Error: No cloud CLI found"
+        return 1
+    fi
+
+    case "$cloud" in
+        aws)
+            aws ec2 describe-regions --query 'Regions[*].RegionName' --output table
+            ;;
+        gcp)
+            gcloud compute regions list
+            ;;
+        azure)
+            az account list-locations -o table
+            ;;
+    esac
+}
+
+cmd_whoami() {
+    local cloud=$(detect_cloud)
+
+    echo "=== Cloud Identity ==="
+    echo
+
+    if command -v aws &> /dev/null; then
+        echo "AWS:"
+        aws sts get-caller-identity 2>/dev/null || echo "  Not configured"
+        echo
+    fi
+
+    if command -v gcloud &> /dev/null; then
+        echo "GCP:"
+        gcloud config list account --format='value(core.account)' 2>/dev/null || echo "  Not configured"
+        gcloud config list project --format='value(core.project)' 2>/dev/null || true
+        echo
+    fi
+
+    if command -v az &> /dev/null; then
+        echo "Azure:"
+        az account show --query '[user.name, name]' -o tsv 2>/dev/null || echo "  Not configured"
+        echo
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    aws)
+        shift
+        cmd_aws "$@"
+        ;;
+    gcp|gcloud|google)
+        shift
+        cmd_gcp "$@"
+        ;;
+    azure|az)
+        shift
+        cmd_azure "$@"
+        ;;
+    list|ls)
+        shift
+        cmd_list "$@"
+        ;;
+    regions)
+        cmd_regions
+        ;;
+    whoami|identity|account)
+        cmd_whoami
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # Try to guess which cloud based on command
+        if [[ "$1" =~ ^(s3|ec2|lambda|rds|iam|sns|sqs) ]]; then
+            cmd_aws "$@"
+        elif [[ "$1" =~ ^(compute|storage|functions|sql) ]]; then
+            cmd_gcp "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-cloud help"
+            exit 1
+        fi
+        ;;
+esac

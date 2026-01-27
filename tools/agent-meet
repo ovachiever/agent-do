@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# agent-meet - Google Meet control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-meet - Google Meet control
+
+Commands:
+  new                      Create new meeting
+  join <code>              Join a meeting
+  schedule <topic>         Schedule via Calendar
+  mute                     Toggle microphone
+  video                    Toggle camera
+  share                    Start screen share
+  chat <message>           Send chat message
+  captions                 Toggle captions
+  end                      Leave meeting
+
+Requirements:
+  - Chrome browser (recommended)
+  - Google account
+
+Examples:
+  agent-meet new
+  agent-meet join abc-defg-hij
+  agent-meet schedule "Team Sync" --time "tomorrow 2pm"
+  agent-meet mute
+EOF
+}
+
+MEET_BASE="https://meet.google.com"
+
+# Open URL in browser
+open_url() {
+    local url="$1"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        open -a "Google Chrome" "$url" 2>/dev/null || open "$url"
+    else
+        google-chrome "$url" 2>/dev/null || \
+            chromium-browser "$url" 2>/dev/null || \
+            xdg-open "$url"
+    fi
+}
+
+# Send keystrokes to Chrome (macOS)
+send_keystroke() {
+    local key="$1"
+    local modifiers="${2:-}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << EOF
+tell application "Google Chrome"
+    activate
+end tell
+tell application "System Events"
+    keystroke "$key" using {$modifiers}
+end tell
+EOF
+    else
+        if command -v xdotool &> /dev/null; then
+            xdotool search --name "Meet" windowactivate --sync 2>/dev/null || true
+            if [[ -n "$modifiers" ]]; then
+                xdotool key "$modifiers+$key"
+            else
+                xdotool key "$key"
+            fi
+        fi
+    fi
+}
+
+cmd_new() {
+    echo "Creating new meeting..."
+    open_url "$MEET_BASE/new"
+}
+
+cmd_join() {
+    local code="${1:-}"
+
+    if [[ -z "$code" ]]; then
+        echo "Error: Meeting code required"
+        echo "Example: agent-meet join abc-defg-hij"
+        return 1
+    fi
+
+    # Clean meeting code
+    code="${code//[^a-zA-Z-]/}"
+
+    echo "Joining meeting: $code"
+    open_url "$MEET_BASE/$code"
+}
+
+cmd_schedule() {
+    local topic="${1:-Meeting}"
+    local time=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --time|-t) time="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    # Open Google Calendar with Meet
+    local cal_url="https://calendar.google.com/calendar/render?action=TEMPLATE"
+    cal_url="$cal_url&text=$(echo "$topic" | sed 's/ /%20/g')"
+    cal_url="$cal_url&add=meet"
+
+    echo "Opening Google Calendar to schedule..."
+    echo "Topic: $topic"
+    open_url "$cal_url"
+}
+
+cmd_mute() {
+    echo "Toggling microphone (Ctrl+D)..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "d" "command down"
+    else
+        send_keystroke "d" "ctrl"
+    fi
+}
+
+cmd_video() {
+    echo "Toggling camera (Ctrl+E)..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "e" "command down"
+    else
+        send_keystroke "e" "ctrl"
+    fi
+}
+
+cmd_share() {
+    echo "Starting screen share..."
+    # Note: Meet requires clicking through the share dialog
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << 'EOF'
+tell application "Google Chrome" to activate
+tell application "System Events"
+    -- Open present menu
+    keystroke "d" using {command down, option down}
+end tell
+EOF
+    else
+        echo "Click 'Present now' in the Meet interface"
+    fi
+}
+
+cmd_chat() {
+    local message="$*"
+
+    echo "Opening chat..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << EOF
+tell application "Google Chrome" to activate
+tell application "System Events"
+    -- Open chat panel (may vary)
+    keystroke "c" using {command down, option down}
+    delay 0.5
+end tell
+EOF
+        if [[ -n "$message" ]]; then
+            osascript -e "tell application \"System Events\" to keystroke \"$message\""
+            osascript -e "tell application \"System Events\" to keystroke return"
+            echo "Sent: $message"
+        fi
+    else
+        echo "Use Ctrl+Alt+C to open chat"
+    fi
+}
+
+cmd_captions() {
+    echo "Toggling captions (Ctrl+C on Mac)..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "c" "command down"
+    else
+        send_keystroke "c" "ctrl"
+    fi
+}
+
+cmd_end() {
+    echo "Leaving meeting..."
+    # The leave button needs to be clicked
+    echo "Click the red 'Leave call' button or close the tab"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        osascript << 'EOF'
+tell application "Google Chrome" to activate
+tell application "System Events"
+    keystroke "w" using {command down}
+end tell
+EOF
+    fi
+}
+
+cmd_reactions() {
+    local reaction="${1:-thumbsup}"
+
+    echo "Note: Reactions require clicking in the Meet UI"
+    echo "Available: thumbsup, heart, clap, laugh, surprise"
+}
+
+cmd_hand() {
+    echo "Toggling hand raise..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        send_keystroke "h" "command down, option down"
+    else
+        send_keystroke "h" "ctrl+alt"
+    fi
+}
+
+cmd_info() {
+    echo "Google Meet Keyboard Shortcuts:"
+    echo
+    echo "  Ctrl/Cmd + D     Toggle microphone"
+    echo "  Ctrl/Cmd + E     Toggle camera"
+    echo "  Ctrl/Cmd + C     Toggle captions"
+    echo "  Ctrl/Alt + H     Raise/lower hand"
+    echo "  Ctrl/Alt + C     Open chat"
+    echo "  Ctrl/Alt + P     Open participants"
+    echo
+    echo "Meet URL: $MEET_BASE"
+}
+
+# Main
+case "${1:-help}" in
+    new|create|start)
+        cmd_new
+        ;;
+    join)
+        shift
+        cmd_join "$@"
+        ;;
+    schedule)
+        shift
+        cmd_schedule "$@"
+        ;;
+    mute|mic|microphone)
+        cmd_mute
+        ;;
+    video|camera|cam)
+        cmd_video
+        ;;
+    share|present|screen)
+        cmd_share
+        ;;
+    chat|message)
+        shift || true
+        cmd_chat "$@"
+        ;;
+    captions|cc|subtitles)
+        cmd_captions
+        ;;
+    end|leave|exit)
+        cmd_end
+        ;;
+    reactions|react)
+        shift || true
+        cmd_reactions "$@"
+        ;;
+    hand|raise)
+        cmd_hand
+        ;;
+    info|shortcuts)
+        cmd_info
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-meet help"
+        exit 1
+        ;;
+esac

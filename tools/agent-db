@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# agent-db - Database client tool
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-db - Database client
+
+Commands:
+  query <sql>                Run SQL query
+  tables [pattern]           List tables
+  describe <table>           Show table schema
+  export <sql> [file]        Export query to CSV
+
+Options:
+  --db <name>                Database name/connection string
+  --type <pg|mysql|sqlite>   Database type (auto-detected)
+  --host <host>              Database host
+  --port <port>              Database port
+  --user <user>              Database user
+  --password <pass>          Database password
+
+Environment:
+  DATABASE_URL               Connection string (postgresql://user:pass@host/db)
+  PGHOST, PGUSER, etc.       PostgreSQL environment vars
+
+Examples:
+  agent-db query "SELECT * FROM users LIMIT 10"
+  agent-db tables
+  agent-db describe users
+  agent-db query "SELECT * FROM orders" --db myapp.db --type sqlite
+EOF
+}
+
+# Detect database type from URL or file
+detect_db_type() {
+    local db="$1"
+    if [[ "$db" =~ ^postgres(ql)?:// ]] || [[ "$db" =~ ^pg:// ]]; then
+        echo "pg"
+    elif [[ "$db" =~ ^mysql:// ]]; then
+        echo "mysql"
+    elif [[ "$db" =~ \.db$ ]] || [[ "$db" =~ \.sqlite$ ]] || [[ -f "$db" ]]; then
+        echo "sqlite"
+    elif [[ -n "${PGHOST:-}" ]] || [[ -n "${PGDATABASE:-}" ]]; then
+        echo "pg"
+    elif [[ -n "${MYSQL_HOST:-}" ]]; then
+        echo "mysql"
+    else
+        echo "pg"  # Default to postgres
+    fi
+}
+
+# PostgreSQL query
+pg_query() {
+    local sql="$1"
+    local db="${2:-${DATABASE_URL:-}}"
+
+    if [[ -n "$db" ]]; then
+        psql "$db" -c "$sql"
+    else
+        psql -c "$sql"
+    fi
+}
+
+# MySQL query
+mysql_query() {
+    local sql="$1"
+    local db="${2:-}"
+
+    local args=()
+    [[ -n "${MYSQL_HOST:-}" ]] && args+=(-h "$MYSQL_HOST")
+    [[ -n "${MYSQL_USER:-}" ]] && args+=(-u "$MYSQL_USER")
+    [[ -n "${MYSQL_PASSWORD:-}" ]] && args+=(-p"$MYSQL_PASSWORD")
+    [[ -n "$db" ]] && args+=("$db")
+
+    mysql "${args[@]}" -e "$sql"
+}
+
+# SQLite query
+sqlite_query() {
+    local sql="$1"
+    local db="${2:-}"
+
+    if [[ -z "$db" ]]; then
+        echo "Error: SQLite requires --db <file>"
+        return 1
+    fi
+
+    sqlite3 -header -column "$db" "$sql"
+}
+
+cmd_query() {
+    local sql=""
+    local db=""
+    local db_type=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --db) db="$2"; shift 2 ;;
+            --type) db_type="$2"; shift 2 ;;
+            --host) export PGHOST="$2"; export MYSQL_HOST="$2"; shift 2 ;;
+            --port) export PGPORT="$2"; shift 2 ;;
+            --user) export PGUSER="$2"; export MYSQL_USER="$2"; shift 2 ;;
+            --password) export PGPASSWORD="$2"; export MYSQL_PASSWORD="$2"; shift 2 ;;
+            *) sql="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$sql" ]]; then
+        echo "Error: SQL query required"
+        return 1
+    fi
+
+    [[ -z "$db_type" ]] && db_type=$(detect_db_type "${db:-${DATABASE_URL:-}}")
+
+    case "$db_type" in
+        pg|postgres|postgresql)
+            pg_query "$sql" "$db"
+            ;;
+        mysql|mariadb)
+            mysql_query "$sql" "$db"
+            ;;
+        sqlite|sqlite3)
+            sqlite_query "$sql" "$db"
+            ;;
+        *)
+            echo "Unknown database type: $db_type"
+            return 1
+            ;;
+    esac
+}
+
+cmd_tables() {
+    local pattern="${1:-}"
+    local db=""
+    local db_type=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --db) db="$2"; shift 2 ;;
+            --type) db_type="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$db_type" ]] && db_type=$(detect_db_type "${db:-${DATABASE_URL:-}}")
+
+    case "$db_type" in
+        pg|postgres|postgresql)
+            local sql="SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            [[ -n "$pattern" ]] && sql="$sql AND tablename LIKE '%$pattern%'"
+            pg_query "$sql" "$db"
+            ;;
+        mysql|mariadb)
+            local sql="SHOW TABLES"
+            [[ -n "$pattern" ]] && sql="$sql LIKE '%$pattern%'"
+            mysql_query "$sql" "$db"
+            ;;
+        sqlite|sqlite3)
+            local sql=".tables"
+            [[ -n "$pattern" ]] && sql="SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%$pattern%'"
+            sqlite_query "$sql" "$db"
+            ;;
+    esac
+}
+
+cmd_describe() {
+    local table="${1:-}"
+    local db=""
+    local db_type=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --db) db="$2"; shift 2 ;;
+            --type) db_type="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$table" ]]; then
+        echo "Error: Table name required"
+        return 1
+    fi
+
+    [[ -z "$db_type" ]] && db_type=$(detect_db_type "${db:-${DATABASE_URL:-}}")
+
+    case "$db_type" in
+        pg|postgres|postgresql)
+            pg_query "\\d $table" "$db"
+            ;;
+        mysql|mariadb)
+            mysql_query "DESCRIBE $table" "$db"
+            ;;
+        sqlite|sqlite3)
+            sqlite_query ".schema $table" "$db"
+            ;;
+    esac
+}
+
+cmd_export() {
+    local sql="${1:-}"
+    local output="${2:-/dev/stdout}"
+    local db=""
+    local db_type=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --db) db="$2"; shift 2 ;;
+            --type) db_type="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$sql" ]]; then
+        echo "Error: SQL query required"
+        return 1
+    fi
+
+    [[ -z "$db_type" ]] && db_type=$(detect_db_type "${db:-${DATABASE_URL:-}}")
+
+    case "$db_type" in
+        pg|postgres|postgresql)
+            if [[ -n "$db" ]]; then
+                psql "$db" -c "COPY ($sql) TO STDOUT WITH CSV HEADER" > "$output"
+            else
+                psql -c "COPY ($sql) TO STDOUT WITH CSV HEADER" > "$output"
+            fi
+            ;;
+        mysql|mariadb)
+            mysql_query "$sql" "$db" | sed 's/\t/,/g' > "$output"
+            ;;
+        sqlite|sqlite3)
+            sqlite3 -header -csv "$db" "$sql" > "$output"
+            ;;
+    esac
+
+    [[ "$output" != "/dev/stdout" ]] && echo "Exported to $output"
+}
+
+# Main
+case "${1:-help}" in
+    query|q)
+        shift
+        cmd_query "$@"
+        ;;
+    tables|t)
+        shift
+        cmd_tables "$@"
+        ;;
+    describe|desc|d)
+        shift
+        cmd_describe "$@"
+        ;;
+    export|e)
+        shift
+        cmd_export "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it starts with SELECT/INSERT/etc, treat as query
+        if [[ "${1^^}" =~ ^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER) ]]; then
+            cmd_query "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-db help"
+            exit 1
+        fi
+        ;;
+esac

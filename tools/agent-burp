@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# agent-burp - Burp Suite automation
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-burp - Burp Suite automation
+
+Commands:
+  launch                   Launch Burp Suite
+  proxy <on|off>           Control system proxy
+  scan <url>               Scan a target URL
+  sitemap                  Export site map
+  issues                   List found issues
+  export <path>            Export project/results
+
+Requirements:
+  - Burp Suite (Community or Professional)
+  - burp-rest-api extension (for automation)
+
+Examples:
+  agent-burp launch
+  agent-burp proxy on
+  agent-burp scan https://example.com
+  agent-burp issues --severity high
+EOF
+}
+
+BURP_API="${BURP_API:-http://localhost:1337}"
+
+# Check if Burp API is available
+check_api() {
+    if ! curl -s "$BURP_API/burp/versions" &>/dev/null; then
+        echo "Error: Burp REST API not available at $BURP_API"
+        echo "Install the burp-rest-api extension from: https://github.com/vmware/burp-rest-api"
+        return 1
+    fi
+}
+
+cmd_launch() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS
+        if [[ -d "/Applications/Burp Suite Professional.app" ]]; then
+            open "/Applications/Burp Suite Professional.app"
+        elif [[ -d "/Applications/Burp Suite Community Edition.app" ]]; then
+            open "/Applications/Burp Suite Community Edition.app"
+        else
+            echo "Error: Burp Suite not found in /Applications"
+            return 1
+        fi
+    else
+        # Linux
+        if command -v burpsuite &> /dev/null; then
+            burpsuite &
+        elif [[ -f ~/BurpSuite/burpsuite_pro.jar ]]; then
+            java -jar ~/BurpSuite/burpsuite_pro.jar &
+        elif [[ -f ~/BurpSuite/burpsuite_community.jar ]]; then
+            java -jar ~/BurpSuite/burpsuite_community.jar &
+        else
+            echo "Error: Burp Suite not found"
+            return 1
+        fi
+    fi
+    echo "Launching Burp Suite..."
+}
+
+cmd_proxy() {
+    local state="${1:-}"
+
+    case "$state" in
+        on|enable)
+            if [[ "$(uname)" == "Darwin" ]]; then
+                # macOS - set HTTP proxy
+                networksetup -setwebproxy "Wi-Fi" 127.0.0.1 8080
+                networksetup -setsecurewebproxy "Wi-Fi" 127.0.0.1 8080
+                echo "Proxy enabled (127.0.0.1:8080)"
+            else
+                echo "Set HTTP_PROXY and HTTPS_PROXY to 127.0.0.1:8080"
+                echo "export HTTP_PROXY=http://127.0.0.1:8080"
+                echo "export HTTPS_PROXY=http://127.0.0.1:8080"
+            fi
+            ;;
+        off|disable)
+            if [[ "$(uname)" == "Darwin" ]]; then
+                networksetup -setwebproxystate "Wi-Fi" off
+                networksetup -setsecurewebproxystate "Wi-Fi" off
+                echo "Proxy disabled"
+            else
+                echo "Unset HTTP_PROXY and HTTPS_PROXY"
+                echo "unset HTTP_PROXY HTTPS_PROXY"
+            fi
+            ;;
+        status)
+            if [[ "$(uname)" == "Darwin" ]]; then
+                networksetup -getwebproxy "Wi-Fi"
+            else
+                echo "HTTP_PROXY=${HTTP_PROXY:-not set}"
+                echo "HTTPS_PROXY=${HTTPS_PROXY:-not set}"
+            fi
+            ;;
+        *)
+            echo "Usage: agent-burp proxy <on|off|status>"
+            return 1
+            ;;
+    esac
+}
+
+cmd_scan() {
+    local url="${1:-}"
+
+    if [[ -z "$url" ]]; then
+        echo "Error: URL required"
+        return 1
+    fi
+
+    check_api || return 1
+
+    # Add to scope
+    curl -s -X PUT "$BURP_API/burp/target/scope?url=$url" || true
+
+    # Start spider
+    echo "Starting spider on $url..."
+    curl -s -X POST "$BURP_API/burp/spider?baseUrl=$url"
+
+    # Start active scan (Professional only)
+    echo "Starting active scan..."
+    curl -s -X POST "$BURP_API/burp/scanner/scans/active?baseUrl=$url" 2>/dev/null || \
+        echo "Note: Active scanning requires Burp Suite Professional"
+
+    echo "Scan initiated for: $url"
+}
+
+cmd_sitemap() {
+    local output="${1:-sitemap.xml}"
+
+    check_api || return 1
+
+    curl -s "$BURP_API/burp/target/sitemap" > "$output"
+    echo "Site map exported to: $output"
+}
+
+cmd_issues() {
+    local severity=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --severity|-s) severity="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    check_api || return 1
+
+    local issues
+    issues=$(curl -s "$BURP_API/burp/scanner/issues")
+
+    if [[ -n "$severity" ]]; then
+        echo "$issues" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for issue in data.get('issues', []):
+    if issue.get('severity', '').lower() == '$severity'.lower():
+        print(f\"[{issue['severity']}] {issue['name']}\")
+        print(f\"  URL: {issue.get('url', 'N/A')}\")
+"
+    else
+        echo "$issues" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for issue in data.get('issues', []):
+    print(f\"[{issue.get('severity', 'Info')}] {issue.get('name', 'Unknown')}\")
+    print(f\"  URL: {issue.get('url', 'N/A')}\")
+"
+    fi
+}
+
+cmd_export() {
+    local path="${1:-burp-export.json}"
+
+    check_api || return 1
+
+    # Export issues
+    curl -s "$BURP_API/burp/scanner/issues" > "$path"
+    echo "Exported issues to: $path"
+}
+
+cmd_intercept() {
+    local state="${1:-}"
+
+    check_api || return 1
+
+    case "$state" in
+        on|enable)
+            curl -s -X PUT "$BURP_API/burp/proxy/intercept?enabled=true"
+            echo "Intercept enabled"
+            ;;
+        off|disable)
+            curl -s -X PUT "$BURP_API/burp/proxy/intercept?enabled=false"
+            echo "Intercept disabled"
+            ;;
+        *)
+            local status
+            status=$(curl -s "$BURP_API/burp/proxy/intercept")
+            echo "Intercept: $status"
+            ;;
+    esac
+}
+
+# Main
+case "${1:-help}" in
+    launch|start|open)
+        cmd_launch
+        ;;
+    proxy)
+        shift
+        cmd_proxy "$@"
+        ;;
+    scan)
+        shift
+        cmd_scan "$@"
+        ;;
+    sitemap)
+        shift
+        cmd_sitemap "$@"
+        ;;
+    issues|vulnerabilities)
+        shift
+        cmd_issues "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    intercept)
+        shift
+        cmd_intercept "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-burp help"
+        exit 1
+        ;;
+esac

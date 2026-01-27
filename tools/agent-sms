@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+# agent-sms - SMS messaging
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-sms - SMS messaging
+
+Commands:
+  send <number> <message>  Send SMS
+  list                     List recent messages (macOS)
+  search <term>            Search messages
+  export <path>            Export messages
+
+Providers:
+  - macOS: iMessage/SMS via Messages.app
+  - Twilio: TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM
+  - AWS SNS: AWS credentials
+
+Examples:
+  agent-sms send "+1234567890" "Hello!"
+  agent-sms send "+1234567890" "Test" --provider twilio
+  agent-sms list
+  agent-sms search "meeting"
+EOF
+}
+
+PROVIDER="${SMS_PROVIDER:-auto}"
+
+cmd_send() {
+    local number="${1:-}"
+    shift || true
+    local message="$*"
+    local provider="$PROVIDER"
+
+    # Parse remaining args for provider
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --provider|-p) provider="$2"; shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    [[ ${#args[@]} -gt 0 ]] && message="${args[*]}"
+
+    if [[ -z "$number" ]] || [[ -z "$message" ]]; then
+        echo "Error: Phone number and message required"
+        return 1
+    fi
+
+    # Auto-detect provider
+    if [[ "$provider" == "auto" ]]; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            provider="imessage"
+        elif [[ -n "${TWILIO_SID:-}" ]]; then
+            provider="twilio"
+        elif command -v aws &> /dev/null; then
+            provider="aws"
+        else
+            echo "Error: No SMS provider available"
+            echo "Set SMS_PROVIDER or configure Twilio/AWS"
+            return 1
+        fi
+    fi
+
+    case "$provider" in
+        imessage|messages|macos)
+            send_imessage "$number" "$message"
+            ;;
+        twilio)
+            send_twilio "$number" "$message"
+            ;;
+        aws|sns)
+            send_aws "$number" "$message"
+            ;;
+        *)
+            echo "Unknown provider: $provider"
+            return 1
+            ;;
+    esac
+}
+
+send_imessage() {
+    local number="$1"
+    local message="$2"
+
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo "Error: iMessage only available on macOS"
+        return 1
+    fi
+
+    osascript << EOF
+tell application "Messages"
+    set targetService to 1st account whose service type = SMS
+    set targetBuddy to participant "$number" of targetService
+    send "$message" to targetBuddy
+end tell
+EOF
+
+    echo "Sent via iMessage to $number"
+}
+
+send_twilio() {
+    local number="$1"
+    local message="$2"
+
+    if [[ -z "${TWILIO_SID:-}" ]] || [[ -z "${TWILIO_TOKEN:-}" ]] || [[ -z "${TWILIO_FROM:-}" ]]; then
+        echo "Error: TWILIO_SID, TWILIO_TOKEN, and TWILIO_FROM required"
+        return 1
+    fi
+
+    local response
+    response=$(curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_SID/Messages.json" \
+        -u "$TWILIO_SID:$TWILIO_TOKEN" \
+        -d "To=$number" \
+        -d "From=$TWILIO_FROM" \
+        -d "Body=$message")
+
+    if echo "$response" | grep -q '"sid"'; then
+        echo "Sent via Twilio to $number"
+    else
+        echo "Error: $response"
+        return 1
+    fi
+}
+
+send_aws() {
+    local number="$1"
+    local message="$2"
+
+    if ! command -v aws &> /dev/null; then
+        echo "Error: AWS CLI required"
+        return 1
+    fi
+
+    aws sns publish \
+        --phone-number "$number" \
+        --message "$message"
+
+    echo "Sent via AWS SNS to $number"
+}
+
+cmd_list() {
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo "Error: Message listing only available on macOS"
+        return 1
+    fi
+
+    # Query Messages database
+    local db="$HOME/Library/Messages/chat.db"
+
+    if [[ ! -f "$db" ]]; then
+        echo "Error: Messages database not accessible"
+        echo "Grant Full Disk Access in System Preferences > Security"
+        return 1
+    fi
+
+    echo "Recent messages:"
+    echo
+
+    sqlite3 "$db" << 'SQL'
+SELECT
+    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as date,
+    CASE WHEN message.is_from_me THEN 'Me' ELSE handle.id END as sender,
+    message.text
+FROM message
+LEFT JOIN handle ON message.handle_id = handle.ROWID
+WHERE message.text IS NOT NULL
+ORDER BY message.date DESC
+LIMIT 20;
+SQL
+}
+
+cmd_search() {
+    local term="${1:-}"
+
+    if [[ -z "$term" ]]; then
+        echo "Error: Search term required"
+        return 1
+    fi
+
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo "Error: Message search only available on macOS"
+        return 1
+    fi
+
+    local db="$HOME/Library/Messages/chat.db"
+
+    sqlite3 "$db" << SQL
+SELECT
+    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as date,
+    handle.id as contact,
+    message.text
+FROM message
+LEFT JOIN handle ON message.handle_id = handle.ROWID
+WHERE message.text LIKE '%$term%'
+ORDER BY message.date DESC
+LIMIT 20;
+SQL
+}
+
+cmd_export() {
+    local output="${1:-messages.json}"
+
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo "Error: Export only available on macOS"
+        return 1
+    fi
+
+    local db="$HOME/Library/Messages/chat.db"
+
+    sqlite3 -json "$db" << 'SQL' > "$output"
+SELECT
+    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as date,
+    CASE WHEN message.is_from_me THEN 'outgoing' ELSE 'incoming' END as direction,
+    handle.id as contact,
+    message.text
+FROM message
+LEFT JOIN handle ON message.handle_id = handle.ROWID
+WHERE message.text IS NOT NULL
+ORDER BY message.date DESC
+LIMIT 1000;
+SQL
+
+    echo "Exported to: $output"
+}
+
+cmd_conversation() {
+    local contact="${1:-}"
+
+    if [[ -z "$contact" ]]; then
+        echo "Error: Contact number/email required"
+        return 1
+    fi
+
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo "Error: Only available on macOS"
+        return 1
+    fi
+
+    local db="$HOME/Library/Messages/chat.db"
+
+    sqlite3 "$db" << SQL
+SELECT
+    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as date,
+    CASE WHEN message.is_from_me THEN 'Me' ELSE handle.id END as sender,
+    message.text
+FROM message
+LEFT JOIN handle ON message.handle_id = handle.ROWID
+WHERE handle.id LIKE '%$contact%'
+AND message.text IS NOT NULL
+ORDER BY message.date DESC
+LIMIT 50;
+SQL
+}
+
+cmd_providers() {
+    echo "Available SMS providers:"
+    echo
+    echo "  imessage  - macOS Messages app (default on Mac)"
+    echo "  twilio    - Twilio API (requires TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM)"
+    echo "  aws       - AWS SNS (requires AWS credentials)"
+    echo
+    echo "Set SMS_PROVIDER or use --provider flag"
+}
+
+# Main
+case "${1:-help}" in
+    send|text|msg)
+        shift
+        cmd_send "$@"
+        ;;
+    list|recent)
+        cmd_list
+        ;;
+    search|find)
+        shift
+        cmd_search "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    conversation|conv|thread)
+        shift
+        cmd_conversation "$@"
+        ;;
+    providers)
+        cmd_providers
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-sms help"
+        exit 1
+        ;;
+esac

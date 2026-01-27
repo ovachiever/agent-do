@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# agent-agent - AI agent session control
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_TUI="${SCRIPT_DIR}/agent-tui"
+
+show_help() {
+    cat << 'EOF'
+agent-agent - AI agent session control
+
+Commands:
+  start <type>               Start an AI agent session
+  send <session> <prompt>    Send prompt to agent
+  read <session>             Read agent output
+  list                       List active sessions
+  stop <session>             Stop agent session
+
+Agent types:
+  claude, claude-code        Claude Code CLI
+  aider                      Aider coding assistant
+  gpt                        ChatGPT CLI (if available)
+  copilot                    GitHub Copilot CLI
+
+Examples:
+  agent-agent start claude
+  agent-agent send 1 "fix the bug in main.py"
+  agent-agent read 1
+  agent-agent stop 1
+EOF
+}
+
+# Get command for agent type
+get_agent_cmd() {
+    local type="$1"
+    case "$type" in
+        claude|claude-code) echo "claude" ;;
+        aider) echo "aider" ;;
+        gpt|chatgpt) echo "chatgpt" ;;
+        copilot) echo "gh copilot" ;;
+        *) echo "$type" ;;
+    esac
+}
+
+cmd_start() {
+    local type="${1:-claude}"
+    local cmd=$(get_agent_cmd "$type")
+
+    # Check if command exists
+    local base_cmd="${cmd%% *}"
+    if ! command -v "$base_cmd" &> /dev/null; then
+        echo "Error: $base_cmd not found"
+        case "$type" in
+            claude*) echo "Install: npm install -g @anthropic-ai/claude-code" ;;
+            aider) echo "Install: pip install aider-chat" ;;
+            copilot) echo "Install: gh extension install github/gh-copilot" ;;
+        esac
+        return 1
+    fi
+
+    # Use agent-tui to spawn the agent
+    "$AGENT_TUI" spawn "$cmd"
+}
+
+cmd_send() {
+    local session="${1:-}"
+    shift || true
+    local prompt="$*"
+
+    if [[ -z "$session" ]] || [[ -z "$prompt" ]]; then
+        echo "Error: Session ID and prompt required"
+        echo "Usage: agent-agent send <session> <prompt>"
+        return 1
+    fi
+
+    # Send prompt followed by Enter
+    "$AGENT_TUI" type "$prompt" --session "$session"
+    "$AGENT_TUI" press Enter --session "$session"
+    echo "Sent prompt to session $session"
+}
+
+cmd_read() {
+    local session="${1:-}"
+
+    if [[ -z "$session" ]]; then
+        echo "Error: Session ID required"
+        return 1
+    fi
+
+    "$AGENT_TUI" snapshot --session "$session"
+}
+
+cmd_list() {
+    "$AGENT_TUI" list
+}
+
+cmd_stop() {
+    local session="${1:-}"
+
+    if [[ -z "$session" ]]; then
+        echo "Error: Session ID required"
+        return 1
+    fi
+
+    "$AGENT_TUI" kill --session "$session"
+    echo "Stopped session $session"
+}
+
+cmd_wait() {
+    local session="${1:-}"
+    local pattern="${2:-}"
+    local timeout="${3:-60000}"
+
+    if [[ -z "$session" ]]; then
+        echo "Error: Session ID required"
+        return 1
+    fi
+
+    if [[ -n "$pattern" ]]; then
+        "$AGENT_TUI" wait --text "$pattern" --timeout "$timeout" --session "$session"
+    else
+        "$AGENT_TUI" wait --stable --timeout "$timeout" --session "$session"
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    start|spawn|new)
+        shift || true
+        cmd_start "$@"
+        ;;
+    send|prompt|ask)
+        shift
+        cmd_send "$@"
+        ;;
+    read|output|snapshot)
+        shift
+        cmd_read "$@"
+        ;;
+    list|ls)
+        cmd_list
+        ;;
+    stop|kill|end)
+        shift
+        cmd_stop "$@"
+        ;;
+    wait)
+        shift
+        cmd_wait "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-agent help"
+        exit 1
+        ;;
+esac

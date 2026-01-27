@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# agent-homekit - HomeKit/smart home control (macOS)
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-homekit - HomeKit/smart home control
+
+Commands:
+  list                       List accessories
+  rooms                      List rooms
+  scenes                     List scenes
+  run <scene>                Run a scene
+  set <accessory> <state>    Set accessory state
+
+States:
+  on, off                    For switches/lights
+  brightness <0-100>         For dimmable lights
+  temperature <value>        For thermostats
+
+Requirements:
+  - macOS with HomeKit configured
+  - Shortcuts app for some commands
+
+Examples:
+  agent-homekit list
+  agent-homekit scenes
+  agent-homekit run "Good Night"
+  agent-homekit set "Living Room Light" on
+  agent-homekit set "Bedroom" brightness 50
+EOF
+}
+
+# Note: HomeKit API is not directly accessible via command line
+# We use AppleScript/Shortcuts as a bridge
+
+cmd_list() {
+    # Use AppleScript to get Home app data
+    osascript << 'EOF' 2>/dev/null || echo "Error: Could not access Home app"
+tell application "System Events"
+    tell application "Home" to activate
+    delay 1
+    -- Note: Home app doesn't have good AppleScript support
+    -- This is a placeholder
+end tell
+return "HomeKit accessories require the Home app or Shortcuts."
+EOF
+
+    echo ""
+    echo "For better HomeKit control, create Shortcuts and use:"
+    echo "  shortcuts run 'Your Shortcut Name'"
+    echo ""
+    echo "Available shortcuts with 'home' in name:"
+    shortcuts list 2>/dev/null | grep -i home || echo "  (none found)"
+}
+
+cmd_rooms() {
+    echo "Rooms require Home app access."
+    echo "Create a Shortcut to list rooms, then run:"
+    echo "  shortcuts run 'List Rooms'"
+}
+
+cmd_scenes() {
+    # List shortcuts that might be HomeKit scenes
+    echo "HomeKit Scenes (via Shortcuts):"
+    echo ""
+    shortcuts list 2>/dev/null | head -20 || echo "Error: Could not list shortcuts"
+    echo ""
+    echo "To run: agent-homekit run 'Scene Name'"
+}
+
+cmd_run() {
+    local scene="$*"
+
+    if [[ -z "$scene" ]]; then
+        echo "Error: Scene name required"
+        return 1
+    fi
+
+    # Try running as a Shortcut first
+    if shortcuts run "$scene" 2>/dev/null; then
+        echo "Ran scene: $scene"
+    else
+        # Try via AppleScript/Home app
+        osascript << EOF
+tell application "Home"
+    -- Note: Home app has limited AppleScript support
+    -- This may not work directly
+end tell
+EOF
+        echo "Note: Direct HomeKit scene triggering requires Shortcuts."
+        echo "Create a Shortcut named '$scene' that triggers the scene."
+    fi
+}
+
+cmd_set() {
+    local accessory="${1:-}"
+    local state="${2:-}"
+    local value="${3:-}"
+
+    if [[ -z "$accessory" ]] || [[ -z "$state" ]]; then
+        echo "Error: Accessory and state required"
+        echo "Usage: agent-homekit set <accessory> <on|off|brightness N>"
+        return 1
+    fi
+
+    # Create and run a temporary shortcut-like command
+    # This requires pre-configured shortcuts for each accessory
+    local shortcut_name=""
+
+    case "$state" in
+        on)
+            shortcut_name="${accessory} On"
+            ;;
+        off)
+            shortcut_name="${accessory} Off"
+            ;;
+        brightness)
+            shortcut_name="Set ${accessory} Brightness"
+            ;;
+        *)
+            echo "Unknown state: $state"
+            return 1
+            ;;
+    esac
+
+    if shortcuts run "$shortcut_name" 2>/dev/null; then
+        echo "Set $accessory to $state"
+    else
+        echo "Error: Shortcut '$shortcut_name' not found"
+        echo ""
+        echo "To control HomeKit devices, create Shortcuts:"
+        echo "  1. Open Shortcuts app"
+        echo "  2. Create new shortcut"
+        echo "  3. Add 'Control Home' action"
+        echo "  4. Name it '$shortcut_name'"
+    fi
+}
+
+cmd_shortcuts() {
+    echo "Available Shortcuts:"
+    shortcuts list 2>/dev/null || echo "Error: Could not list shortcuts"
+}
+
+# Main
+case "${1:-help}" in
+    list|devices|accessories)
+        cmd_list
+        ;;
+    rooms)
+        cmd_rooms
+        ;;
+    scenes)
+        cmd_scenes
+        ;;
+    run|scene|trigger)
+        shift
+        cmd_run "$@"
+        ;;
+    set|control)
+        shift
+        cmd_set "$@"
+        ;;
+    shortcuts)
+        cmd_shortcuts
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-homekit help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# agent-midi - MIDI device control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-midi - MIDI device control
+
+Commands:
+  list                       List MIDI devices
+  send <device> <msg>        Send MIDI message
+  monitor [device]           Monitor MIDI input
+  play <file>                Play MIDI file
+
+Message format:
+  note <channel> <note> <velocity>     Note on (velocity 0 = note off)
+  cc <channel> <controller> <value>    Control change
+  pc <channel> <program>               Program change
+
+Requirements:
+  - macOS: Core MIDI (built-in)
+  - Python: mido, python-rtmidi
+
+Examples:
+  agent-midi list
+  agent-midi send "USB MIDI" note 1 60 100
+  agent-midi monitor
+  agent-midi play song.mid
+EOF
+}
+
+# Python-based MIDI operations (cross-platform)
+python_midi() {
+    python3 << 'PYTHON'
+import sys
+try:
+    import mido
+except ImportError:
+    print("Error: mido not installed")
+    print("Install with: pip install mido python-rtmidi")
+    sys.exit(1)
+
+import argparse
+
+def list_devices():
+    print("Input devices:")
+    for name in mido.get_input_names():
+        print(f"  - {name}")
+    print("\nOutput devices:")
+    for name in mido.get_output_names():
+        print(f"  - {name}")
+
+def send_message(device, msg_type, *args):
+    args = [int(a) for a in args]
+
+    if msg_type == "note":
+        channel, note, velocity = args[0]-1, args[1], args[2]
+        if velocity > 0:
+            msg = mido.Message('note_on', channel=channel, note=note, velocity=velocity)
+        else:
+            msg = mido.Message('note_off', channel=channel, note=note)
+    elif msg_type == "cc":
+        channel, control, value = args[0]-1, args[1], args[2]
+        msg = mido.Message('control_change', channel=channel, control=control, value=value)
+    elif msg_type == "pc":
+        channel, program = args[0]-1, args[1]
+        msg = mido.Message('program_change', channel=channel, program=program)
+    else:
+        print(f"Unknown message type: {msg_type}")
+        return
+
+    with mido.open_output(device) as output:
+        output.send(msg)
+        print(f"Sent: {msg}")
+
+def monitor(device=None):
+    if device:
+        inputs = [device]
+    else:
+        inputs = mido.get_input_names()
+
+    print("Monitoring MIDI input (Ctrl+C to stop)...")
+
+    for port_name in inputs:
+        try:
+            with mido.open_input(port_name) as port:
+                print(f"Listening on: {port_name}")
+                for msg in port:
+                    print(f"[{port_name}] {msg}")
+        except:
+            pass
+
+def play_file(filename):
+    mid = mido.MidiFile(filename)
+
+    outputs = mido.get_output_names()
+    if not outputs:
+        print("No MIDI output devices available")
+        return
+
+    with mido.open_output(outputs[0]) as output:
+        print(f"Playing {filename} on {outputs[0]}...")
+        for msg in mid.play():
+            output.send(msg)
+        print("Done")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        list_devices()
+    elif sys.argv[1] == "list":
+        list_devices()
+    elif sys.argv[1] == "send":
+        send_message(sys.argv[2], sys.argv[3], *sys.argv[4:])
+    elif sys.argv[1] == "monitor":
+        device = sys.argv[2] if len(sys.argv) > 2 else None
+        monitor(device)
+    elif sys.argv[1] == "play":
+        play_file(sys.argv[2])
+PYTHON
+}
+
+cmd_list() {
+    python_midi list
+}
+
+cmd_send() {
+    local device="${1:-}"
+    shift || true
+
+    if [[ -z "$device" ]]; then
+        echo "Error: Device and message required"
+        echo "Usage: agent-midi send <device> <note|cc|pc> <args...>"
+        return 1
+    fi
+
+    python3 << PYTHON
+import sys
+sys.argv = ['midi', 'send', '$device', $@]
+PYTHON
+
+    # Actually run it properly
+    python_midi send "$device" "$@"
+}
+
+cmd_monitor() {
+    local device="${1:-}"
+    python_midi monitor "$device"
+}
+
+cmd_play() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid MIDI file required"
+        return 1
+    fi
+
+    python_midi play "$file"
+}
+
+# Main
+case "${1:-help}" in
+    list|devices)
+        cmd_list
+        ;;
+    send|msg)
+        shift
+        cmd_send "$@"
+        ;;
+    monitor|listen|input)
+        shift || true
+        cmd_monitor "$@"
+        ;;
+    play)
+        shift
+        cmd_play "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-midi help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# agent-video - Video processing
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-video - Video processing
+
+Commands:
+  info <file>                Show video info
+  convert <file> <format>    Convert format (mp4, webm, avi, mkv)
+  trim <file> <start> <end>  Trim video (HH:MM:SS format)
+  merge <files...> <output>  Merge videos
+  resize <file> <WxH>        Resize video
+  extract <file> [dir]       Extract frames as images
+  thumbnail <file> [time]    Create thumbnail at time (default: 00:00:01)
+  gif <file> [start] [len]   Convert to GIF
+  compress <file>            Compress video
+
+Options:
+  -o, --output <path>        Output file path
+
+Requirements:
+  - ffmpeg
+
+Examples:
+  agent-video convert movie.avi mp4
+  agent-video trim video.mp4 00:01:00 00:02:00
+  agent-video thumbnail video.mp4 00:00:30
+  agent-video gif video.mp4 00:00:05 3
+EOF
+}
+
+check_ffmpeg() {
+    if ! command -v ffmpeg &> /dev/null; then
+        echo "Error: ffmpeg not found"
+        exit 1
+    fi
+}
+
+cmd_info() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    if command -v ffprobe &> /dev/null; then
+        echo "=== Video Info ==="
+        ffprobe -v quiet -show_format -show_streams "$file" 2>/dev/null | \
+            grep -E "^(codec_name|width|height|r_frame_rate|bit_rate|duration|format_name)=" | head -20
+    else
+        file "$file"
+    fi
+}
+
+cmd_convert() {
+    local file="${1:-}"
+    local format="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$format" ]]; then
+        echo "Error: File and format required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    format="${format#.}"
+    [[ -z "$output" ]] && output="${file%.*}.$format"
+
+    ffmpeg -i "$file" -y "$output" 2>/dev/null
+    echo "Converted to $output"
+}
+
+cmd_trim() {
+    local file="${1:-}"
+    local start="${2:-}"
+    local end="${3:-}"
+    local output=""
+
+    shift 3 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$start" ]] || [[ -z "$end" ]]; then
+        echo "Error: File, start, and end time required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    [[ -z "$output" ]] && output="${file%.*}-trimmed.${file##*.}"
+
+    ffmpeg -i "$file" -ss "$start" -to "$end" -c copy -y "$output" 2>/dev/null
+    echo "Trimmed to $output"
+}
+
+cmd_merge() {
+    local files=()
+    local output=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output)
+                output="$2"
+                shift 2
+                ;;
+            *)
+                if [[ $# -eq 1 ]] && [[ -z "$output" ]]; then
+                    output="$1"
+                else
+                    files+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ ${#files[@]} -lt 2 ]] || [[ -z "$output" ]]; then
+        echo "Error: At least 2 input files and output required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    local concat_file="/tmp/video-concat-$$.txt"
+    for f in "${files[@]}"; do
+        echo "file '$(realpath "$f")'" >> "$concat_file"
+    done
+
+    ffmpeg -f concat -safe 0 -i "$concat_file" -c copy -y "$output" 2>/dev/null
+    rm -f "$concat_file"
+
+    echo "Merged to $output"
+}
+
+cmd_resize() {
+    local file="${1:-}"
+    local size="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$size" ]]; then
+        echo "Error: File and size required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    [[ -z "$output" ]] && output="${file%.*}-${size}.${file##*.}"
+
+    local w="${size%x*}"
+    local h="${size#*x}"
+
+    ffmpeg -i "$file" -vf "scale=$w:$h" -y "$output" 2>/dev/null
+    echo "Resized to $output"
+}
+
+cmd_extract() {
+    local file="${1:-}"
+    local output_dir="${2:-.}"
+    local fps="${3:-1}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    mkdir -p "$output_dir"
+    ffmpeg -i "$file" -vf "fps=$fps" "$output_dir/frame-%04d.png" 2>/dev/null
+    echo "Frames extracted to $output_dir/"
+}
+
+cmd_thumbnail() {
+    local file="${1:-}"
+    local time="${2:-00:00:01}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    [[ -z "$output" ]] && output="${file%.*}-thumb.jpg"
+
+    ffmpeg -i "$file" -ss "$time" -vframes 1 -y "$output" 2>/dev/null
+    echo "Thumbnail created: $output"
+}
+
+cmd_gif() {
+    local file="${1:-}"
+    local start="${2:-00:00:00}"
+    local duration="${3:-5}"
+    local output=""
+    local fps="${4:-10}"
+
+    shift 4 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    [[ -z "$output" ]] && output="${file%.*}.gif"
+
+    ffmpeg -i "$file" -ss "$start" -t "$duration" \
+           -vf "fps=$fps,scale=480:-1:flags=lanczos" \
+           -y "$output" 2>/dev/null
+    echo "GIF created: $output"
+}
+
+cmd_compress() {
+    local file="${1:-}"
+    local output=""
+    local crf="${2:-28}"
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    check_ffmpeg
+
+    [[ -z "$output" ]] && output="${file%.*}-compressed.${file##*.}"
+
+    ffmpeg -i "$file" -vcodec libx264 -crf "$crf" -y "$output" 2>/dev/null
+
+    local orig_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file")
+    local new_size=$(stat -f%z "$output" 2>/dev/null || stat -c%s "$output")
+    echo "Compressed: $orig_size -> $new_size bytes"
+    echo "Output: $output"
+}
+
+# Main
+case "${1:-help}" in
+    info|i)
+        shift
+        cmd_info "$@"
+        ;;
+    convert|c)
+        shift
+        cmd_convert "$@"
+        ;;
+    trim|cut)
+        shift
+        cmd_trim "$@"
+        ;;
+    merge|join|concat)
+        shift
+        cmd_merge "$@"
+        ;;
+    resize|scale)
+        shift
+        cmd_resize "$@"
+        ;;
+    extract|frames)
+        shift
+        cmd_extract "$@"
+        ;;
+    thumbnail|thumb)
+        shift
+        cmd_thumbnail "$@"
+        ;;
+    gif)
+        shift
+        cmd_gif "$@"
+        ;;
+    compress|shrink)
+        shift
+        cmd_compress "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-video help"
+        exit 1
+        ;;
+esac

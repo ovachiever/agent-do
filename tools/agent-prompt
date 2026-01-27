@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+# agent-prompt - Prompt management and templating
+
+set -euo pipefail
+
+PROMPT_DIR="${AGENT_DO_HOME:-$HOME/.agent-do}/prompts"
+mkdir -p "$PROMPT_DIR"
+
+show_help() {
+    cat << 'EOF'
+agent-prompt - Prompt management and templating
+
+Commands:
+  list                     List saved prompts
+  save <name>              Save prompt from stdin
+  load <name>              Load and output prompt
+  run <name> [vars]        Run prompt with variables
+  edit <name>              Edit prompt in $EDITOR
+  delete <name>            Delete a prompt
+  search <term>            Search prompts
+  import <file>            Import prompts from file
+  export <name>            Export prompt to file
+
+Variables:
+  Use {{variable}} syntax in prompts
+  Pass values as KEY=VALUE arguments
+
+Examples:
+  echo "Explain {{topic}}" | agent-prompt save explain
+  agent-prompt run explain topic="quantum computing"
+  agent-prompt list
+  agent-prompt edit explain
+EOF
+}
+
+cmd_list() {
+    if [[ ! -d "$PROMPT_DIR" ]] || [[ -z "$(ls -A "$PROMPT_DIR" 2>/dev/null)" ]]; then
+        echo "No saved prompts."
+        echo "Save one with: echo 'prompt text' | agent-prompt save <name>"
+        return 0
+    fi
+
+    echo "Saved prompts:"
+    echo
+    for f in "$PROMPT_DIR"/*.txt; do
+        [[ -f "$f" ]] || continue
+        local name=$(basename "$f" .txt)
+        local preview=$(head -1 "$f" | cut -c1-60)
+        printf "  %-20s %s\n" "$name" "$preview..."
+    done
+}
+
+cmd_save() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Prompt name required"
+        return 1
+    fi
+
+    local file="$PROMPT_DIR/${name}.txt"
+
+    if [[ -t 0 ]]; then
+        # Interactive mode - open editor
+        ${EDITOR:-nano} "$file"
+    else
+        # Pipe mode - read from stdin
+        cat > "$file"
+    fi
+
+    echo "Saved: $name"
+}
+
+cmd_load() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Prompt name required"
+        return 1
+    fi
+
+    local file="$PROMPT_DIR/${name}.txt"
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: Prompt not found: $name"
+        return 1
+    fi
+
+    cat "$file"
+}
+
+cmd_run() {
+    local name="${1:-}"
+    shift || true
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Prompt name required"
+        return 1
+    fi
+
+    local file="$PROMPT_DIR/${name}.txt"
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: Prompt not found: $name"
+        return 1
+    fi
+
+    local content
+    content=$(cat "$file")
+
+    # Replace variables
+    for arg in "$@"; do
+        if [[ "$arg" == *=* ]]; then
+            local key="${arg%%=*}"
+            local value="${arg#*=}"
+            content="${content//\{\{$key\}\}/$value}"
+        fi
+    done
+
+    # Check for unreplaced variables
+    local missing
+    missing=$(echo "$content" | grep -oE '\{\{[^}]+\}\}' | sort -u)
+    if [[ -n "$missing" ]]; then
+        echo "Warning: Unreplaced variables:"
+        echo "$missing"
+        echo
+    fi
+
+    echo "$content"
+}
+
+cmd_edit() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Prompt name required"
+        return 1
+    fi
+
+    local file="$PROMPT_DIR/${name}.txt"
+
+    ${EDITOR:-nano} "$file"
+    echo "Edited: $name"
+}
+
+cmd_delete() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Prompt name required"
+        return 1
+    fi
+
+    local file="$PROMPT_DIR/${name}.txt"
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: Prompt not found: $name"
+        return 1
+    fi
+
+    rm "$file"
+    echo "Deleted: $name"
+}
+
+cmd_search() {
+    local term="${1:-}"
+
+    if [[ -z "$term" ]]; then
+        echo "Error: Search term required"
+        return 1
+    fi
+
+    echo "Prompts containing '$term':"
+    echo
+    grep -l -i "$term" "$PROMPT_DIR"/*.txt 2>/dev/null | while read -r f; do
+        local name=$(basename "$f" .txt)
+        echo "  $name:"
+        grep -i --color=always "$term" "$f" | head -3 | sed 's/^/    /'
+        echo
+    done
+}
+
+cmd_import() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    local ext="${file##*.}"
+
+    case "$ext" in
+        json)
+            # Import from JSON: {"name": "content", ...}
+            python3 << PYTHON
+import json
+import os
+with open('$file') as f:
+    data = json.load(f)
+for name, content in data.items():
+    path = os.path.join('$PROMPT_DIR', f'{name}.txt')
+    with open(path, 'w') as f:
+        f.write(content)
+    print(f'Imported: {name}')
+PYTHON
+            ;;
+        yaml|yml)
+            # Import from YAML
+            python3 << PYTHON
+import yaml
+import os
+with open('$file') as f:
+    data = yaml.safe_load(f)
+for name, content in data.items():
+    path = os.path.join('$PROMPT_DIR', f'{name}.txt')
+    with open(path, 'w') as f:
+        f.write(content if isinstance(content, str) else content.get('content', ''))
+    print(f'Imported: {name}')
+PYTHON
+            ;;
+        *)
+            # Single prompt file
+            local name=$(basename "$file" ".$ext")
+            cp "$file" "$PROMPT_DIR/${name}.txt"
+            echo "Imported: $name"
+            ;;
+    esac
+}
+
+cmd_export() {
+    local name="${1:-}"
+    local output="${2:-}"
+
+    if [[ -z "$name" ]]; then
+        # Export all
+        output="${output:-prompts.json}"
+        python3 << PYTHON
+import json
+import os
+import glob
+prompts = {}
+for f in glob.glob('$PROMPT_DIR/*.txt'):
+    name = os.path.splitext(os.path.basename(f))[0]
+    with open(f) as file:
+        prompts[name] = file.read()
+with open('$output', 'w') as f:
+    json.dump(prompts, f, indent=2)
+print(f'Exported {len(prompts)} prompts to: $output')
+PYTHON
+    else
+        local file="$PROMPT_DIR/${name}.txt"
+        if [[ ! -f "$file" ]]; then
+            echo "Error: Prompt not found: $name"
+            return 1
+        fi
+        output="${output:-${name}.txt}"
+        cp "$file" "$output"
+        echo "Exported: $output"
+    fi
+}
+
+cmd_copy() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Prompt name required"
+        return 1
+    fi
+
+    local file="$PROMPT_DIR/${name}.txt"
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: Prompt not found: $name"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        cat "$file" | pbcopy
+    else
+        cat "$file" | xclip -selection clipboard 2>/dev/null || \
+            cat "$file" | xsel --clipboard
+    fi
+
+    echo "Copied to clipboard: $name"
+}
+
+# Main
+case "${1:-help}" in
+    list|ls)
+        cmd_list
+        ;;
+    save|add|create)
+        shift
+        cmd_save "$@"
+        ;;
+    load|get|show)
+        shift
+        cmd_load "$@"
+        ;;
+    run|exec|use)
+        shift
+        cmd_run "$@"
+        ;;
+    edit)
+        shift
+        cmd_edit "$@"
+        ;;
+    delete|rm|remove)
+        shift
+        cmd_delete "$@"
+        ;;
+    search|find|grep)
+        shift
+        cmd_search "$@"
+        ;;
+    import)
+        shift
+        cmd_import "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    copy|cp|clipboard)
+        shift
+        cmd_copy "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-prompt help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# agent-printer - Printer operations
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-printer - Printer operations
+
+Commands:
+  list                       List available printers
+  default                    Show/set default printer
+  status [printer]           Show printer status
+  print <file>               Print file
+  jobs [printer]             List print jobs
+  cancel <job-id>            Cancel print job
+  queue                      Show print queue
+
+Options:
+  --printer <name>           Specify printer
+  --copies <n>               Number of copies
+  --pages <range>            Page range (e.g., 1-5)
+  --duplex                   Double-sided printing
+
+Examples:
+  agent-printer list
+  agent-printer print document.pdf
+  agent-printer print report.pdf --printer "HP LaserJet" --copies 2
+  agent-printer jobs
+  agent-printer cancel 123
+EOF
+}
+
+cmd_list() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        lpstat -p 2>/dev/null | while read -r line; do
+            echo "$line"
+        done
+        echo ""
+        echo "Default: $(lpstat -d 2>/dev/null | awk '{print $NF}')"
+    else
+        lpstat -p -d 2>/dev/null || echo "No printers configured"
+    fi
+}
+
+cmd_default() {
+    local printer="${1:-}"
+
+    if [[ -z "$printer" ]]; then
+        lpstat -d 2>/dev/null | awk '{print $NF}'
+    else
+        if [[ "$(uname)" == "Darwin" ]]; then
+            lpoptions -d "$printer"
+            echo "Default printer set to: $printer"
+        else
+            lpadmin -d "$printer"
+            echo "Default printer set to: $printer"
+        fi
+    fi
+}
+
+cmd_status() {
+    local printer="${1:-}"
+
+    if [[ -n "$printer" ]]; then
+        lpstat -p "$printer" 2>/dev/null
+    else
+        lpstat -p 2>/dev/null
+    fi
+}
+
+cmd_print() {
+    local file=""
+    local printer=""
+    local copies="1"
+    local pages=""
+    local duplex=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --printer|-P) printer="$2"; shift 2 ;;
+            --copies|-n) copies="$2"; shift 2 ;;
+            --pages) pages="$2"; shift 2 ;;
+            --duplex|-d) duplex="sides=two-sided-long-edge"; shift ;;
+            *) file="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]]; then
+        echo "Error: File required"
+        return 1
+    fi
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: File not found: $file"
+        return 1
+    fi
+
+    local args=()
+    [[ -n "$printer" ]] && args+=(-P "$printer")
+    args+=(-n "$copies")
+    [[ -n "$pages" ]] && args+=(-o "page-ranges=$pages")
+    [[ -n "$duplex" ]] && args+=(-o "$duplex")
+
+    lp "${args[@]}" "$file"
+}
+
+cmd_jobs() {
+    local printer="${1:-}"
+
+    if [[ -n "$printer" ]]; then
+        lpstat -o "$printer" 2>/dev/null || echo "No jobs"
+    else
+        lpstat -o 2>/dev/null || echo "No jobs"
+    fi
+}
+
+cmd_cancel() {
+    local job_id="${1:-}"
+
+    if [[ -z "$job_id" ]]; then
+        echo "Error: Job ID required"
+        echo "Use 'agent-printer jobs' to list jobs"
+        return 1
+    fi
+
+    cancel "$job_id"
+    echo "Cancelled job: $job_id"
+}
+
+cmd_queue() {
+    lpq -a 2>/dev/null || lpstat -o 2>/dev/null || echo "No jobs in queue"
+}
+
+# Main
+case "${1:-help}" in
+    list|ls|printers)
+        cmd_list
+        ;;
+    default)
+        shift || true
+        cmd_default "$@"
+        ;;
+    status|stat)
+        shift || true
+        cmd_status "$@"
+        ;;
+    print|p)
+        shift
+        cmd_print "$@"
+        ;;
+    jobs|queue|q)
+        shift || true
+        cmd_jobs "$@"
+        ;;
+    cancel|rm)
+        shift
+        cmd_cancel "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it's a file, print it
+        if [[ -f "$1" ]]; then
+            cmd_print "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-printer help"
+            exit 1
+        fi
+        ;;
+esac

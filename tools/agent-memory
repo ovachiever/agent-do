@@ -1,0 +1,440 @@
+#!/usr/bin/env bash
+# agent-memory - Persistent memory and context management
+
+set -euo pipefail
+
+MEMORY_DIR="${AGENT_DO_HOME:-$HOME/.agent-do}/memory"
+mkdir -p "$MEMORY_DIR"
+
+show_help() {
+    cat << 'EOF'
+agent-memory - Persistent memory and context management
+
+Commands:
+  store <key> <value>      Store a memory
+  recall <key>             Recall a memory
+  search <query>           Search memories
+  list                     List all memories
+  delete <key>             Delete a memory
+  context                  Show current context
+  clear                    Clear all memories
+  export <path>            Export memories
+  import <path>            Import memories
+
+Memory types:
+  - facts: Persistent facts about user/project
+  - context: Session context
+  - history: Command history
+  - preferences: User preferences
+
+Examples:
+  agent-memory store project "E-commerce app using React"
+  agent-memory recall project
+  agent-memory search "react"
+  agent-memory store --type facts user_name "Erik"
+EOF
+}
+
+cmd_store() {
+    local key=""
+    local value=""
+    local mem_type="facts"
+    local ttl=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --type|-t) mem_type="$2"; shift 2 ;;
+            --ttl) ttl="$2"; shift 2 ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                else
+                    value="$*"
+                    break
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$key" ]] || [[ -z "$value" ]]; then
+        echo "Error: Key and value required"
+        return 1
+    fi
+
+    local store="$MEMORY_DIR/${mem_type}.json"
+
+    python3 << PYTHON
+import json
+import os
+from datetime import datetime
+
+store_path = '$store'
+if os.path.exists(store_path):
+    with open(store_path) as f:
+        data = json.load(f)
+else:
+    data = {}
+
+data['$key'] = {
+    'value': '''$value''',
+    'created': datetime.now().isoformat(),
+    'updated': datetime.now().isoformat(),
+    'type': '$mem_type'
+}
+
+if '$ttl':
+    data['$key']['ttl'] = '$ttl'
+
+with open(store_path, 'w') as f:
+    json.dump(data, f, indent=2)
+
+print(f"Stored: $key")
+PYTHON
+}
+
+cmd_recall() {
+    local key="${1:-}"
+    local mem_type=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --type|-t) mem_type="$2"; shift 2 ;;
+            *) key="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$key" ]]; then
+        echo "Error: Key required"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+import glob
+import os
+
+key = '$key'
+mem_type = '$mem_type'
+
+if mem_type:
+    stores = [f"$MEMORY_DIR/{mem_type}.json"]
+else:
+    stores = glob.glob("$MEMORY_DIR/*.json")
+
+for store in stores:
+    if os.path.exists(store):
+        with open(store) as f:
+            data = json.load(f)
+        if key in data:
+            print(data[key]['value'])
+            exit(0)
+
+print(f"Memory not found: {key}")
+exit(1)
+PYTHON
+}
+
+cmd_search() {
+    local query="${1:-}"
+
+    if [[ -z "$query" ]]; then
+        echo "Error: Search query required"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+import glob
+import os
+
+query = '$query'.lower()
+results = []
+
+for store in glob.glob("$MEMORY_DIR/*.json"):
+    store_type = os.path.splitext(os.path.basename(store))[0]
+    with open(store) as f:
+        data = json.load(f)
+
+    for key, mem in data.items():
+        value = mem.get('value', '')
+        if query in key.lower() or query in value.lower():
+            results.append({
+                'key': key,
+                'value': value[:100] + ('...' if len(value) > 100 else ''),
+                'type': store_type
+            })
+
+if results:
+    print(f"Found {len(results)} memories:")
+    for r in results:
+        print(f"  [{r['type']}] {r['key']}: {r['value']}")
+else:
+    print("No memories found")
+PYTHON
+}
+
+cmd_list() {
+    local mem_type="${1:-}"
+
+    python3 << PYTHON
+import json
+import glob
+import os
+
+mem_type = '$mem_type'
+
+if mem_type:
+    stores = [f"$MEMORY_DIR/{mem_type}.json"]
+else:
+    stores = glob.glob("$MEMORY_DIR/*.json")
+
+for store in stores:
+    if not os.path.exists(store):
+        continue
+
+    store_type = os.path.splitext(os.path.basename(store))[0]
+    with open(store) as f:
+        data = json.load(f)
+
+    if data:
+        print(f"\n{store_type.upper()} ({len(data)} items):")
+        for key, mem in list(data.items())[:10]:
+            value = mem.get('value', '')
+            preview = value[:60] + ('...' if len(value) > 60 else '')
+            print(f"  {key}: {preview}")
+        if len(data) > 10:
+            print(f"  ... and {len(data) - 10} more")
+PYTHON
+}
+
+cmd_delete() {
+    local key="${1:-}"
+    local mem_type="${2:-}"
+
+    if [[ -z "$key" ]]; then
+        echo "Error: Key required"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+import glob
+import os
+
+key = '$key'
+mem_type = '$mem_type'
+deleted = False
+
+if mem_type:
+    stores = [f"$MEMORY_DIR/{mem_type}.json"]
+else:
+    stores = glob.glob("$MEMORY_DIR/*.json")
+
+for store in stores:
+    if os.path.exists(store):
+        with open(store) as f:
+            data = json.load(f)
+        if key in data:
+            del data[key]
+            with open(store, 'w') as f:
+                json.dump(data, f, indent=2)
+            print(f"Deleted: {key}")
+            deleted = True
+
+if not deleted:
+    print(f"Memory not found: {key}")
+PYTHON
+}
+
+cmd_context() {
+    echo "Current context:"
+    echo
+
+    # Show recent memories
+    python3 << PYTHON
+import json
+import os
+from datetime import datetime, timedelta
+
+context_file = "$MEMORY_DIR/context.json"
+if os.path.exists(context_file):
+    with open(context_file) as f:
+        context = json.load(f)
+
+    print("Context memories:")
+    for key, mem in context.items():
+        updated = mem.get('updated', '')
+        print(f"  {key}: {mem.get('value', '')[:60]}")
+        print(f"    (updated: {updated[:10]})")
+else:
+    print("No context memories")
+
+# Show recent facts
+facts_file = "$MEMORY_DIR/facts.json"
+if os.path.exists(facts_file):
+    with open(facts_file) as f:
+        facts = json.load(f)
+    print(f"\nFacts ({len(facts)} total):")
+    for key in list(facts.keys())[:5]:
+        print(f"  {key}: {facts[key].get('value', '')[:50]}")
+PYTHON
+}
+
+cmd_clear() {
+    local mem_type="${1:-all}"
+    local force=false
+
+    [[ "$2" == "--force" ]] && force=true
+
+    if ! $force; then
+        read -p "Clear ${mem_type} memories? [y/N] " -n 1 -r
+        echo
+        [[ ! $REPLY =~ ^[Yy]$ ]] && return 0
+    fi
+
+    if [[ "$mem_type" == "all" ]]; then
+        rm -f "$MEMORY_DIR"/*.json
+        echo "All memories cleared"
+    else
+        rm -f "$MEMORY_DIR/${mem_type}.json"
+        echo "Cleared: $mem_type"
+    fi
+}
+
+cmd_export() {
+    local output="${1:-memories.json}"
+
+    python3 << PYTHON
+import json
+import glob
+import os
+
+all_memories = {}
+
+for store in glob.glob("$MEMORY_DIR/*.json"):
+    store_type = os.path.splitext(os.path.basename(store))[0]
+    with open(store) as f:
+        all_memories[store_type] = json.load(f)
+
+with open('$output', 'w') as f:
+    json.dump(all_memories, f, indent=2)
+
+total = sum(len(v) for v in all_memories.values())
+print(f"Exported {total} memories to: $output")
+PYTHON
+}
+
+cmd_import() {
+    local input="${1:-}"
+
+    if [[ -z "$input" ]] || [[ ! -f "$input" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+import os
+
+with open('$input') as f:
+    data = json.load(f)
+
+total = 0
+for mem_type, memories in data.items():
+    store_path = f"$MEMORY_DIR/{mem_type}.json"
+
+    # Merge with existing
+    if os.path.exists(store_path):
+        with open(store_path) as f:
+            existing = json.load(f)
+        existing.update(memories)
+        memories = existing
+
+    with open(store_path, 'w') as f:
+        json.dump(memories, f, indent=2)
+
+    total += len(memories)
+
+print(f"Imported {total} memories")
+PYTHON
+}
+
+cmd_stats() {
+    python3 << PYTHON
+import json
+import glob
+import os
+
+print("Memory Statistics:")
+print()
+
+total_memories = 0
+total_size = 0
+
+for store in glob.glob("$MEMORY_DIR/*.json"):
+    store_type = os.path.splitext(os.path.basename(store))[0]
+    size = os.path.getsize(store)
+    total_size += size
+
+    with open(store) as f:
+        data = json.load(f)
+
+    count = len(data)
+    total_memories += count
+    print(f"  {store_type}: {count} items ({size / 1024:.1f} KB)")
+
+print()
+print(f"Total: {total_memories} memories ({total_size / 1024:.1f} KB)")
+PYTHON
+}
+
+# Main
+case "${1:-help}" in
+    store|set|save)
+        shift
+        cmd_store "$@"
+        ;;
+    recall|get|load)
+        shift
+        cmd_recall "$@"
+        ;;
+    search|find|query)
+        shift
+        cmd_search "$@"
+        ;;
+    list|ls)
+        shift || true
+        cmd_list "$@"
+        ;;
+    delete|rm|remove|forget)
+        shift
+        cmd_delete "$@"
+        ;;
+    context|ctx)
+        cmd_context
+        ;;
+    clear|reset)
+        shift || true
+        cmd_clear "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    import)
+        shift
+        cmd_import "$@"
+        ;;
+    stats|info)
+        cmd_stats
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-memory help"
+        exit 1
+        ;;
+esac

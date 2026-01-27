@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+# agent-debug - Debugger control
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-debug - Debugger control
+
+Commands:
+  python <script>            Debug Python script with pdb
+  node <script>              Debug Node.js script
+  lldb <binary>              Debug binary with lldb
+  gdb <binary>               Debug binary with gdb
+
+  attach <pid>               Attach to running process
+  core <binary> <core>       Debug core dump
+
+Python pdb commands (when attached):
+  break <file:line>          Set breakpoint
+  continue                   Continue execution
+  step                       Step into
+  next                       Step over
+  print <expr>               Print expression
+  list                       List source
+  quit                       Quit debugger
+
+Examples:
+  agent-debug python app.py
+  agent-debug node server.js
+  agent-debug attach 12345
+  agent-debug lldb ./myapp
+EOF
+}
+
+cmd_python() {
+    local script="${1:-}"
+    shift || true
+
+    if [[ -z "$script" ]]; then
+        echo "Error: Script path required"
+        return 1
+    fi
+
+    if [[ ! -f "$script" ]]; then
+        echo "Error: Script not found: $script"
+        return 1
+    fi
+
+    python3 -m pdb "$script" "$@"
+}
+
+cmd_node() {
+    local script="${1:-}"
+    shift || true
+
+    if [[ -z "$script" ]]; then
+        echo "Error: Script path required"
+        return 1
+    fi
+
+    if [[ ! -f "$script" ]]; then
+        echo "Error: Script not found: $script"
+        return 1
+    fi
+
+    node inspect "$script" "$@"
+}
+
+cmd_lldb() {
+    local binary="${1:-}"
+    shift || true
+
+    if [[ -z "$binary" ]]; then
+        echo "Error: Binary path required"
+        return 1
+    fi
+
+    if ! command -v lldb &> /dev/null; then
+        echo "Error: lldb not found"
+        return 1
+    fi
+
+    lldb "$binary" "$@"
+}
+
+cmd_gdb() {
+    local binary="${1:-}"
+    shift || true
+
+    if [[ -z "$binary" ]]; then
+        echo "Error: Binary path required"
+        return 1
+    fi
+
+    if ! command -v gdb &> /dev/null; then
+        echo "Error: gdb not found"
+        echo "On macOS, use lldb instead: agent-debug lldb"
+        return 1
+    fi
+
+    gdb "$binary" "$@"
+}
+
+cmd_attach() {
+    local pid="${1:-}"
+
+    if [[ -z "$pid" ]]; then
+        echo "Error: PID required"
+        return 1
+    fi
+
+    # Detect process type
+    local proc_name
+    proc_name=$(ps -p "$pid" -o comm= 2>/dev/null)
+
+    if [[ -z "$proc_name" ]]; then
+        echo "Error: Process $pid not found"
+        return 1
+    fi
+
+    case "$proc_name" in
+        *python*)
+            echo "Attaching to Python process $pid..."
+            echo "Note: Process must have been started with: python -m debugpy --listen 5678"
+            if command -v python3 &> /dev/null; then
+                python3 -c "
+import debugpy
+debugpy.connect(('localhost', 5678))
+print('Connected to debugpy')
+"
+            fi
+            ;;
+        *node*)
+            echo "Attaching to Node.js process $pid..."
+            echo "Send SIGUSR1 to enable debugging: kill -USR1 $pid"
+            kill -USR1 "$pid" 2>/dev/null || true
+            sleep 1
+            node inspect -p "$pid"
+            ;;
+        *)
+            # Use lldb or gdb
+            if command -v lldb &> /dev/null; then
+                lldb -p "$pid"
+            elif command -v gdb &> /dev/null; then
+                gdb -p "$pid"
+            else
+                echo "Error: No debugger found for process type: $proc_name"
+                return 1
+            fi
+            ;;
+    esac
+}
+
+cmd_core() {
+    local binary="${1:-}"
+    local core="${2:-}"
+
+    if [[ -z "$binary" ]] || [[ -z "$core" ]]; then
+        echo "Error: Binary and core file required"
+        echo "Usage: agent-debug core <binary> <core-file>"
+        return 1
+    fi
+
+    if command -v lldb &> /dev/null; then
+        lldb "$binary" -c "$core"
+    elif command -v gdb &> /dev/null; then
+        gdb "$binary" "$core"
+    else
+        echo "Error: No debugger (lldb/gdb) found"
+        return 1
+    fi
+}
+
+cmd_strace() {
+    local pid="${1:-}"
+
+    if [[ -z "$pid" ]]; then
+        echo "Error: PID required"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # Use dtruss on macOS (requires sudo)
+        sudo dtruss -p "$pid"
+    else
+        if command -v strace &> /dev/null; then
+            strace -p "$pid"
+        else
+            echo "Error: strace not found"
+            return 1
+        fi
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    python|py|pdb)
+        shift
+        cmd_python "$@"
+        ;;
+    node|js)
+        shift
+        cmd_node "$@"
+        ;;
+    lldb)
+        shift
+        cmd_lldb "$@"
+        ;;
+    gdb)
+        shift
+        cmd_gdb "$@"
+        ;;
+    attach)
+        shift
+        cmd_attach "$@"
+        ;;
+    core)
+        shift
+        cmd_core "$@"
+        ;;
+    strace|trace)
+        shift
+        cmd_strace "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it looks like a script, try to debug it
+        if [[ -f "$1" ]]; then
+            case "$1" in
+                *.py) cmd_python "$@" ;;
+                *.js) cmd_node "$@" ;;
+                *) cmd_lldb "$@" ;;
+            esac
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-debug help"
+            exit 1
+        fi
+        ;;
+esac

@@ -1,0 +1,385 @@
+#!/usr/bin/env bash
+# agent-vm - Virtual machine management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-vm - Virtual machine management
+
+Supports:
+  - VirtualBox (vboxmanage)
+  - VMware (vmrun)
+  - Parallels (prlctl) - macOS
+  - UTM - macOS (via AppleScript)
+  - QEMU/KVM (virsh)
+
+Commands:
+  list                       List VMs
+  start <vm>                 Start VM
+  stop <vm>                  Stop VM (graceful)
+  kill <vm>                  Force stop VM
+  pause <vm>                 Pause/suspend VM
+  resume <vm>                Resume VM
+  snapshot <vm> <name>       Create snapshot
+  restore <vm> <name>        Restore snapshot
+  status <vm>                Show VM status
+  ssh <vm>                   SSH into VM (if configured)
+
+Examples:
+  agent-vm list
+  agent-vm start "Ubuntu 22.04"
+  agent-vm stop "Ubuntu 22.04"
+  agent-vm snapshot "Dev VM" "before-update"
+EOF
+}
+
+# Detect VM platform
+detect_platform() {
+    if command -v VBoxManage &> /dev/null; then
+        echo "virtualbox"
+    elif command -v vmrun &> /dev/null; then
+        echo "vmware"
+    elif command -v prlctl &> /dev/null; then
+        echo "parallels"
+    elif command -v virsh &> /dev/null; then
+        echo "libvirt"
+    elif [[ "$(uname)" == "Darwin" ]] && [[ -d "/Applications/UTM.app" ]]; then
+        echo "utm"
+    else
+        echo ""
+    fi
+}
+
+# VirtualBox commands
+vbox_list() {
+    VBoxManage list vms
+    echo
+    echo "Running:"
+    VBoxManage list runningvms
+}
+
+vbox_start() {
+    local vm="$1"
+    VBoxManage startvm "$vm" --type headless
+}
+
+vbox_stop() {
+    local vm="$1"
+    VBoxManage controlvm "$vm" acpipowerbutton
+}
+
+vbox_kill() {
+    local vm="$1"
+    VBoxManage controlvm "$vm" poweroff
+}
+
+vbox_pause() {
+    local vm="$1"
+    VBoxManage controlvm "$vm" pause
+}
+
+vbox_resume() {
+    local vm="$1"
+    VBoxManage controlvm "$vm" resume
+}
+
+vbox_snapshot() {
+    local vm="$1"
+    local name="$2"
+    VBoxManage snapshot "$vm" take "$name"
+}
+
+vbox_restore() {
+    local vm="$1"
+    local name="$2"
+    VBoxManage snapshot "$vm" restore "$name"
+}
+
+vbox_status() {
+    local vm="$1"
+    VBoxManage showvminfo "$vm" | grep -E "^(Name|State|Memory|CPUs):"
+}
+
+# VMware commands
+vmware_list() {
+    vmrun list
+}
+
+vmware_start() {
+    local vm="$1"
+    vmrun start "$vm" nogui
+}
+
+vmware_stop() {
+    local vm="$1"
+    vmrun stop "$vm" soft
+}
+
+# Parallels commands
+parallels_list() {
+    prlctl list -a
+}
+
+parallels_start() {
+    local vm="$1"
+    prlctl start "$vm"
+}
+
+parallels_stop() {
+    local vm="$1"
+    prlctl stop "$vm"
+}
+
+# UTM commands (macOS)
+utm_list() {
+    osascript -e 'tell application "UTM" to get name of every virtual machine'
+}
+
+utm_start() {
+    local vm="$1"
+    osascript -e "tell application \"UTM\" to start virtual machine \"$vm\""
+}
+
+utm_stop() {
+    local vm="$1"
+    osascript -e "tell application \"UTM\" to stop virtual machine \"$vm\""
+}
+
+# libvirt/KVM commands
+libvirt_list() {
+    virsh list --all
+}
+
+libvirt_start() {
+    local vm="$1"
+    virsh start "$vm"
+}
+
+libvirt_stop() {
+    local vm="$1"
+    virsh shutdown "$vm"
+}
+
+cmd_list() {
+    local platform=$(detect_platform)
+
+    case "$platform" in
+        virtualbox) vbox_list ;;
+        vmware) vmware_list ;;
+        parallels) parallels_list ;;
+        utm) utm_list ;;
+        libvirt) libvirt_list ;;
+        *)
+            echo "No supported VM platform found"
+            echo "Supported: VirtualBox, VMware, Parallels, UTM, libvirt"
+            return 1
+            ;;
+    esac
+}
+
+cmd_start() {
+    local vm="${1:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]]; then
+        echo "Error: VM name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_start "$vm" ;;
+        vmware) vmware_start "$vm" ;;
+        parallels) parallels_start "$vm" ;;
+        utm) utm_start "$vm" ;;
+        libvirt) libvirt_start "$vm" ;;
+        *) echo "No supported VM platform found"; return 1 ;;
+    esac
+
+    echo "Started: $vm"
+}
+
+cmd_stop() {
+    local vm="${1:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]]; then
+        echo "Error: VM name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_stop "$vm" ;;
+        vmware) vmware_stop "$vm" ;;
+        parallels) parallels_stop "$vm" ;;
+        utm) utm_stop "$vm" ;;
+        libvirt) libvirt_stop "$vm" ;;
+        *) echo "No supported VM platform found"; return 1 ;;
+    esac
+
+    echo "Stopping: $vm"
+}
+
+cmd_kill() {
+    local vm="${1:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]]; then
+        echo "Error: VM name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_kill "$vm" ;;
+        vmware) vmrun stop "$vm" hard ;;
+        parallels) prlctl stop "$vm" --kill ;;
+        libvirt) virsh destroy "$vm" ;;
+        *) echo "No supported VM platform found"; return 1 ;;
+    esac
+
+    echo "Force stopped: $vm"
+}
+
+cmd_pause() {
+    local vm="${1:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]]; then
+        echo "Error: VM name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_pause "$vm" ;;
+        vmware) vmrun pause "$vm" ;;
+        parallels) prlctl pause "$vm" ;;
+        libvirt) virsh suspend "$vm" ;;
+        *) echo "No supported VM platform found"; return 1 ;;
+    esac
+
+    echo "Paused: $vm"
+}
+
+cmd_resume() {
+    local vm="${1:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]]; then
+        echo "Error: VM name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_resume "$vm" ;;
+        vmware) vmrun unpause "$vm" ;;
+        parallels) prlctl resume "$vm" ;;
+        libvirt) virsh resume "$vm" ;;
+        *) echo "No supported VM platform found"; return 1 ;;
+    esac
+
+    echo "Resumed: $vm"
+}
+
+cmd_snapshot() {
+    local vm="${1:-}"
+    local name="${2:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]] || [[ -z "$name" ]]; then
+        echo "Error: VM name and snapshot name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_snapshot "$vm" "$name" ;;
+        parallels) prlctl snapshot "$vm" --name "$name" ;;
+        libvirt) virsh snapshot-create-as "$vm" "$name" ;;
+        *) echo "Snapshot not supported on this platform"; return 1 ;;
+    esac
+
+    echo "Snapshot created: $name"
+}
+
+cmd_restore() {
+    local vm="${1:-}"
+    local name="${2:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]] || [[ -z "$name" ]]; then
+        echo "Error: VM name and snapshot name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_restore "$vm" "$name" ;;
+        parallels) prlctl snapshot-switch "$vm" --name "$name" ;;
+        libvirt) virsh snapshot-revert "$vm" "$name" ;;
+        *) echo "Restore not supported on this platform"; return 1 ;;
+    esac
+
+    echo "Restored snapshot: $name"
+}
+
+cmd_status() {
+    local vm="${1:-}"
+    local platform=$(detect_platform)
+
+    if [[ -z "$vm" ]]; then
+        echo "Error: VM name required"
+        return 1
+    fi
+
+    case "$platform" in
+        virtualbox) vbox_status "$vm" ;;
+        parallels) prlctl status "$vm" ;;
+        libvirt) virsh dominfo "$vm" ;;
+        *) echo "Status not supported on this platform"; return 1 ;;
+    esac
+}
+
+# Main
+case "${1:-help}" in
+    list|ls)
+        cmd_list
+        ;;
+    start|boot|up)
+        shift
+        cmd_start "$@"
+        ;;
+    stop|shutdown|down)
+        shift
+        cmd_stop "$@"
+        ;;
+    kill|force-stop|poweroff)
+        shift
+        cmd_kill "$@"
+        ;;
+    pause|suspend)
+        shift
+        cmd_pause "$@"
+        ;;
+    resume|unpause)
+        shift
+        cmd_resume "$@"
+        ;;
+    snapshot|snap)
+        shift
+        cmd_snapshot "$@"
+        ;;
+    restore|revert)
+        shift
+        cmd_restore "$@"
+        ;;
+    status|info)
+        shift
+        cmd_status "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-vm help"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+# agent-k8s - Kubernetes management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-k8s - Kubernetes management
+
+Commands:
+  pods [namespace]           List pods
+  logs <pod> [container]     View pod logs
+  exec <pod> <cmd>           Execute command in pod
+  shell <pod>                Open shell in pod
+  describe <resource> <name> Describe resource
+  apply <file>               Apply manifest
+  delete <resource> <name>   Delete resource
+  get <resource>             Get resources
+  contexts                   List contexts
+  use <context>              Switch context
+  namespace <ns>             Set default namespace
+  port-forward <pod> <ports> Forward ports
+
+Options:
+  -n, --namespace <ns>       Namespace
+  -f, --follow               Follow logs
+  -l, --selector <label>     Label selector
+
+Examples:
+  agent-k8s pods
+  agent-k8s logs my-pod -f
+  agent-k8s shell my-pod
+  agent-k8s port-forward my-pod 8080:80
+  agent-k8s get deployments -n production
+EOF
+}
+
+# Check for kubectl
+check_kubectl() {
+    if ! command -v kubectl &> /dev/null; then
+        echo "Error: kubectl not found"
+        exit 1
+    fi
+}
+
+cmd_pods() {
+    check_kubectl
+    local namespace=""
+    local selector=""
+    local all_namespaces=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            -l|--selector) selector="-l $2"; shift 2 ;;
+            -A|--all-namespaces) all_namespaces="-A"; shift ;;
+            *) [[ -z "$namespace" ]] && namespace="-n $1"; shift ;;
+        esac
+    done
+
+    kubectl get pods $namespace $all_namespaces $selector -o wide
+}
+
+cmd_logs() {
+    check_kubectl
+    local pod=""
+    local container=""
+    local namespace=""
+    local follow=""
+    local tail=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            -f|--follow) follow="-f"; shift ;;
+            --tail) tail="--tail=$2"; shift 2 ;;
+            -c|--container) container="-c $2"; shift 2 ;;
+            *)
+                if [[ -z "$pod" ]]; then
+                    pod="$1"
+                else
+                    container="-c $1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$pod" ]]; then
+        echo "Error: Pod name required"
+        return 1
+    fi
+
+    kubectl logs $namespace $follow $tail $container "$pod"
+}
+
+cmd_exec() {
+    check_kubectl
+    local pod=""
+    local namespace=""
+    local container=""
+    local cmd=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            -c|--container) container="-c $2"; shift 2 ;;
+            *)
+                if [[ -z "$pod" ]]; then
+                    pod="$1"
+                else
+                    cmd="$*"
+                    break
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$pod" ]] || [[ -z "$cmd" ]]; then
+        echo "Error: Pod and command required"
+        return 1
+    fi
+
+    kubectl exec $namespace $container -it "$pod" -- $cmd
+}
+
+cmd_shell() {
+    check_kubectl
+    local pod="${1:-}"
+    local namespace=""
+    local container=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            -c|--container) container="-c $2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$pod" ]]; then
+        echo "Error: Pod name required"
+        return 1
+    fi
+
+    # Try bash, fall back to sh
+    kubectl exec $namespace $container -it "$pod" -- bash 2>/dev/null || \
+    kubectl exec $namespace $container -it "$pod" -- sh
+}
+
+cmd_describe() {
+    check_kubectl
+    local resource="${1:-}"
+    local name="${2:-}"
+    local namespace=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$resource" ]]; then
+        echo "Error: Resource type required"
+        return 1
+    fi
+
+    kubectl describe $namespace "$resource" $name
+}
+
+cmd_apply() {
+    check_kubectl
+    local file="${1:-}"
+    local namespace=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]]; then
+        echo "Error: Manifest file required"
+        return 1
+    fi
+
+    kubectl apply $namespace -f "$file"
+}
+
+cmd_delete() {
+    check_kubectl
+    local resource="${1:-}"
+    local name="${2:-}"
+    local namespace=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$resource" ]] || [[ -z "$name" ]]; then
+        echo "Error: Resource type and name required"
+        return 1
+    fi
+
+    kubectl delete $namespace "$resource" "$name"
+}
+
+cmd_get() {
+    check_kubectl
+    local resource="${1:-}"
+    local namespace=""
+    local selector=""
+    local output=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            -l|--selector) selector="-l $2"; shift 2 ;;
+            -o|--output) output="-o $2"; shift 2 ;;
+            -A|--all-namespaces) namespace="-A"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$resource" ]]; then
+        resource="all"
+    fi
+
+    kubectl get $namespace $selector $output "$resource"
+}
+
+cmd_contexts() {
+    check_kubectl
+    kubectl config get-contexts
+}
+
+cmd_use() {
+    check_kubectl
+    local context="${1:-}"
+
+    if [[ -z "$context" ]]; then
+        echo "Error: Context name required"
+        return 1
+    fi
+
+    kubectl config use-context "$context"
+}
+
+cmd_namespace() {
+    check_kubectl
+    local ns="${1:-}"
+
+    if [[ -z "$ns" ]]; then
+        kubectl config view --minify --output 'jsonpath={..namespace}'
+        echo
+        return
+    fi
+
+    kubectl config set-context --current --namespace="$ns"
+    echo "Namespace set to $ns"
+}
+
+cmd_port_forward() {
+    check_kubectl
+    local pod="${1:-}"
+    local ports="${2:-}"
+    local namespace=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$pod" ]] || [[ -z "$ports" ]]; then
+        echo "Error: Pod and ports required"
+        echo "Usage: agent-k8s port-forward <pod> <local:remote>"
+        return 1
+    fi
+
+    echo "Forwarding $ports to $pod"
+    echo "Press Ctrl+C to stop"
+    kubectl port-forward $namespace "$pod" "$ports"
+}
+
+# Main
+case "${1:-help}" in
+    pods|po)
+        shift || true
+        cmd_pods "$@"
+        ;;
+    logs|log)
+        shift
+        cmd_logs "$@"
+        ;;
+    exec)
+        shift
+        cmd_exec "$@"
+        ;;
+    shell|sh)
+        shift
+        cmd_shell "$@"
+        ;;
+    describe|desc)
+        shift
+        cmd_describe "$@"
+        ;;
+    apply)
+        shift
+        cmd_apply "$@"
+        ;;
+    delete|del)
+        shift
+        cmd_delete "$@"
+        ;;
+    get|g)
+        shift
+        cmd_get "$@"
+        ;;
+    contexts|ctx)
+        cmd_contexts
+        ;;
+    use|use-context)
+        shift
+        cmd_use "$@"
+        ;;
+    namespace|ns)
+        shift
+        cmd_namespace "$@"
+        ;;
+    port-forward|pf)
+        shift
+        cmd_port_forward "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-k8s help"
+        exit 1
+        ;;
+esac

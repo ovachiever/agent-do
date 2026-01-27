@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# agent-api - HTTP API testing tool
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-api - HTTP API testing
+
+Commands:
+  get <url>                    GET request
+  post <url> [data]            POST request
+  put <url> [data]             PUT request
+  delete <url>                 DELETE request
+  head <url>                   HEAD request
+
+Options:
+  -H, --header "Key: Value"    Add header
+  -d, --data '{"key":"val"}'   Request body (JSON)
+  -f, --file <path>            Read body from file
+  -o, --output <path>          Save response to file
+  -v, --verbose                Show headers
+  -q, --quiet                  Only output response body
+  --json                       Set Content-Type: application/json
+
+Examples:
+  agent-api get https://api.github.com/users/octocat
+  agent-api post http://localhost:3000/api/users -d '{"name":"test"}'
+  agent-api get /api/users --header "Authorization: Bearer TOKEN"
+EOF
+}
+
+# Default base URL (can be set via AGENT_API_BASE)
+BASE_URL="${AGENT_API_BASE:-}"
+
+build_url() {
+    local url="$1"
+    if [[ "$url" =~ ^https?:// ]]; then
+        echo "$url"
+    elif [[ -n "$BASE_URL" ]]; then
+        echo "${BASE_URL%/}/${url#/}"
+    else
+        echo "$url"
+    fi
+}
+
+do_request() {
+    local method="$1"
+    shift
+
+    local url=""
+    local headers=()
+    local data=""
+    local data_file=""
+    local output=""
+    local verbose=""
+    local quiet=""
+    local json_content=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -H|--header)
+                headers+=(-H "$2")
+                shift 2
+                ;;
+            -d|--data)
+                data="$2"
+                shift 2
+                ;;
+            -f|--file)
+                data_file="$2"
+                shift 2
+                ;;
+            -o|--output)
+                output="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                verbose="-v"
+                shift
+                ;;
+            -q|--quiet)
+                quiet="-s"
+                shift
+                ;;
+            --json)
+                json_content=1
+                shift
+                ;;
+            -*)
+                echo "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                if [[ -z "$url" ]]; then
+                    url="$1"
+                else
+                    # Treat as data if no -d specified
+                    [[ -z "$data" ]] && data="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$url" ]]; then
+        echo "Error: URL required"
+        return 1
+    fi
+
+    url=$(build_url "$url")
+
+    local curl_args=(-X "$method")
+
+    # Add JSON content type if specified or if data looks like JSON
+    if [[ -n "$json_content" ]] || [[ "$data" =~ ^\{ ]]; then
+        curl_args+=(-H "Content-Type: application/json")
+    fi
+
+    # Add custom headers
+    curl_args+=("${headers[@]}")
+
+    # Add data
+    if [[ -n "$data" ]]; then
+        curl_args+=(-d "$data")
+    elif [[ -n "$data_file" ]]; then
+        curl_args+=(-d "@$data_file")
+    fi
+
+    # Verbose/quiet
+    [[ -n "$verbose" ]] && curl_args+=(-v)
+    [[ -n "$quiet" ]] && curl_args+=(-s)
+    [[ -z "$verbose" && -z "$quiet" ]] && curl_args+=(-s -S)
+
+    # Output file
+    if [[ -n "$output" ]]; then
+        curl_args+=(-o "$output")
+    fi
+
+    # Show response with status code
+    if [[ -z "$quiet" && -z "$output" ]]; then
+        curl_args+=(-w '\n\n[Status: %{http_code}, Time: %{time_total}s, Size: %{size_download} bytes]\n')
+    fi
+
+    curl "${curl_args[@]}" "$url"
+}
+
+# Main
+case "${1:-help}" in
+    get|GET)
+        shift
+        do_request GET "$@"
+        ;;
+    post|POST)
+        shift
+        do_request POST "$@"
+        ;;
+    put|PUT)
+        shift
+        do_request PUT "$@"
+        ;;
+    patch|PATCH)
+        shift
+        do_request PATCH "$@"
+        ;;
+    delete|DELETE)
+        shift
+        do_request DELETE "$@"
+        ;;
+    head|HEAD)
+        shift
+        do_request HEAD -v "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it looks like a URL, default to GET
+        if [[ "$1" =~ ^https?:// ]] || [[ "$1" =~ ^/ ]]; then
+            do_request GET "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-api help"
+            exit 1
+        fi
+        ;;
+esac

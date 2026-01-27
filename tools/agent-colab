@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+# agent-colab - Google Colab notebook management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-colab - Google Colab notebook management
+
+Commands:
+  open <notebook>          Open notebook in Colab
+  download <url>           Download notebook from Colab
+  upload <file>            Upload notebook to Drive
+  convert <file>           Convert to/from .ipynb
+  run <notebook>           Execute notebook locally
+  list                     List recent notebooks
+
+Requirements:
+  - Google Cloud SDK (gcloud)
+  - jupyter for local execution
+
+Examples:
+  agent-colab open analysis.ipynb
+  agent-colab download "https://colab.research.google.com/..."
+  agent-colab convert script.py --to notebook
+  agent-colab run experiment.ipynb
+EOF
+}
+
+COLAB_BASE="https://colab.research.google.com"
+
+cmd_open() {
+    local notebook="${1:-}"
+
+    if [[ -z "$notebook" ]]; then
+        # Open Colab home
+        open "$COLAB_BASE" 2>/dev/null || xdg-open "$COLAB_BASE"
+        return
+    fi
+
+    if [[ "$notebook" == http* ]]; then
+        # Already a URL
+        open "$notebook" 2>/dev/null || xdg-open "$notebook"
+    elif [[ -f "$notebook" ]]; then
+        # Local file - upload to Colab
+        # For now, open Colab upload page
+        echo "To open a local notebook in Colab:"
+        echo "1. Go to colab.research.google.com"
+        echo "2. File > Upload notebook"
+        echo "3. Select: $notebook"
+        open "$COLAB_BASE/#create=true" 2>/dev/null || xdg-open "$COLAB_BASE/#create=true"
+    else
+        # Try as GitHub path
+        local github_url="$COLAB_BASE/github/$notebook"
+        open "$github_url" 2>/dev/null || xdg-open "$github_url"
+    fi
+}
+
+cmd_download() {
+    local url="${1:-}"
+    local output="${2:-}"
+
+    if [[ -z "$url" ]]; then
+        echo "Error: Colab URL required"
+        return 1
+    fi
+
+    # Extract notebook ID from URL
+    local notebook_id=""
+    if [[ "$url" =~ drive/([a-zA-Z0-9_-]+) ]]; then
+        notebook_id="${BASH_REMATCH[1]}"
+    elif [[ "$url" =~ /d/([a-zA-Z0-9_-]+) ]]; then
+        notebook_id="${BASH_REMATCH[1]}"
+    fi
+
+    if [[ -z "$notebook_id" ]]; then
+        echo "Error: Could not extract notebook ID from URL"
+        return 1
+    fi
+
+    [[ -z "$output" ]] && output="notebook_${notebook_id}.ipynb"
+
+    # Try using gcloud/gdrive
+    if command -v gdown &> /dev/null; then
+        gdown "https://drive.google.com/uc?id=$notebook_id" -O "$output"
+        echo "Downloaded: $output"
+    else
+        echo "Install gdown for direct download: pip install gdown"
+        echo "Or manually download from: https://drive.google.com/file/d/$notebook_id"
+        return 1
+    fi
+}
+
+cmd_upload() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid notebook file required"
+        return 1
+    fi
+
+    if command -v gdrive &> /dev/null; then
+        gdrive upload "$file"
+        echo "Uploaded to Google Drive: $file"
+    elif command -v rclone &> /dev/null; then
+        rclone copy "$file" gdrive:Colab\ Notebooks/
+        echo "Uploaded to Google Drive: $file"
+    else
+        echo "Install gdrive or rclone for uploads"
+        echo "Or manually upload at: https://drive.google.com"
+        return 1
+    fi
+}
+
+cmd_convert() {
+    local file="${1:-}"
+    local to_format=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --to|-t) to_format="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    local ext="${file##*.}"
+    local base="${file%.*}"
+
+    case "$ext" in
+        py)
+            # Python to notebook
+            if command -v jupytext &> /dev/null; then
+                jupytext --to notebook "$file"
+                echo "Created: ${base}.ipynb"
+            elif command -v p2j &> /dev/null; then
+                p2j "$file"
+                echo "Created: ${base}.ipynb"
+            else
+                # Manual conversion
+                python3 << PYTHON
+import json
+with open('$file', 'r') as f:
+    code = f.read()
+
+cells = []
+for block in code.split('\n# %%'):
+    if block.strip():
+        cells.append({
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": block.strip().split('\n')
+        })
+
+notebook = {
+    "cells": cells,
+    "metadata": {
+        "kernelspec": {
+            "display_name": "Python 3",
+            "language": "python",
+            "name": "python3"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 4
+}
+
+with open('${base}.ipynb', 'w') as f:
+    json.dump(notebook, f, indent=2)
+print(f"Created: ${base}.ipynb")
+PYTHON
+            fi
+            ;;
+        ipynb)
+            # Notebook to Python
+            if command -v jupytext &> /dev/null; then
+                jupytext --to py "$file"
+                echo "Created: ${base}.py"
+            elif command -v jupyter &> /dev/null; then
+                jupyter nbconvert --to script "$file"
+                echo "Created: ${base}.py"
+            else
+                python3 << PYTHON
+import json
+with open('$file', 'r') as f:
+    nb = json.load(f)
+
+code_lines = []
+for cell in nb.get('cells', []):
+    if cell['cell_type'] == 'code':
+        code_lines.append('# %%')
+        source = cell.get('source', [])
+        if isinstance(source, list):
+            code_lines.extend(source)
+        else:
+            code_lines.append(source)
+        code_lines.append('')
+
+with open('${base}.py', 'w') as f:
+    f.write('\n'.join(code_lines))
+print(f"Created: ${base}.py")
+PYTHON
+            fi
+            ;;
+        *)
+            echo "Unknown format: $ext"
+            return 1
+            ;;
+    esac
+}
+
+cmd_run() {
+    local notebook="${1:-}"
+
+    if [[ -z "$notebook" ]] || [[ ! -f "$notebook" ]]; then
+        echo "Error: Valid notebook file required"
+        return 1
+    fi
+
+    if command -v jupyter &> /dev/null; then
+        jupyter nbconvert --execute --to notebook --inplace "$notebook"
+        echo "Executed: $notebook"
+    elif command -v papermill &> /dev/null; then
+        local output="${notebook%.ipynb}_output.ipynb"
+        papermill "$notebook" "$output"
+        echo "Executed: $output"
+    else
+        echo "Error: jupyter or papermill required"
+        echo "Install: pip install jupyter papermill"
+        return 1
+    fi
+}
+
+cmd_list() {
+    echo "Recent Colab notebooks:"
+    echo
+    echo "Visit: $COLAB_BASE"
+    echo
+    if command -v gdrive &> /dev/null; then
+        gdrive list --query "mimeType='application/vnd.google.colaboratory'" 2>/dev/null || \
+            echo "(Install gdrive for listing)"
+    elif command -v rclone &> /dev/null; then
+        rclone ls gdrive:Colab\ Notebooks/ 2>/dev/null || \
+            echo "(Configure rclone with Google Drive)"
+    fi
+}
+
+cmd_new() {
+    local name="${1:-Untitled}"
+
+    # Create a basic notebook
+    python3 << PYTHON
+import json
+
+notebook = {
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": ["# $name\n", "\n", "Created with agent-colab"]
+        },
+        {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": ["# Your code here\n"]
+        }
+    ],
+    "metadata": {
+        "colab": {
+            "name": "$name",
+            "provenance": []
+        },
+        "kernelspec": {
+            "display_name": "Python 3",
+            "name": "python3"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 0
+}
+
+filename = "${name}.ipynb".replace(" ", "_")
+with open(filename, 'w') as f:
+    json.dump(notebook, f, indent=2)
+print(f"Created: {filename}")
+PYTHON
+}
+
+# Main
+case "${1:-help}" in
+    open|launch)
+        shift || true
+        cmd_open "$@"
+        ;;
+    download|get)
+        shift
+        cmd_download "$@"
+        ;;
+    upload|push)
+        shift
+        cmd_upload "$@"
+        ;;
+    convert)
+        shift
+        cmd_convert "$@"
+        ;;
+    run|execute)
+        shift
+        cmd_run "$@"
+        ;;
+    list|ls)
+        cmd_list
+        ;;
+    new|create)
+        shift
+        cmd_new "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-colab help"
+        exit 1
+        ;;
+esac

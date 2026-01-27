@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# agent-dns - DNS lookup and management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-dns - DNS lookup and management
+
+Commands:
+  lookup <domain> [type]     DNS lookup (A, AAAA, MX, TXT, NS, CNAME, SOA)
+  all <domain>               Show all common record types
+  reverse <ip>               Reverse DNS lookup
+  trace <domain>             Trace DNS resolution path
+  flush                      Flush local DNS cache (macOS)
+
+Options:
+  --server <dns-server>      Use specific DNS server
+  --short                    Short output (just values)
+
+Examples:
+  agent-dns lookup example.com
+  agent-dns lookup example.com MX
+  agent-dns all google.com
+  agent-dns reverse 8.8.8.8
+  agent-dns lookup example.com --server 8.8.8.8
+EOF
+}
+
+cmd_lookup() {
+    local domain=""
+    local record_type="A"
+    local server=""
+    local short=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --server|-s) server="@$2"; shift 2 ;;
+            --short) short="+short"; shift ;;
+            -*)
+                echo "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                if [[ -z "$domain" ]]; then
+                    domain="$1"
+                else
+                    record_type="${1^^}"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$domain" ]]; then
+        echo "Error: Domain required"
+        return 1
+    fi
+
+    if command -v dig &> /dev/null; then
+        if [[ -n "$short" ]]; then
+            dig $server "$domain" "$record_type" +short
+        else
+            dig $server "$domain" "$record_type" +noall +answer
+        fi
+    elif command -v nslookup &> /dev/null; then
+        nslookup -type="$record_type" "$domain" ${server#@}
+    elif command -v host &> /dev/null; then
+        host -t "$record_type" "$domain" ${server#@}
+    else
+        echo "Error: dig, nslookup, or host required"
+        return 1
+    fi
+}
+
+cmd_all() {
+    local domain="${1:-}"
+    local server=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --server|-s) server="@$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$domain" ]]; then
+        echo "Error: Domain required"
+        return 1
+    fi
+
+    echo "=== DNS Records for $domain ==="
+    echo
+
+    for type in A AAAA MX TXT NS CNAME SOA; do
+        echo "--- $type ---"
+        if command -v dig &> /dev/null; then
+            result=$(dig $server "$domain" "$type" +short 2>/dev/null)
+            if [[ -n "$result" ]]; then
+                echo "$result"
+            else
+                echo "(none)"
+            fi
+        else
+            host -t "$type" "$domain" ${server#@} 2>/dev/null || echo "(none)"
+        fi
+        echo
+    done
+}
+
+cmd_reverse() {
+    local ip="${1:-}"
+    local server=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --server|-s) server="@$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$ip" ]]; then
+        echo "Error: IP address required"
+        return 1
+    fi
+
+    if command -v dig &> /dev/null; then
+        dig $server -x "$ip" +short
+    elif command -v nslookup &> /dev/null; then
+        nslookup "$ip" ${server#@}
+    elif command -v host &> /dev/null; then
+        host "$ip" ${server#@}
+    else
+        echo "Error: dig, nslookup, or host required"
+        return 1
+    fi
+}
+
+cmd_trace() {
+    local domain="${1:-}"
+
+    if [[ -z "$domain" ]]; then
+        echo "Error: Domain required"
+        return 1
+    fi
+
+    if command -v dig &> /dev/null; then
+        dig "$domain" +trace
+    else
+        echo "Error: dig required for trace"
+        return 1
+    fi
+}
+
+cmd_flush() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        sudo dscacheutil -flushcache
+        sudo killall -HUP mDNSResponder
+        echo "DNS cache flushed"
+    elif [[ -f /etc/debian_version ]]; then
+        sudo systemd-resolve --flush-caches
+        echo "DNS cache flushed"
+    elif [[ -f /etc/redhat-release ]]; then
+        sudo systemctl restart nscd
+        echo "DNS cache flushed (nscd restarted)"
+    else
+        echo "DNS flush not implemented for this system"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    lookup|l|query|q)
+        shift
+        cmd_lookup "$@"
+        ;;
+    all|full)
+        shift
+        cmd_all "$@"
+        ;;
+    reverse|rev|ptr)
+        shift
+        cmd_reverse "$@"
+        ;;
+    trace|path)
+        shift
+        cmd_trace "$@"
+        ;;
+    flush|clear)
+        cmd_flush
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it looks like a domain, do lookup
+        if [[ "$1" =~ \. ]]; then
+            cmd_lookup "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-dns help"
+            exit 1
+        fi
+        ;;
+esac

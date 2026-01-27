@@ -1,0 +1,396 @@
+#!/usr/bin/env bash
+# agent-eval - LLM output evaluation and testing
+
+set -euo pipefail
+
+EVAL_DIR="${AGENT_DO_HOME:-$HOME/.agent-do}/evals"
+mkdir -p "$EVAL_DIR"
+
+show_help() {
+    cat << 'EOF'
+agent-eval - LLM output evaluation and testing
+
+Commands:
+  run <eval-file>          Run evaluation suite
+  create <name>            Create new evaluation
+  add <name> <case>        Add test case to evaluation
+  results [eval]           Show evaluation results
+  compare <a> <b>          Compare two runs
+  export <name>            Export results
+
+Evaluation format (YAML):
+  name: "My Evaluation"
+  model: "claude-3-sonnet"
+  cases:
+    - input: "What is 2+2?"
+      expected: "4"
+      type: contains
+    - input: "Write a haiku"
+      criteria: "Has 3 lines, 5-7-5 syllables"
+      type: rubric
+
+Types: exact, contains, regex, rubric, code
+
+Examples:
+  agent-eval create math-test
+  agent-eval add math-test "What is 2+2?" --expected "4"
+  agent-eval run math-test
+  agent-eval results math-test
+EOF
+}
+
+cmd_run() {
+    local eval_file="${1:-}"
+
+    if [[ -z "$eval_file" ]]; then
+        echo "Error: Evaluation file required"
+        return 1
+    fi
+
+    # Handle both paths and names
+    if [[ ! -f "$eval_file" ]]; then
+        eval_file="$EVAL_DIR/${eval_file}.yaml"
+    fi
+
+    if [[ ! -f "$eval_file" ]]; then
+        echo "Error: Evaluation not found: $eval_file"
+        return 1
+    fi
+
+    echo "Running evaluation: $(basename "$eval_file" .yaml)"
+    echo
+
+    python3 << PYTHON
+import yaml
+import json
+import os
+import re
+from datetime import datetime
+
+try:
+    import anthropic
+    client = anthropic.Anthropic()
+except ImportError:
+    print("Warning: anthropic not installed, using mock responses")
+    client = None
+
+with open('$eval_file') as f:
+    eval_config = yaml.safe_load(f)
+
+name = eval_config.get('name', 'Unnamed')
+model = eval_config.get('model', 'claude-3-sonnet-20240229')
+cases = eval_config.get('cases', [])
+
+results = {
+    'name': name,
+    'model': model,
+    'timestamp': datetime.now().isoformat(),
+    'cases': [],
+    'summary': {'passed': 0, 'failed': 0, 'total': len(cases)}
+}
+
+for i, case in enumerate(cases, 1):
+    print(f"Case {i}/{len(cases)}: {case.get('input', '')[:50]}...")
+
+    # Get LLM response
+    if client:
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": case['input']}]
+        )
+        output = response.content[0].text
+    else:
+        output = "[Mock response]"
+
+    # Evaluate
+    eval_type = case.get('type', 'contains')
+    passed = False
+    reason = ""
+
+    if eval_type == 'exact':
+        expected = case.get('expected', '')
+        passed = output.strip() == expected.strip()
+        reason = f"Expected exact: {expected[:50]}"
+
+    elif eval_type == 'contains':
+        expected = case.get('expected', '')
+        passed = expected.lower() in output.lower()
+        reason = f"Should contain: {expected}"
+
+    elif eval_type == 'regex':
+        pattern = case.get('pattern', case.get('expected', ''))
+        passed = bool(re.search(pattern, output, re.IGNORECASE))
+        reason = f"Should match: {pattern}"
+
+    elif eval_type == 'rubric':
+        criteria = case.get('criteria', '')
+        # Use LLM to evaluate against rubric
+        if client:
+            eval_response = client.messages.create(
+                model=model,
+                max_tokens=256,
+                messages=[{
+                    "role": "user",
+                    "content": f"Evaluate this response against the criteria. Reply PASS or FAIL with brief reason.\n\nCriteria: {criteria}\n\nResponse: {output}"
+                }]
+            )
+            eval_text = eval_response.content[0].text
+            passed = 'PASS' in eval_text.upper()
+            reason = eval_text
+        else:
+            passed = True
+            reason = "Mock evaluation"
+
+    elif eval_type == 'code':
+        # Execute code validation
+        validator = case.get('validator', '')
+        if validator:
+            try:
+                exec(validator)
+                passed = validate(output)  # validator should define validate()
+            except Exception as e:
+                passed = False
+                reason = str(e)
+
+    status = "✓ PASS" if passed else "✗ FAIL"
+    print(f"  {status}: {reason[:60]}")
+
+    results['cases'].append({
+        'input': case['input'],
+        'output': output,
+        'passed': passed,
+        'reason': reason
+    })
+
+    if passed:
+        results['summary']['passed'] += 1
+    else:
+        results['summary']['failed'] += 1
+
+# Save results
+result_file = f"$EVAL_DIR/{name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+with open(result_file, 'w') as f:
+    json.dump(results, f, indent=2)
+
+print()
+print(f"Results: {results['summary']['passed']}/{results['summary']['total']} passed")
+print(f"Saved to: {result_file}")
+PYTHON
+}
+
+cmd_create() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Evaluation name required"
+        return 1
+    fi
+
+    local file="$EVAL_DIR/${name}.yaml"
+
+    if [[ -f "$file" ]]; then
+        echo "Error: Evaluation already exists: $name"
+        return 1
+    fi
+
+    cat > "$file" << YAML
+name: "$name"
+model: "claude-sonnet-4-20250514"
+description: ""
+cases: []
+YAML
+
+    echo "Created: $file"
+    echo "Add test cases with: agent-eval add $name \"input\" --expected \"output\""
+}
+
+cmd_add() {
+    local name="${1:-}"
+    local input="${2:-}"
+
+    if [[ -z "$name" ]] || [[ -z "$input" ]]; then
+        echo "Error: Name and input required"
+        return 1
+    fi
+
+    local expected=""
+    local eval_type="contains"
+    local criteria=""
+
+    shift 2
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --expected|-e) expected="$2"; shift 2 ;;
+            --type|-t) eval_type="$2"; shift 2 ;;
+            --criteria|-c) criteria="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local file="$EVAL_DIR/${name}.yaml"
+
+    if [[ ! -f "$file" ]]; then
+        cmd_create "$name"
+    fi
+
+    # Add case using Python (for proper YAML handling)
+    python3 << PYTHON
+import yaml
+
+with open('$file') as f:
+    config = yaml.safe_load(f)
+
+case = {'input': '''$input''', 'type': '$eval_type'}
+if '$expected':
+    case['expected'] = '''$expected'''
+if '$criteria':
+    case['criteria'] = '''$criteria'''
+
+config['cases'].append(case)
+
+with open('$file', 'w') as f:
+    yaml.dump(config, f, default_flow_style=False)
+
+print(f"Added case {len(config['cases'])} to $name")
+PYTHON
+}
+
+cmd_results() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        # List all results
+        echo "Evaluation results:"
+        echo
+        for f in "$EVAL_DIR"/*.json; do
+            [[ -f "$f" ]] || continue
+            python3 << PYTHON
+import json
+with open('$f') as f:
+    r = json.load(f)
+print(f"  {r.get('name', 'Unknown')}: {r['summary']['passed']}/{r['summary']['total']} ({r.get('timestamp', 'N/A')[:10]})")
+PYTHON
+        done
+    else
+        # Show specific results
+        local result_file=$(ls -t "$EVAL_DIR"/${name}*.json 2>/dev/null | head -1)
+        if [[ -z "$result_file" ]]; then
+            echo "Error: No results found for: $name"
+            return 1
+        fi
+
+        python3 << PYTHON
+import json
+with open('$result_file') as f:
+    r = json.load(f)
+
+print(f"Evaluation: {r['name']}")
+print(f"Model: {r.get('model', 'Unknown')}")
+print(f"Date: {r.get('timestamp', 'Unknown')}")
+print(f"Results: {r['summary']['passed']}/{r['summary']['total']} passed")
+print()
+
+for i, case in enumerate(r['cases'], 1):
+    status = "✓" if case['passed'] else "✗"
+    print(f"{status} Case {i}: {case['input'][:50]}...")
+    print(f"  Output: {case['output'][:100]}...")
+    print(f"  Reason: {case.get('reason', 'N/A')[:80]}")
+    print()
+PYTHON
+    fi
+}
+
+cmd_compare() {
+    local a="${1:-}"
+    local b="${2:-}"
+
+    if [[ -z "$a" ]] || [[ -z "$b" ]]; then
+        echo "Error: Two result files required"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+
+with open('$a') as f:
+    ra = json.load(f)
+with open('$b') as f:
+    rb = json.load(f)
+
+print(f"Comparing: {ra['name']} vs {rb['name']}")
+print()
+print(f"  A: {ra['summary']['passed']}/{ra['summary']['total']} passed ({ra.get('model', 'Unknown')})")
+print(f"  B: {rb['summary']['passed']}/{rb['summary']['total']} passed ({rb.get('model', 'Unknown')})")
+print()
+
+# Compare case by case
+diff_count = 0
+for i, (ca, cb) in enumerate(zip(ra['cases'], rb['cases'])):
+    if ca['passed'] != cb['passed']:
+        diff_count += 1
+        print(f"Case {i+1} differs:")
+        print(f"  Input: {ca['input'][:50]}...")
+        print(f"  A: {'PASS' if ca['passed'] else 'FAIL'}")
+        print(f"  B: {'PASS' if cb['passed'] else 'FAIL'}")
+        print()
+
+print(f"Total differences: {diff_count}")
+PYTHON
+}
+
+cmd_export() {
+    local name="${1:-}"
+    local output="${2:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Error: Evaluation name required"
+        return 1
+    fi
+
+    local result_file=$(ls -t "$EVAL_DIR"/${name}*.json 2>/dev/null | head -1)
+    if [[ -z "$result_file" ]]; then
+        echo "Error: No results found for: $name"
+        return 1
+    fi
+
+    output="${output:-${name}_results.json}"
+    cp "$result_file" "$output"
+    echo "Exported: $output"
+}
+
+# Main
+case "${1:-help}" in
+    run|exec)
+        shift
+        cmd_run "$@"
+        ;;
+    create|new)
+        shift
+        cmd_create "$@"
+        ;;
+    add|case)
+        shift
+        cmd_add "$@"
+        ;;
+    results|show)
+        shift || true
+        cmd_results "$@"
+        ;;
+    compare|diff)
+        shift
+        cmd_compare "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-eval help"
+        exit 1
+        ;;
+esac

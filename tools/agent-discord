@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# agent-discord - Discord integration
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-discord - Discord messaging
+
+Commands:
+  send <channel-id> <message>  Send message to channel
+  webhook <message>            Send via webhook URL
+
+Environment:
+  DISCORD_TOKEN                Bot token
+  DISCORD_WEBHOOK_URL          Webhook URL
+
+Examples:
+  agent-discord send 123456789 "Hello from agent-do!"
+  agent-discord webhook "Build completed"
+EOF
+}
+
+send_api() {
+    local channel_id="$1"
+    local message="$2"
+    local token="${DISCORD_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: DISCORD_TOKEN not set"
+        return 1
+    fi
+
+    curl -s -X POST "https://discord.com/api/v10/channels/${channel_id}/messages" \
+        -H "Authorization: Bot $token" \
+        -H "Content-Type: application/json" \
+        -d "{\"content\": \"$message\"}" | \
+        python3 -c "import sys,json; r=json.load(sys.stdin); print('Sent!' if 'id' in r else f'Error: {r}')"
+}
+
+send_webhook() {
+    local message="$1"
+    local webhook="${DISCORD_WEBHOOK_URL:-}"
+
+    if [[ -z "$webhook" ]]; then
+        echo "Error: DISCORD_WEBHOOK_URL not set"
+        return 1
+    fi
+
+    local response
+    response=$(curl -s -X POST "$webhook" \
+        -H "Content-Type: application/json" \
+        -d "{\"content\": \"$message\"}")
+
+    if [[ -z "$response" ]]; then
+        echo "Sent!"
+    else
+        echo "Response: $response"
+    fi
+}
+
+cmd_send() {
+    local channel_id="${1:-}"
+    shift || true
+    local message="$*"
+
+    if [[ -z "$channel_id" ]] || [[ -z "$message" ]]; then
+        echo "Error: Channel ID and message required"
+        return 1
+    fi
+
+    send_api "$channel_id" "$message"
+}
+
+cmd_webhook() {
+    local message="$*"
+
+    if [[ -z "$message" ]]; then
+        echo "Error: Message required"
+        return 1
+    fi
+
+    send_webhook "$message"
+}
+
+# Main
+case "${1:-help}" in
+    send|message)
+        shift
+        cmd_send "$@"
+        ;;
+    webhook|hook)
+        shift
+        cmd_webhook "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-discord help"
+        exit 1
+        ;;
+esac

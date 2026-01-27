@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# agent-serial - Serial port communication
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-serial - Serial port communication
+
+Commands:
+  list                       List serial ports
+  monitor <port>             Monitor serial port
+  send <port> <data>         Send data to port
+  config <port>              Show/set port configuration
+
+Options:
+  --baud <rate>              Baud rate (default: 9600)
+  --bits <5-8>               Data bits (default: 8)
+  --parity <N|E|O>           Parity (default: N)
+  --stop <1|2>               Stop bits (default: 1)
+
+Examples:
+  agent-serial list
+  agent-serial monitor /dev/tty.usbserial-1234 --baud 115200
+  agent-serial send /dev/tty.usbserial-1234 "AT"
+EOF
+}
+
+cmd_list() {
+    echo "Serial ports:"
+    echo
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        ls -1 /dev/tty.* /dev/cu.* 2>/dev/null | grep -v Bluetooth || echo "No serial ports found"
+    else
+        ls -1 /dev/ttyUSB* /dev/ttyACM* /dev/ttyS* 2>/dev/null || echo "No serial ports found"
+    fi
+}
+
+cmd_monitor() {
+    local port="${1:-}"
+    local baud="9600"
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --baud|-b) baud="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$port" ]]; then
+        echo "Error: Port required"
+        return 1
+    fi
+
+    if [[ ! -e "$port" ]]; then
+        echo "Error: Port not found: $port"
+        return 1
+    fi
+
+    echo "Monitoring $port at $baud baud (Ctrl+C to stop)..."
+
+    if command -v screen &> /dev/null; then
+        screen "$port" "$baud"
+    elif command -v minicom &> /dev/null; then
+        minicom -D "$port" -b "$baud"
+    elif command -v picocom &> /dev/null; then
+        picocom -b "$baud" "$port"
+    else
+        # Basic cat-based monitoring
+        stty -F "$port" "$baud" 2>/dev/null || stty -f "$port" "$baud"
+        cat "$port"
+    fi
+}
+
+cmd_send() {
+    local port="${1:-}"
+    shift || true
+    local data="$*"
+    local baud="9600"
+
+    # Check for --baud flag in remaining args
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --baud|-b) baud="$2"; shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    data="${args[*]:-$data}"
+
+    if [[ -z "$port" ]] || [[ -z "$data" ]]; then
+        echo "Error: Port and data required"
+        return 1
+    fi
+
+    if [[ ! -e "$port" ]]; then
+        echo "Error: Port not found: $port"
+        return 1
+    fi
+
+    # Configure port
+    stty -F "$port" "$baud" 2>/dev/null || stty -f "$port" "$baud"
+
+    # Send data
+    echo -n "$data" > "$port"
+    echo "Sent: $data"
+}
+
+cmd_config() {
+    local port="${1:-}"
+
+    if [[ -z "$port" ]]; then
+        echo "Error: Port required"
+        return 1
+    fi
+
+    if [[ ! -e "$port" ]]; then
+        echo "Error: Port not found: $port"
+        return 1
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        stty -f "$port" -a
+    else
+        stty -F "$port" -a
+    fi
+}
+
+cmd_raw() {
+    local port="${1:-}"
+    local baud="${2:-9600}"
+
+    if [[ -z "$port" ]]; then
+        echo "Error: Port required"
+        return 1
+    fi
+
+    # Set up raw mode for binary communication
+    if [[ "$(uname)" == "Darwin" ]]; then
+        stty -f "$port" "$baud" raw -echo
+    else
+        stty -F "$port" "$baud" raw -echo
+    fi
+
+    echo "Port configured for raw mode at $baud baud"
+}
+
+# Main
+case "${1:-help}" in
+    list|ls|ports)
+        cmd_list
+        ;;
+    monitor|mon|watch)
+        shift
+        cmd_monitor "$@"
+        ;;
+    send|write|tx)
+        shift
+        cmd_send "$@"
+        ;;
+    config|settings)
+        shift
+        cmd_config "$@"
+        ;;
+    raw)
+        shift
+        cmd_raw "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-serial help"
+        exit 1
+        ;;
+esac

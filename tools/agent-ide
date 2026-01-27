@@ -1,0 +1,347 @@
+#!/usr/bin/env bash
+# agent-ide - IDE control (VS Code, Cursor)
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-ide - IDE control (VS Code, Cursor)
+
+Commands:
+  open <path>                Open file or folder
+  goto <file:line:col>       Go to location
+  run <command>              Run editor command
+  search <query>             Search in files
+  terminal <cmd>             Run in integrated terminal
+  extensions                 List installed extensions
+  install <ext>              Install extension
+  diff <file1> <file2>       Diff two files
+
+Options:
+  --ide <vscode|cursor>      Specify IDE (auto-detected)
+  --new-window               Open in new window
+  --wait                     Wait for file to close
+
+Examples:
+  agent-ide open .
+  agent-ide open src/main.py
+  agent-ide goto src/main.py:42
+  agent-ide run "workbench.action.toggleSidebarVisibility"
+  agent-ide search "TODO"
+  agent-ide terminal "npm test"
+EOF
+}
+
+# Detect IDE
+detect_ide() {
+    if command -v cursor &> /dev/null; then
+        echo "cursor"
+    elif command -v code &> /dev/null; then
+        echo "code"
+    elif [[ -d "/Applications/Cursor.app" ]]; then
+        echo "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+    elif [[ -d "/Applications/Visual Studio Code.app" ]]; then
+        echo "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+    else
+        echo ""
+    fi
+}
+
+get_ide_cmd() {
+    local ide="${1:-}"
+
+    if [[ -n "$ide" ]]; then
+        case "$ide" in
+            vscode|code) echo "code" ;;
+            cursor) echo "cursor" ;;
+            *) echo "$ide" ;;
+        esac
+    else
+        detect_ide
+    fi
+}
+
+cmd_open() {
+    local path="${1:-.}"
+    local ide=""
+    local new_window=""
+    local wait=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            --new-window|-n) new_window="--new-window"; shift ;;
+            --wait|-w) wait="--wait"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local cmd=$(get_ide_cmd "$ide")
+    if [[ -z "$cmd" ]]; then
+        echo "Error: No IDE found (install VS Code or Cursor)"
+        return 1
+    fi
+
+    $cmd $new_window $wait "$path"
+    echo "Opened: $path"
+}
+
+cmd_goto() {
+    local location="${1:-}"
+    local ide=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$location" ]]; then
+        echo "Error: Location required (file:line or file:line:col)"
+        return 1
+    fi
+
+    local cmd=$(get_ide_cmd "$ide")
+    if [[ -z "$cmd" ]]; then
+        echo "Error: No IDE found"
+        return 1
+    fi
+
+    $cmd --goto "$location"
+    echo "Opened: $location"
+}
+
+cmd_run() {
+    local command="${1:-}"
+    local ide=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$command" ]]; then
+        echo "Error: Command required"
+        return 1
+    fi
+
+    # Use AppleScript to run command in VS Code/Cursor
+    local app_name="Visual Studio Code"
+    if [[ "$ide" == "cursor" ]] || [[ "$(detect_ide)" == "cursor" ]]; then
+        app_name="Cursor"
+    fi
+
+    osascript << EOF
+tell application "$app_name"
+    activate
+end tell
+tell application "System Events"
+    tell process "$app_name"
+        keystroke "p" using {command down, shift down}
+        delay 0.3
+        keystroke ">$command"
+        delay 0.2
+        keystroke return
+    end tell
+end tell
+EOF
+    echo "Ran command: $command"
+}
+
+cmd_search() {
+    local query="${1:-}"
+    local ide=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$query" ]]; then
+        echo "Error: Search query required"
+        return 1
+    fi
+
+    local app_name="Visual Studio Code"
+    if [[ "$ide" == "cursor" ]] || [[ "$(detect_ide)" == "cursor" ]]; then
+        app_name="Cursor"
+    fi
+
+    osascript << EOF
+tell application "$app_name"
+    activate
+end tell
+tell application "System Events"
+    tell process "$app_name"
+        keystroke "f" using {command down, shift down}
+        delay 0.3
+        keystroke "$query"
+    end tell
+end tell
+EOF
+    echo "Searching for: $query"
+}
+
+cmd_terminal() {
+    local command="$*"
+    local ide=""
+
+    if [[ -z "$command" ]]; then
+        echo "Error: Command required"
+        return 1
+    fi
+
+    local app_name="Visual Studio Code"
+    if [[ "$(detect_ide)" == "cursor" ]]; then
+        app_name="Cursor"
+    fi
+
+    osascript << EOF
+tell application "$app_name"
+    activate
+end tell
+tell application "System Events"
+    tell process "$app_name"
+        -- Open terminal
+        keystroke "\`" using {control down}
+        delay 0.5
+        -- Type command
+        keystroke "$command"
+        keystroke return
+    end tell
+end tell
+EOF
+    echo "Ran in terminal: $command"
+}
+
+cmd_extensions() {
+    local ide=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local cmd=$(get_ide_cmd "$ide")
+    if [[ -z "$cmd" ]]; then
+        echo "Error: No IDE found"
+        return 1
+    fi
+
+    $cmd --list-extensions
+}
+
+cmd_install() {
+    local ext="${1:-}"
+    local ide=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$ext" ]]; then
+        echo "Error: Extension ID required"
+        return 1
+    fi
+
+    local cmd=$(get_ide_cmd "$ide")
+    if [[ -z "$cmd" ]]; then
+        echo "Error: No IDE found"
+        return 1
+    fi
+
+    $cmd --install-extension "$ext"
+    echo "Installed: $ext"
+}
+
+cmd_diff() {
+    local file1="${1:-}"
+    local file2="${2:-}"
+    local ide=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ide) ide="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file1" ]] || [[ -z "$file2" ]]; then
+        echo "Error: Two files required"
+        return 1
+    fi
+
+    local cmd=$(get_ide_cmd "$ide")
+    if [[ -z "$cmd" ]]; then
+        echo "Error: No IDE found"
+        return 1
+    fi
+
+    $cmd --diff "$file1" "$file2"
+    echo "Diffing: $file1 vs $file2"
+}
+
+# Main
+case "${1:-help}" in
+    open|o)
+        shift
+        cmd_open "$@"
+        ;;
+    goto|g|jump)
+        shift
+        cmd_goto "$@"
+        ;;
+    run|cmd|command)
+        shift
+        cmd_run "$@"
+        ;;
+    search|find|grep)
+        shift
+        cmd_search "$@"
+        ;;
+    terminal|term|shell)
+        shift
+        cmd_terminal "$@"
+        ;;
+    extensions|ext|list)
+        shift || true
+        cmd_extensions "$@"
+        ;;
+    install|add)
+        shift
+        cmd_install "$@"
+        ;;
+    diff|compare)
+        shift
+        cmd_diff "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If it looks like a path, open it
+        if [[ -e "$1" ]] || [[ "$1" =~ ^[./~] ]]; then
+            cmd_open "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-ide help"
+            exit 1
+        fi
+        ;;
+esac

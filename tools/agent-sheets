@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# agent-sheets - Google Sheets integration
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-sheets - Google Sheets operations
+
+Commands:
+  read <sheet-id> <range>    Read cells
+  write <sheet-id> <range> <values>  Write cells
+  append <sheet-id> <values> Append row
+  list <sheet-id>            List sheet names
+
+Environment:
+  GOOGLE_API_KEY             API key (for read-only)
+  GOOGLE_CREDENTIALS_FILE    Service account JSON file
+
+Notes:
+  - Sheet ID is from URL: docs.google.com/spreadsheets/d/{SHEET_ID}/edit
+  - Range format: Sheet1!A1:B10
+
+Examples:
+  agent-sheets read 1abc123 "Sheet1!A1:B10"
+  agent-sheets write 1abc123 "Sheet1!A1" "Hello"
+  agent-sheets append 1abc123 "John,Doe,john@example.com"
+EOF
+}
+
+SHEETS_API="https://sheets.googleapis.com/v4/spreadsheets"
+
+# Read using API key (public/shared sheets only)
+read_with_api_key() {
+    local sheet_id="$1"
+    local range="$2"
+    local api_key="${GOOGLE_API_KEY:-}"
+
+    if [[ -z "$api_key" ]]; then
+        echo "Error: GOOGLE_API_KEY not set"
+        return 1
+    fi
+
+    local encoded_range=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$range'))")
+
+    curl -s "${SHEETS_API}/${sheet_id}/values/${encoded_range}?key=${api_key}" | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'values' in r:
+    for row in r['values']:
+        print('\t'.join(str(cell) for cell in row))
+elif 'error' in r:
+    print(f\"Error: {r['error']['message']}\")
+else:
+    print('No data')
+"
+}
+
+# Read using service account
+read_with_service_account() {
+    local sheet_id="$1"
+    local range="$2"
+    local creds="${GOOGLE_CREDENTIALS_FILE:-}"
+
+    if [[ -z "$creds" ]] || [[ ! -f "$creds" ]]; then
+        echo "Error: GOOGLE_CREDENTIALS_FILE not set or file not found"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+creds = service_account.Credentials.from_service_account_file('$creds', scopes=SCOPES)
+service = build('sheets', 'v4', credentials=creds)
+
+result = service.spreadsheets().values().get(
+    spreadsheetId='$sheet_id',
+    range='$range'
+).execute()
+
+values = result.get('values', [])
+for row in values:
+    print('\t'.join(str(cell) for cell in row))
+PYTHON
+}
+
+cmd_read() {
+    local sheet_id="${1:-}"
+    local range="${2:-A1:Z100}"
+
+    if [[ -z "$sheet_id" ]]; then
+        echo "Error: Sheet ID required"
+        return 1
+    fi
+
+    # Try API key first, then service account
+    if [[ -n "${GOOGLE_API_KEY:-}" ]]; then
+        read_with_api_key "$sheet_id" "$range"
+    elif [[ -n "${GOOGLE_CREDENTIALS_FILE:-}" ]]; then
+        read_with_service_account "$sheet_id" "$range"
+    else
+        echo "Error: GOOGLE_API_KEY or GOOGLE_CREDENTIALS_FILE required"
+        return 1
+    fi
+}
+
+cmd_write() {
+    local sheet_id="${1:-}"
+    local range="${2:-}"
+    shift 2 || true
+    local values="$*"
+
+    if [[ -z "$sheet_id" ]] || [[ -z "$range" ]] || [[ -z "$values" ]]; then
+        echo "Error: Sheet ID, range, and values required"
+        return 1
+    fi
+
+    local creds="${GOOGLE_CREDENTIALS_FILE:-}"
+    if [[ -z "$creds" ]] || [[ ! -f "$creds" ]]; then
+        echo "Error: GOOGLE_CREDENTIALS_FILE required for writing"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+creds = service_account.Credentials.from_service_account_file('$creds', scopes=SCOPES)
+service = build('sheets', 'v4', credentials=creds)
+
+# Parse values (comma-separated)
+values = [['$values'.split(',')]]
+
+body = {'values': values}
+result = service.spreadsheets().values().update(
+    spreadsheetId='$sheet_id',
+    range='$range',
+    valueInputOption='USER_ENTERED',
+    body=body
+).execute()
+
+print(f"Updated {result.get('updatedCells', 0)} cells")
+PYTHON
+}
+
+cmd_append() {
+    local sheet_id="${1:-}"
+    shift || true
+    local values="$*"
+
+    if [[ -z "$sheet_id" ]] || [[ -z "$values" ]]; then
+        echo "Error: Sheet ID and values required"
+        return 1
+    fi
+
+    local creds="${GOOGLE_CREDENTIALS_FILE:-}"
+    if [[ -z "$creds" ]] || [[ ! -f "$creds" ]]; then
+        echo "Error: GOOGLE_CREDENTIALS_FILE required for appending"
+        return 1
+    fi
+
+    python3 << PYTHON
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+creds = service_account.Credentials.from_service_account_file('$creds', scopes=SCOPES)
+service = build('sheets', 'v4', credentials=creds)
+
+# Parse values (comma-separated)
+values = [['$values'.replace("'", "").split(',')]]
+
+body = {'values': values}
+result = service.spreadsheets().values().append(
+    spreadsheetId='$sheet_id',
+    range='Sheet1!A1',
+    valueInputOption='USER_ENTERED',
+    insertDataOption='INSERT_ROWS',
+    body=body
+).execute()
+
+print(f"Appended {result.get('updates', {}).get('updatedRows', 0)} row(s)")
+PYTHON
+}
+
+cmd_list() {
+    local sheet_id="${1:-}"
+
+    if [[ -z "$sheet_id" ]]; then
+        echo "Error: Sheet ID required"
+        return 1
+    fi
+
+    local api_key="${GOOGLE_API_KEY:-}"
+    if [[ -n "$api_key" ]]; then
+        curl -s "${SHEETS_API}/${sheet_id}?key=${api_key}&fields=sheets.properties.title" | \
+            python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'sheets' in r:
+    for sheet in r['sheets']:
+        print(sheet['properties']['title'])
+else:
+    print(f'Error: {r}')
+"
+    else
+        echo "Error: GOOGLE_API_KEY required"
+        return 1
+    fi
+}
+
+# Main
+case "${1:-help}" in
+    read|get)
+        shift
+        cmd_read "$@"
+        ;;
+    write|set|update)
+        shift
+        cmd_write "$@"
+        ;;
+    append|add)
+        shift
+        cmd_append "$@"
+        ;;
+    list|sheets)
+        shift
+        cmd_list "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-sheets help"
+        exit 1
+        ;;
+esac

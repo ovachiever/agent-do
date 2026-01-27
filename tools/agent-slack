@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# agent-slack - Slack integration
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-slack - Slack messaging
+
+Commands:
+  send <channel> <message>   Send message to channel
+  webhook <message>          Send via webhook URL
+  upload <channel> <file>    Upload file to channel
+
+Environment:
+  SLACK_TOKEN                Bot token (xoxb-...)
+  SLACK_WEBHOOK_URL          Incoming webhook URL
+
+Examples:
+  agent-slack send "#general" "Hello from agent-do!"
+  agent-slack send "@user" "Direct message"
+  agent-slack webhook "Build completed successfully"
+  agent-slack upload "#dev" ./report.pdf
+EOF
+}
+
+# Send message via API
+send_api() {
+    local channel="$1"
+    local message="$2"
+    local token="${SLACK_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: SLACK_TOKEN not set"
+        return 1
+    fi
+
+    curl -s -X POST "https://slack.com/api/chat.postMessage" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -d "{\"channel\": \"$channel\", \"text\": \"$message\"}" | \
+        python3 -c "import sys,json; r=json.load(sys.stdin); print('Sent!' if r.get('ok') else f'Error: {r.get(\"error\")}')"
+}
+
+# Send message via webhook
+send_webhook() {
+    local message="$1"
+    local webhook="${SLACK_WEBHOOK_URL:-}"
+
+    if [[ -z "$webhook" ]]; then
+        echo "Error: SLACK_WEBHOOK_URL not set"
+        return 1
+    fi
+
+    local response
+    response=$(curl -s -X POST "$webhook" \
+        -H "Content-Type: application/json" \
+        -d "{\"text\": \"$message\"}")
+
+    if [[ "$response" == "ok" ]]; then
+        echo "Sent!"
+    else
+        echo "Error: $response"
+        return 1
+    fi
+}
+
+cmd_send() {
+    local channel="${1:-}"
+    shift || true
+    local message="$*"
+
+    if [[ -z "$channel" ]] || [[ -z "$message" ]]; then
+        echo "Error: Channel and message required"
+        echo "Usage: agent-slack send <channel> <message>"
+        return 1
+    fi
+
+    # Normalize channel name
+    [[ ! "$channel" =~ ^[#@] ]] && channel="#$channel"
+
+    send_api "$channel" "$message"
+}
+
+cmd_webhook() {
+    local message="$*"
+
+    if [[ -z "$message" ]]; then
+        echo "Error: Message required"
+        return 1
+    fi
+
+    send_webhook "$message"
+}
+
+cmd_upload() {
+    local channel="${1:-}"
+    local file="${2:-}"
+    local token="${SLACK_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: SLACK_TOKEN not set"
+        return 1
+    fi
+
+    if [[ -z "$channel" ]] || [[ -z "$file" ]]; then
+        echo "Error: Channel and file required"
+        echo "Usage: agent-slack upload <channel> <file>"
+        return 1
+    fi
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: File not found: $file"
+        return 1
+    fi
+
+    # Normalize channel name
+    [[ ! "$channel" =~ ^[#@] ]] && channel="#$channel"
+
+    curl -s -X POST "https://slack.com/api/files.upload" \
+        -H "Authorization: Bearer $token" \
+        -F "channels=$channel" \
+        -F "file=@$file" | \
+        python3 -c "import sys,json; r=json.load(sys.stdin); print('Uploaded!' if r.get('ok') else f'Error: {r.get(\"error\")}')"
+}
+
+# Main
+case "${1:-help}" in
+    send|message|msg)
+        shift
+        cmd_send "$@"
+        ;;
+    webhook|hook)
+        shift
+        cmd_webhook "$@"
+        ;;
+    upload|file)
+        shift
+        cmd_upload "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # If first arg looks like a channel, assume send
+        if [[ "$1" =~ ^[#@] ]]; then
+            cmd_send "$@"
+        else
+            echo "Unknown command: $1"
+            echo "Try: agent-slack help"
+            exit 1
+        fi
+        ;;
+esac

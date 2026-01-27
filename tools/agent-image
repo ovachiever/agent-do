@@ -1,0 +1,423 @@
+#!/usr/bin/env bash
+# agent-image - Image processing tool
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-image - Image processing
+
+Commands:
+  info <file>                Show image info
+  resize <file> <WxH>        Resize image
+  crop <file> <WxH+X+Y>      Crop image
+  convert <file> <format>    Convert format
+  compress <file> [quality]  Compress image (default quality: 80)
+  rotate <file> <degrees>    Rotate image
+  flip <file> <h|v>          Flip horizontal or vertical
+  thumbnail <file> [size]    Create thumbnail (default: 150x150)
+
+Options:
+  -o, --output <path>        Output path (default: adds suffix)
+
+Examples:
+  agent-image info photo.jpg
+  agent-image resize photo.jpg 800x600
+  agent-image convert photo.png jpg
+  agent-image compress photo.jpg 75
+  agent-image thumbnail photo.jpg 200
+EOF
+}
+
+# Check for image tools
+check_tools() {
+    if command -v magick &> /dev/null; then
+        echo "magick"
+    elif command -v convert &> /dev/null; then
+        echo "convert"
+    elif command -v sips &> /dev/null; then
+        echo "sips"
+    else
+        echo ""
+    fi
+}
+
+cmd_info() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid file required"
+        return 1
+    fi
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick|convert)
+            identify -verbose "$file" | head -30
+            ;;
+        sips)
+            sips -g all "$file"
+            ;;
+        *)
+            # Basic info with file command
+            file "$file"
+            ;;
+    esac
+}
+
+cmd_resize() {
+    local file="${1:-}"
+    local size="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$size" ]]; then
+        echo "Error: File and size required"
+        echo "Usage: agent-image resize <file> <WxH>"
+        return 1
+    fi
+
+    [[ -z "$output" ]] && output="${file%.*}-${size}.${file##*.}"
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick)
+            magick "$file" -resize "$size" "$output"
+            ;;
+        convert)
+            convert "$file" -resize "$size" "$output"
+            ;;
+        sips)
+            local w="${size%x*}"
+            local h="${size#*x}"
+            cp "$file" "$output"
+            sips -z "$h" "$w" "$output"
+            ;;
+        *)
+            echo "Error: ImageMagick or sips required"
+            return 1
+            ;;
+    esac
+
+    echo "Resized to $output"
+}
+
+cmd_crop() {
+    local file="${1:-}"
+    local geometry="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$geometry" ]]; then
+        echo "Error: File and geometry required"
+        echo "Usage: agent-image crop <file> <WxH+X+Y>"
+        return 1
+    fi
+
+    [[ -z "$output" ]] && output="${file%.*}-cropped.${file##*.}"
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick)
+            magick "$file" -crop "$geometry" "$output"
+            ;;
+        convert)
+            convert "$file" -crop "$geometry" "$output"
+            ;;
+        sips)
+            # sips crop is more complex, use ImageMagick syntax parser
+            echo "Error: sips crop not supported, install ImageMagick"
+            return 1
+            ;;
+        *)
+            echo "Error: ImageMagick required"
+            return 1
+            ;;
+    esac
+
+    echo "Cropped to $output"
+}
+
+cmd_convert() {
+    local file="${1:-}"
+    local format="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$format" ]]; then
+        echo "Error: File and format required"
+        return 1
+    fi
+
+    format="${format#.}"  # Remove leading dot if present
+    [[ -z "$output" ]] && output="${file%.*}.$format"
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick)
+            magick "$file" "$output"
+            ;;
+        convert)
+            convert "$file" "$output"
+            ;;
+        sips)
+            sips -s format "$format" "$file" --out "$output"
+            ;;
+        *)
+            echo "Error: ImageMagick or sips required"
+            return 1
+            ;;
+    esac
+
+    echo "Converted to $output"
+}
+
+cmd_compress() {
+    local file="${1:-}"
+    local quality="${2:-80}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]]; then
+        echo "Error: File required"
+        return 1
+    fi
+
+    [[ -z "$output" ]] && output="${file%.*}-compressed.${file##*.}"
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick)
+            magick "$file" -quality "$quality" "$output"
+            ;;
+        convert)
+            convert "$file" -quality "$quality" "$output"
+            ;;
+        sips)
+            cp "$file" "$output"
+            # sips doesn't have direct quality control for all formats
+            echo "Note: sips compression limited"
+            ;;
+        *)
+            echo "Error: ImageMagick required"
+            return 1
+            ;;
+    esac
+
+    local orig_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file")
+    local new_size=$(stat -f%z "$output" 2>/dev/null || stat -c%s "$output")
+    echo "Compressed to $output (${orig_size} -> ${new_size} bytes)"
+}
+
+cmd_rotate() {
+    local file="${1:-}"
+    local degrees="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$degrees" ]]; then
+        echo "Error: File and degrees required"
+        return 1
+    fi
+
+    [[ -z "$output" ]] && output="${file%.*}-rotated.${file##*.}"
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick)
+            magick "$file" -rotate "$degrees" "$output"
+            ;;
+        convert)
+            convert "$file" -rotate "$degrees" "$output"
+            ;;
+        sips)
+            cp "$file" "$output"
+            sips -r "$degrees" "$output"
+            ;;
+        *)
+            echo "Error: ImageMagick or sips required"
+            return 1
+            ;;
+    esac
+
+    echo "Rotated to $output"
+}
+
+cmd_flip() {
+    local file="${1:-}"
+    local direction="${2:-}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ -z "$direction" ]]; then
+        echo "Error: File and direction (h/v) required"
+        return 1
+    fi
+
+    [[ -z "$output" ]] && output="${file%.*}-flipped.${file##*.}"
+
+    local tool=$(check_tools)
+    local flip_opt=""
+
+    case "$direction" in
+        h|horizontal) flip_opt="-flop" ;;
+        v|vertical) flip_opt="-flip" ;;
+        *) echo "Error: Direction must be h or v"; return 1 ;;
+    esac
+
+    case "$tool" in
+        magick)
+            magick "$file" $flip_opt "$output"
+            ;;
+        convert)
+            convert "$file" $flip_opt "$output"
+            ;;
+        sips)
+            cp "$file" "$output"
+            [[ "$direction" == "h" ]] && sips -f horizontal "$output"
+            [[ "$direction" == "v" ]] && sips -f vertical "$output"
+            ;;
+        *)
+            echo "Error: ImageMagick or sips required"
+            return 1
+            ;;
+    esac
+
+    echo "Flipped to $output"
+}
+
+cmd_thumbnail() {
+    local file="${1:-}"
+    local size="${2:-150}"
+    local output=""
+
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output) output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]]; then
+        echo "Error: File required"
+        return 1
+    fi
+
+    [[ ! "$size" =~ x ]] && size="${size}x${size}"
+    [[ -z "$output" ]] && output="${file%.*}-thumb.${file##*.}"
+
+    local tool=$(check_tools)
+
+    case "$tool" in
+        magick)
+            magick "$file" -thumbnail "$size^" -gravity center -extent "$size" "$output"
+            ;;
+        convert)
+            convert "$file" -thumbnail "$size^" -gravity center -extent "$size" "$output"
+            ;;
+        sips)
+            local w="${size%x*}"
+            local h="${size#*x}"
+            sips -z "$h" "$w" "$file" --out "$output"
+            ;;
+        *)
+            echo "Error: ImageMagick or sips required"
+            return 1
+            ;;
+    esac
+
+    echo "Thumbnail created: $output"
+}
+
+# Main
+case "${1:-help}" in
+    info|i)
+        shift
+        cmd_info "$@"
+        ;;
+    resize|r)
+        shift
+        cmd_resize "$@"
+        ;;
+    crop)
+        shift
+        cmd_crop "$@"
+        ;;
+    convert|c)
+        shift
+        cmd_convert "$@"
+        ;;
+    compress|comp)
+        shift
+        cmd_compress "$@"
+        ;;
+    rotate|rot)
+        shift
+        cmd_rotate "$@"
+        ;;
+    flip)
+        shift
+        cmd_flip "$@"
+        ;;
+    thumbnail|thumb|t)
+        shift
+        cmd_thumbnail "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-image help"
+        exit 1
+        ;;
+esac

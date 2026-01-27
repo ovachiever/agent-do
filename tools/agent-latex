@@ -1,0 +1,472 @@
+#!/usr/bin/env bash
+# agent-latex - LaTeX document compilation and management
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-latex - LaTeX document compilation and management
+
+Commands:
+  compile <file>           Compile LaTeX to PDF
+  watch <file>             Watch and auto-compile
+  clean <dir>              Clean auxiliary files
+  preview <file>           Compile and open PDF
+  template <type>          Create from template
+  bib <file>               Process bibliography
+  check <file>             Check for errors
+
+Templates:
+  article, report, thesis, letter, beamer, cv
+
+Requirements:
+  - TeX distribution (MacTeX, TeX Live, MiKTeX)
+
+Examples:
+  agent-latex compile paper.tex
+  agent-latex watch thesis.tex
+  agent-latex template article > new.tex
+  agent-latex preview slides.tex
+EOF
+}
+
+cmd_compile() {
+    local file="${1:-}"
+    local engine="pdflatex"
+    local bibtex=false
+    local output_dir=""
+
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --engine|-e) engine="$2"; shift 2 ;;
+            --bibtex|-b) bibtex=true; shift ;;
+            --output|-o) output_dir="$2"; shift 2 ;;
+            --xelatex) engine="xelatex"; shift ;;
+            --lualatex) engine="lualatex"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid .tex file required"
+        return 1
+    fi
+
+    local dir="$(dirname "$file")"
+    local base="$(basename "$file" .tex)"
+
+    # Build command
+    local cmd="$engine -interaction=nonstopmode"
+    [[ -n "$output_dir" ]] && cmd="$cmd -output-directory=$output_dir"
+    cmd="$cmd \"$file\""
+
+    echo "Compiling with $engine..."
+
+    # First pass
+    (cd "$dir" && eval "$cmd")
+
+    # BibTeX if requested or detected
+    if $bibtex || grep -q '\\bibliography\|\\addbibresource' "$file" 2>/dev/null; then
+        echo "Processing bibliography..."
+        (cd "$dir" && bibtex "$base" 2>/dev/null || biber "$base" 2>/dev/null || true)
+        # Two more passes for references
+        (cd "$dir" && eval "$cmd")
+        (cd "$dir" && eval "$cmd")
+    else
+        # One more pass for cross-references
+        (cd "$dir" && eval "$cmd")
+    fi
+
+    local pdf="${output_dir:-$dir}/${base}.pdf"
+    if [[ -f "$pdf" ]]; then
+        echo "Created: $pdf"
+    else
+        echo "Compilation may have failed - check log file"
+        return 1
+    fi
+}
+
+cmd_watch() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid .tex file required"
+        return 1
+    fi
+
+    # Try latexmk first (best option)
+    if command -v latexmk &> /dev/null; then
+        latexmk -pvc -pdf "$file"
+        return
+    fi
+
+    # Fall back to fswatch (macOS) or inotifywait (Linux)
+    echo "Watching $file for changes (Ctrl+C to stop)..."
+
+    if command -v fswatch &> /dev/null; then
+        fswatch -o "$file" | while read -r; do
+            echo "Change detected, compiling..."
+            cmd_compile "$file"
+        done
+    elif command -v inotifywait &> /dev/null; then
+        while inotifywait -e modify "$file"; do
+            echo "Change detected, compiling..."
+            cmd_compile "$file"
+        done
+    else
+        echo "Error: Install latexmk, fswatch (macOS), or inotify-tools (Linux)"
+        return 1
+    fi
+}
+
+cmd_clean() {
+    local dir="${1:-.}"
+
+    local extensions=(
+        "aux" "log" "out" "toc" "lof" "lot"
+        "bbl" "blg" "bcf" "run.xml"
+        "fls" "fdb_latexmk" "synctex.gz"
+        "nav" "snm" "vrb"  # beamer
+        "idx" "ind" "ilg"  # index
+        "glg" "glo" "gls"  # glossary
+    )
+
+    local count=0
+    for ext in "${extensions[@]}"; do
+        for f in "$dir"/*."$ext" 2>/dev/null; do
+            if [[ -f "$f" ]]; then
+                rm "$f"
+                ((count++))
+            fi
+        done
+    done
+
+    echo "Removed $count auxiliary files"
+}
+
+cmd_preview() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid .tex file required"
+        return 1
+    fi
+
+    cmd_compile "$file" || return 1
+
+    local base="$(basename "$file" .tex)"
+    local dir="$(dirname "$file")"
+    local pdf="$dir/${base}.pdf"
+
+    if [[ -f "$pdf" ]]; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            open "$pdf"
+        elif command -v xdg-open &> /dev/null; then
+            xdg-open "$pdf"
+        elif command -v evince &> /dev/null; then
+            evince "$pdf" &
+        else
+            echo "PDF ready: $pdf"
+        fi
+    fi
+}
+
+cmd_template() {
+    local type="${1:-article}"
+
+    case "$type" in
+        article)
+            cat << 'LATEX'
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Title}
+\author{Author}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Abstract text here.
+\end{abstract}
+
+\section{Introduction}
+
+\section{Methods}
+
+\section{Results}
+
+\section{Conclusion}
+
+\bibliographystyle{plain}
+% \bibliography{references}
+
+\end{document}
+LATEX
+            ;;
+        report)
+            cat << 'LATEX'
+\documentclass[12pt]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Report Title}
+\author{Author Name}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\chapter{Introduction}
+
+\chapter{Background}
+
+\chapter{Methodology}
+
+\chapter{Results}
+
+\chapter{Conclusion}
+
+\appendix
+\chapter{Supplementary Material}
+
+\bibliographystyle{plain}
+% \bibliography{references}
+
+\end{document}
+LATEX
+            ;;
+        beamer)
+            cat << 'LATEX'
+\documentclass{beamer}
+\usetheme{Madrid}
+\usecolortheme{default}
+
+\title{Presentation Title}
+\author{Author Name}
+\institute{Institution}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Outline}
+\tableofcontents
+\end{frame}
+
+\section{Introduction}
+
+\begin{frame}{Introduction}
+\begin{itemize}
+    \item Point 1
+    \item Point 2
+    \item Point 3
+\end{itemize}
+\end{frame}
+
+\section{Main Content}
+
+\begin{frame}{Slide Title}
+Content here
+\end{frame}
+
+\section{Conclusion}
+
+\begin{frame}{Conclusion}
+\begin{itemize}
+    \item Summary point 1
+    \item Summary point 2
+\end{itemize}
+\end{frame}
+
+\begin{frame}
+\centering
+\Huge Questions?
+\end{frame}
+
+\end{document}
+LATEX
+            ;;
+        letter)
+            cat << 'LATEX'
+\documentclass{letter}
+\usepackage[utf8]{inputenc}
+
+\signature{Your Name}
+\address{Your Address \\ City, State ZIP}
+
+\begin{document}
+
+\begin{letter}{Recipient Name \\ Recipient Address \\ City, State ZIP}
+
+\opening{Dear Sir or Madam,}
+
+Letter body here.
+
+\closing{Sincerely,}
+
+\end{letter}
+
+\end{document}
+LATEX
+            ;;
+        cv)
+            cat << 'LATEX'
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+{\LARGE \textbf{Your Name}}\\[0.5em]
+email@example.com | (123) 456-7890 | City, State\\
+\href{https://linkedin.com/in/yourprofile}{LinkedIn} | \href{https://github.com/yourusername}{GitHub}
+\end{center}
+
+\section*{Experience}
+\textbf{Job Title} \hfill Start -- End\\
+\textit{Company Name, Location}
+\begin{itemize}[nosep]
+    \item Achievement 1
+    \item Achievement 2
+\end{itemize}
+
+\section*{Education}
+\textbf{Degree Name} \hfill Year\\
+\textit{University Name, Location}
+
+\section*{Skills}
+\textbf{Technical:} Skill 1, Skill 2, Skill 3\\
+\textbf{Languages:} Language 1, Language 2
+
+\end{document}
+LATEX
+            ;;
+        *)
+            echo "Unknown template: $type"
+            echo "Available: article, report, beamer, letter, cv"
+            return 1
+            ;;
+    esac
+}
+
+cmd_bib() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]]; then
+        echo "Error: .bib or .tex file required"
+        return 1
+    fi
+
+    local base="${file%.*}"
+
+    if [[ "$file" == *.tex ]]; then
+        # Process from tex file
+        bibtex "$base" 2>/dev/null || biber "$base"
+    elif [[ "$file" == *.bib ]]; then
+        # Check bibliography file
+        if command -v biber &> /dev/null; then
+            biber --tool --validate-datamodel "$file"
+        else
+            echo "BibTeX file: $file"
+            echo "Entries: $(grep -c '@' "$file")"
+        fi
+    fi
+}
+
+cmd_check() {
+    local file="${1:-}"
+
+    if [[ -z "$file" ]] || [[ ! -f "$file" ]]; then
+        echo "Error: Valid .tex file required"
+        return 1
+    fi
+
+    # Use lacheck if available
+    if command -v lacheck &> /dev/null; then
+        echo "=== LaCheck ==="
+        lacheck "$file"
+    fi
+
+    # Use chktex if available
+    if command -v chktex &> /dev/null; then
+        echo "=== ChkTeX ==="
+        chktex "$file"
+    fi
+
+    # Basic checks
+    echo "=== Basic Checks ==="
+
+    # Unmatched braces
+    local open=$(grep -o '{' "$file" | wc -l)
+    local close=$(grep -o '}' "$file" | wc -l)
+    if [[ "$open" -ne "$close" ]]; then
+        echo "Warning: Unbalanced braces (open: $open, close: $close)"
+    else
+        echo "Braces balanced: $open pairs"
+    fi
+
+    # Check for common issues
+    grep -n '\\\\$' "$file" && echo "  ^ Double backslash at end of line"
+    grep -n '[^\\]%' "$file" | head -5 && echo "  ^ Unescaped % (may be intentional comments)"
+}
+
+# Main
+case "${1:-help}" in
+    compile|build|make)
+        shift
+        cmd_compile "$@"
+        ;;
+    watch|auto)
+        shift
+        cmd_watch "$@"
+        ;;
+    clean)
+        shift
+        cmd_clean "$@"
+        ;;
+    preview|view|open)
+        shift
+        cmd_preview "$@"
+        ;;
+    template|new)
+        shift
+        cmd_template "$@"
+        ;;
+    bib|bibliography)
+        shift
+        cmd_bib "$@"
+        ;;
+    check|lint|verify)
+        shift
+        cmd_check "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-latex help"
+        exit 1
+        ;;
+esac
