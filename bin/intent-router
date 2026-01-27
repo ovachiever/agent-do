@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""
+Intent router using Claude API.
+Maps natural language intents to agent-* tool commands.
+"""
+
+import anthropic
+import json
+import subprocess
+import sys
+import os
+from pathlib import Path
+
+# Add lib to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+
+from state import load_state, build_state_context
+from registry import load_registry, build_registry_context
+from cache import check_cache, cache_result, fuzzy_match
+
+
+def route_intent(intent: str, registry: dict, state: dict, dry_run: bool = False, explain: bool = False) -> dict:
+    """Route intent to tool command using Claude."""
+
+    # Try cache first
+    cached = check_cache(intent)
+    if cached and not explain:
+        cached['from_cache'] = True
+        return cached
+
+    # Try fuzzy match if cache miss
+    fuzzy = fuzzy_match(intent)
+    if fuzzy and not explain:
+        fuzzy['from_fuzzy'] = True
+        return fuzzy
+
+    # Fall back to LLM
+    client = anthropic.Anthropic()
+
+    mode = "explain what tool to use" if explain else "determine the exact command"
+
+    prompt = f"""You are an intent router for the agent-do CLI. Given a natural language request, {mode}.
+
+Current state:
+{build_state_context(state)}
+
+Available tools (each is invoked as `agent-<tool> <command> [args]`):
+{build_registry_context(registry)}
+
+User request: "{intent}"
+
+Respond with JSON only:
+{{
+  "tool": "tool_name",
+  "command": "subcommand",
+  "args": ["arg1", "arg2"],
+  "flags": {{"--flag": "value"}},
+  "confidence": 0.95,
+  "explanation": "brief explanation of what this will do",
+  "clarification_needed": null
+}}
+
+Rules:
+- tool should be just the name (e.g., "tui" not "agent-tui")
+- If the intent is ambiguous, set clarification_needed to a clarifying question
+- If no tool matches, set tool to null
+- Reference session IDs from current state when relevant
+- Keep args as a flat list of strings
+- Use flags dict for named options (--flag value)"""
+
+    response = client.messages.create(
+        model="claude-opus-4-5-20251101",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    # Extract JSON from response
+    text = response.content[0].text
+    # Handle potential markdown code blocks
+    if "```json" in text:
+        text = text.split("```json")[1].split("```")[0]
+    elif "```" in text:
+        text = text.split("```")[1].split("```")[0]
+
+    result = json.loads(text.strip())
+
+    # Cache successful routing
+    if result.get('tool') and not result.get('clarification_needed'):
+        cache_result(intent, result)
+
+    return result
+
+
+def build_command(result: dict) -> list[str]:
+    """Build command list from routing result."""
+    cmd = [f"agent-{result['tool']}", result['command']]
+    cmd.extend(result.get('args', []))
+    for flag, value in result.get('flags', {}).items():
+        if value is True:
+            cmd.append(flag)
+        elif value is not None:
+            cmd.extend([flag, str(value)])
+    return cmd
+
+
+def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> int:
+    """Execute the routed command."""
+
+    if result.get('clarification_needed'):
+        if json_output:
+            # Structured output for orchestrators - exit 2 means "needs input"
+            output = {
+                "status": "needs_input",
+                "question": result['clarification_needed'],
+                "context": result.get('explanation'),
+                "partial_routing": {
+                    "tool": result.get('tool'),
+                    "command": result.get('command'),
+                    "confidence": result.get('confidence', 0)
+                }
+            }
+            print(json.dumps(output))
+            return 2  # Exit 2 = needs clarification (not error)
+        else:
+            print(f"? {result['clarification_needed']}")
+            return 1
+
+    if not result.get('tool'):
+        if json_output:
+            output = {
+                "status": "error",
+                "error": "no_matching_tool",
+                "message": "Could not determine which tool to use.",
+                "explanation": result.get('explanation')
+            }
+            print(json.dumps(output))
+            return 1
+        print("Could not determine which tool to use.")
+        if result.get('explanation'):
+            print(f"  {result['explanation']}")
+        return 1
+
+    cmd = build_command(result)
+    cmd_str = ' '.join(cmd)
+
+    if dry_run:
+        if json_output:
+            output = {
+                "status": "dry_run",
+                "command": cmd_str,
+                "tool": result.get('tool'),
+                "explanation": result.get('explanation')
+            }
+            print(json.dumps(output))
+        else:
+            print(f"Would execute: {cmd_str}")
+            if result.get('explanation'):
+                print(f"  ({result['explanation']})")
+        return 0
+
+    # Show what we're doing
+    source = ""
+    if result.get('from_cache'):
+        source = " [cached]"
+    elif result.get('from_fuzzy'):
+        source = " [fuzzy match]"
+
+    if not json_output:
+        print(f"→ {cmd_str}{source}")
+        if result.get('explanation'):
+            print(f"  ({result['explanation']})")
+        print()
+
+    # Find the tool
+    script_dir = Path(__file__).parent.parent
+    tools_dir = script_dir / "tools"
+
+    tool_path = tools_dir / f"agent-{result['tool']}"
+    if tool_path.exists():
+        cmd[0] = str(tool_path)
+    # Otherwise assume it's in PATH
+
+    try:
+        proc = subprocess.run(cmd, capture_output=json_output, text=True)
+        if json_output:
+            output = {
+                "status": "success" if proc.returncode == 0 else "tool_error",
+                "command": cmd_str,
+                "tool": result.get('tool'),
+                "exit_code": proc.returncode,
+                "stdout": proc.stdout,
+                "stderr": proc.stderr
+            }
+            print(json.dumps(output))
+        return proc.returncode
+    except FileNotFoundError:
+        if json_output:
+            output = {
+                "status": "error",
+                "error": "tool_not_found",
+                "message": f"Tool 'agent-{result['tool']}' not found.",
+                "tool": result.get('tool')
+            }
+            print(json.dumps(output))
+        else:
+            print(f"Error: Tool 'agent-{result['tool']}' not found.")
+            print(f"Expected at: {tool_path}")
+        return 1
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Intent router for agent-do")
+    parser.add_argument("intent", nargs="*", help="Natural language intent")
+    parser.add_argument("--dry-run", action="store_true", help="Show command without executing")
+    parser.add_argument("--explain", action="store_true", help="Explain how to do something")
+    parser.add_argument("--json", action="store_true", help="Output JSON (for orchestrator integration)")
+    parser.add_argument("--context", type=str, help="Additional context/answer to previous question")
+    args = parser.parse_args()
+
+    intent = " ".join(args.intent)
+    if not intent:
+        if args.json:
+            print(json.dumps({"status": "error", "error": "no_intent", "message": "No intent provided"}))
+        else:
+            print("Usage: intent-router \"what you want to do\"")
+        return 1
+
+    # If context provided, append to intent
+    if args.context:
+        intent = f"{intent}. Additional context: {args.context}"
+
+    registry = load_registry()
+    state = load_state()
+
+    try:
+        result = route_intent(intent, registry, state, args.dry_run, args.explain)
+        return execute(result, args.dry_run, args.json)
+    except json.JSONDecodeError as e:
+        if args.json:
+            print(json.dumps({"status": "error", "error": "json_parse_error", "message": str(e)}))
+        else:
+            print(f"Error parsing router response: {e}")
+        return 1
+    except anthropic.APIError as e:
+        if args.json:
+            print(json.dumps({"status": "error", "error": "api_error", "message": str(e)}))
+        else:
+            print(f"API error: {e}")
+        # Try fuzzy match as fallback
+        fuzzy = fuzzy_match(intent, threshold=0.4)
+        if fuzzy:
+            if not args.json:
+                print("Falling back to fuzzy match...")
+            return execute(fuzzy, args.dry_run, args.json)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

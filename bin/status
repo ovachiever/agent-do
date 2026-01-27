@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# agent-do status - Show active sessions and state
+
+set -euo pipefail
+
+AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
+STATE_FILE="$AGENT_DO_HOME/state.yaml"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}agent-do status${NC}"
+echo "───────────────────────────────────────"
+
+# Check if state file exists
+if [[ ! -f "$STATE_FILE" ]]; then
+    echo "No active sessions."
+    exit 0
+fi
+
+# Parse YAML with python (simpler than pure bash)
+python3 << 'PYTHON'
+import yaml
+import os
+from pathlib import Path
+
+state_file = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do")) / "state.yaml"
+
+if not state_file.exists():
+    print("No active sessions.")
+    exit(0)
+
+with open(state_file) as f:
+    state = yaml.safe_load(f) or {}
+
+if not state:
+    print("No active sessions.")
+    exit(0)
+
+# TUI sessions
+if state.get('tui'):
+    print("\033[1;33mTUI Sessions:\033[0m")
+    for s in state['tui']:
+        label = s.get('label', s.get('command', 'unknown'))
+        print(f"  [{s['id']}] {label}")
+
+# REPL sessions
+if state.get('repl'):
+    print("\033[1;33mREPL Sessions:\033[0m")
+    for s in state['repl']:
+        print(f"  [{s['id']}] {s.get('type', 'unknown')}")
+
+# iOS
+if state.get('ios'):
+    ios = state['ios']
+    if isinstance(ios, dict):
+        print(f"\033[1;33miOS Simulator:\033[0m {ios.get('booted', 'not running')}")
+    else:
+        print(f"\033[1;33miOS Simulator:\033[0m {ios}")
+
+# Android
+if state.get('android'):
+    android = state['android']
+    if isinstance(android, dict):
+        print(f"\033[1;33mAndroid Emulator:\033[0m {android.get('booted', 'not running')}")
+    else:
+        print(f"\033[1;33mAndroid Emulator:\033[0m {android}")
+
+# Docker
+if state.get('docker'):
+    containers = state['docker'].get('containers', [])
+    if containers:
+        print(f"\033[1;33mDocker:\033[0m {len(containers)} containers")
+        for c in containers[:5]:
+            name = c.get('name', c.get('id', 'unknown'))
+            status = c.get('status', '')
+            print(f"  - {name} {status}")
+
+# SSH
+if state.get('ssh'):
+    print("\033[1;33mSSH Sessions:\033[0m")
+    for s in state['ssh']:
+        print(f"  [{s['id']}] {s.get('host', 'unknown')}")
+PYTHON
+
+echo "───────────────────────────────────────"

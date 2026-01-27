@@ -1,0 +1,1021 @@
+tools:
+  tui:
+    description: "Control any terminal/TUI application via tmux"
+    capabilities:
+      - spawn terminal applications
+      - send keystrokes
+      - capture screen state
+      - wait for text/patterns
+    commands:
+      spawn: "Start a new TUI session"
+      snapshot: "Capture current screen"
+      send: "Send keys to session"
+      type: "Type text into session"
+      wait: "Wait for condition"
+      kill: "Kill a session"
+      list: "List active sessions"
+    examples:
+      - intent: "start htop"
+        command: "agent-tui spawn htop"
+      - intent: "take a screenshot of session 1"
+        command: "agent-tui snapshot 1"
+      - intent: "send q to htop"
+        command: "agent-tui send 1 q"
+
+  ios:
+    description: "Control iOS Simulator"
+    capabilities:
+      - tap/swipe gestures
+      - take screenshots
+      - install/launch apps
+      - get UI hierarchy
+    commands:
+      tap: "Tap at coordinates: tap <x> <y>"
+      screenshot: "Capture simulator screen: screenshot [path] (saves to path or /tmp/ios-screenshot.png)"
+      launch: "Launch an app: launch <bundle-id>"
+      tree: "Get UI element tree"
+      swipe: "Swipe gesture: swipe <x1> <y1> <x2> <y2>"
+      type: "Type text: type <text>"
+      boot: "Boot simulator: boot [device-name]"
+      shutdown: "Shutdown simulator: shutdown [device-name]"
+      list: "List available simulators"
+      status: "Show booted simulator status"
+    examples:
+      - intent: "screenshot the iPhone simulator"
+        command: "agent-ios screenshot"
+      - intent: "take a screenshot and save to Downloads"
+        command: "agent-ios screenshot ~/Downloads/screenshot.png"
+      - intent: "save iOS screenshot to /tmp/test.png"
+        command: "agent-ios screenshot /tmp/test.png"
+      - intent: "tap at 100, 200"
+        command: "agent-ios tap 100 200"
+      - intent: "launch Safari"
+        command: "agent-ios launch com.apple.mobilesafari"
+      - intent: "boot the simulator"
+        command: "agent-ios boot"
+      - intent: "boot iPhone 15 Pro"
+        command: "agent-ios boot 'iPhone 15 Pro'"
+      - intent: "shutdown the simulator"
+        command: "agent-ios shutdown"
+
+  gui:
+    description: "Control native desktop applications via accessibility APIs"
+    capabilities:
+      - click buttons and UI elements
+      - type text into fields
+      - read UI element tree
+      - navigate menus
+    commands:
+      click: "Click an element"
+      type: "Type text"
+      tree: "Get UI hierarchy"
+      find: "Find elements"
+      focus: "Focus an application"
+      menu: "Navigate menus"
+    examples:
+      - intent: "click the Save button in Photoshop"
+        command: "agent-gui click Photoshop --title Save"
+      - intent: "type hello into the search field"
+        command: "agent-gui type --role textfield hello"
+      - intent: "get the UI tree of Finder"
+        command: "agent-gui tree Finder"
+
+  repl:
+    description: "Control interactive REPLs (Python, Node, psql, etc.)"
+    capabilities:
+      - spawn REPL sessions
+      - send commands
+      - read output
+      - detect prompts
+    commands:
+      spawn: "Start a REPL"
+      send: "Send command to REPL"
+      read: "Read REPL output"
+      list: "List active REPLs"
+      kill: "Kill a REPL session"
+    examples:
+      - intent: "start a python REPL"
+        command: "agent-repl spawn python"
+      - intent: "send x = 42 to my python session"
+        command: "agent-repl send 1 'x = 42'"
+      - intent: "read output from python"
+        command: "agent-repl read 1"
+
+  docker:
+    description: "Control Docker containers"
+    capabilities:
+      - list/start/stop containers
+      - view logs
+      - execute commands
+      - manage compose stacks
+    commands:
+      ps: "List containers"
+      logs: "View container logs"
+      exec: "Run command in container"
+      shell: "Interactive shell"
+      start: "Start container"
+      stop: "Stop container"
+      compose: "Docker compose operations"
+    examples:
+      - intent: "show running containers"
+        command: "agent-docker ps"
+      - intent: "view logs for postgres container"
+        command: "agent-docker logs postgres"
+      - intent: "run bash in my-container"
+        command: "agent-docker shell my-container"
+
+  ide:
+    description: "Control VS Code/Cursor editor"
+    capabilities:
+      - open files and folders
+      - run commands
+      - navigate code
+      - manage extensions
+    commands:
+      open: "Open file or folder"
+      run: "Run editor command"
+      goto: "Go to line/symbol"
+      search: "Search in files"
+      terminal: "Run in integrated terminal"
+    examples:
+      - intent: "open src/main.py in VS Code"
+        command: "agent-ide open src/main.py"
+      - intent: "go to line 42"
+        command: "agent-ide goto 42"
+      - intent: "search for TODO"
+        command: "agent-ide search TODO"
+
+  ssh:
+    description: "Control remote server sessions"
+    capabilities:
+      - connect to remote servers
+      - execute commands
+      - transfer files
+      - manage sessions
+    commands:
+      connect: "Connect to server"
+      exec: "Execute remote command"
+      upload: "Upload file"
+      download: "Download file"
+      list: "List active sessions"
+    examples:
+      - intent: "connect to production server"
+        command: "agent-ssh connect prod"
+      - intent: "run df -h on server1"
+        command: "agent-ssh exec server1 'df -h'"
+
+  android:
+    description: "Control Android Emulator"
+    capabilities:
+      - tap/swipe gestures
+      - take screenshots
+      - install/launch apps
+      - send intents
+    commands:
+      tap: "Tap at coordinates"
+      screenshot: "Capture emulator screen"
+      launch: "Launch an app"
+      install: "Install APK"
+      shell: "Run adb shell command"
+    examples:
+      - intent: "screenshot the Android emulator"
+        command: "agent-android screenshot"
+      - intent: "launch Chrome on Android"
+        command: "agent-android launch com.android.chrome"
+
+  db:
+    description: "Control database clients"
+    capabilities:
+      - connect to databases
+      - run queries
+      - export data
+      - manage schemas
+    commands:
+      connect: "Connect to database"
+      query: "Run SQL query"
+      export: "Export query results"
+      tables: "List tables"
+      describe: "Describe table schema"
+    examples:
+      - intent: "show all tables in postgres"
+        command: "agent-db tables --db postgres"
+      - intent: "run SELECT * FROM users"
+        command: "agent-db query 'SELECT * FROM users'"
+
+  k8s:
+    description: "Control Kubernetes clusters"
+    capabilities:
+      - manage pods and deployments
+      - view logs
+      - port forwarding
+      - apply manifests
+    commands:
+      pods: "List pods"
+      logs: "View pod logs"
+      exec: "Execute in pod"
+      apply: "Apply manifest"
+      port-forward: "Forward port"
+    examples:
+      - intent: "show all pods"
+        command: "agent-k8s pods"
+      - intent: "view logs for api pod"
+        command: "agent-k8s logs api"
+
+  git:
+    description: "Enhanced git operations"
+    capabilities:
+      - commit with AI messages
+      - manage branches
+      - resolve conflicts
+      - interactive rebase
+    commands:
+      commit: "Commit with message"
+      branch: "Branch operations"
+      diff: "Show diff"
+      log: "Show log"
+      stash: "Stash changes"
+    examples:
+      - intent: "commit all changes"
+        command: "agent-git commit"
+      - intent: "show recent commits"
+        command: "agent-git log"
+
+  debug:
+    description: "Control debuggers"
+    capabilities:
+      - set breakpoints
+      - step through code
+      - inspect variables
+      - manage sessions
+    commands:
+      break: "Set breakpoint"
+      continue: "Continue execution"
+      step: "Step over/into/out"
+      print: "Print variable"
+      backtrace: "Show call stack"
+    examples:
+      - intent: "set breakpoint at line 42"
+        command: "agent-debug break 42"
+      - intent: "print the value of x"
+        command: "agent-debug print x"
+
+  jupyter:
+    description: "Control Jupyter notebooks"
+    capabilities:
+      - run cells
+      - create notebooks
+      - manage kernels
+      - export notebooks
+    commands:
+      run: "Run cell"
+      create: "Create notebook"
+      export: "Export notebook"
+      kernel: "Manage kernel"
+    examples:
+      - intent: "run all cells"
+        command: "agent-jupyter run --all"
+      - intent: "restart kernel"
+        command: "agent-jupyter kernel restart"
+
+  api:
+    description: "API testing and interaction"
+    capabilities:
+      - make HTTP requests
+      - test endpoints
+      - mock responses
+      - manage collections
+    commands:
+      get: "HTTP GET request"
+      post: "HTTP POST request"
+      put: "HTTP PUT request"
+      delete: "HTTP DELETE request"
+      test: "Run API test"
+    examples:
+      - intent: "GET /api/users"
+        command: "agent-api get /api/users"
+      - intent: "POST to /api/login"
+        command: "agent-api post /api/login"
+
+  clipboard:
+    description: "Cross-app clipboard management"
+    capabilities:
+      - copy/paste text
+      - copy images
+      - clipboard history
+    commands:
+      copy: "Copy to clipboard"
+      paste: "Paste from clipboard"
+      history: "Show clipboard history"
+      clear: "Clear clipboard"
+    examples:
+      - intent: "copy hello to clipboard"
+        command: "agent-clipboard copy 'hello'"
+      - intent: "show clipboard history"
+        command: "agent-clipboard history"
+
+  ocr:
+    description: "Screen text extraction"
+    capabilities:
+      - extract text from screen
+      - extract from images
+      - find text location
+    commands:
+      screen: "OCR entire screen"
+      region: "OCR screen region"
+      file: "OCR image file"
+      find: "Find text on screen"
+    examples:
+      - intent: "extract text from screen"
+        command: "agent-ocr screen"
+      - intent: "find where 'Submit' button is"
+        command: "agent-ocr find 'Submit'"
+
+  slack:
+    description: "Control Slack"
+    capabilities:
+      - send messages
+      - read channels
+      - manage reactions
+      - upload files
+    commands:
+      send: "Send message"
+      read: "Read channel"
+      react: "Add reaction"
+      upload: "Upload file"
+    examples:
+      - intent: "post 'deploy complete' to #engineering"
+        command: "agent-slack send '#engineering' 'deploy complete'"
+      - intent: "read #general"
+        command: "agent-slack read '#general'"
+
+  discord:
+    description: "Control Discord"
+    capabilities:
+      - send messages
+      - read channels
+      - manage servers
+    commands:
+      send: "Send message"
+      read: "Read channel"
+      join: "Join voice channel"
+    examples:
+      - intent: "send hello to #general"
+        command: "agent-discord send '#general' 'hello'"
+
+  email:
+    description: "Control email"
+    capabilities:
+      - send emails
+      - read inbox
+      - search messages
+      - manage folders
+    commands:
+      send: "Send email"
+      read: "Read inbox"
+      search: "Search emails"
+    examples:
+      - intent: "send email to john@example.com"
+        command: "agent-email send john@example.com"
+      - intent: "read my inbox"
+        command: "agent-email read"
+
+  calendar:
+    description: "Control calendar"
+    capabilities:
+      - create events
+      - list events
+      - manage invites
+    commands:
+      create: "Create event"
+      list: "List events"
+      delete: "Delete event"
+    examples:
+      - intent: "show today's events"
+        command: "agent-calendar list --today"
+      - intent: "create meeting at 3pm"
+        command: "agent-calendar create 'Meeting' --time 15:00"
+
+  notion:
+    description: "Control Notion"
+    capabilities:
+      - create pages
+      - update content
+      - query databases
+    commands:
+      create: "Create page"
+      update: "Update page"
+      query: "Query database"
+    examples:
+      - intent: "create a new page"
+        command: "agent-notion create 'New Page'"
+
+  linear:
+    description: "Control Linear"
+    capabilities:
+      - create issues
+      - update status
+      - manage projects
+    commands:
+      create: "Create issue"
+      update: "Update issue"
+      list: "List issues"
+    examples:
+      - intent: "create a bug report"
+        command: "agent-linear create --type bug"
+      - intent: "list my issues"
+        command: "agent-linear list --mine"
+
+  figma:
+    description: "Control Figma"
+    capabilities:
+      - export assets
+      - read design specs
+      - manage components
+    commands:
+      export: "Export assets"
+      inspect: "Inspect element"
+      list: "List components"
+    examples:
+      - intent: "export icons from design"
+        command: "agent-figma export --icons"
+
+  sheets:
+    description: "Control Google Sheets"
+    capabilities:
+      - read/write cells
+      - create sheets
+      - run formulas
+    commands:
+      read: "Read cells"
+      write: "Write cells"
+      create: "Create sheet"
+    examples:
+      - intent: "read A1:B10 from my sheet"
+        command: "agent-sheets read A1:B10"
+
+  pdf:
+    description: "Control PDF operations"
+    capabilities:
+      - read PDF content
+      - merge/split PDFs
+      - extract text
+    commands:
+      read: "Read PDF"
+      merge: "Merge PDFs"
+      split: "Split PDF"
+      extract: "Extract text"
+    examples:
+      - intent: "extract text from document.pdf"
+        command: "agent-pdf extract document.pdf"
+
+  cloud:
+    description: "Control cloud providers (AWS, GCP, Azure)"
+    capabilities:
+      - manage resources
+      - deploy services
+      - view metrics
+    commands:
+      list: "List resources"
+      deploy: "Deploy service"
+      logs: "View logs"
+    examples:
+      - intent: "list EC2 instances"
+        command: "agent-cloud list ec2"
+
+  ci:
+    description: "Control CI/CD pipelines"
+    capabilities:
+      - trigger builds
+      - view status
+      - manage pipelines
+    commands:
+      trigger: "Trigger build"
+      status: "View status"
+      logs: "View build logs"
+    examples:
+      - intent: "trigger deploy pipeline"
+        command: "agent-ci trigger deploy"
+
+  logs:
+    description: "Control log aggregation"
+    capabilities:
+      - search logs
+      - tail logs
+      - filter by service
+    commands:
+      search: "Search logs"
+      tail: "Tail logs"
+      filter: "Filter logs"
+    examples:
+      - intent: "search logs for errors"
+        command: "agent-logs search 'error'"
+
+  metrics:
+    description: "Control metrics/monitoring"
+    capabilities:
+      - view dashboards
+      - query metrics
+      - set alerts
+    commands:
+      query: "Query metrics"
+      dashboard: "View dashboard"
+      alert: "Manage alerts"
+    examples:
+      - intent: "show CPU usage"
+        command: "agent-metrics query cpu_usage"
+
+  vm:
+    description: "Control virtual machines"
+    capabilities:
+      - start/stop VMs
+      - snapshot
+      - manage images
+    commands:
+      start: "Start VM"
+      stop: "Stop VM"
+      snapshot: "Create snapshot"
+      list: "List VMs"
+    examples:
+      - intent: "start dev VM"
+        command: "agent-vm start dev"
+
+  network:
+    description: "Network diagnostics"
+    capabilities:
+      - check connectivity
+      - trace routes
+      - scan ports
+    commands:
+      ping: "Ping host"
+      trace: "Trace route"
+      scan: "Scan ports"
+      whois: "WHOIS lookup"
+    examples:
+      - intent: "what's using port 3000"
+        command: "agent-network scan --port 3000"
+      - intent: "ping google.com"
+        command: "agent-network ping google.com"
+
+  dns:
+    description: "DNS management"
+    capabilities:
+      - lookup records
+      - manage zones
+      - update entries
+    commands:
+      lookup: "DNS lookup"
+      update: "Update record"
+      list: "List records"
+    examples:
+      - intent: "lookup DNS for example.com"
+        command: "agent-dns lookup example.com"
+
+  image:
+    description: "Image processing"
+    capabilities:
+      - resize/crop images
+      - convert formats
+      - apply filters
+    commands:
+      resize: "Resize image"
+      crop: "Crop image"
+      convert: "Convert format"
+    examples:
+      - intent: "resize image to 800x600"
+        command: "agent-image resize input.png --size 800x600"
+
+  video:
+    description: "Video processing"
+    capabilities:
+      - trim/merge videos
+      - extract frames
+      - convert formats
+    commands:
+      trim: "Trim video"
+      merge: "Merge videos"
+      extract: "Extract frames"
+    examples:
+      - intent: "extract frames from video"
+        command: "agent-video extract video.mp4"
+
+  audio:
+    description: "Audio processing"
+    capabilities:
+      - convert formats
+      - trim/merge
+      - transcribe
+    commands:
+      convert: "Convert format"
+      trim: "Trim audio"
+      transcribe: "Transcribe audio"
+    examples:
+      - intent: "transcribe recording.mp3"
+        command: "agent-audio transcribe recording.mp3"
+
+  serial:
+    description: "Serial port communication"
+    capabilities:
+      - list ports
+      - send/receive data
+      - monitor traffic
+    commands:
+      list: "List ports"
+      send: "Send data"
+      monitor: "Monitor port"
+    examples:
+      - intent: "list serial ports"
+        command: "agent-serial list"
+
+  midi:
+    description: "MIDI control"
+    capabilities:
+      - send MIDI messages
+      - list devices
+      - record/playback
+    commands:
+      list: "List devices"
+      send: "Send message"
+      play: "Play file"
+    examples:
+      - intent: "list MIDI devices"
+        command: "agent-midi list"
+
+  homekit:
+    description: "HomeKit/smart home control"
+    capabilities:
+      - control devices
+      - run scenes
+      - check status
+    commands:
+      list: "List devices"
+      set: "Set device state"
+      scene: "Run scene"
+    examples:
+      - intent: "turn on living room lights"
+        command: "agent-homekit set 'Living Room' on"
+
+  bluetooth:
+    description: "Bluetooth control"
+    capabilities:
+      - scan devices
+      - connect/disconnect
+      - send data
+    commands:
+      scan: "Scan devices"
+      connect: "Connect device"
+      disconnect: "Disconnect device"
+    examples:
+      - intent: "scan for bluetooth devices"
+        command: "agent-bluetooth scan"
+
+  usb:
+    description: "USB device management"
+    capabilities:
+      - list devices
+      - mount/unmount
+      - eject
+    commands:
+      list: "List devices"
+      mount: "Mount device"
+      eject: "Eject device"
+    examples:
+      - intent: "list USB devices"
+        command: "agent-usb list"
+
+  printer:
+    description: "Printer control"
+    capabilities:
+      - list printers
+      - print documents
+      - check status
+    commands:
+      list: "List printers"
+      print: "Print document"
+      status: "Check status"
+    examples:
+      - intent: "print document.pdf"
+        command: "agent-printer print document.pdf"
+
+  agent:
+    description: "Control AI agent sessions (Claude Code, etc.)"
+    capabilities:
+      - start agent sessions
+      - send prompts
+      - monitor progress
+    commands:
+      start: "Start agent session"
+      send: "Send prompt to agent"
+      status: "Check agent status"
+      stop: "Stop agent session"
+    examples:
+      - intent: "start a Claude session"
+        command: "agent-agent start claude"
+      - intent: "send 'fix the bug' to my agent"
+        command: "agent-agent send 1 'fix the bug'"
+
+  3d:
+    description: "3D modeling and rendering control"
+    capabilities:
+      - view 3D files
+      - convert between formats
+      - render to image
+      - get model info
+    commands:
+      view: "Open 3D file in viewer"
+      convert: "Convert between formats"
+      render: "Render to image"
+      info: "Show model information"
+    examples:
+      - intent: "view model.obj"
+        command: "agent-3d view model.obj"
+      - intent: "convert model.stl to obj"
+        command: "agent-3d convert model.stl model.obj"
+
+  cad:
+    description: "CAD file operations"
+    capabilities:
+      - view CAD files
+      - convert formats
+      - measure dimensions
+    commands:
+      view: "Open CAD file"
+      convert: "Convert between formats"
+      measure: "Get measurements"
+      info: "Show file information"
+    examples:
+      - intent: "view drawing.dxf"
+        command: "agent-cad view drawing.dxf"
+      - intent: "convert part.step to stl"
+        command: "agent-cad convert part.step part.stl"
+
+  burp:
+    description: "Burp Suite automation"
+    capabilities:
+      - control proxy
+      - scan targets
+      - view issues
+    commands:
+      launch: "Launch Burp Suite"
+      proxy: "Control system proxy"
+      scan: "Scan target URL"
+      issues: "List found issues"
+    examples:
+      - intent: "enable burp proxy"
+        command: "agent-burp proxy on"
+      - intent: "scan example.com"
+        command: "agent-burp scan https://example.com"
+
+  wireshark:
+    description: "Network packet capture and analysis"
+    capabilities:
+      - capture packets
+      - analyze pcap files
+      - filter traffic
+    commands:
+      capture: "Start packet capture"
+      read: "Read pcap file"
+      filter: "Filter packets"
+      stats: "Show statistics"
+    examples:
+      - intent: "capture on en0"
+        command: "agent-wireshark capture en0"
+      - intent: "read capture.pcap"
+        command: "agent-wireshark read capture.pcap"
+
+  ghidra:
+    description: "Ghidra reverse engineering automation"
+    capabilities:
+      - analyze binaries
+      - decompile functions
+      - list functions/imports
+    commands:
+      analyze: "Analyze binary"
+      decompile: "Decompile function"
+      functions: "List functions"
+      strings: "Extract strings"
+    examples:
+      - intent: "decompile main from myapp"
+        command: "agent-ghidra decompile myapp main"
+      - intent: "list functions in binary"
+        command: "agent-ghidra functions program.exe"
+
+  latex:
+    description: "LaTeX document compilation"
+    capabilities:
+      - compile documents
+      - watch for changes
+      - manage templates
+    commands:
+      compile: "Compile LaTeX to PDF"
+      watch: "Watch and auto-compile"
+      preview: "Compile and open"
+      template: "Create from template"
+    examples:
+      - intent: "compile paper.tex"
+        command: "agent-latex compile paper.tex"
+      - intent: "create article template"
+        command: "agent-latex template article"
+
+  colab:
+    description: "Google Colab notebook management"
+    capabilities:
+      - open notebooks in Colab
+      - convert notebooks
+      - run locally
+    commands:
+      open: "Open notebook in Colab"
+      convert: "Convert to/from ipynb"
+      run: "Execute notebook"
+      new: "Create new notebook"
+    examples:
+      - intent: "open notebook in colab"
+        command: "agent-colab open analysis.ipynb"
+      - intent: "convert script.py to notebook"
+        command: "agent-colab convert script.py"
+
+  lab:
+    description: "JupyterLab management"
+    capabilities:
+      - start/stop server
+      - manage extensions
+      - open notebooks
+    commands:
+      start: "Start JupyterLab server"
+      stop: "Stop server"
+      open: "Open in browser"
+      extensions: "List extensions"
+    examples:
+      - intent: "start jupyterlab"
+        command: "agent-lab start"
+      - intent: "open notebook in jupyterlab"
+        command: "agent-lab open analysis.ipynb"
+
+  zoom:
+    description: "Zoom meeting control"
+    capabilities:
+      - join/start meetings
+      - control audio/video
+      - screen sharing
+    commands:
+      join: "Join meeting"
+      start: "Start instant meeting"
+      mute: "Toggle mute"
+      video: "Toggle video"
+      share: "Start screen share"
+    examples:
+      - intent: "join zoom meeting 123-456-789"
+        command: "agent-zoom join 123-456-789"
+      - intent: "start a zoom meeting"
+        command: "agent-zoom start"
+
+  meet:
+    description: "Google Meet control"
+    capabilities:
+      - create/join meetings
+      - control audio/video
+      - chat
+    commands:
+      new: "Create new meeting"
+      join: "Join meeting"
+      mute: "Toggle microphone"
+      video: "Toggle camera"
+    examples:
+      - intent: "create new google meet"
+        command: "agent-meet new"
+      - intent: "join meet abc-defg-hij"
+        command: "agent-meet join abc-defg-hij"
+
+  teams:
+    description: "Microsoft Teams control"
+    capabilities:
+      - join meetings
+      - send messages
+      - control calls
+    commands:
+      join: "Join meeting"
+      new: "Start new meeting"
+      chat: "Send message"
+      mute: "Toggle mute"
+    examples:
+      - intent: "start teams meeting"
+        command: "agent-teams new"
+      - intent: "chat with john in teams"
+        command: "agent-teams chat john"
+
+  voice:
+    description: "Voice synthesis and recognition"
+    capabilities:
+      - text-to-speech
+      - speech-to-text
+      - record audio
+    commands:
+      speak: "Text-to-speech"
+      listen: "Speech-to-text"
+      record: "Record audio"
+      transcribe: "Transcribe audio file"
+    examples:
+      - intent: "speak hello world"
+        command: "agent-voice speak 'Hello, world'"
+      - intent: "transcribe recording.wav"
+        command: "agent-voice transcribe recording.wav"
+
+  sms:
+    description: "SMS messaging"
+    capabilities:
+      - send SMS
+      - read messages
+      - search conversations
+    commands:
+      send: "Send SMS"
+      list: "List recent messages"
+      search: "Search messages"
+    examples:
+      - intent: "send sms to +1234567890"
+        command: "agent-sms send '+1234567890' 'Hello!'"
+      - intent: "list recent sms"
+        command: "agent-sms list"
+
+  prompt:
+    description: "Prompt management and templating"
+    capabilities:
+      - save/load prompts
+      - template variables
+      - prompt library
+    commands:
+      save: "Save prompt"
+      load: "Load prompt"
+      run: "Run with variables"
+      list: "List saved prompts"
+    examples:
+      - intent: "save this prompt as explain"
+        command: "agent-prompt save explain"
+      - intent: "run explain prompt with topic=AI"
+        command: "agent-prompt run explain topic=AI"
+
+  eval:
+    description: "LLM output evaluation and testing"
+    capabilities:
+      - run evaluation suites
+      - compare results
+      - track metrics
+    commands:
+      run: "Run evaluation"
+      create: "Create evaluation"
+      results: "Show results"
+      compare: "Compare runs"
+    examples:
+      - intent: "run math evaluation"
+        command: "agent-eval run math-test"
+      - intent: "show evaluation results"
+        command: "agent-eval results"
+
+  memory:
+    description: "Persistent memory and context"
+    capabilities:
+      - store/recall facts
+      - manage context
+      - search memories
+    commands:
+      store: "Store memory"
+      recall: "Recall memory"
+      search: "Search memories"
+      list: "List all memories"
+    examples:
+      - intent: "remember that the project uses React"
+        command: "agent-memory store project 'Uses React'"
+      - intent: "what do I know about the project"
+        command: "agent-memory recall project"
+
+  learn:
+    description: "Learning and pattern improvement"
+    capabilities:
+      - correct mistakes
+      - provide feedback
+      - view learned patterns
+    commands:
+      correct: "Correct routing mistake"
+      feedback: "Rate response"
+      patterns: "Show learned patterns"
+      stats: "Show learning stats"
+    examples:
+      - intent: "that should have been agent-ios screenshot"
+        command: "agent-learn correct 'screenshot ios' --should 'agent-ios screenshot'"
+      - intent: "that was a great response"
+        command: "agent-learn feedback 5"
+
+  swarm:
+    description: "Multi-agent orchestration"
+    capabilities:
+      - spawn multiple agents
+      - parallel execution
+      - pipeline coordination
+    commands:
+      spawn: "Spawn agents"
+      parallel: "Run in parallel"
+      pipeline: "Run in sequence"
+      status: "Show swarm status"
+    examples:
+      - intent: "run 3 agents on this task"
+        command: "agent-swarm spawn 3 'search for best practices'"
+      - intent: "run tests and linting in parallel"
+        command: "agent-swarm parallel 'test' 'lint'"

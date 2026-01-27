@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# agent-do - Natural language automation CLI
+
+set -euo pipefail
+
+AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Ensure home directory exists
+mkdir -p "$AGENT_DO_HOME"
+
+# Ensure tools directory is in PATH for this script
+export PATH="$SCRIPT_DIR/tools:$PATH"
+
+show_help() {
+    cat << 'EOF'
+agent-do - Natural language automation
+
+Usage: agent-do "what you want to do"
+
+Examples:
+  agent-do "take a screenshot of the iOS simulator"
+  agent-do "send 'x = 42' to my python REPL"
+  agent-do "click Save in Photoshop"
+  agent-do "post 'deploy complete' to #engineering on Slack"
+  agent-do "what's using port 3000"
+
+Options:
+  --help, -h     Show this help
+  --status       Show active sessions and state
+  --how          Explain how to do something without doing it
+  --raw          Pass through to tool directly (power user)
+  --dry-run      Show what would be executed
+  --offline      Use offline pattern matching only (no LLM)
+  --json         Output structured JSON (for orchestrator integration)
+  --context      Provide additional context or answer to clarifying question
+
+Exit codes:
+  0 = success
+  1 = error
+  2 = needs clarification (check JSON output for question)
+
+Environment:
+  AGENT_DO_HOME      Config/state directory (default: ~/.agent-do)
+  ANTHROPIC_API_KEY  Required for intent routing (unless --offline)
+EOF
+}
+
+case "${1:-}" in
+    --help|-h)
+        show_help
+        ;;
+    --status)
+        exec "$SCRIPT_DIR/bin/status"
+        ;;
+    --how)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do --how \"your question\""
+            exit 1
+        fi
+        exec "$SCRIPT_DIR/bin/intent-router" --explain "$*"
+        ;;
+    --raw)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do --raw <tool> [args...]"
+            exit 1
+        fi
+        tool="$1"
+        shift
+        tool_path="$SCRIPT_DIR/tools/agent-$tool"
+        if [[ -x "$tool_path" ]]; then
+            exec "$tool_path" "$@"
+        else
+            # Try PATH
+            exec "agent-$tool" "$@"
+        fi
+        ;;
+    --dry-run)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do --dry-run \"what you want to do\""
+            exit 1
+        fi
+        exec "$SCRIPT_DIR/bin/intent-router" --dry-run "$*"
+        ;;
+    --offline)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do --offline \"what you want to do\""
+            exit 1
+        fi
+        # Use pattern matcher instead of LLM router
+        result=$("$SCRIPT_DIR/bin/pattern-matcher" --json "$*")
+        tool=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('tool') or '')")
+
+        if [[ -z "$tool" ]]; then
+            echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('clarification_needed', 'No match found'))"
+            exit 1
+        fi
+
+        cmd=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('command', ''))")
+        args=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(' '.join(r.get('args', [])))")
+        explanation=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('explanation', ''))")
+
+        echo "→ agent-$tool $cmd $args [offline match]"
+        [[ -n "$explanation" ]] && echo "  ($explanation)"
+        echo
+
+        tool_path="$SCRIPT_DIR/tools/agent-$tool"
+        if [[ -x "$tool_path" ]]; then
+            exec "$tool_path" $cmd $args
+        else
+            exec "agent-$tool" $cmd $args
+        fi
+        ;;
+    --json)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo '{"status":"error","error":"no_intent","message":"Usage: agent-do --json \"what you want\""}'
+            exit 1
+        fi
+        # Check for --context flag
+        intent=""
+        context=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --context)
+                    context="$2"
+                    shift 2
+                    ;;
+                *)
+                    intent="$intent $1"
+                    shift
+                    ;;
+            esac
+        done
+        intent="${intent# }"  # Trim leading space
+        if [[ -n "$context" ]]; then
+            exec "$SCRIPT_DIR/bin/intent-router" --json --context "$context" "$intent"
+        else
+            exec "$SCRIPT_DIR/bin/intent-router" --json "$intent"
+        fi
+        ;;
+    --context)
+        # --context without --json - append context to intent for normal mode
+        shift
+        context="$1"
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do --context \"answer\" \"original intent\""
+            exit 1
+        fi
+        exec "$SCRIPT_DIR/bin/intent-router" --context "$context" "$*"
+        ;;
+    "")
+        echo "Usage: agent-do \"what you want to do\""
+        echo "Try: agent-do --help"
+        exit 1
+        ;;
+    -*)
+        echo "Unknown option: $1"
+        echo "Try: agent-do --help"
+        exit 1
+        ;;
+    *)
+        # Main path: natural language intent
+        exec "$SCRIPT_DIR/bin/intent-router" "$*"
+        ;;
+esac
