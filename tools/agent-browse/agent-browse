@@ -1,0 +1,1043 @@
+#!/usr/bin/env bash
+# agent-browse - AI-first browser automation CLI
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DAEMON_DIR="$SCRIPT_DIR"
+SESSION="${AGENT_BROWSER_SESSION:-default}"
+# Note: daemon.js uses os.tmpdir() which on macOS is /var/folders/...
+TMPDIR_ACTUAL="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')"
+SOCKET_PATH="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.sock"
+PID_FILE="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.pid"
+
+# ============================================================================
+# HELP
+# ============================================================================
+
+show_help() {
+    cat << 'EOF'
+agent-browse - AI-first browser automation CLI
+
+NAVIGATION:
+  open <url>                     Navigate to URL
+  back                           Go back
+  forward                        Go forward  
+  reload                         Reload page
+
+INTERACTION:
+  click <selector|@ref>          Click element
+  dblclick <selector|@ref>       Double-click element
+  fill <selector|@ref> <text>    Clear and fill input
+  type <selector|@ref> <text>    Type text (append)
+  press <key>                    Press key (Enter, Tab, Escape, etc.)
+  hover <selector|@ref>          Hover over element
+  focus <selector|@ref>          Focus element
+  check <selector|@ref>          Check checkbox
+  uncheck <selector|@ref>        Uncheck checkbox
+  select <selector|@ref> <val>   Select dropdown option
+  upload <selector|@ref> <file>  Upload file
+  drag <from> <to>               Drag and drop
+
+READING:
+  snapshot [-i] [-c] [-d N]      Get page structure with refs
+    -i, --interactive            Only interactive elements
+    -c, --compact                Remove empty structural elements
+    -d, --depth <n>              Limit tree depth
+    -s, --selector <sel>         Scope to selector
+    -b, --boxes                  Include bounding boxes (x,y,w,h)
+    --json                       Output as JSON with full metadata
+    --csv                        Output as CSV for analysis
+    --md, --markdown             Output as markdown summary
+  get text <selector|@ref>       Get element text
+  get html <selector|@ref>       Get element HTML
+  get value <selector|@ref>      Get input value
+  get attr <name> <selector>     Get attribute
+  get title                      Get page title
+  get url                        Get current URL
+  get count <selector>           Count matching elements
+
+WAITING:
+  wait <selector|ms>             Wait for element or milliseconds
+  wait --text <text>             Wait for text to appear
+  wait --url <pattern>           Wait for URL to match
+  wait --stable                  Wait for network idle + DOM stable
+  wait --load                    Wait for load event
+
+SCREENSHOTS & RECORDING:
+  screenshot [path]              Take screenshot
+    --full                       Full page screenshot
+  pdf <path>                     Save page as PDF
+  record start <path>            Start video recording
+  record stop                    Stop recording
+
+NETWORK:
+  network requests [--filter]    Show tracked requests (filter by url/type)
+  network route <url> --abort    Block URL pattern
+  network route <url> --body <j> Mock response
+  network unroute [url]          Remove route
+  network har start              Start HAR recording
+  network har stop <path>        Stop recording and save HAR file
+  network stats                  Show request statistics
+  network throttle <preset>      Throttle: offline|slow-3g|3g|4g|fast|off
+  network throttle --latency N   Custom throttle with latency (ms)
+
+AUTH:
+  auth totp <secret>             Generate TOTP code from secret
+  auth totp <secret> --fill @ref Generate and fill into element
+  auth detect-login              Detect login form on page
+  auth autofill <user> <pass>    Auto-fill detected login form
+  auth autofill ... --submit     Fill and submit
+  auth detect-captcha            Check for CAPTCHA presence
+  auth wait-captcha [timeout]    Wait for CAPTCHA to be solved
+
+VISION (AI-powered):
+  vision describe [--detail L]   Describe page visually (low|medium|high)
+  vision describe --focus <area> Focus on specific area
+  vision find <description>      Find element by visual description
+  vision click <description>     Click element found visually
+  vision analyze <pattern>       Analyze for patterns (errors|forms|login|products|navigation)
+  vision explain <action> <tgt>  Predict what will happen if action taken
+  vision compare <before> [now]  Compare screenshots for changes
+
+AGENT (Autonomous):
+  agent goal "<goal>"            Execute goal through planning loop
+    --max-steps N                Maximum steps (default: 10)
+    --verbose                    Show thinking at each step
+  agent explore [--depth N]      Explore page and discover interactions
+    --max-links N                Max links to follow (default: 10)
+    --all-origins                Follow cross-origin links
+  agent explain                  Explain current page state and actions
+  agent recover                  Attempt to recover from stuck state
+
+SESSIONS:
+  session                        Show current daemon session name
+  session list                   List saved persistent sessions
+  session save <name> [desc]     Save browser state (cookies, storage, URL)
+  session load <name>            Restore saved session state
+  session delete <name>          Delete a saved session
+  session export <name> <file>   Export session to portable file
+  session import <file> [name]   Import session from file
+  session active                 List active daemon sessions
+
+TABS:
+  tab                            Show active tab
+  tab list                       List all tabs
+  tab new [url]                  Open new tab
+  tab close                      Close current tab
+  tab <n>                        Switch to tab N
+
+STATE:
+  is visible <selector>          Check if visible
+  is enabled <selector>          Check if enabled
+  is checked <selector>          Check if checked
+
+EVALUATE:
+  eval <javascript>              Run JavaScript in page
+
+DEBUG:
+  console [--clear]              View console logs
+  errors [--clear]               View page errors
+  highlight <selector>           Highlight element
+  
+BROWSER CONTROL:
+  install                        Install browser binaries
+  close                          Close browser and daemon
+  status                         Show daemon status
+
+OPTIONS:
+  --session <name>               Use named session
+  --headed                       Show browser window
+  --debug                        Debug output
+  --json                         JSON output
+
+ENVIRONMENT:
+  AGENT_BROWSER_SESSION          Default session name
+  AGENT_BROWSER_HEADED           Set to 1 for headed mode
+
+Examples:
+  agent-browse open https://example.com
+  agent-browse snapshot -i
+  agent-browse click @e3
+  agent-browse fill @e5 "hello@example.com"
+  agent-browse screenshot ~/Desktop/page.png
+  agent-browse --session mysite open https://mysite.com
+EOF
+}
+
+# ============================================================================
+# DAEMON MANAGEMENT
+# ============================================================================
+
+is_daemon_running() {
+    if [[ ! -f "$PID_FILE" ]]; then
+        return 1
+    fi
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null) || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+start_daemon() {
+    if is_daemon_running; then
+        return 0
+    fi
+    
+    # Clean up stale socket
+    rm -f "$SOCKET_PATH" "$PID_FILE"
+    
+    # Start daemon in background
+    AGENT_BROWSER_SESSION="$SESSION" \
+    AGENT_BROWSER_HEADED="${AGENT_BROWSER_HEADED:-0}" \
+    node "$DAEMON_DIR/daemon.js" &
+    
+    local daemon_pid=$!
+    echo "$daemon_pid" > "$PID_FILE"
+    
+    # Wait for socket to appear
+    local attempts=0
+    while [[ ! -S "$SOCKET_PATH" ]] && [[ $attempts -lt 50 ]]; do
+        sleep 0.1
+        attempts=$((attempts + 1))
+        # Check if daemon died
+        if ! kill -0 "$daemon_pid" 2>/dev/null; then
+            echo "Error: Daemon failed to start" >&2
+            rm -f "$PID_FILE"
+            return 1
+        fi
+    done
+    
+    if [[ ! -S "$SOCKET_PATH" ]]; then
+        echo "Error: Daemon socket not created" >&2
+        kill "$daemon_pid" 2>/dev/null || true
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+stop_daemon() {
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null) || true
+        if [[ -n "$pid" ]]; then
+            kill "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE" "$SOCKET_PATH"
+    fi
+}
+
+send_command() {
+    local json="$1"
+    
+    # Ensure daemon is running
+    start_daemon || return 1
+    
+    # Send command via python for reliable bidirectional socket communication
+    local response
+    response=$(python3 << EOF
+import socket
+import sys
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect("$SOCKET_PATH")
+    sock.settimeout(60)
+    sock.sendall(b'$json\n')
+    
+    response = b""
+    while True:
+        try:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            if b"\n" in response:
+                break
+        except socket.timeout:
+            break
+    
+    print(response.decode().strip())
+except Exception as e:
+    print(f'{{"success":false,"error":"{e}"}}', file=sys.stderr)
+    sys.exit(1)
+finally:
+    sock.close()
+EOF
+    ) || {
+        echo "Error: Failed to communicate with daemon" >&2
+        return 1
+    }
+    
+    echo "$response"
+}
+
+# ============================================================================
+# COMMAND BUILDERS
+# ============================================================================
+
+cmd_id() {
+    echo "cmd-$(date +%s%N)"
+}
+
+build_launch_cmd() {
+    local headless="true"
+    [[ "${AGENT_BROWSER_HEADED:-0}" == "1" ]] && headless="false"
+    
+    cat << EOF
+{"id":"$(cmd_id)","action":"launch","headless":$headless}
+EOF
+}
+
+build_navigate_cmd() {
+    local url="$1"
+    cat << EOF
+{"id":"$(cmd_id)","action":"navigate","url":"$url"}
+EOF
+}
+
+build_click_cmd() {
+    local selector="$1"
+    cat << EOF
+{"id":"$(cmd_id)","action":"click","selector":"$selector"}
+EOF
+}
+
+build_fill_cmd() {
+    local selector="$1"
+    local value="$2"
+    # Escape quotes in value
+    value="${value//\"/\\\"}"
+    cat << EOF
+{"id":"$(cmd_id)","action":"fill","selector":"$selector","value":"$value"}
+EOF
+}
+
+build_type_cmd() {
+    local selector="$1"
+    local text="$2"
+    text="${text//\"/\\\"}"
+    cat << EOF
+{"id":"$(cmd_id)","action":"type","selector":"$selector","text":"$text"}
+EOF
+}
+
+build_press_cmd() {
+    local key="$1"
+    cat << EOF
+{"id":"$(cmd_id)","action":"press","key":"$key"}
+EOF
+}
+
+build_screenshot_cmd() {
+    local path="${1:-}"
+    local full="${2:-false}"
+    if [[ -n "$path" ]]; then
+        cat << EOF
+{"id":"$(cmd_id)","action":"screenshot","path":"$path","fullPage":$full}
+EOF
+    else
+        cat << EOF
+{"id":"$(cmd_id)","action":"screenshot","fullPage":$full}
+EOF
+    fi
+}
+
+build_snapshot_cmd() {
+    local interactive="${1:-false}"
+    local compact="${2:-false}"
+    local depth="${3:-}"
+    local selector="${4:-}"
+    local format="${5:-}"
+    local with_boxes="${6:-false}"
+    
+    local opts=""
+    [[ "$interactive" == "true" ]] && opts="$opts,\"interactive\":true"
+    [[ "$compact" == "true" ]] && opts="$opts,\"compact\":true"
+    [[ -n "$depth" ]] && opts="$opts,\"maxDepth\":$depth"
+    [[ -n "$selector" ]] && opts="$opts,\"selector\":\"$selector\""
+    [[ -n "$format" ]] && opts="$opts,\"format\":\"$format\""
+    [[ "$with_boxes" == "true" ]] && opts="$opts,\"withBoxes\":true"
+    
+    # Remove leading comma
+    opts="${opts#,}"
+    
+    if [[ -n "$opts" ]]; then
+        cat << EOF
+{"id":"$(cmd_id)","action":"snapshot",$opts}
+EOF
+    else
+        cat << EOF
+{"id":"$(cmd_id)","action":"snapshot"}
+EOF
+    fi
+}
+
+build_wait_cmd() {
+    local target="$1"
+    # Check if it's a number (milliseconds)
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        cat << EOF
+{"id":"$(cmd_id)","action":"wait","timeout":$target}
+EOF
+    else
+        cat << EOF
+{"id":"$(cmd_id)","action":"wait","selector":"$target"}
+EOF
+    fi
+}
+
+build_eval_cmd() {
+    local script="$1"
+    # Escape for JSON
+    script="${script//\\/\\\\}"
+    script="${script//\"/\\\"}"
+    script="${script//$'\n'/\\n}"
+    cat << EOF
+{"id":"$(cmd_id)","action":"evaluate","script":"$script"}
+EOF
+}
+
+build_get_cmd() {
+    local what="$1"
+    local selector="${2:-}"
+    local extra="${3:-}"
+    
+    case "$what" in
+        text|html|value)
+            cat << EOF
+{"id":"$(cmd_id)","action":"get${what^}","selector":"$selector"}
+EOF
+            ;;
+        attr)
+            cat << EOF
+{"id":"$(cmd_id)","action":"getAttribute","selector":"$extra","attribute":"$selector"}
+EOF
+            ;;
+        title)
+            cat << EOF
+{"id":"$(cmd_id)","action":"title"}
+EOF
+            ;;
+        url)
+            cat << EOF
+{"id":"$(cmd_id)","action":"url"}
+EOF
+            ;;
+        count)
+            cat << EOF
+{"id":"$(cmd_id)","action":"count","selector":"$selector"}
+EOF
+            ;;
+        *)
+            echo "Error: Unknown get target: $what" >&2
+            return 1
+            ;;
+    esac
+}
+
+build_close_cmd() {
+    cat << EOF
+{"id":"$(cmd_id)","action":"close"}
+EOF
+}
+
+build_hover_cmd() {
+    local selector="$1"
+    cat << EOF
+{"id":"$(cmd_id)","action":"hover","selector":"$selector"}
+EOF
+}
+
+build_focus_cmd() {
+    local selector="$1"
+    cat << EOF
+{"id":"$(cmd_id)","action":"focus","selector":"$selector"}
+EOF
+}
+
+# ============================================================================
+# RESPONSE PARSING
+# ============================================================================
+
+parse_response() {
+    local response="$1"
+    local format="${2:-text}"
+    
+    # Check for error
+    if echo "$response" | grep -q '"success":false'; then
+        local error
+        error=$(echo "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('error','Unknown error'))" 2>/dev/null || echo "Unknown error")
+        echo "Error: $error" >&2
+        return 1
+    fi
+    
+    # Extract result
+    if [[ "$format" == "json" ]]; then
+        echo "$response"
+    else
+        # Try to extract meaningful data from result
+        local result
+        result=$(echo "$response" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    res = r.get('result', r)
+    if isinstance(res, str):
+        print(res)
+    elif isinstance(res, dict):
+        if 'tree' in res:
+            print(res['tree'])
+        elif 'path' in res:
+            print(res['path'])
+        elif 'value' in res:
+            print(res['value'])
+        elif 'text' in res:
+            print(res['text'])
+        elif 'url' in res:
+            print(res['url'])
+        elif 'title' in res:
+            print(res['title'])
+        else:
+            print(json.dumps(res, indent=2))
+    elif res is None:
+        pass  # Silent success
+    else:
+        print(res)
+except:
+    print(sys.stdin.read())
+" 2>/dev/null) || result="$response"
+        echo "$result"
+    fi
+}
+
+# ============================================================================
+# MAIN COMMAND DISPATCH
+# ============================================================================
+
+main() {
+    local output_format="text"
+    local headed=false
+    local debug=false
+    
+    # Parse global options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            --session)
+                SESSION="$2"
+                SOCKET_PATH="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.sock"
+                PID_FILE="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.pid"
+                shift 2
+                ;;
+            --headed)
+                export AGENT_BROWSER_HEADED=1
+                shift
+                ;;
+            --json)
+                output_format="json"
+                shift
+                ;;
+            --debug)
+                debug=true
+                shift
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    
+    if [[ $# -eq 0 ]]; then
+        show_help
+        exit 0
+    fi
+    
+    local cmd="$1"
+    shift
+    
+    local json response
+    
+    case "$cmd" in
+        # Navigation
+        open)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse open <url>" >&2; exit 1; }
+            json=$(build_navigate_cmd "$1")
+            ;;
+        back)
+            json='{"id":"'$(cmd_id)'","action":"back"}'
+            ;;
+        forward)
+            json='{"id":"'$(cmd_id)'","action":"forward"}'
+            ;;
+        reload)
+            json='{"id":"'$(cmd_id)'","action":"reload"}'
+            ;;
+            
+        # Interaction
+        click)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse click <selector>" >&2; exit 1; }
+            json=$(build_click_cmd "$1")
+            ;;
+        dblclick)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse dblclick <selector>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"dblclick","selector":"'"$1"'"}'
+            ;;
+        fill)
+            [[ $# -lt 2 ]] && { echo "Usage: agent-browse fill <selector> <text>" >&2; exit 1; }
+            json=$(build_fill_cmd "$1" "$2")
+            ;;
+        type)
+            [[ $# -lt 2 ]] && { echo "Usage: agent-browse type <selector> <text>" >&2; exit 1; }
+            json=$(build_type_cmd "$1" "$2")
+            ;;
+        press)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse press <key>" >&2; exit 1; }
+            json=$(build_press_cmd "$1")
+            ;;
+        hover)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse hover <selector>" >&2; exit 1; }
+            json=$(build_hover_cmd "$1")
+            ;;
+        focus)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse focus <selector>" >&2; exit 1; }
+            json=$(build_focus_cmd "$1")
+            ;;
+        check)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse check <selector>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"check","selector":"'"$1"'"}'
+            ;;
+        uncheck)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse uncheck <selector>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"uncheck","selector":"'"$1"'"}'
+            ;;
+        select)
+            [[ $# -lt 2 ]] && { echo "Usage: agent-browse select <selector> <value>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"select","selector":"'"$1"'","values":["'"$2"'"]}'
+            ;;
+        upload)
+            [[ $# -lt 2 ]] && { echo "Usage: agent-browse upload <selector> <file>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"upload","selector":"'"$1"'","files":["'"$2"'"]}'
+            ;;
+            
+        # Reading
+        snapshot)
+            local interactive=false compact=false depth="" selector="" format="" with_boxes=false
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -i|--interactive) interactive=true; shift ;;
+                    -c|--compact) compact=true; shift ;;
+                    -d|--depth) depth="$2"; shift 2 ;;
+                    -s|--selector) selector="$2"; shift 2 ;;
+                    --format) format="$2"; shift 2 ;;
+                    --boxes|-b) with_boxes=true; shift ;;
+                    --json) format="json"; shift ;;
+                    --csv) format="csv"; shift ;;
+                    --markdown|--md) format="markdown"; shift ;;
+                    *) shift ;;
+                esac
+            done
+            json=$(build_snapshot_cmd "$interactive" "$compact" "$depth" "$selector" "$format" "$with_boxes")
+            ;;
+        get)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse get <what> [selector]" >&2; exit 1; }
+            json=$(build_get_cmd "$@")
+            ;;
+            
+        # Waiting
+        wait)
+            if [[ $# -eq 0 ]]; then
+                echo "Usage: agent-browse wait <selector|ms|--text|--url|--stable>" >&2
+                exit 1
+            fi
+            case "$1" in
+                --text)
+                    json='{"id":"'$(cmd_id)'","action":"wait","text":"'"$2"'"}'
+                    ;;
+                --url)
+                    json='{"id":"'$(cmd_id)'","action":"wait","url":"'"$2"'"}'
+                    ;;
+                --stable|--load)
+                    json='{"id":"'$(cmd_id)'","action":"wait","state":"networkidle"}'
+                    ;;
+                *)
+                    json=$(build_wait_cmd "$1")
+                    ;;
+            esac
+            ;;
+            
+        # Screenshots
+        screenshot)
+            local path="" full=false
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --full|-f) full=true; shift ;;
+                    *) path="$1"; shift ;;
+                esac
+            done
+            json=$(build_screenshot_cmd "$path" "$full")
+            ;;
+        pdf)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse pdf <path>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"pdf","path":"'"$1"'"}'
+            ;;
+            
+        # Evaluate
+        eval)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse eval <javascript>" >&2; exit 1; }
+            json=$(build_eval_cmd "$1")
+            ;;
+            
+        # Session/tabs
+        session)
+            if [[ $# -eq 0 ]]; then
+                echo "Session: $SESSION"
+                exit 0
+            fi
+            case "$1" in
+                list)
+                    # List saved sessions (persistent) 
+                    json='{"id":"'$(cmd_id)'","action":"session_list"}'
+                    ;;
+                save)
+                    [[ $# -lt 2 ]] && { echo "Usage: agent-browse session save <name> [description]" >&2; exit 1; }
+                    local name="$2"
+                    local desc="${3:-}"
+                    if [[ -n "$desc" ]]; then
+                        json='{"id":"'$(cmd_id)'","action":"session_save","name":"'"$name"'","description":"'"$desc"'"}'
+                    else
+                        json='{"id":"'$(cmd_id)'","action":"session_save","name":"'"$name"'"}'
+                    fi
+                    ;;
+                load)
+                    [[ $# -lt 2 ]] && { echo "Usage: agent-browse session load <name>" >&2; exit 1; }
+                    json='{"id":"'$(cmd_id)'","action":"session_load","name":"'"$2"'"}'
+                    ;;
+                delete)
+                    [[ $# -lt 2 ]] && { echo "Usage: agent-browse session delete <name>" >&2; exit 1; }
+                    json='{"id":"'$(cmd_id)'","action":"session_delete","name":"'"$2"'"}'
+                    ;;
+                export)
+                    [[ $# -lt 3 ]] && { echo "Usage: agent-browse session export <name> <file>" >&2; exit 1; }
+                    json='{"id":"'$(cmd_id)'","action":"session_export","name":"'"$2"'","path":"'"$3"'"}'
+                    ;;
+                import)
+                    [[ $# -lt 2 ]] && { echo "Usage: agent-browse session import <file> [name]" >&2; exit 1; }
+                    local file="$2"
+                    local name="${3:-}"
+                    if [[ -n "$name" ]]; then
+                        json='{"id":"'$(cmd_id)'","action":"session_import","path":"'"$file"'","name":"'"$name"'"}'
+                    else
+                        json='{"id":"'$(cmd_id)'","action":"session_import","path":"'"$file"'"}'
+                    fi
+                    ;;
+                active)
+                    # List active daemon sessions
+                    ls "${TMPDIR_ACTUAL}"/agent-browser-*.sock 2>/dev/null | sed "s|${TMPDIR_ACTUAL}/agent-browser-||;s|\.sock||" || echo "(none)"
+                    exit 0
+                    ;;
+                *)
+                    echo "Unknown session command: $1" >&2
+                    echo "Usage: session list|save|load|delete|export|import|active" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        tab)
+            if [[ $# -eq 0 ]]; then
+                json='{"id":"'$(cmd_id)'","action":"tab","subAction":"current"}'
+            else
+                case "$1" in
+                    list) json='{"id":"'$(cmd_id)'","action":"tab","subAction":"list"}' ;;
+                    new) json='{"id":"'$(cmd_id)'","action":"tab","subAction":"new","url":"'"${2:-about:blank}"'"}' ;;
+                    close) json='{"id":"'$(cmd_id)'","action":"tab","subAction":"close"}' ;;
+                    [0-9]*) json='{"id":"'$(cmd_id)'","action":"tab","subAction":"switch","index":'"$1"'}' ;;
+                    *) echo "Unknown tab command: $1" >&2; exit 1 ;;
+                esac
+            fi
+            ;;
+            
+        # Network commands
+        network)
+            [[ $# -eq 0 ]] && { echo "Usage: agent-browse network <requests|route|unroute|har|stats|throttle>" >&2; exit 1; }
+            local subcmd="$1"; shift
+            case "$subcmd" in
+                requests)
+                    local filter=""
+                    [[ -n "${1:-}" && "$1" != "--"* ]] && filter="$1"
+                    json='{"id":"'$(cmd_id)'","action":"requests"'
+                    [[ -n "$filter" ]] && json="$json,\"filter\":\"$filter\""
+                    json="$json}"
+                    ;;
+                route)
+                    [[ $# -lt 1 ]] && { echo "Usage: network route <url> [--abort|--body <json>]" >&2; exit 1; }
+                    local url="$1"; shift
+                    json='{"id":"'$(cmd_id)'","action":"route","url":"'"$url"'"'
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --abort) json="$json,\"abort\":true"; shift ;;
+                            --body) json="$json,\"response\":{\"body\":$2}"; shift 2 ;;
+                            *) shift ;;
+                        esac
+                    done
+                    json="$json}"
+                    ;;
+                unroute)
+                    json='{"id":"'$(cmd_id)'","action":"unroute"'
+                    [[ -n "${1:-}" ]] && json="$json,\"url\":\"$1\""
+                    json="$json}"
+                    ;;
+                har)
+                    [[ $# -lt 1 ]] && { echo "Usage: network har <start|stop <path>>" >&2; exit 1; }
+                    case "$1" in
+                        start)
+                            json='{"id":"'$(cmd_id)'","action":"har_start"}'
+                            ;;
+                        stop)
+                            [[ $# -lt 2 ]] && { echo "Usage: network har stop <path>" >&2; exit 1; }
+                            json='{"id":"'$(cmd_id)'","action":"har_stop","path":"'"$2"'"}'
+                            ;;
+                        *)
+                            echo "Unknown har command: $1" >&2; exit 1
+                            ;;
+                    esac
+                    ;;
+                stats)
+                    json='{"id":"'$(cmd_id)'","action":"network_stats"}'
+                    ;;
+                throttle)
+                    if [[ $# -eq 0 ]]; then
+                        json='{"id":"'$(cmd_id)'","action":"throttle"}'
+                    elif [[ "$1" == "--latency" || "$1" == "--download" || "$1" == "--upload" ]]; then
+                        json='{"id":"'$(cmd_id)'","action":"throttle"'
+                        while [[ $# -gt 0 ]]; do
+                            case "$1" in
+                                --latency) json="$json,\"latency\":$2"; shift 2 ;;
+                                --download) json="$json,\"download\":$2"; shift 2 ;;
+                                --upload) json="$json,\"upload\":$2"; shift 2 ;;
+                                *) shift ;;
+                            esac
+                        done
+                        json="$json}"
+                    else
+                        json='{"id":"'$(cmd_id)'","action":"throttle","preset":"'"$1"'"}'
+                    fi
+                    ;;
+                *)
+                    echo "Unknown network command: $subcmd" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        
+        # Auth commands
+        auth)
+            [[ $# -eq 0 ]] && { echo "Usage: agent-browse auth <totp|detect-login|autofill|detect-captcha|wait-captcha>" >&2; exit 1; }
+            local subcmd="$1"; shift
+            case "$subcmd" in
+                totp)
+                    [[ $# -lt 1 ]] && { echo "Usage: auth totp <secret> [--fill <selector>]" >&2; exit 1; }
+                    local secret="$1"; shift
+                    json='{"id":"'$(cmd_id)'","action":"totp","secret":"'"$secret"'"'
+                    if [[ "${1:-}" == "--fill" && -n "${2:-}" ]]; then
+                        json="$json,\"fill\":\"$2\""
+                    fi
+                    json="$json}"
+                    ;;
+                detect-login)
+                    json='{"id":"'$(cmd_id)'","action":"detect_login"}'
+                    ;;
+                autofill)
+                    [[ $# -lt 2 ]] && { echo "Usage: auth autofill <username> <password> [--submit]" >&2; exit 1; }
+                    local username="$1"
+                    local password="$2"
+                    shift 2
+                    json='{"id":"'$(cmd_id)'","action":"autofill_login","username":"'"$username"'","password":"'"$password"'"'
+                    [[ "${1:-}" == "--submit" ]] && json="$json,\"submit\":true"
+                    json="$json}"
+                    ;;
+                detect-captcha)
+                    json='{"id":"'$(cmd_id)'","action":"detect_captcha"}'
+                    ;;
+                wait-captcha)
+                    local timeout="${1:-120000}"
+                    json='{"id":"'$(cmd_id)'","action":"wait_captcha","timeout":'"$timeout"'}'
+                    ;;
+                *)
+                    echo "Unknown auth command: $subcmd" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        
+        # Vision commands (Phase 6)
+        vision)
+            [[ $# -eq 0 ]] && { echo "Usage: agent-browse vision <describe|find|click|analyze|explain|compare>" >&2; exit 1; }
+            local subcmd="$1"; shift
+            case "$subcmd" in
+                describe)
+                    json='{"id":"'$(cmd_id)'","action":"vision_describe"'
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --detail) json="$json,\"detail\":\"$2\""; shift 2 ;;
+                            --focus) json="$json,\"focus\":\"$2\""; shift 2 ;;
+                            --full) json="$json,\"fullPage\":true"; shift ;;
+                            *) shift ;;
+                        esac
+                    done
+                    json="$json}"
+                    ;;
+                find)
+                    [[ $# -lt 1 ]] && { echo "Usage: vision find <description>" >&2; exit 1; }
+                    local desc="$*"
+                    json='{"id":"'$(cmd_id)'","action":"vision_find","description":"'"$desc"'"}'
+                    ;;
+                click)
+                    [[ $# -lt 1 ]] && { echo "Usage: vision click <description>" >&2; exit 1; }
+                    local desc="$*"
+                    json='{"id":"'$(cmd_id)'","action":"vision_click","description":"'"$desc"'"}'
+                    ;;
+                analyze)
+                    [[ $# -lt 1 ]] && { echo "Usage: vision analyze <pattern>" >&2; exit 1; }
+                    local pattern="$1"; shift
+                    json='{"id":"'$(cmd_id)'","action":"vision_analyze","pattern":"'"$pattern"'"'
+                    [[ "${1:-}" == "--full" ]] && json="$json,\"fullPage\":true"
+                    json="$json}"
+                    ;;
+                explain)
+                    [[ $# -lt 2 ]] && { echo "Usage: vision explain <action> <target>" >&2; exit 1; }
+                    local action_type="$1"
+                    shift
+                    local target="$*"
+                    json='{"id":"'$(cmd_id)'","action":"vision_explain","action_type":"'"$action_type"'","target":"'"$target"'"}'
+                    ;;
+                compare)
+                    [[ $# -lt 1 ]] && { echo "Usage: vision compare <before_image> [after_image]" >&2; exit 1; }
+                    local before="$1"
+                    local after="${2:-}"
+                    json='{"id":"'$(cmd_id)'","action":"vision_compare","before":"'"$before"'"'
+                    [[ -n "$after" ]] && json="$json,\"after\":\"$after\""
+                    json="$json}"
+                    ;;
+                *)
+                    echo "Unknown vision command: $subcmd" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        
+        # Agent commands (Phase 7)
+        agent)
+            [[ $# -eq 0 ]] && { echo "Usage: agent-browse agent <goal|explore|explain|recover>" >&2; exit 1; }
+            local subcmd="$1"; shift
+            case "$subcmd" in
+                goal)
+                    [[ $# -lt 1 ]] && { echo "Usage: agent goal <goal> [--max-steps N] [--verbose]" >&2; exit 1; }
+                    local goal=""
+                    local max_steps=""
+                    local verbose="false"
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --max-steps) max_steps="$2"; shift 2 ;;
+                            --verbose) verbose="true"; shift ;;
+                            *) goal="$goal $1"; shift ;;
+                        esac
+                    done
+                    goal="${goal# }"
+                    json='{"id":"'$(cmd_id)'","action":"agent_goal","goal":"'"$goal"'"'
+                    [[ -n "$max_steps" ]] && json="$json,\"maxSteps\":$max_steps"
+                    [[ "$verbose" == "true" ]] && json="$json,\"verbose\":true"
+                    json="$json}"
+                    ;;
+                explore)
+                    json='{"id":"'$(cmd_id)'","action":"agent_explore"'
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --depth) json="$json,\"depth\":$2"; shift 2 ;;
+                            --max-links) json="$json,\"maxLinks\":$2"; shift 2 ;;
+                            --all-origins) json="$json,\"sameOrigin\":false"; shift ;;
+                            *) shift ;;
+                        esac
+                    done
+                    json="$json}"
+                    ;;
+                explain)
+                    json='{"id":"'$(cmd_id)'","action":"agent_explain"}'
+                    ;;
+                recover)
+                    json='{"id":"'$(cmd_id)'","action":"agent_recover"}'
+                    ;;
+                *)
+                    echo "Unknown agent command: $subcmd" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+            
+        # State checks
+        is)
+            [[ $# -lt 2 ]] && { echo "Usage: agent-browse is <visible|enabled|checked> <selector>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"is'"${1^}"'","selector":"'"$2"'"}'
+            ;;
+            
+        # Debug
+        console)
+            local clear=false
+            [[ "${1:-}" == "--clear" ]] && clear=true
+            json='{"id":"'$(cmd_id)'","action":"console","clear":'$clear'}'
+            ;;
+        errors)
+            local clear=false
+            [[ "${1:-}" == "--clear" ]] && clear=true
+            json='{"id":"'$(cmd_id)'","action":"errors","clear":'$clear'}'
+            ;;
+        highlight)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse highlight <selector>" >&2; exit 1; }
+            json='{"id":"'$(cmd_id)'","action":"highlight","selector":"'"$1"'"}'
+            ;;
+            
+        # Browser control
+        install)
+            echo "Installing Playwright browsers..."
+            npx playwright install chromium
+            exit $?
+            ;;
+        close)
+            json=$(build_close_cmd)
+            response=$(send_command "$json" 2>/dev/null) || true
+            stop_daemon
+            echo "Browser closed"
+            exit 0
+            ;;
+        status)
+            if is_daemon_running; then
+                echo "Daemon: running (session: $SESSION)"
+                echo "Socket: $SOCKET_PATH"
+                echo "PID: $(cat "$PID_FILE")"
+            else
+                echo "Daemon: not running"
+            fi
+            exit 0
+            ;;
+            
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'agent-browse --help' for usage" >&2
+            exit 1
+            ;;
+    esac
+    
+    # Send command and parse response
+    [[ "$debug" == "true" ]] && echo "DEBUG: $json" >&2
+    
+    response=$(send_command "$json") || exit 1
+    
+    [[ "$debug" == "true" ]] && echo "DEBUG response: $response" >&2
+    
+    parse_response "$response" "$output_format"
+}
+
+main "$@"
