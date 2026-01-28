@@ -179,6 +179,8 @@ export async function executeCommand(command, browser) {
                 return await handleIsChecked(command, browser);
             case 'count':
                 return await handleCount(command, browser);
+            case 'getoptions':
+                return await handleGetOptions(command, browser);
             case 'boundingbox':
                 return await handleBoundingBox(command, browser);
             case 'styles':
@@ -977,6 +979,15 @@ async function handleCount(command, browser) {
     const count = await page.locator(command.selector).count();
     return successResponse(command.id, { count });
 }
+async function handleGetOptions(command, browser) {
+    const page = browser.getPage();
+    // If selector provided, get options from that element; otherwise find first open listbox/select
+    const selector = command.selector || '[role=listbox], [role=menu], select';
+    const locator = page.locator(selector).first();
+    // Get all option elements
+    const options = await locator.locator('[role=option], option').allTextContents();
+    return successResponse(command.id, { options, selector });
+}
 async function handleBoundingBox(command, browser) {
     const page = browser.getPage();
     const box = await page.locator(command.selector).boundingBox();
@@ -1163,6 +1174,10 @@ async function handleSessionSave(command, browser) {
     return successResponse(command.id, result);
 }
 async function handleSessionLoad(command, browser) {
+    // Auto-launch browser if not running
+    if (!browser.isLaunched()) {
+        await browser.launch({});
+    }
     const page = browser.getPage();
     const result = await restoreSession(page, command.name);
     return successResponse(command.id, result);

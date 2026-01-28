@@ -57,6 +57,7 @@ READING:
   get title                      Get page title
   get url                        Get current URL
   get count <selector>           Count matching elements
+  get options [selector]         Get options from open dropdown/select
 
 WAITING:
   wait <selector|ms>             Wait for element or milliseconds
@@ -98,9 +99,13 @@ CREDENTIAL MANAGEMENT:
   auth store-creds <dom> <e> <p> Store credentials for future sessions
   auth login <domain>            Auto-login using stored credentials
   auth login <domain> --submit   Auto-login and submit form
+  auth login <domain> --auto     Full login: navigate, fill, submit, wait, verify
   
   Credential naming: ninety.io -> NINETY_EMAIL, NINETY_PASSWORD
   When credentials missing, exit code 2 + JSON with action_required
+
+NETWORK:
+  network reconnect              Force new browser context (clears DNS cache)
 
 VISION (AI-powered):
   vision describe [--detail L]   Describe page visually (low|medium|high)
@@ -438,6 +443,12 @@ EOF
         count)
             cat << EOF
 {"id":"$(cmd_id)","action":"count","selector":"$selector"}
+EOF
+            ;;
+        options)
+            # Get options from a select/combobox - selector is optional
+            cat << EOF
+{"id":"$(cmd_id)","action":"getoptions","selector":"$selector"}
 EOF
             ;;
         *)
@@ -837,6 +848,13 @@ main() {
                         json='{"id":"'$(cmd_id)'","action":"throttle","preset":"'"$1"'"}'
                     fi
                     ;;
+                reconnect)
+                    # Force new browser context to clear DNS cache and connections
+                    json=$(build_close_cmd)
+                    response=$(send_command "$json" 2>/dev/null) || true
+                    # Relaunch with fresh context
+                    json='{"id":"'$(cmd_id)'","action":"launch"}'
+                    ;;
                 *)
                     echo "Unknown network command: $subcmd" >&2
                     exit 1
@@ -1000,11 +1018,17 @@ main() {
                     ;;
                 login)
                     # High-level login command: get creds from keychain/env, autofill, submit
-                    # Usage: auth login <domain> [--submit]
-                    [[ $# -lt 1 ]] && { echo "Usage: auth login <domain> [--submit]" >&2; exit 1; }
+                    # Usage: auth login <domain> [--submit] [--auto]
+                    [[ $# -lt 1 ]] && { echo "Usage: auth login <domain> [--submit] [--auto]" >&2; exit 1; }
                     local domain="$1"; shift
-                    local do_submit=false
-                    [[ "${1:-}" == "--submit" ]] && do_submit=true
+                    local do_submit=false do_auto=false
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --submit) do_submit=true; shift ;;
+                            --auto) do_auto=true; do_submit=true; shift ;;
+                            *) shift ;;
+                        esac
+                    done
                     
                     local prefix
                     prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
@@ -1018,10 +1042,34 @@ main() {
                         echo "  \"error\": \"credentials_missing\","
                         echo "  \"domain\": \"$domain\","
                         echo "  \"env_vars\": [\"${prefix}_EMAIL\", \"${prefix}_PASSWORD\"],"
-                        echo "  \"action_required\": \"ASK_USER_FOR_CREDENTIALS\","
-                        echo "  \"message\": \"No credentials found for $domain. Ask user for credentials, then run: agent-browse auth store-creds $domain <email> <password>\""
+                        echo "  \"action_required\": \"STORE_CREDENTIALS\","
+                        echo "  \"command\": \"auth store-creds $domain <email> <password>\""
                         echo "}"
                         exit 2
+                    fi
+                    
+                    # --auto: navigate, fill, submit, wait, verify all in one
+                    if [[ "$do_auto" == "true" ]]; then
+                        # Navigate to login page
+                        local login_url="https://${domain}/login"
+                        "$0" open "$login_url" >/dev/null 2>&1 || true
+                        sleep 2
+                        # Autofill and submit
+                        json='{"id":"'$(cmd_id)'","action":"autofill_login","username":"'"$email_val"'","password":"'"$pass_val"'","submit":true}'
+                        response=$(send_command "$json" 2>/dev/null) || true
+                        # Wait for navigation
+                        "$0" wait --stable >/dev/null 2>&1 || true
+                        # Get final URL to verify
+                        local final_url
+                        final_url=$("$0" get url 2>/dev/null | grep -o '"url":"[^"]*"' | cut -d'"' -f4)
+                        local logged_in=false
+                        [[ "$final_url" != *"/login"* ]] && logged_in=true
+                        echo "{"
+                        echo "  \"success\": $logged_in,"
+                        echo "  \"domain\": \"$domain\","
+                        echo "  \"url\": \"$final_url\""
+                        echo "}"
+                        [[ "$logged_in" == "true" ]] && exit 0 || exit 1
                     fi
                     
                     # Use autofill with the credentials
@@ -1190,13 +1238,28 @@ main() {
             exit 0
             ;;
         status)
+            local daemon_running=false browser_ok=false pid="" suggestion=""
             if is_daemon_running; then
-                echo "Daemon: running (session: $SESSION)"
-                echo "Socket: $SOCKET_PATH"
-                echo "PID: $(cat "$PID_FILE")"
-            else
-                echo "Daemon: not running"
+                daemon_running=true
+                pid=$(cat "$PID_FILE")
+                # Check if browser is responsive by getting URL
+                if url_result=$(send_command '{"id":"status-check","action":"get","target":"url"}' 2>/dev/null); then
+                    if echo "$url_result" | grep -q '"success":true'; then
+                        browser_ok=true
+                    fi
+                fi
             fi
+            if [[ "$daemon_running" == "false" ]]; then
+                suggestion="Run 'open <url>' to start browser"
+            elif [[ "$browser_ok" == "false" ]]; then
+                suggestion="Run 'restart' to recover browser"
+            fi
+            echo "{"
+            echo "  \"daemon\": {\"running\": $daemon_running, \"pid\": ${pid:-null}, \"session\": \"$SESSION\"},"
+            echo "  \"browser\": {\"responsive\": $browser_ok},"
+            echo "  \"socket\": \"$SOCKET_PATH\""
+            [[ -n "$suggestion" ]] && echo "  ,\"suggestion\": \"$suggestion\""
+            echo "}"
             exit 0
             ;;
             

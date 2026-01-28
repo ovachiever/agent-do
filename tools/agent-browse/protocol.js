@@ -252,6 +252,10 @@ const countSchema = baseCommandSchema.extend({
     action: z.literal('count'),
     selector: z.string().min(1),
 });
+const getOptionsSchema = baseCommandSchema.extend({
+    action: z.literal('getoptions'),
+    selector: z.string().optional(),
+});
 const boundingBoxSchema = baseCommandSchema.extend({
     action: z.literal('boundingbox'),
     selector: z.string().min(1),
@@ -810,6 +814,7 @@ const commandSchema = z.discriminatedUnion('action', [
     isEnabledSchema,
     isCheckedSchema,
     countSchema,
+    getOptionsSchema,
     boundingBoxSchema,
     stylesSchema,
     videoStartSchema,
