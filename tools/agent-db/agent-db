@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# agent-db v2 - AI-first database exploration and querying
+# See the schema, understand the shape, then act.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-db - AI-first database tool
+
+CONNECT & SESSION
+  connect <profile>          Connect to database profile
+  disconnect                 End session
+  status                     Show connection status
+  profiles                   List saved profiles
+  profile add <name> ...     Add connection profile
+  profile remove <name>      Remove profile
+
+SCHEMA EXPLORATION (see before you query)
+  snapshot                   Full schema overview (tables, columns, types)
+  snapshot --tables          Tables only with row counts
+  snapshot --compact         Just table names
+  tables [pattern]           List tables matching pattern
+  describe <table>           Detailed table schema (columns, PKs, FKs, indexes)
+  relations [table]          Foreign key relationship map
+
+DATA SAMPLING (peek without loading everything)
+  sample <table> [n]         Sample n rows (default: 5)
+  sample <table> --random    Random sample
+  count <table>              Row count
+
+QUERY EXECUTION
+  query "<sql>"              Run SQL query
+  query "<sql>" --limit N    Add/override LIMIT
+  query "<sql>" --explain    Show execution plan
+  export "<sql>" <file>      Export to CSV/JSON/Excel
+  history                    Recent queries
+  history --last             Last query only
+
+TRANSACTION SAFETY
+  begin                      Start transaction
+  commit                     Commit transaction
+  rollback                   Rollback transaction
+
+PROFILE OPTIONS (for 'profile add')
+  --type <type>              postgres, mysql, mssql, sqlite
+  --host <host>              Database host
+  --port <port>              Database port
+  --database <db>            Database name
+  --user <user>              Username
+  --password <pass>          Password (stored in keychain)
+
+EXIT CODES
+  0  Success
+  1  Connection failed
+  2  Authentication failed
+  3  Object not found (table/column)
+  4  Query syntax error
+  5  Permission denied
+  6  Timeout
+  7  Transaction error
+  8  Unknown error
+
+EXAMPLES
+  # Setup
+  agent-db profile add prod-sales --type mssql --host sql.company.com \
+    --port 1433 --database SalesDB --user readonly --password 'secret'
+  
+  # Connect and explore
+  agent-db connect prod-sales
+  agent-db snapshot                    # See all tables and columns
+  agent-db describe orders             # Deep dive into one table
+  agent-db sample orders 5             # Peek at data
+  
+  # Query with confidence
+  agent-db query "SELECT * FROM customers WHERE state = 'CA' LIMIT 10"
+  agent-db export "SELECT * FROM orders" orders.csv
+  
+  # Safe modifications
+  agent-db begin
+  agent-db query "UPDATE orders SET status = 'shipped' WHERE id = 123"
+  agent-db rollback                    # Oops, undo that
+  
+  # Disconnect
+  agent-db disconnect
+
+EOF
+}
+
+# Run Python module
+run_db_ops() {
+    python3 "$SCRIPT_DIR/db_ops.py" "$@"
+}
+
+# Main
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        run_db_ops "$@"
+        ;;
+esac
