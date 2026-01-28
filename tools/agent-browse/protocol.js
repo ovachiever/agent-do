@@ -694,7 +694,10 @@ const waitSchema = baseCommandSchema.extend({
     action: z.literal('wait'),
     selector: z.string().min(1).optional(),
     timeout: z.number().positive().optional(),
-    state: z.enum(['attached', 'detached', 'visible', 'hidden']).optional(),
+    // state can be selector state (attached/detached/visible/hidden) or load state (networkidle/load/domcontentloaded)
+    state: z.enum(['attached', 'detached', 'visible', 'hidden', 'networkidle', 'load', 'domcontentloaded']).optional(),
+    text: z.string().optional(),
+    url: z.string().optional(),
 });
 const scrollSchema = baseCommandSchema.extend({
     action: z.literal('scroll'),

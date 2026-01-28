@@ -493,11 +493,33 @@ async function handleEvaluate(command, browser) {
 }
 async function handleWait(command, browser) {
     const page = browser.getPage();
+    
+    // Check if state is a load state (networkidle, load, domcontentloaded)
+    const loadStates = ['networkidle', 'load', 'domcontentloaded'];
+    if (command.state && loadStates.includes(command.state)) {
+        await page.waitForLoadState(command.state, { timeout: command.timeout });
+        return successResponse(command.id, { waited: true, state: command.state });
+    }
+    
     if (command.selector) {
         await page.waitForSelector(command.selector, {
             state: command.state ?? 'visible',
             timeout: command.timeout,
         });
+    }
+    else if (command.text) {
+        // Wait for text to appear on page
+        await page.waitForFunction(
+            (text) => document.body.innerText.includes(text),
+            command.text,
+            { timeout: command.timeout }
+        );
+        return successResponse(command.id, { waited: true, text: command.text });
+    }
+    else if (command.url) {
+        // Wait for URL to match pattern
+        await page.waitForURL(command.url, { timeout: command.timeout });
+        return successResponse(command.id, { waited: true, url: page.url() });
     }
     else if (command.timeout) {
         await page.waitForTimeout(command.timeout);
