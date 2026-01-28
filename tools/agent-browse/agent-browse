@@ -877,104 +877,128 @@ main() {
                     json='{"id":"'$(cmd_id)'","action":"wait_captcha","timeout":'"$timeout"'}'
                     ;;
                 check-creds)
-                    # Check if credentials exist for a domain
+                    # Check if credentials exist for a domain (env vars or keychain)
                     # Usage: auth check-creds <domain>
-                    # Returns env var names and whether they're set
                     [[ $# -lt 1 ]] && { echo "Usage: auth check-creds <domain>" >&2; exit 1; }
                     local domain="$1"
-                    # Convert domain to env var prefix: ninety.io -> NINETY, app.example.com -> EXAMPLE
                     local prefix
                     prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
                     local email_var="${prefix}_EMAIL"
                     local pass_var="${prefix}_PASSWORD"
-                    local email_val="${!email_var:-}"
-                    local pass_val="${!pass_var:-}"
+                    local platform
+                    platform=$("$SCRIPT_DIR/creds-helper.sh" platform)
+                    
+                    # Try to get credentials (checks env vars then keychain)
+                    local creds_output ready="false" source=""
+                    if creds_output=$("$SCRIPT_DIR/creds-helper.sh" get "$domain" 2>/dev/null); then
+                        ready="true"
+                        source=$(echo "$creds_output" | tail -1)
+                    fi
                     
                     echo "{"
                     echo "  \"domain\": \"$domain\","
                     echo "  \"prefix\": \"$prefix\","
                     echo "  \"email_var\": \"$email_var\","
                     echo "  \"password_var\": \"$pass_var\","
-                    echo "  \"email_set\": $([ -n "$email_val" ] && echo 'true' || echo 'false'),"
-                    echo "  \"password_set\": $([ -n "$pass_val" ] && echo 'true' || echo 'false'),"
-                    echo "  \"ready\": $([ -n "$email_val" ] && [ -n "$pass_val" ] && echo 'true' || echo 'false')"
+                    echo "  \"platform\": \"$platform\","
+                    echo "  \"ready\": $ready,"
+                    echo "  \"source\": \"$source\""
                     echo "}"
                     exit 0
                     ;;
                 store-creds)
-                    # Store credentials for a domain in shell config
+                    # Store credentials securely in OS keychain
                     # Usage: auth store-creds <domain> <email> <password>
                     [[ $# -lt 3 ]] && { echo "Usage: auth store-creds <domain> <email> <password>" >&2; exit 1; }
                     local domain="$1"
                     local email="$2"
                     local password="$3"
-                    local prefix
-                    prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
-                    local email_var="${prefix}_EMAIL"
-                    local pass_var="${prefix}_PASSWORD"
+                    local platform
+                    platform=$("$SCRIPT_DIR/creds-helper.sh" platform)
                     
-                    # Add to ~/.zshenv (for all zsh including non-interactive)
-                    {
-                        echo ""
-                        echo "# Credentials for $domain (added by agent-browse)"
-                        echo "export ${email_var}=\"$email\""
-                        echo "export ${pass_var}='$password'"
-                    } >> ~/.zshenv
-                    
-                    # Also add to ~/.profile for other shells
-                    {
-                        echo ""
-                        echo "# Credentials for $domain (added by agent-browse)"
-                        echo "export ${email_var}=\"$email\""
-                        echo "export ${pass_var}='$password'"
-                    } >> ~/.profile
-                    
-                    # Export for current session
-                    export "${email_var}=$email"
-                    export "${pass_var}=$password"
-                    
+                    # Store in OS keychain
+                    if "$SCRIPT_DIR/creds-helper.sh" store "$domain" "$email" "$password"; then
+                        echo "{"
+                        echo "  \"stored\": true,"
+                        echo "  \"domain\": \"$domain\","
+                        echo "  \"platform\": \"$platform\","
+                        echo "  \"storage\": \"keychain\","
+                        echo "  \"note\": \"Credentials stored securely in $platform keychain\""
+                        echo "}"
+                        exit 0
+                    else
+                        echo "{"
+                        echo "  \"error\": \"storage_failed\","
+                        echo "  \"domain\": \"$domain\","
+                        echo "  \"platform\": \"$platform\","
+                        echo "  \"message\": \"Failed to store credentials in keychain\""
+                        echo "}"
+                        exit 1
+                    fi
+                    ;;
+                delete-creds)
+                    # Delete stored credentials
+                    # Usage: auth delete-creds <domain>
+                    [[ $# -lt 1 ]] && { echo "Usage: auth delete-creds <domain>" >&2; exit 1; }
+                    local domain="$1"
+                    "$SCRIPT_DIR/creds-helper.sh" delete "$domain"
                     echo "{"
-                    echo "  \"stored\": true,"
-                    echo "  \"domain\": \"$domain\","
-                    echo "  \"email_var\": \"$email_var\","
-                    echo "  \"password_var\": \"$pass_var\","
-                    echo "  \"files\": [\"~/.zshenv\", \"~/.profile\"],"
-                    echo "  \"note\": \"Restart Claude Code for new sessions to inherit these credentials\""
+                    echo "  \"deleted\": true,"
+                    echo "  \"domain\": \"$domain\""
+                    echo "}"
+                    exit 0
+                    ;;
+                list-creds)
+                    # List all stored credential domains
+                    local domains
+                    domains=$("$SCRIPT_DIR/creds-helper.sh" list 2>/dev/null || echo "")
+                    echo "{"
+                    echo "  \"domains\": ["
+                    local first=true
+                    while IFS= read -r d; do
+                        [[ -z "$d" ]] && continue
+                        [[ "$first" == "true" ]] && first=false || echo ","
+                        echo -n "    \"$d\""
+                    done <<< "$domains"
+                    echo ""
+                    echo "  ]"
                     echo "}"
                     exit 0
                     ;;
                 get-creds)
-                    # Get credentials for a domain (for use in autofill)
+                    # Get credentials for a domain (checks env vars then keychain)
                     # Usage: auth get-creds <domain>
                     [[ $# -lt 1 ]] && { echo "Usage: auth get-creds <domain>" >&2; exit 1; }
                     local domain="$1"
                     local prefix
                     prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
-                    local email_var="${prefix}_EMAIL"
-                    local pass_var="${prefix}_PASSWORD"
-                    local email_val="${!email_var:-}"
-                    local pass_val="${!pass_var:-}"
                     
-                    if [[ -z "$email_val" || -z "$pass_val" ]]; then
+                    local creds_output
+                    if creds_output=$("$SCRIPT_DIR/creds-helper.sh" get "$domain" 2>/dev/null); then
+                        local email password source
+                        email=$(echo "$creds_output" | sed -n '1p')
+                        password=$(echo "$creds_output" | sed -n '2p')
+                        source=$(echo "$creds_output" | sed -n '3p')
+                        echo "{"
+                        echo "  \"domain\": \"$domain\","
+                        echo "  \"email\": \"$email\","
+                        echo "  \"password\": \"$password\","
+                        echo "  \"source\": \"$source\""
+                        echo "}"
+                        exit 0
+                    else
                         echo "{"
                         echo "  \"error\": \"credentials_missing\","
                         echo "  \"domain\": \"$domain\","
-                        echo "  \"email_var\": \"$email_var\","
-                        echo "  \"password_var\": \"$pass_var\","
-                        echo "  \"message\": \"Credentials not found. Ask user for credentials and use 'auth store-creds $domain <email> <password>' to save them.\""
+                        echo "  \"env_vars\": [\"${prefix}_EMAIL\", \"${prefix}_PASSWORD\"],"
+                        echo "  \"action_required\": \"ASK_USER_FOR_CREDENTIALS\","
+                        echo "  \"message\": \"No credentials found. Ask user for credentials, then run: agent-browse auth store-creds $domain <email> <password>\""
                         echo "}"
                         exit 2
                     fi
-                    
-                    echo "{"
-                    echo "  \"domain\": \"$domain\","
-                    echo "  \"email\": \"$email_val\","
-                    echo "  \"password\": \"$pass_val\""
-                    echo "}"
-                    exit 0
                     ;;
                 login)
-                    # High-level login command: check creds, autofill, submit
+                    # High-level login command: get creds from keychain/env, autofill, submit
                     # Usage: auth login <domain> [--submit]
                     [[ $# -lt 1 ]] && { echo "Usage: auth login <domain> [--submit]" >&2; exit 1; }
                     local domain="$1"; shift
@@ -983,19 +1007,18 @@ main() {
                     
                     local prefix
                     prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
-                    local email_var="${prefix}_EMAIL"
-                    local pass_var="${prefix}_PASSWORD"
-                    local email_val="${!email_var:-}"
-                    local pass_val="${!pass_var:-}"
                     
-                    if [[ -z "$email_val" || -z "$pass_val" ]]; then
+                    local creds_output email_val pass_val
+                    if creds_output=$("$SCRIPT_DIR/creds-helper.sh" get "$domain" 2>/dev/null); then
+                        email_val=$(echo "$creds_output" | sed -n '1p')
+                        pass_val=$(echo "$creds_output" | sed -n '2p')
+                    else
                         echo "{"
                         echo "  \"error\": \"credentials_missing\","
                         echo "  \"domain\": \"$domain\","
-                        echo "  \"email_var\": \"$email_var\","
-                        echo "  \"password_var\": \"$pass_var\","
+                        echo "  \"env_vars\": [\"${prefix}_EMAIL\", \"${prefix}_PASSWORD\"],"
                         echo "  \"action_required\": \"ASK_USER_FOR_CREDENTIALS\","
-                        echo "  \"message\": \"No credentials found for $domain. Please ask the user for their login email and password, then run: agent-browse auth store-creds $domain <email> <password>\""
+                        echo "  \"message\": \"No credentials found for $domain. Ask user for credentials, then run: agent-browse auth store-creds $domain <email> <password>\""
                         echo "}"
                         exit 2
                     fi
