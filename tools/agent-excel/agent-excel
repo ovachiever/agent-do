@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# agent-excel - AI-first Excel CLI
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_FILE="${TMPDIR:-/tmp}/agent-excel-state.json"
+
+show_help() {
+    cat << 'EOF'
+agent-excel - AI-first Excel CLI for workbook automation
+
+WORKBOOK:
+  open <path>                    Open existing workbook
+  new [path]                     Create new workbook
+  save [path]                    Save workbook (optionally to new path)
+  close                          Close without saving
+  status                         Current workbook info
+  export csv <path> [sheet]      Export sheet to CSV
+  export pdf <path>              Export to PDF
+
+SHEETS:
+  sheets                         List all sheets
+  sheet <name>                   Switch to sheet
+  sheet new <name>               Create new sheet
+  sheet rename <old> <new>       Rename sheet
+  sheet delete <name>            Delete sheet
+  sheet copy <src> [dest]        Copy sheet
+
+READING:
+  snapshot                       Overview of active sheet
+  snapshot --range A1:Z50        Specific range
+  snapshot --used                Only used range
+  snapshot --headers             Headers + data preview
+  get <cell>                     Get cell value: A1, B2
+  get <range>                    Get range: A1:D10
+  get row <n>                    Get entire row
+  get col <letter>               Get entire column
+  get formula <cell>             Get formula if present
+
+WRITING:
+  set <cell> <value>             Set single cell
+  set <range> <json>             Set range from 2D array
+  fill <range> <value>           Fill range with value
+  clear <range>                  Clear contents
+  clear <range> --all            Clear contents + formatting
+  formula <cell> <expr>          Set formula
+
+STRUCTURE:
+  insert row <n> [count]         Insert row(s)
+  insert col <letter> [count]    Insert column(s)
+  delete row <n> [count]         Delete row(s)
+  delete col <letter> [count]    Delete column(s)
+  autofit col <letter>           Auto-fit column width
+
+FINDING:
+  find <text>                    Find text, return cells
+  find <text> --col <letter>     Search in column only
+  replace <old> <new>            Replace all occurrences
+  filter <col> <op> <value>      Filter rows (=, !=, >, <, contains)
+  filter clear                   Clear filters
+  sort <col> [asc|desc]          Sort by column
+
+FORMATTING:
+  format <range> --bold          Bold text
+  format <range> --italic        Italic
+  format <range> --color <hex>   Text color
+  format <range> --bg <hex>      Background color
+  format <range> --align <l|c|r> Horizontal align
+  format <range> --number <fmt>  Number format
+  merge <range>                  Merge cells
+  unmerge <range>                Unmerge cells
+
+FORMULAS:
+  sum <range>                    Calculate SUM
+  avg <range>                    Calculate AVERAGE
+  count <range>                  Calculate COUNT
+  max <range>                    Calculate MAX
+  min <range>                    Calculate MIN
+
+OPTIONS:
+  --json                         JSON output (default)
+  --help                         Show this help
+
+EXIT CODES:
+  0  Success
+  1  General error
+  2  File not found
+  3  Invalid cell/range
+  4  Sheet not found
+  5  Formula error
+  6  File locked
+  7  Validation error
+
+EXAMPLES:
+  agent-excel open data.xlsx
+  agent-excel snapshot --headers
+  agent-excel get A1:D10
+  agent-excel set B2 "Hello"
+  agent-excel set A1:C2 '[["Name","Age"],["Alice",30]]'
+  agent-excel find "error" --col C
+  agent-excel format A1:D1 --bold --bg "#4472C4"
+  agent-excel save
+EOF
+}
+
+# Run Python with the excel operations module
+run_python() {
+    python3 "$SCRIPT_DIR/excel_ops.py" "$STATE_FILE" "$@"
+}
+
+main() {
+    # Handle help
+    if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]] || [[ $# -eq 0 ]]; then
+        show_help
+        exit 0
+    fi
+    
+    # Pass all arguments to Python handler
+    run_python "$@"
+}
+
+main "$@"
