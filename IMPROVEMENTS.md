@@ -305,10 +305,10 @@ agent-do browse session load mysite
 | P1 | Session auto-launch (#9) | Low | Medium | ✅ Done |
 | P1 | Streamlined auth (#8) | Medium | Medium | ✅ Done - --auto flag |
 | P2 | DNS recovery (#2) | Low | Medium | ✅ Done - network reconnect |
-| P2 | Stale ref detection (#4) | Medium | Medium | Deferred |
+| P2 | Stale ref detection (#4) | Medium | Medium | ✅ Done - warns when >30s old |
 | P2 | Dropdown scoping (#6) | Medium | Medium | ✅ Done - get options |
-| P3 | Timeout handling (#7) | Low | Low | Deferred |
-| P3 | Expanded exit codes (#10) | Low | Low | Deferred |
+| P3 | Timeout handling (#7) | Low | Low | ✅ Done - --timeout flag |
+| P3 | Expanded exit codes (#10) | Low | Low | ✅ Done - codes 0-8 |
 
 ---
 
@@ -322,3 +322,6 @@ agent-do browse session load mysite
 6. ✅ **`auth login --auto`** - Full login flow in one command
 7. ✅ **`network reconnect`** - Force new browser context
 8. ✅ **`get options`** - Query dropdown/select options
+9. ✅ **Stale ref warnings** - Errors include ref age when >30s
+10. ✅ **Exit codes 0-8** - Specific codes for crash/network/collision/timeout
+11. ✅ **`--timeout` flag** - Command-level timeout control
