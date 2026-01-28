@@ -297,25 +297,28 @@ agent-do browse session load mysite
 
 ## Implementation Priority
 
-| Priority | Issue | Effort | Impact |
-|----------|-------|--------|--------|
-| P0 | Ref collisions (#3) | Medium | High - blocks basic workflows |
-| P0 | Browser recovery (#1) | Medium | High - common failure mode |
-| P1 | Better error messages (#5) | Low | High - reduces AI confusion |
-| P1 | Session auto-launch (#9) | Low | Medium - smoother UX |
-| P1 | Streamlined auth (#8) | Medium | Medium - reduces boilerplate |
-| P2 | DNS recovery (#2) | Low | Medium - occasional issue |
-| P2 | Stale ref detection (#4) | Medium | Medium - prevents wasted attempts |
-| P2 | Dropdown scoping (#6) | Medium | Medium - specific use case |
-| P3 | Timeout handling (#7) | Low | Low - rare issue |
-| P3 | Expanded exit codes (#10) | Low | Low - nice to have |
+| Priority | Issue | Effort | Impact | Status |
+|----------|-------|--------|--------|--------|
+| P0 | Ref collisions (#3) | Medium | High | ✅ Done - nth selector suggestion |
+| P0 | Browser recovery (#1) | Medium | High | ✅ Done - restart command |
+| P1 | Better error messages (#5) | Low | High | ✅ Done - fuzzy suggestions |
+| P1 | Session auto-launch (#9) | Low | Medium | ✅ Done |
+| P1 | Streamlined auth (#8) | Medium | Medium | ✅ Done - --auto flag |
+| P2 | DNS recovery (#2) | Low | Medium | ✅ Done - network reconnect |
+| P2 | Stale ref detection (#4) | Medium | Medium | Deferred |
+| P2 | Dropdown scoping (#6) | Medium | Medium | ✅ Done - get options |
+| P3 | Timeout handling (#7) | Low | Low | Deferred |
+| P3 | Expanded exit codes (#10) | Low | Low | Deferred |
 
 ---
 
-## Quick Wins (< 1 hour each)
+## Implemented Quick Wins
 
-1. **Add `restart` command** - Kill browser, restart daemon connection
-2. **Better ref collision error** - Include suggestions in error JSON
-3. **Session load auto-launch** - Launch browser before restoring session
-4. **Fuzzy command suggestions** - Levenshtein distance matching on unknown commands
-5. **Include `suggestion` field** - All errors should have actionable next step
+1. ✅ **`restart` command** - Kill browser, restart daemon connection
+2. ✅ **Better ref collision error** - Suggests `@ref >> nth=0` or `role=X >> nth=N`
+3. ✅ **Session load auto-launch** - Launch browser before restoring session
+4. ✅ **Fuzzy command suggestions** - Prefix matching on unknown commands
+5. ✅ **JSON status output** - Returns daemon/browser state with suggestion
+6. ✅ **`auth login --auto`** - Full login flow in one command
+7. ✅ **`network reconnect`** - Force new browser context
+8. ✅ **`get options`** - Query dropdown/select options
