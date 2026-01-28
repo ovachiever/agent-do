@@ -1,1 +1,398 @@
-/Users/erik/Documents/AI/Custom_Coding/agent-tui/agent-tui
+#!/usr/bin/env bash
+set -euo pipefail
+
+PREFIX="agent-tui-"
+DEFAULT_WIDTH=160
+DEFAULT_HEIGHT=50
+DEFAULT_TIMEOUT=5000
+POLL_INTERVAL=100
+
+die() { echo "error: $1" >&2; exit "${2:-1}"; }
+
+require_tmux() {
+    command -v tmux &>/dev/null || die "tmux required. Install with: brew install tmux"
+}
+
+list_sessions() {
+    tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^${PREFIX}" || true
+}
+
+resolve_session() {
+    local user_session="$1"
+    if [[ -n "$user_session" ]]; then
+        echo "${PREFIX}${user_session}"
+        return
+    fi
+    local sessions
+    sessions=$(list_sessions)
+    local count
+    count=$(echo "$sessions" | grep -c . || true)
+    if [[ "$count" -eq 0 ]]; then
+        die "No agent-tui sessions found. Run 'agent-tui spawn <command>' first."
+    elif [[ "$count" -eq 1 ]]; then
+        echo "$sessions"
+    else
+        die "Multiple sessions active. Specify with --session. Run 'agent-tui list' to see them."
+    fi
+}
+
+session_exists() {
+    tmux has-session -t "$1" 2>/dev/null
+}
+
+get_snapshot() {
+    local session="$1"
+    tmux capture-pane -t "$session" -p
+}
+
+map_key() {
+    local key="$1"
+    case "$key" in
+        Up|Down|Left|Right|Home|End|Tab|Space|Enter|Escape) echo "$key" ;;
+        Return) echo "Enter" ;;
+        Esc) echo "Escape" ;;
+        PageUp|PgUp) echo "PageUp" ;;
+        PageDown|PgDn) echo "PageDown" ;;
+        Backspace) echo "BSpace" ;;
+        Delete) echo "DC" ;;
+        F[0-9]|F1[0-2]) echo "$key" ;;
+        Shift+Tab) echo "BTab" ;;
+        Ctrl+*) echo "C-${key#Ctrl+}" ;;
+        C-*) echo "$key" ;;
+        Alt+*) echo "M-${key#Alt+}" ;;
+        M-*) echo "$key" ;;
+        *) echo "$key" ;;
+    esac
+}
+
+cmd_spawn() {
+    local command="" user_session="" size=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --size) size="$2"; shift 2 ;;
+            *) 
+                if [[ -z "$command" ]]; then
+                    command="$1"; shift
+                else
+                    die "unexpected argument: $1"
+                fi
+                ;;
+        esac
+    done
+    [[ -n "$command" ]] || die "usage: agent-tui spawn <command> [--session <name>] [--size WxH]"
+    
+    if [[ -z "$user_session" ]]; then
+        user_session="$(date +%s)"
+    fi
+    local tmux_session="${PREFIX}${user_session}"
+    
+    local width=$DEFAULT_WIDTH height=$DEFAULT_HEIGHT
+    if [[ -n "$size" ]]; then
+        if [[ ! "$size" =~ ^[0-9]+x[0-9]+$ ]]; then
+            die "invalid size format. Use WxH (e.g., 160x50)"
+        fi
+        width="${size%x*}"
+        height="${size#*x}"
+    fi
+    
+    if session_exists "$tmux_session"; then
+        die "session '$user_session' already exists"
+    fi
+    
+    tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" -- $command
+    echo "$user_session"
+}
+
+cmd_list() {
+    local sessions
+    sessions=$(list_sessions)
+    if [[ -z "$sessions" ]]; then
+        echo "No agent-tui sessions."
+        return
+    fi
+    echo "$sessions" | sed "s/^${PREFIX}//"
+}
+
+cmd_kill() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    tmux kill-session -t "$tmux_session"
+}
+
+cmd_attach() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    echo "tmux attach -t $tmux_session"
+}
+
+cmd_snapshot() {
+    local user_session="" json=false lines=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --json) json=true; shift ;;
+            --lines) lines=true; shift ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    local content
+    content=$(get_snapshot "$tmux_session")
+    
+    if $json; then
+        local width height
+        width=$(tmux display -t "$tmux_session" -p '#{window_width}')
+        height=$(tmux display -t "$tmux_session" -p '#{window_height}')
+        local timestamp
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        local session_name="${tmux_session#$PREFIX}"
+        
+        python3 -c "
+import json, sys
+content = sys.stdin.read()
+lines = content.split('\n')
+print(json.dumps({
+    'session': '$session_name',
+    'timestamp': '$timestamp',
+    'dimensions': {'width': $width, 'height': $height},
+    'content': content,
+    'lines': lines
+}, indent=2))
+" <<< "$content"
+    elif $lines; then
+        local i=1
+        while IFS= read -r line; do
+            printf "%3d│ %s\n" "$i" "$line"
+            ((i++))
+        done <<< "$content"
+    else
+        echo "$content"
+    fi
+}
+
+cmd_press() {
+    local user_session="" key=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) 
+                if [[ -z "$key" ]]; then
+                    key="$1"; shift
+                else
+                    die "unexpected argument: $1"
+                fi
+                ;;
+        esac
+    done
+    [[ -n "$key" ]] || die "usage: agent-tui press <key> [--session <name>]"
+    
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    local mapped
+    mapped=$(map_key "$key")
+    tmux send-keys -t "$tmux_session" "$mapped"
+}
+
+cmd_type() {
+    local user_session="" text=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) 
+                if [[ -z "$text" ]]; then
+                    text="$1"; shift
+                else
+                    die "unexpected argument: $1"
+                fi
+                ;;
+        esac
+    done
+    [[ -n "$text" ]] || die "usage: agent-tui type <text> [--session <name>]"
+    
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    tmux send-keys -t "$tmux_session" -l -- "$text"
+}
+
+cmd_send() {
+    local user_session="" keys=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) keys+=("$1"); shift ;;
+        esac
+    done
+    [[ ${#keys[@]} -gt 0 ]] || die "usage: agent-tui send <key>... [--session <name>]"
+    
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    for key in "${keys[@]}"; do
+        local mapped
+        mapped=$(map_key "$key")
+        tmux send-keys -t "$tmux_session" "$mapped"
+    done
+}
+
+cmd_wait() {
+    local user_session="" ms="" text="" stable=false timeout=$DEFAULT_TIMEOUT
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --text) text="$2"; shift 2 ;;
+            --stable) stable=true; shift ;;
+            --timeout) timeout="$2"; shift 2 ;;
+            *) 
+                if [[ -z "$ms" && "$1" =~ ^[0-9]+$ ]]; then
+                    ms="$1"; shift
+                else
+                    die "unexpected argument: $1"
+                fi
+                ;;
+        esac
+    done
+    
+    if [[ -n "$ms" ]]; then
+        local seconds
+        seconds=$(echo "scale=3; $ms / 1000" | bc)
+        sleep "$seconds"
+        return 0
+    fi
+    
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    local elapsed=0
+    local poll_sec
+    poll_sec=$(echo "scale=3; $POLL_INTERVAL / 1000" | bc)
+    
+    if [[ -n "$text" ]]; then
+        while [[ $elapsed -lt $timeout ]]; do
+            local content
+            content=$(get_snapshot "$tmux_session")
+            if echo "$content" | grep -qE "$text"; then
+                return 0
+            fi
+            sleep "$poll_sec"
+            elapsed=$((elapsed + POLL_INTERVAL))
+        done
+        die "timeout waiting for pattern: $text" 2
+    fi
+    
+    if $stable; then
+        local prev="" prev2="" current=""
+        local stable_count=0
+        while [[ $elapsed -lt $timeout ]]; do
+            current=$(get_snapshot "$tmux_session")
+            if [[ "$current" == "$prev" && "$prev" == "$prev2" && -n "$prev2" ]]; then
+                return 0
+            fi
+            prev2="$prev"
+            prev="$current"
+            sleep "$poll_sec"
+            elapsed=$((elapsed + POLL_INTERVAL))
+        done
+        die "timeout waiting for stable screen" 2
+    fi
+    
+    die "usage: agent-tui wait <ms> | --text <pattern> | --stable [--timeout <ms>] [--session <name>]"
+}
+
+cmd_size() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    local width height
+    width=$(tmux display -t "$tmux_session" -p '#{window_width}')
+    height=$(tmux display -t "$tmux_session" -p '#{window_height}')
+    echo "${width}x${height}"
+}
+
+cmd_pid() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session '${tmux_session#$PREFIX}' not found. Run 'agent-tui list'."
+    
+    tmux display -t "$tmux_session" -p '#{pane_pid}'
+}
+
+usage() {
+    cat <<EOF
+agent-tui - TUI automation via tmux
+
+Commands:
+  spawn <command> [--session <name>] [--size WxH]
+  list
+  kill [--session <name>]
+  attach [--session <name>]
+  snapshot [--session <name>] [--json] [--lines]
+  press <key> [--session <name>]
+  type <text> [--session <name>]
+  send <key>... [--session <name>]
+  wait <ms> [--session <name>]
+  wait --text <pattern> [--timeout <ms>] [--session <name>]
+  wait --stable [--timeout <ms>] [--session <name>]
+  size [--session <name>]
+  pid [--session <name>]
+EOF
+    exit 0
+}
+
+require_tmux
+
+case "${1:-}" in
+    spawn)    shift; cmd_spawn "$@" ;;
+    list)     shift; cmd_list "$@" ;;
+    kill)     shift; cmd_kill "$@" ;;
+    attach)   shift; cmd_attach "$@" ;;
+    snapshot) shift; cmd_snapshot "$@" ;;
+    press)    shift; cmd_press "$@" ;;
+    type)     shift; cmd_type "$@" ;;
+    send)     shift; cmd_send "$@" ;;
+    wait)     shift; cmd_wait "$@" ;;
+    size)     shift; cmd_size "$@" ;;
+    pid)      shift; cmd_pid "$@" ;;
+    -h|--help|help|"") usage ;;
+    *)        die "unknown command: $1. Run 'agent-tui --help'." ;;
+esac
