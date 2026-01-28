@@ -26,8 +26,12 @@ export function toAIFriendlyError(error, selector) {
         // Extract count if available
         const countMatch = message.match(/resolved to (\d+) elements/);
         const count = countMatch ? countMatch[1] : 'multiple';
-        return new Error(`Selector "${selector}" matched ${count} elements. ` +
-            `Run 'snapshot' to get updated refs, or use a more specific CSS selector.`);
+        // Provide actionable suggestions based on selector type
+        const isRef = selector?.startsWith('@');
+        const suggestion = isRef
+            ? `Use '${selector} >> nth=0' for first match, or 'role=X >> nth=N' pattern.`
+            : `Use '${selector} >> nth=0' for first match.`;
+        return new Error(`Selector "${selector}" matched ${count} elements. ${suggestion}`);
     }
     // Handle element not interactable (must be checked BEFORE timeout case)
     // This includes cases where an overlay/modal blocks the element

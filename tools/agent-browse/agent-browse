@@ -154,6 +154,7 @@ DEBUG:
 BROWSER CONTROL:
   install                        Install browser binaries
   close                          Close browser and daemon
+  restart [url]                  Kill and restart browser (optionally navigate)
   status                         Show daemon status
 
 OPTIONS:
@@ -1174,6 +1175,20 @@ main() {
             echo "Browser closed"
             exit 0
             ;;
+        restart)
+            # Kill browser and daemon, then relaunch with optional URL
+            json=$(build_close_cmd)
+            send_command "$json" 2>/dev/null || true
+            stop_daemon
+            sleep 1
+            # If URL provided, open it (which auto-starts daemon)
+            if [[ $# -gt 0 ]]; then
+                "$0" open "$1"
+                exit $?
+            fi
+            echo '{"restarted": true, "hint": "Run open <url> to navigate"}'
+            exit 0
+            ;;
         status)
             if is_daemon_running; then
                 echo "Daemon: running (session: $SESSION)"
@@ -1187,7 +1202,20 @@ main() {
             
         *)
             echo "Unknown command: $cmd" >&2
-            echo "Run 'agent-browse --help' for usage" >&2
+            # Suggest similar commands (prefix match)
+            local commands="open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval session tab network auth vision agent is console errors highlight install close restart status"
+            local suggestions=""
+            for c in $commands; do
+                if [[ "$c" == "$cmd"* ]]; then
+                    suggestions+="  $c"$'\n'
+                fi
+            done
+            if [[ -n "$suggestions" ]]; then
+                echo "Did you mean:" >&2
+                echo -n "$suggestions" >&2
+            else
+                echo "Run 'agent-browse --help' for usage" >&2
+            fi
             exit 1
             ;;
     esac
