@@ -19,36 +19,39 @@ export function setScreencastFrameCallback(callback) {
  * Convert Playwright errors to AI-friendly messages
  * @internal Exported for testing
  */
-export function toAIFriendlyError(error, selector) {
+// Threshold for warning about stale refs (seconds)
+const STALE_REF_THRESHOLD = 30;
+
+export function toAIFriendlyError(error, selector, snapshotAge = null) {
     const message = error instanceof Error ? error.message : String(error);
+    const isRef = selector?.startsWith('@');
+    const staleWarning = (isRef && snapshotAge && snapshotAge > STALE_REF_THRESHOLD)
+        ? ` Refs are ${snapshotAge}s old - re-snapshot recommended.`
+        : '';
+    
     // Handle strict mode violation (multiple elements match)
     if (message.includes('strict mode violation')) {
-        // Extract count if available
         const countMatch = message.match(/resolved to (\d+) elements/);
         const count = countMatch ? countMatch[1] : 'multiple';
-        // Provide actionable suggestions based on selector type
-        const isRef = selector?.startsWith('@');
         const suggestion = isRef
             ? `Use '${selector} >> nth=0' for first match, or 'role=X >> nth=N' pattern.`
             : `Use '${selector} >> nth=0' for first match.`;
-        return new Error(`Selector "${selector}" matched ${count} elements. ${suggestion}`);
+        return new Error(`Selector "${selector}" matched ${count} elements. ${suggestion}${staleWarning}`);
     }
-    // Handle element not interactable (must be checked BEFORE timeout case)
-    // This includes cases where an overlay/modal blocks the element
+    // Handle element not interactable (overlay blocks it)
     if (message.includes('intercepts pointer events')) {
-        return new Error(`Element "${selector}" is blocked by another element (likely a modal or overlay). ` +
-            `Try dismissing any modals/cookie banners first.`);
+        return new Error(`Element "${selector}" is blocked by another element (modal/overlay). ` +
+            `Try dismissing modals first.${staleWarning}`);
     }
     // Handle element not visible
     if (message.includes('not visible') && !message.includes('Timeout')) {
-        return new Error(`Element "${selector}" is not visible. ` +
-            `Try scrolling it into view or check if it's hidden.`);
+        return new Error(`Element "${selector}" not visible. ` +
+            `Scroll into view or check if hidden.${staleWarning}`);
     }
-    // Handle element not found (timeout waiting for element)
+    // Handle element not found (timeout)
     if (message.includes('waiting for') &&
         (message.includes('to be visible') || message.includes('Timeout'))) {
-        return new Error(`Element "${selector}" not found or not visible. ` +
-            `Run 'snapshot' to see current page elements.`);
+        return new Error(`Element "${selector}" not found.${staleWarning || ' Run snapshot to see current elements.'}`);
     }
     // Return original error for unknown cases
     return error instanceof Error ? error : new Error(message);
@@ -396,7 +399,7 @@ async function handleClick(command, browser) {
         });
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { clicked: true });
 }
@@ -411,7 +414,7 @@ async function handleType(command, browser) {
         });
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { typed: true });
 }
@@ -488,6 +491,9 @@ async function handleSnapshot(command, browser) {
     if (result.markdown) response.markdown = result.markdown;
     if (result.elements) response.elements = result.elements;
     if (result.stats) response.stats = result.stats;
+    
+    // Include timestamp for staleness tracking
+    response.timestamp = Date.now();
     
     return successResponse(command.id, response);
 }
@@ -579,7 +585,7 @@ async function handleSelect(command, browser) {
         await locator.selectOption(values);
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { selected: values });
 }
@@ -589,7 +595,7 @@ async function handleHover(command, browser) {
         await locator.hover();
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { hovered: true });
 }
@@ -647,7 +653,7 @@ async function handleFill(command, browser) {
         await locator.fill(command.value);
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { filled: true });
 }
@@ -657,7 +663,7 @@ async function handleCheck(command, browser) {
         await locator.check();
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { checked: true });
 }
@@ -667,7 +673,7 @@ async function handleUncheck(command, browser) {
         await locator.uncheck();
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { unchecked: true });
 }
@@ -678,7 +684,7 @@ async function handleUpload(command, browser) {
         await locator.setInputFiles(files);
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { uploaded: files });
 }
@@ -688,7 +694,7 @@ async function handleDoubleClick(command, browser) {
         await locator.dblclick();
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { clicked: true });
 }
@@ -698,7 +704,7 @@ async function handleFocus(command, browser) {
         await locator.focus();
     }
     catch (error) {
-        throw toAIFriendlyError(error, command.selector);
+        throw toAIFriendlyError(error, command.selector, browser.getSnapshotAge());
     }
     return successResponse(command.id, { focused: true });
 }

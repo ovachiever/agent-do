@@ -22,6 +22,7 @@ export class BrowserManager {
     isRecordingHar = false;
     refMap = {};
     lastSnapshot = '';
+    lastSnapshotTime = 0;
     scopedHeaderRoutes = new Map();
     // CDP session for screencast and input injection
     cdpSession = null;
@@ -48,7 +49,15 @@ export class BrowserManager {
         const snapshot = await getEnhancedSnapshot(page, options);
         this.refMap = snapshot.refs;
         this.lastSnapshot = snapshot.tree;
+        this.lastSnapshotTime = Date.now();
         return snapshot;
+    }
+    /**
+     * Get age of last snapshot in seconds
+     */
+    getSnapshotAge() {
+        if (!this.lastSnapshotTime) return null;
+        return Math.floor((Date.now() - this.lastSnapshotTime) / 1000);
     }
     /**
      * Get the cached ref map from last snapshot

@@ -167,6 +167,18 @@ OPTIONS:
   --headed                       Show browser window
   --debug                        Debug output
   --json                         JSON output
+  --timeout <seconds>            Command timeout (default: 60)
+
+EXIT CODES:
+  0  Success
+  1  General error
+  2  User input needed (credentials)
+  3  Browser crashed (run restart)
+  4  Network error (run network reconnect)
+  5  Ref collision (use nth selector)
+  6  Stale refs (re-snapshot)
+  7  Element not found
+  8  Timeout
 
 ENVIRONMENT:
   AGENT_BROWSER_SESSION          Default session name
@@ -245,6 +257,7 @@ stop_daemon() {
 
 send_command() {
     local json="$1"
+    local timeout="${2:-60}"
     
     # Ensure daemon is running
     start_daemon || return 1
@@ -258,7 +271,7 @@ import sys
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 try:
     sock.connect("$SOCKET_PATH")
-    sock.settimeout(60)
+    sock.settimeout($timeout)
     sock.sendall(b'$json\n')
     
     response = b""
@@ -271,7 +284,9 @@ try:
             if b"\n" in response:
                 break
         except socket.timeout:
-            break
+            # Return partial/timeout response
+            print('{"success":false,"error":"Command timed out after ${timeout}s","partial":true}')
+            sys.exit(0)
     
     print(response.decode().strip())
 except Exception as e:
@@ -482,6 +497,21 @@ EOF
 # RESPONSE PARSING
 # ============================================================================
 
+# Map error messages to specific exit codes for AI
+# 0=success, 1=general, 2=user input needed, 3=browser crashed, 4=network, 5=ref collision, 6=stale refs, 7=not found, 8=timeout
+error_to_exit_code() {
+    local error="$1"
+    case "$error" in
+        *"Browser not launched"*|*"crashed"*) echo 3 ;;
+        *"ERR_NAME_NOT_RESOLVED"*|*"net::"*|*"network"*) echo 4 ;;
+        *"matched"*"elements"*) echo 5 ;;
+        *"re-snapshot"*|*"stale"*) echo 6 ;;
+        *"not found"*|*"not visible"*) echo 7 ;;
+        *"Timeout"*|*"timeout"*) echo 8 ;;
+        *) echo 1 ;;
+    esac
+}
+
 parse_response() {
     local response="$1"
     local format="${2:-text}"
@@ -491,7 +521,7 @@ parse_response() {
         local error
         error=$(echo "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('error','Unknown error'))" 2>/dev/null || echo "Unknown error")
         echo "Error: $error" >&2
-        return 1
+        return $(error_to_exit_code "$error")
     fi
     
     # Extract result
@@ -541,6 +571,7 @@ main() {
     local output_format="text"
     local headed=false
     local debug=false
+    local cmd_timeout=60
     
     # Parse global options
     while [[ $# -gt 0 ]]; do
@@ -566,6 +597,10 @@ main() {
             --debug)
                 debug=true
                 shift
+                ;;
+            --timeout)
+                cmd_timeout="$2"
+                shift 2
                 ;;
             *)
                 break
@@ -1286,7 +1321,7 @@ main() {
     # Send command and parse response
     [[ "$debug" == "true" ]] && echo "DEBUG: $json" >&2
     
-    response=$(send_command "$json") || exit 1
+    response=$(send_command "$json" "$cmd_timeout") || exit 1
     
     [[ "$debug" == "true" ]] && echo "DEBUG response: $response" >&2
     
