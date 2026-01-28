@@ -92,6 +92,16 @@ AUTH:
   auth detect-captcha            Check for CAPTCHA presence
   auth wait-captcha [timeout]    Wait for CAPTCHA to be solved
 
+CREDENTIAL MANAGEMENT:
+  auth check-creds <domain>      Check if credentials exist for domain
+  auth get-creds <domain>        Get stored credentials (exits 2 if missing)
+  auth store-creds <dom> <e> <p> Store credentials for future sessions
+  auth login <domain>            Auto-login using stored credentials
+  auth login <domain> --submit   Auto-login and submit form
+  
+  Credential naming: ninety.io -> NINETY_EMAIL, NINETY_PASSWORD
+  When credentials missing, exit code 2 + JSON with action_required
+
 VISION (AI-powered):
   vision describe [--detail L]   Describe page visually (low|medium|high)
   vision describe --focus <area> Focus on specific area
@@ -865,6 +875,135 @@ main() {
                 wait-captcha)
                     local timeout="${1:-120000}"
                     json='{"id":"'$(cmd_id)'","action":"wait_captcha","timeout":'"$timeout"'}'
+                    ;;
+                check-creds)
+                    # Check if credentials exist for a domain
+                    # Usage: auth check-creds <domain>
+                    # Returns env var names and whether they're set
+                    [[ $# -lt 1 ]] && { echo "Usage: auth check-creds <domain>" >&2; exit 1; }
+                    local domain="$1"
+                    # Convert domain to env var prefix: ninety.io -> NINETY, app.example.com -> EXAMPLE
+                    local prefix
+                    prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
+                    local email_var="${prefix}_EMAIL"
+                    local pass_var="${prefix}_PASSWORD"
+                    local email_val="${!email_var:-}"
+                    local pass_val="${!pass_var:-}"
+                    
+                    echo "{"
+                    echo "  \"domain\": \"$domain\","
+                    echo "  \"prefix\": \"$prefix\","
+                    echo "  \"email_var\": \"$email_var\","
+                    echo "  \"password_var\": \"$pass_var\","
+                    echo "  \"email_set\": $([ -n "$email_val" ] && echo 'true' || echo 'false'),"
+                    echo "  \"password_set\": $([ -n "$pass_val" ] && echo 'true' || echo 'false'),"
+                    echo "  \"ready\": $([ -n "$email_val" ] && [ -n "$pass_val" ] && echo 'true' || echo 'false')"
+                    echo "}"
+                    exit 0
+                    ;;
+                store-creds)
+                    # Store credentials for a domain in shell config
+                    # Usage: auth store-creds <domain> <email> <password>
+                    [[ $# -lt 3 ]] && { echo "Usage: auth store-creds <domain> <email> <password>" >&2; exit 1; }
+                    local domain="$1"
+                    local email="$2"
+                    local password="$3"
+                    local prefix
+                    prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
+                    local email_var="${prefix}_EMAIL"
+                    local pass_var="${prefix}_PASSWORD"
+                    
+                    # Add to ~/.zshenv (for all zsh including non-interactive)
+                    {
+                        echo ""
+                        echo "# Credentials for $domain (added by agent-browse)"
+                        echo "export ${email_var}=\"$email\""
+                        echo "export ${pass_var}='$password'"
+                    } >> ~/.zshenv
+                    
+                    # Also add to ~/.profile for other shells
+                    {
+                        echo ""
+                        echo "# Credentials for $domain (added by agent-browse)"
+                        echo "export ${email_var}=\"$email\""
+                        echo "export ${pass_var}='$password'"
+                    } >> ~/.profile
+                    
+                    # Export for current session
+                    export "${email_var}=$email"
+                    export "${pass_var}=$password"
+                    
+                    echo "{"
+                    echo "  \"stored\": true,"
+                    echo "  \"domain\": \"$domain\","
+                    echo "  \"email_var\": \"$email_var\","
+                    echo "  \"password_var\": \"$pass_var\","
+                    echo "  \"files\": [\"~/.zshenv\", \"~/.profile\"],"
+                    echo "  \"note\": \"Restart Claude Code for new sessions to inherit these credentials\""
+                    echo "}"
+                    exit 0
+                    ;;
+                get-creds)
+                    # Get credentials for a domain (for use in autofill)
+                    # Usage: auth get-creds <domain>
+                    [[ $# -lt 1 ]] && { echo "Usage: auth get-creds <domain>" >&2; exit 1; }
+                    local domain="$1"
+                    local prefix
+                    prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
+                    local email_var="${prefix}_EMAIL"
+                    local pass_var="${prefix}_PASSWORD"
+                    local email_val="${!email_var:-}"
+                    local pass_val="${!pass_var:-}"
+                    
+                    if [[ -z "$email_val" || -z "$pass_val" ]]; then
+                        echo "{"
+                        echo "  \"error\": \"credentials_missing\","
+                        echo "  \"domain\": \"$domain\","
+                        echo "  \"email_var\": \"$email_var\","
+                        echo "  \"password_var\": \"$pass_var\","
+                        echo "  \"message\": \"Credentials not found. Ask user for credentials and use 'auth store-creds $domain <email> <password>' to save them.\""
+                        echo "}"
+                        exit 2
+                    fi
+                    
+                    echo "{"
+                    echo "  \"domain\": \"$domain\","
+                    echo "  \"email\": \"$email_val\","
+                    echo "  \"password\": \"$pass_val\""
+                    echo "}"
+                    exit 0
+                    ;;
+                login)
+                    # High-level login command: check creds, autofill, submit
+                    # Usage: auth login <domain> [--submit]
+                    [[ $# -lt 1 ]] && { echo "Usage: auth login <domain> [--submit]" >&2; exit 1; }
+                    local domain="$1"; shift
+                    local do_submit=false
+                    [[ "${1:-}" == "--submit" ]] && do_submit=true
+                    
+                    local prefix
+                    prefix=$(echo "$domain" | sed -E 's/^(www\.|app\.|eos\.)?//; s/\.[a-z]+$//; s/[^a-zA-Z0-9]/_/g' | tr '[:lower:]' '[:upper:]')
+                    local email_var="${prefix}_EMAIL"
+                    local pass_var="${prefix}_PASSWORD"
+                    local email_val="${!email_var:-}"
+                    local pass_val="${!pass_var:-}"
+                    
+                    if [[ -z "$email_val" || -z "$pass_val" ]]; then
+                        echo "{"
+                        echo "  \"error\": \"credentials_missing\","
+                        echo "  \"domain\": \"$domain\","
+                        echo "  \"email_var\": \"$email_var\","
+                        echo "  \"password_var\": \"$pass_var\","
+                        echo "  \"action_required\": \"ASK_USER_FOR_CREDENTIALS\","
+                        echo "  \"message\": \"No credentials found for $domain. Please ask the user for their login email and password, then run: agent-browse auth store-creds $domain <email> <password>\""
+                        echo "}"
+                        exit 2
+                    fi
+                    
+                    # Use autofill with the credentials
+                    json='{"id":"'$(cmd_id)'","action":"autofill_login","username":"'"$email_val"'","password":"'"$pass_val"'"'
+                    [[ "$do_submit" == "true" ]] && json="$json,\"submit\":true"
+                    json="$json}"
                     ;;
                 *)
                     echo "Unknown auth command: $subcmd" >&2
