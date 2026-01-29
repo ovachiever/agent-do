@@ -431,12 +431,15 @@ class ScreenCapture:
             }
             
             if run_ocr:
+                # Build index-to-display mapping since displays are sorted
+                display_by_index = {d["index"]: d for d in displays}
+                
                 for cap in captures:
                     if "path" in cap:
                         elements = self.ocr_image(cap["path"])
                         
                         # Add display offset to element bounds
-                        display = displays[cap["display"]]
+                        display = display_by_index[cap["display"]]
                         for elem in elements:
                             elem["display"] = cap["display"]
                             elem["bounds"]["x"] += display["bounds"]["x"]
