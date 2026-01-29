@@ -268,6 +268,32 @@ class MacOSGUI:
             return list(names)
         return []
     
+    def _unpack_axvalue(self, value, value_type: str):
+        """Unpack AXValueRef to Python values."""
+        if value is None:
+            return None
+        try:
+            # Try direct attribute access first (works for some types)
+            if value_type == "position":
+                if hasattr(value, 'x'):
+                    return [int(value.x), int(value.y)]
+                # Use Quartz to unpack CGPoint
+                import Quartz
+                point = Quartz.CGPoint()
+                if Quartz.AXValueGetValue(value, Quartz.kAXValueTypeCGPoint, point):
+                    return [int(point.x), int(point.y)]
+            elif value_type == "size":
+                if hasattr(value, 'width'):
+                    return [int(value.width), int(value.height)]
+                # Use Quartz to unpack CGSize
+                import Quartz
+                size = Quartz.CGSize()
+                if Quartz.AXValueGetValue(value, Quartz.kAXValueTypeCGSize, size):
+                    return [int(size.width), int(size.height)]
+        except Exception:
+            pass
+        return None
+    
     def _get_actions(self, element) -> list:
         """Get available actions for element."""
         err, actions = AXUIElementCopyActionNames(element, None)
@@ -306,18 +332,8 @@ class MacOSGUI:
         position = self._get_attribute(element, "AXPosition")
         size = self._get_attribute(element, "AXSize")
         
-        pos = None
-        sz = None
-        if position:
-            try:
-                pos = [int(position.x), int(position.y)]
-            except:
-                pass
-        if size:
-            try:
-                sz = [int(size.width), int(size.height)]
-            except:
-                pass
+        pos = self._unpack_axvalue(position, "position")
+        sz = self._unpack_axvalue(size, "size")
         
         # Get actions
         actions = self._get_actions(element)
@@ -460,8 +476,8 @@ class MacOSGUI:
             "window": {
                 "title": window_title,
                 "index": window_index,
-                "position": [int(window_pos.x), int(window_pos.y)] if window_pos else None,
-                "size": [int(window_size.width), int(window_size.height)] if window_size else None
+                "position": self._unpack_axvalue(window_pos, "position"),
+                "size": self._unpack_axvalue(window_size, "size")
             },
             "elements": elements,
             "element_count": len(elements),
