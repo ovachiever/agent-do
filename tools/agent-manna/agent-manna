@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# agent-manna - Manna CLI wrapper
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BINARY="$SCRIPT_DIR/target/release/manna-core"
+
+# Check if binary exists
+if [[ ! -f "$BINARY" ]]; then
+    cat >&2 << EOF
+Error: manna-core binary not found
+
+Expected location: $BINARY
+
+To build the binary, run:
+  cd "$SCRIPT_DIR"
+  cargo build --release
+EOF
+    exit 1
+fi
+
+# Exec binary with all arguments
+exec "$BINARY" "$@"
