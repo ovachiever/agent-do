@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# agent-vision - AI-first visual perception
+# Capture, detect, describe, react.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-vision - AI-first visual perception
+
+SOURCE MANAGEMENT
+  source webcam [index]      Use webcam (default: 0)
+  source screen [display]    Capture screen
+  source window "Name"       Capture specific window (macOS)
+  source file <path>         Use video file
+  source image <path>        Use single image
+  source ios                 iOS simulator (via agent-ios)
+  source rtsp <url>          RTSP/IP camera stream
+  status                     Show current source
+  disconnect                 Release source
+
+SNAPSHOT (core pattern)
+  snapshot                   Capture frame → JSON + image path
+  snapshot --output path     Save to specific path
+  snapshot --yolo            + YOLO object detection
+  snapshot --ocr             + OCR text extraction
+  snapshot --faces           + Face detection
+  snapshot --motion          + Motion detection
+  snapshot --analyze         + Vision LLM description
+  snapshot --all             Run all analysis
+
+OBJECT DETECTION
+  detect                     Run YOLO on current frame
+  detect --model yolov8s     Use specific model
+  detect --classes person    Filter by class
+  detect --annotate          Save annotated image
+  count [class]              Count objects (or all)
+
+TEXT EXTRACTION (OCR)
+  ocr                        Extract all text
+  ocr --region x,y,w,h       OCR specific region
+  ocr --find "text"          Search for text
+
+FACE DETECTION
+  faces                      Detect faces
+  faces --identify           Match against known faces
+  face learn "Name" img.jpg  Learn a face
+  face list                  List known faces
+
+VISION LLM
+  describe                   Describe frame with LLM
+  describe --focus "people"  Focus on specific topic
+  ask "question"             Ask about current frame
+
+EVENT DETECTION (watch)
+  watch "person"             Wait for person detected
+  watch "person" --enter     Wait for person to enter frame
+  watch "person" --exit      Wait for person to exit
+  watch --motion             Wait for motion
+  watch --face "Erik"        Wait for specific person
+  watch --text "READY"       Wait for text to appear
+  watch --timeout 60         Set timeout (seconds)
+
+RECORDING
+  record 10                  Record 10 seconds
+  record 10 output.mp4       Record to specific file
+  record --until "person"    Record until detection
+  record --fps 30            Set frame rate
+
+EXIT CODES
+  0  Success
+  1  Source not available
+  2  No video device found
+  3  Detection failed
+  4  Model not found
+  5  Timeout waiting for event
+  6  Vision LLM error
+  7  Recording error
+  8  Unknown error
+
+EXAMPLES
+  # Basic webcam capture
+  agent-vision source webcam
+  agent-vision snapshot --yolo
+  
+  # Security monitoring (use RTSP URL from camera)
+  agent-vision source rtsp://192.168.1.100/stream
+  agent-vision watch "person" --timeout 3600
+  agent-vision describe
+  
+  # Document OCR
+  agent-vision source image document.png
+  agent-vision ocr
+  
+  # iOS app testing
+  agent-vision source ios
+  agent-vision ocr --find "Sign In"
+
+DEPENDENCIES
+  Required: opencv-python, pillow
+  Detection: ultralytics (YOLO)
+  OCR: pytesseract
+  Faces: face_recognition
+  LLM: openai or anthropic
+
+EOF
+}
+
+# Run Python module
+run_vision_ops() {
+    python3 "$SCRIPT_DIR/vision_ops.py" "$@"
+}
+
+# Main
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        run_vision_ops "$@"
+        ;;
+esac
