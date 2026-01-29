@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# agent-gui - Desktop GUI automation with semantic element refs
+# macOS implementation using Accessibility APIs
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-gui - Desktop GUI automation (macOS)
+
+APPLICATIONS
+  apps                       List running applications
+  frontmost                  Get frontmost app
+  open <app>                 Open/activate application
+  focus <app>                Focus application
+  quit <app> [--force]       Quit application
+
+WINDOWS
+  windows [<app>]            List windows
+  window list <app>          List windows for app
+  window info <app>          Get window info
+  window minimize <app>      Minimize window
+  window maximize <app>      Maximize (zoom) window
+  window fullscreen <app>    Toggle fullscreen
+  window close <app>         Close window
+  window move <app> <x> <y>  Move window
+  window resize <app> <w> <h>  Resize window
+
+SNAPSHOT (core pattern - get @refs)
+  snapshot                   Snapshot frontmost app
+  snapshot <app>             Snapshot specific app
+  snapshot -i                Interactive elements only
+  snapshot -d <depth>        Limit tree depth
+
+ELEMENT INTERACTION (use @refs from snapshot)
+  click <@ref>               Click element
+  dblclick <@ref>            Double-click
+  rightclick <@ref>          Right-click (context menu)
+  type [<@ref>] <text>       Type text
+  fill <@ref> <text>         Clear and type
+  press <key>                Press key (Enter, Cmd+S, etc.)
+  keys <key1> <key2> ...     Press key sequence
+  action <@ref> <action>     Perform action (expand, collapse, etc.)
+
+READING DATA
+  get <@ref> <attr>          Get attribute (label, value, enabled, etc.)
+  inspect <@ref>             Get all attributes
+  find --role <role>         Find elements by role
+  find --label <text>        Find by exact label
+  find --contains <text>     Find by label contains
+  count --role <role>        Count elements
+
+MENUS
+  menu <Menu> <Item>         Click menu item
+  menu <Menu> <Item> <Sub>   Click submenu item
+  menubar                    Get menu bar items
+  menubar <Menu>             Get items in menu
+
+DIALOGS
+  dialog detect              Detect active dialog/sheet
+  dialog click <button>      Click dialog button
+  dialog click --default     Click default button
+  dialog click --cancel      Click cancel button
+
+WAITING
+  wait <@ref>                Wait for element to exist
+  wait <@ref> --enabled      Wait until enabled
+  wait <@ref> --visible      Wait until visible
+  wait --label <text>        Wait for element with label
+  wait --window <title>      Wait for window
+  wait --timeout <seconds>   Set timeout (default: 30)
+
+CLIPBOARD
+  clipboard                  Get clipboard contents
+  clipboard <text>           Set clipboard
+
+SCREENSHOTS
+  screenshot                 Screenshot frontmost window
+  screenshot <app>           Screenshot app window
+  screenshot <@ref>          Screenshot element
+  screenshot <app> <path>    Save to path
+
+OTHER
+  status                     Session status
+  reset                      Reset session
+  permissions                Check accessibility permissions
+
+EXIT CODES
+  0  Success
+  1  Application not found
+  2  Window not found
+  3  Element not found (invalid @ref)
+  4  Action failed
+  5  Timeout
+  6  Accessibility permission denied
+  7  Vision fallback failed
+  8  Unknown error
+
+EXAMPLES
+  # List apps and focus one
+  agent-gui apps
+  agent-gui focus "Finder"
+  
+  # Snapshot and interact
+  agent-gui snapshot -i
+  agent-gui click @g5
+  agent-gui type @g12 "search query"
+  agent-gui press Enter
+  
+  # Menu navigation
+  agent-gui menu "File" "New Window"
+  agent-gui press "Cmd+S"
+  
+  # Handle save dialog
+  agent-gui dialog detect
+  agent-gui dialog click "Save"
+  
+  # Window management
+  agent-gui window minimize "Safari"
+  agent-gui window move "Finder" 100 100
+  agent-gui window resize "Finder" 800 600
+
+REQUIREMENTS
+  - macOS with Accessibility permissions enabled
+  - System Settings > Privacy & Security > Accessibility
+  - Add Terminal.app (or your terminal) to allowed apps
+
+EOF
+}
+
+# Run Python module
+run_gui_ops() {
+    python3 "$SCRIPT_DIR/gui_ops.py" "$@"
+}
+
+# Main
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        run_gui_ops "$@"
+        ;;
+esac
