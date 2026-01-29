@@ -328,7 +328,7 @@ mod tests {
     fn test_append_and_load_issue() {
         let (_temp_dir, store) = setup_store();
 
-        let issue = Issue::new("mn-abc123".to_string(), "Test issue".to_string());
+        let issue = Issue::new("mn-abc123".to_string(), "Test issue".to_string()).unwrap();
         store.append_issue(&issue).unwrap();
 
         let issues = store.load_issues().unwrap();
@@ -341,9 +341,9 @@ mod tests {
     fn test_append_multiple_issues() {
         let (_temp_dir, store) = setup_store();
 
-        let issue1 = Issue::new("mn-111111".to_string(), "First".to_string());
-        let issue2 = Issue::new("mn-222222".to_string(), "Second".to_string());
-        let issue3 = Issue::new("mn-333333".to_string(), "Third".to_string());
+        let issue1 = Issue::new("mn-111111".to_string(), "First".to_string()).unwrap();
+        let issue2 = Issue::new("mn-222222".to_string(), "Second".to_string()).unwrap();
+        let issue3 = Issue::new("mn-333333".to_string(), "Third".to_string()).unwrap();
 
         store.append_issue(&issue1).unwrap();
         store.append_issue(&issue2).unwrap();
@@ -360,7 +360,7 @@ mod tests {
     fn test_update_issue() {
         let (_temp_dir, store) = setup_store();
 
-        let mut issue = Issue::new("mn-update".to_string(), "Original".to_string());
+        let mut issue = Issue::new("mn-update".to_string(), "Original".to_string()).unwrap();
         store.append_issue(&issue).unwrap();
 
         issue.title = "Updated".to_string();
@@ -375,7 +375,7 @@ mod tests {
     fn test_update_nonexistent_issue_fails() {
         let (_temp_dir, store) = setup_store();
 
-        let issue = Issue::new("mn-ghost".to_string(), "Ghost".to_string());
+        let issue = Issue::new("mn-ghost".to_string(), "Ghost".to_string()).unwrap();
 
         let result = store.update_issue(&issue);
         assert!(matches!(result, Err(MannaError::IssueNotFound(_))));
@@ -386,7 +386,7 @@ mod tests {
         let (_temp_dir, store) = setup_store();
 
         // Write a valid issue
-        let issue = Issue::new("mn-valid".to_string(), "Valid".to_string());
+        let issue = Issue::new("mn-valid".to_string(), "Valid".to_string()).unwrap();
         store.append_issue(&issue).unwrap();
 
         // Manually append a malformed line
@@ -395,7 +395,7 @@ mod tests {
         writeln!(file, "{{not valid json").unwrap();
 
         // Append another valid issue
-        let issue2 = Issue::new("mn-valid2".to_string(), "Valid2".to_string());
+        let issue2 = Issue::new("mn-valid2".to_string(), "Valid2".to_string()).unwrap();
         store.append_issue(&issue2).unwrap();
 
         // Should load both valid issues, skipping the malformed line
@@ -433,7 +433,8 @@ mod tests {
                     let issue = Issue::new(
                         format!("mn-t{:02}i{:02}", thread_id, i),
                         format!("Thread {} Issue {}", thread_id, i),
-                    );
+                    )
+                    .unwrap();
                     store_clone.append_issue(&issue).unwrap();
                 }
             });
@@ -471,7 +472,7 @@ mod tests {
         let result = store.load_issues();
         assert!(matches!(result, Err(MannaError::NotInitialized)));
 
-        let issue = Issue::new("mn-test".to_string(), "Test".to_string());
+        let issue = Issue::new("mn-test".to_string(), "Test".to_string()).unwrap();
         let result = store.append_issue(&issue);
         assert!(matches!(result, Err(MannaError::NotInitialized)));
     }

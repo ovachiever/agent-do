@@ -384,7 +384,7 @@ mod tests {
         issue.claim("ses_123".to_string()).unwrap();
         let result = issue.claim("ses_456".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already claimed"));
+        assert!(result.unwrap_err().contains("must be 'open'"));
     }
 
     #[test]
