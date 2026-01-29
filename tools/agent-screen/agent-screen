@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# agent-screen - Vision-first multi-monitor screen perception and control
+# macOS implementation using CGDisplayCreateImage + Apple Vision OCR
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-screen - Vision-based screen perception and control (macOS)
+
+DISPLAYS
+  displays                   List all connected displays
+  display <index>            Get info for specific display
+
+CAPTURE & OCR
+  snapshot                   Capture all displays with OCR
+  snapshot <display>         Capture specific display
+  snapshot --no-ocr          Capture without OCR
+  snapshot --output <path>   Save screenshot to path
+
+ELEMENTS (from last snapshot)
+  elements                   List all detected text elements
+  elements --display <idx>   Filter by display
+  elements --type <type>     Filter by type
+
+FINDING
+  find <text>                Find text on screen (fuzzy match)
+  find <text> --exact        Find exact text match
+  at <x> <y>                 Get element and display at coordinates
+
+CURSOR
+  cursor                     Get current cursor position
+  move <x> <y>               Move cursor to position
+
+MOUSE ACTIONS
+  click <x> <y>              Click at coordinates
+  click --text <text>        Click on text element
+  click --right <x> <y>      Right-click
+  click --double <x> <y>     Double-click
+  dblclick <x> <y>           Double-click at coordinates
+  rightclick <x> <y>         Right-click at coordinates
+
+KEYBOARD
+  type <text>                Type text using CGEvent
+  press <key>                Press key (Enter, Tab, Escape, etc.)
+  press Cmd+S                Press with modifiers (Cmd, Shift, Ctrl, Opt)
+
+SCROLLING
+  scroll up [amount]         Scroll up (default: 3)
+  scroll down [amount]       Scroll down
+  scroll left [amount]       Scroll left
+  scroll right [amount]      Scroll right
+  scroll up --at <x> <y>     Scroll at specific position
+
+VISION LLM
+  describe                   Describe current screen with Vision LLM
+  describe --display <idx>   Describe specific display
+
+STATUS
+  status                     Session status
+  focused                    Get focused application
+
+EXIT CODES
+  0  Success
+  1  Application error
+  2  Display not found
+  3  Element not found
+  4  Action failed
+  5  Timeout
+  6  Permission denied
+  7  Vision LLM failed
+  8  Unknown error
+
+EXAMPLES
+  # List displays
+  agent-screen displays
+  
+  # Snapshot and find
+  agent-screen snapshot
+  agent-screen find "Send"
+  agent-screen click --text "Send"
+  
+  # Direct coordinate interaction
+  agent-screen snapshot --no-ocr
+  agent-screen click 500 300
+  agent-screen type "Hello, World!"
+  agent-screen press Enter
+  
+  # Describe screen with Vision LLM
+  agent-screen describe
+  
+  # Multi-monitor workflow
+  agent-screen displays
+  agent-screen snapshot --display 1
+  agent-screen elements --display 1
+  agent-screen find "Message" --exact
+  agent-screen click 1200 400
+
+ENVIRONMENT
+  OPENAI_API_KEY             For Vision LLM (GPT-4o)
+  ANTHROPIC_API_KEY          For Vision LLM (Claude) - fallback
+
+REQUIREMENTS
+  - macOS with Screen Recording permission
+  - System Settings > Privacy & Security > Screen Recording
+  - Add Terminal.app (or your terminal) to allowed apps
+  - Python 3.10+ with pyobjc and Vision framework
+
+EOF
+}
+
+# Run Python module
+run_screen_ops() {
+    python3 "$SCRIPT_DIR/screen_ops.py" "$@"
+}
+
+# Main
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        run_screen_ops "$@"
+        ;;
+esac
