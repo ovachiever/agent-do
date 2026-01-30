@@ -17,10 +17,10 @@ declare -A AGENT_CMD=(
 )
 
 declare -A AGENT_READY_PATTERN=(
-    [claude]="^>"
-    [opencode]="^>"
-    [droid]="^>"
-    [amp]="^>"
+    [claude]="❯|^>"
+    [opencode]="❯|^>"
+    [droid]="❯|^>"
+    [amp]="❯|^>"
 )
 
 declare -A AGENT_BUSY_PATTERN=(
@@ -88,9 +88,9 @@ AGENT TYPES
   amp        Amp CLI
 
 NOTES
-  - TUI agents use alternate screen buffers which may not capture fully
-  - Use 'attach' command to see the live TUI when debugging
-  - For reliable output capture, consider using Claude's --print mode
+  - TUI capture works with proper TERM settings (xterm-256color)
+  - Use 'attach' command to interact directly with the live TUI
+  - Use snapshot --lines for debugging screen positions
   - Session names are stored with 'agent-agent-' prefix in tmux
 
 EOF
@@ -187,17 +187,14 @@ cmd_spawn() {
     # Build command
     local cmd="${AGENT_CMD[$agent_type]}"
 
-    # Create tmux session with proper terminal settings
+    # Create tmux session - use default TERM (xterm-256color) for full TUI support
+    # Claude and other agents need proper terminal capabilities
     local width=200 height=60
-
-    # Set TERM to disable alternate screen mode so we can capture output
-    # xterm (without -256color) doesn't have smcup/rmcup by default
-    local term_setting="TERM=xterm"
     
     if [[ -n "$workdir" ]]; then
-        tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" -c "$workdir" "env $term_setting $cmd"
+        tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" -c "$workdir" "$cmd"
     else
-        tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" "env $term_setting $cmd"
+        tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" "$cmd"
     fi
 
     # Store agent type in session environment
