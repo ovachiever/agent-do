@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Create Stream Deck XL profile for custom droids.
+Create Stream Deck XL profile for ALL skills (unified ~/.skills).
 
-Generates icons and profile pages for 145+ droids organized by category.
-Each button types: use the custom droid sub-agent <droid>
+Each button types: use <skill-name> skill to
 """
 
 import json
@@ -19,17 +18,11 @@ except ImportError:
     print("Error: Pillow required. pip install Pillow")
     exit(1)
 
-# Icon settings
 ICON_SIZE = 144
 ACCENT_HEIGHT = 8
 BG_TOP = (26, 26, 46)
 BG_BOTTOM = (15, 15, 26)
 TEXT_COLOR = (255, 255, 255)
-
-# Stream Deck XL: 8 rows x 4 cols = 32 buttons
-# Reserve 7,3 for Next Page, 0,3 for Prev Page (except first/last)
-BUTTONS_PER_PAGE = 32
-NAV_POSITIONS = [(0, 3), (7, 3)]  # Prev, Next
 
 
 def hex_to_rgb(hex_color: str) -> tuple:
@@ -41,7 +34,6 @@ def get_font(size: int):
     font_paths = [
         "/System/Library/Fonts/SFNSMono.ttf",
         "/System/Library/Fonts/Menlo.ttc",
-        "/System/Library/Fonts/Monaco.ttf",
     ]
     for path in font_paths:
         if os.path.exists(path):
@@ -53,11 +45,9 @@ def get_font(size: int):
 
 
 def create_icon(text: str, accent_color: str, output_path: Path):
-    """Create a droid icon."""
     img = Image.new('RGB', (ICON_SIZE, ICON_SIZE))
     draw = ImageDraw.Draw(img)
 
-    # Gradient background
     for y in range(ICON_SIZE):
         ratio = y / ICON_SIZE
         r = int(BG_TOP[0] + (BG_BOTTOM[0] - BG_TOP[0]) * ratio)
@@ -65,21 +55,11 @@ def create_icon(text: str, accent_color: str, output_path: Path):
         b = int(BG_TOP[2] + (BG_BOTTOM[2] - BG_TOP[2]) * ratio)
         draw.line([(0, y), (ICON_SIZE, y)], fill=(r, g, b))
 
-    # Accent bar
     accent_rgb = hex_to_rgb(accent_color)
     draw.rectangle([(0, ICON_SIZE - ACCENT_HEIGHT), (ICON_SIZE, ICON_SIZE)], fill=accent_rgb)
 
-    # Truncate long names
-    display = text[:16] if len(text) > 16 else text
-
-    # Font size based on length
-    if len(display) <= 8:
-        font_size = 16
-    elif len(display) <= 12:
-        font_size = 14
-    else:
-        font_size = 11
-
+    display = text[:14] if len(text) > 14 else text
+    font_size = 10 if len(display) > 12 else 12 if len(display) > 8 else 14
     font = get_font(font_size)
     bbox = draw.textbbox((0, 0), display, font=font)
     text_width = bbox[2] - bbox[0]
@@ -92,10 +72,6 @@ def create_icon(text: str, accent_color: str, output_path: Path):
     img.save(output_path, "PNG")
 
 
-def generate_uuid():
-    return str(uuid.uuid4()).upper()
-
-
 def generate_image_id():
     import random
     import string
@@ -103,9 +79,8 @@ def generate_image_id():
     return ''.join(random.choice(chars) for _ in range(26)) + 'Z'
 
 
-def create_text_action(droid_name: str, image_filename: str) -> dict:
-    """Create action that types the droid invocation."""
-    text = f'use the custom droid sub-agent {droid_name} '
+def create_text_action(skill_name: str, image_filename: str) -> dict:
+    text = f'use {skill_name} skill to '
     return {
         "ActionID": str(uuid.uuid4()).lower(),
         "LinkedTitle": True,
@@ -138,7 +113,6 @@ def create_text_action(droid_name: str, image_filename: str) -> dict:
 
 
 def create_nav_action(nav_type: str) -> dict:
-    """Create Previous/Next Page action."""
     return {
         "ActionID": str(uuid.uuid4()).lower(),
         "LinkedTitle": True,
@@ -158,39 +132,33 @@ def create_nav_action(nav_type: str) -> dict:
 
 def main():
     script_dir = Path(__file__).parent
-    droids_file = script_dir / "droids.yaml"
+    config_file = script_dir / "all-skills.yaml"
 
-    # Load droids config
-    with open(droids_file) as f:
+    with open(config_file) as f:
         config = yaml.safe_load(f)
 
-    # Flatten all droids with their colors
-    all_droids = []
+    all_skills = []
     for cat in config['categories']:
         color = cat['color']
-        for droid in cat['droids']:
-            all_droids.append({'name': droid, 'color': color, 'category': cat['name']})
+        for skill in cat.get('skills', []):
+            all_skills.append({'name': skill, 'color': color, 'category': cat['name']})
 
-    print(f"Total droids: {len(all_droids)}")
+    print(f"Total skills: {len(all_skills)}")
 
-    # Calculate pages needed (30 droids per page, leaving room for nav)
-    droids_per_page = 30
-    num_pages = (len(all_droids) + droids_per_page - 1) // droids_per_page
+    skills_per_page = 30
+    num_pages = max(1, (len(all_skills) + skills_per_page - 1) // skills_per_page)
     print(f"Pages needed: {num_pages}")
 
-    # Generate UUIDs
-    profile_uuid = generate_uuid()
-    page_uuids = [generate_uuid() for _ in range(num_pages)]
+    profile_uuid = str(uuid.uuid4()).upper()
+    page_uuids = [str(uuid.uuid4()).upper() for _ in range(num_pages)]
 
-    # Create output directory
     output_dir = script_dir / f"{profile_uuid}.sdProfile"
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir()
     (output_dir / "Images").mkdir()
 
-    # Create pages
-    droid_idx = 0
+    skill_idx = 0
     for page_num, page_uuid in enumerate(page_uuids):
         page_dir = output_dir / "Profiles" / page_uuid
         page_dir.mkdir(parents=True)
@@ -198,37 +166,30 @@ def main():
 
         actions = {}
 
-        # Fill buttons with droids
         for row in range(8):
             for col in range(4):
                 pos = f"{row},{col}"
 
-                # Skip nav positions
                 if (row, col) == (0, 3) and page_num > 0:
-                    # Previous page button
                     actions[pos] = create_nav_action("Previous")
                     continue
                 elif (row, col) == (7, 3) and page_num < num_pages - 1:
-                    # Next page button
                     actions[pos] = create_nav_action("Next")
                     continue
 
-                if droid_idx >= len(all_droids):
+                if skill_idx >= len(all_skills):
                     continue
 
-                droid = all_droids[droid_idx]
-                droid_idx += 1
+                skill = all_skills[skill_idx]
+                skill_idx += 1
 
-                # Generate icon
                 image_id = generate_image_id()
                 image_filename = f"{image_id}.png"
                 icon_path = page_dir / "Images" / image_filename
-                create_icon(droid['name'], droid['color'], icon_path)
+                create_icon(skill['name'], skill['color'], icon_path)
 
-                # Create action
-                actions[pos] = create_text_action(droid['name'], image_filename)
+                actions[pos] = create_text_action(skill['name'], image_filename)
 
-        # Write page manifest
         page_manifest = {
             "Controllers": [{"Actions": actions, "Type": "Keypad"}],
             "Icon": "",
@@ -237,16 +198,15 @@ def main():
         with open(page_dir / "manifest.json", 'w') as f:
             json.dump(page_manifest, f, separators=(',', ':'))
 
-        print(f"  Page {page_num + 1}: {len([a for a in actions.values() if 'text' in a.get('Settings', {})])} droids")
+        count = len([a for a in actions.values() if 'text' in a.get('Settings', {})])
+        print(f"  Page {page_num + 1}: {count} skills")
 
-    # Create profile manifest
-    # Use your Stream Deck XL device info
     profile_manifest = {
         "Device": {
             "Model": "20GAT9902",
             "UUID": "@(1)[4057/143/A00NA5353146X0]"
         },
-        "Name": "droids",
+        "Name": "all-skills",
         "Pages": {
             "Current": page_uuids[0].lower(),
             "Default": page_uuids[0].lower(),

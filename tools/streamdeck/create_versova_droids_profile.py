@@ -2,7 +2,7 @@
 """
 Create Stream Deck XL profile for Versova droids.
 
-Each button types: use Task tool with subagent_type="<droid>" to
+Each button types: use the custom droid sub-agent <droid>
 """
 
 import json
@@ -85,7 +85,7 @@ def generate_image_id():
 
 
 def create_text_action(droid_name: str, image_filename: str) -> dict:
-    text = f'use Task tool with subagent_type="{droid_name}" to '
+    text = f'use the custom droid sub-agent {droid_name} '
     return {
         "ActionID": str(uuid.uuid4()).lower(),
         "LinkedTitle": True,
