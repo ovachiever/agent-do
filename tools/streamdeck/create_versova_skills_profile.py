@@ -85,8 +85,7 @@ def generate_image_id():
 
 
 def create_text_action(skill_name: str, image_filename: str) -> dict:
-    # Skills are invoked with "use <skill> skill to"
-    text = f'use {skill_name} skill to '
+    text = f'use skill {skill_name} '
     return {
         "ActionID": str(uuid.uuid4()).lower(),
         "LinkedTitle": True,
@@ -98,9 +97,10 @@ def create_text_action(skill_name: str, image_filename: str) -> dict:
         },
         "Resources": None,
         "Settings": {
-            "openInBrowser": False,
-            "sendEnter": False,
-            "text": text
+            "Hotkey": {"KeyModifiers": 0, "QTKeyCode": 33554431, "VKeyCode": -1},
+            "isSendingEnter": False,
+            "isTypingMode": False,
+            "pastedText": text
         },
         "State": 0,
         "States": [{

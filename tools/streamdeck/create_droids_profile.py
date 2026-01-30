@@ -117,9 +117,10 @@ def create_text_action(droid_name: str, image_filename: str) -> dict:
         },
         "Resources": None,
         "Settings": {
-            "openInBrowser": False,
-            "sendEnter": False,
-            "text": text
+            "Hotkey": {"KeyModifiers": 0, "QTKeyCode": 33554431, "VKeyCode": -1},
+            "isSendingEnter": False,
+            "isTypingMode": False,
+            "pastedText": text
         },
         "State": 0,
         "States": [{

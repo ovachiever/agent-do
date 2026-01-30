@@ -53,9 +53,10 @@ def create_text_action(tool: str, types_text: str, image_filename: str) -> dict:
         },
         "Resources": None,
         "Settings": {
-            "openInBrowser": False,
-            "sendEnter": False,
-            "text": types_text
+            "Hotkey": {"KeyModifiers": 0, "QTKeyCode": 33554431, "VKeyCode": -1},
+            "isSendingEnter": False,
+            "isTypingMode": False,
+            "pastedText": types_text
         },
         "State": 0,
         "States": [
