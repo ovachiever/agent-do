@@ -17,17 +17,17 @@ declare -A AGENT_CMD=(
 )
 
 declare -A AGENT_READY_PATTERN=(
-    [claude]="❯|^>"
-    [opencode]="❯|^>"
-    [droid]="❯|^>"
-    [amp]="❯|^>"
+    [claude]="\? for shortcuts"
+    [opencode]="\? for shortcuts|awaiting"
+    [droid]="\? for shortcuts"
+    [amp]="\? for shortcuts|awaiting"
 )
 
 declare -A AGENT_BUSY_PATTERN=(
-    [claude]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Thinking|Working"
-    [opencode]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|thinking|working"
-    [droid]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Thinking|Working"
-    [amp]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|thinking|working"
+    [claude]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Thinking|Working|Creating|Swooping|Reading|Searching|thinking|esc to interrupt"
+    [opencode]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|thinking|working|processing"
+    [droid]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Thinking|Working|Creating|Swooping|Reading|Searching"
+    [amp]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|thinking|working|processing"
 )
 
 DEFAULT_TIMEOUT=300000  # 5 minutes for agent responses
@@ -54,6 +54,8 @@ INTERACTION
   send <prompt> [--session <n>]  Send prompt and wait for response
   send <prompt> --nowait         Send without waiting
   snapshot [--session <name>]    Get current screen
+  snapshot --strip               Strip ANSI color codes (clean text)
+  snapshot --scroll              Include scrollback history (1000 lines)
   status [--session <name>]      Check if agent is ready/busy
 
 SPECIAL COMMANDS
@@ -263,12 +265,14 @@ cmd_attach() {
 }
 
 cmd_snapshot() {
-    local user_session="" json=false lines=false
+    local user_session="" json=false lines=false strip=false scroll=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --session) user_session="$2"; shift 2 ;;
             --json) json=true; shift ;;
             --lines) lines=true; shift ;;
+            --strip) strip=true; shift ;;
+            --scroll) scroll=true; shift ;;
             *) die "unexpected argument: $1" ;;
         esac
     done
@@ -277,10 +281,22 @@ cmd_snapshot() {
     tmux_session=$(resolve_session "$user_session")
     session_exists "$tmux_session" || die "session not found"
 
-    # Use -e to capture escape sequences (helps with alternate screen)
-    # Also capture with -J to preserve wrapped lines
+    # Capture options:
+    # -e: include escape sequences (colors)
+    # -J: preserve wrapped lines
+    # -S -1000: include scrollback (1000 lines)
+    local capture_opts="-p"
+    if $scroll; then
+        capture_opts="$capture_opts -S -1000"
+    fi
+    
     local content
-    content=$(tmux capture-pane -t "$tmux_session" -p -e -J 2>/dev/null || tmux capture-pane -t "$tmux_session" -p)
+    content=$(tmux capture-pane -t "$tmux_session" $capture_opts 2>/dev/null || tmux capture-pane -t "$tmux_session" -p)
+    
+    # Strip ANSI escape codes if requested
+    if $strip; then
+        content=$(echo "$content" | sed 's/\x1b\[[0-9;]*m//g')
+    fi
 
     if $json; then
         local agent_type
