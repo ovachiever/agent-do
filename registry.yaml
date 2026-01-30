@@ -697,21 +697,35 @@ tools:
         command: "agent-printer print document.pdf"
 
   agent:
-    description: "Control AI agent sessions (Claude Code, etc.)"
+    description: "Control AI coding agent sessions (Claude, OpenCode, Droid, Amp)"
     capabilities:
-      - start agent sessions
-      - send prompts
-      - monitor progress
+      - spawn agent sessions in tmux
+      - send prompts to agents
+      - monitor agent status (ready/busy)
+      - accept/reject changes
+      - capture screen output
     commands:
-      start: "Start agent session"
-      send: "Send prompt to agent"
-      status: "Check agent status"
-      stop: "Stop agent session"
+      spawn: "Start agent: spawn <type> [--session <name>] [--dir <path>]"
+      list: "List active agent sessions"
+      send: "Send prompt: send <prompt> [--session <name>] [--nowait]"
+      snapshot: "Capture screen: snapshot [--session <name>] [--json]"
+      status: "Check status: status [--session <name>]"
+      accept: "Accept changes (press y)"
+      reject: "Reject changes (press n)"
+      cancel: "Cancel operation (Ctrl+C)"
+      kill: "Kill session: kill [--session <name>]"
+      attach: "Get tmux attach command"
     examples:
-      - intent: "start a Claude session"
-        command: "agent-agent start claude"
-      - intent: "send 'fix the bug' to my agent"
-        command: "agent-agent send 1 'fix the bug'"
+      - intent: "start Claude in my project"
+        command: "agent-agent spawn claude --dir ~/myproject"
+      - intent: "send a task to the agent"
+        command: "agent-agent send 'fix the login bug'"
+      - intent: "check if the agent is done"
+        command: "agent-agent status"
+      - intent: "accept the agent's changes"
+        command: "agent-agent accept"
+      - intent: "list running agents"
+        command: "agent-agent list"
 
   3d:
     description: "3D modeling and rendering control"

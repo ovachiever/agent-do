@@ -1,160 +1,497 @@
 #!/usr/bin/env bash
-# agent-agent - AI agent session control
+# agent-agent - Control AI coding agent sessions (Claude, OpenCode, Droid, Amp)
+# Wrapper around agent-tui specialized for AI agents
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_TUI="${SCRIPT_DIR}/agent-tui"
+TUI="$SCRIPT_DIR/agent-tui"
+PREFIX="agent-agent-"
+
+# Agent configurations: command, ready_pattern, busy_pattern
+declare -A AGENT_CMD=(
+    [claude]="claude"
+    [opencode]="opencode"
+    [droid]="droid"
+    [amp]="amp"
+)
+
+declare -A AGENT_READY_PATTERN=(
+    [claude]="^>"
+    [opencode]="^>"
+    [droid]="^>"
+    [amp]="^>"
+)
+
+declare -A AGENT_BUSY_PATTERN=(
+    [claude]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Thinking|Working"
+    [opencode]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|thinking|working"
+    [droid]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Thinking|Working"
+    [amp]="⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|thinking|working"
+)
+
+DEFAULT_TIMEOUT=300000  # 5 minutes for agent responses
+POLL_INTERVAL=500
+
+die() { echo "error: $1" >&2; exit "${2:-1}"; }
 
 show_help() {
     cat << 'EOF'
-agent-agent - AI agent session control
+agent-agent - AI coding agent control
 
-Commands:
-  start <type>               Start an AI agent session
-  send <session> <prompt>    Send prompt to agent
-  read <session>             Read agent output
-  list                       List active sessions
-  stop <session>             Stop agent session
+SPAWN
+  spawn <type>                   Start an agent (claude, opencode, droid, amp)
+  spawn <type> --session <name>  Named session
+  spawn <type> --dir <path>      Working directory
+  spawn <type> --headless        Use non-interactive mode (Claude: -p flag)
 
-Agent types:
-  claude, claude-code        Claude Code CLI
-  aider                      Aider coding assistant
-  gpt                        ChatGPT CLI (if available)
-  copilot                    GitHub Copilot CLI
+SESSION MANAGEMENT
+  list                           List active agent sessions
+  kill [--session <name>]        Kill agent session
+  attach [--session <name>]      Get tmux attach command
 
-Examples:
-  agent-agent start claude
-  agent-agent send 1 "fix the bug in main.py"
-  agent-agent read 1
-  agent-agent stop 1
+INTERACTION
+  send <prompt> [--session <n>]  Send prompt and wait for response
+  send <prompt> --nowait         Send without waiting
+  snapshot [--session <name>]    Get current screen
+  status [--session <name>]      Check if agent is ready/busy
+
+SPECIAL COMMANDS
+  accept [--session <name>]      Accept pending changes (press 'y')
+  reject [--session <name>]      Reject pending changes (press 'n')
+  cancel [--session <name>]      Cancel current operation (Ctrl+C)
+  escape [--session <name>]      Press Escape (exit mode/menu)
+
+EXAMPLES
+  # Start Claude in current project
+  agent-agent spawn claude --dir ~/myproject
+
+  # Send a task
+  agent-agent send "fix the login bug in auth.py"
+
+  # Check if it's done
+  agent-agent status
+
+  # Get the output
+  agent-agent snapshot
+
+  # Accept changes
+  agent-agent accept
+
+  # Clean up
+  agent-agent kill
+
+AGENT TYPES
+  claude     Claude Code CLI (Anthropic)
+  opencode   OpenCode CLI
+  droid      Factory Droid CLI
+  amp        Amp CLI
+
+NOTES
+  - TUI agents use alternate screen buffers which may not capture fully
+  - Use 'attach' command to see the live TUI when debugging
+  - For reliable output capture, consider using Claude's --print mode
+  - Session names are stored with 'agent-agent-' prefix in tmux
+
 EOF
 }
 
-# Get command for agent type
-get_agent_cmd() {
-    local type="$1"
-    case "$type" in
-        claude|claude-code) echo "claude" ;;
-        aider) echo "aider" ;;
-        gpt|chatgpt) echo "chatgpt" ;;
-        copilot) echo "gh copilot" ;;
-        *) echo "$type" ;;
-    esac
+# Resolve session (convert user-facing name to tmux session name)
+resolve_session() {
+    local user_session="${1:-}"
+    if [[ -n "$user_session" ]]; then
+        echo "${PREFIX}${user_session}"
+        return
+    fi
+    # Find single active session
+    local sessions
+    sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^${PREFIX}" || true)
+    local count
+    count=$(echo "$sessions" | grep -c . || echo 0)
+    if [[ "$count" -eq 0 ]]; then
+        die "No agent sessions found. Run 'agent-agent spawn <type>' first."
+    elif [[ "$count" -eq 1 ]]; then
+        echo "$sessions"
+    else
+        die "Multiple sessions active. Specify with --session. Run 'agent-agent list' to see them."
+    fi
 }
 
-cmd_start() {
-    local type="${1:-claude}"
-    local cmd=$(get_agent_cmd "$type")
+# Get user-facing session name from tmux session name
+user_session_name() {
+    echo "${1#$PREFIX}"
+}
 
-    # Check if command exists
-    local base_cmd="${cmd%% *}"
-    if ! command -v "$base_cmd" &> /dev/null; then
-        echo "Error: $base_cmd not found"
-        case "$type" in
-            claude*) echo "Install: npm install -g @anthropic-ai/claude-code" ;;
-            aider) echo "Install: pip install aider-chat" ;;
-            copilot) echo "Install: gh extension install github/gh-copilot" ;;
+# Check if session exists
+session_exists() {
+    tmux has-session -t "$1" 2>/dev/null
+}
+
+# Get snapshot via agent-tui
+get_snapshot() {
+    local tmux_session="$1"
+    local user_session
+    user_session=$(user_session_name "$tmux_session")
+    "$TUI" snapshot --session "${user_session#agent-tui-}"
+}
+
+# Detect agent type from session metadata or screen content
+detect_agent_type() {
+    local tmux_session="$1"
+    # Check session environment variable we set during spawn
+    local agent_type
+    agent_type=$(tmux show-environment -t "$tmux_session" AGENT_TYPE 2>/dev/null | cut -d= -f2 || true)
+    if [[ -n "$agent_type" ]]; then
+        echo "$agent_type"
+        return
+    fi
+    # Fallback: guess from screen content
+    echo "claude"  # Default
+}
+
+cmd_spawn() {
+    local agent_type="" user_session="" workdir=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --dir) workdir="$2"; shift 2 ;;
+            *)
+                if [[ -z "$agent_type" ]]; then
+                    agent_type="$1"; shift
+                else
+                    die "unexpected argument: $1"
+                fi
+                ;;
         esac
-        return 1
+    done
+
+    [[ -n "$agent_type" ]] || die "usage: agent-agent spawn <type> [--session <name>] [--dir <path>]"
+
+    # Validate agent type
+    if [[ -z "${AGENT_CMD[$agent_type]:-}" ]]; then
+        die "unknown agent type: $agent_type. Supported: claude, opencode, droid, amp"
     fi
 
-    # Use agent-tui to spawn the agent
-    "$AGENT_TUI" spawn "$cmd"
-}
-
-cmd_send() {
-    local session="${1:-}"
-    shift || true
-    local prompt="$*"
-
-    if [[ -z "$session" ]] || [[ -z "$prompt" ]]; then
-        echo "Error: Session ID and prompt required"
-        echo "Usage: agent-agent send <session> <prompt>"
-        return 1
+    # Generate session name if not provided
+    if [[ -z "$user_session" ]]; then
+        user_session="${agent_type}-$(date +%s)"
     fi
 
-    # Send prompt followed by Enter
-    "$AGENT_TUI" type "$prompt" --session "$session"
-    "$AGENT_TUI" press Enter --session "$session"
-    echo "Sent prompt to session $session"
-}
+    local tmux_session="${PREFIX}${user_session}"
+    local tui_session="${user_session}"
 
-cmd_read() {
-    local session="${1:-}"
-
-    if [[ -z "$session" ]]; then
-        echo "Error: Session ID required"
-        return 1
+    if session_exists "$tmux_session"; then
+        die "session '$user_session' already exists"
     fi
 
-    "$AGENT_TUI" snapshot --session "$session"
+    # Build command
+    local cmd="${AGENT_CMD[$agent_type]}"
+
+    # Create tmux session with proper terminal settings
+    local width=200 height=60
+
+    # Set TERM to disable alternate screen mode so we can capture output
+    # xterm (without -256color) doesn't have smcup/rmcup by default
+    local term_setting="TERM=xterm"
+    
+    if [[ -n "$workdir" ]]; then
+        tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" -c "$workdir" "env $term_setting $cmd"
+    else
+        tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" "env $term_setting $cmd"
+    fi
+
+    # Store agent type in session environment
+    tmux set-environment -t "$tmux_session" AGENT_TYPE "$agent_type"
+
+    echo "$user_session"
 }
 
 cmd_list() {
-    "$AGENT_TUI" list
+    local sessions
+    sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^${PREFIX}" || true)
+    if [[ -z "$sessions" ]]; then
+        echo "No agent sessions."
+        return
+    fi
+    echo "Active agent sessions:"
+    while IFS= read -r session; do
+        local user_name
+        user_name=$(user_session_name "$session")
+        local agent_type
+        agent_type=$(tmux show-environment -t "$session" AGENT_TYPE 2>/dev/null | cut -d= -f2 || echo "unknown")
+        local status="unknown"
+        # Quick status check
+        local content
+        content=$(tmux capture-pane -t "$session" -p 2>/dev/null || true)
+        if echo "$content" | grep -qE "${AGENT_BUSY_PATTERN[$agent_type]:-⠋}"; then
+            status="busy"
+        elif echo "$content" | grep -qE "${AGENT_READY_PATTERN[$agent_type]:-^>}"; then
+            status="ready"
+        fi
+        printf "  %-20s %-10s %s\n" "$user_name" "$agent_type" "($status)"
+    done <<< "$sessions"
 }
 
-cmd_stop() {
-    local session="${1:-}"
+cmd_kill() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
 
-    if [[ -z "$session" ]]; then
-        echo "Error: Session ID required"
-        return 1
-    fi
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
 
-    "$AGENT_TUI" kill --session "$session"
-    echo "Stopped session $session"
+    tmux kill-session -t "$tmux_session"
+    echo "Killed session: $(user_session_name "$tmux_session")"
 }
 
-cmd_wait() {
-    local session="${1:-}"
-    local pattern="${2:-}"
-    local timeout="${3:-60000}"
+cmd_attach() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
 
-    if [[ -z "$session" ]]; then
-        echo "Error: Session ID required"
-        return 1
-    fi
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
 
-    if [[ -n "$pattern" ]]; then
-        "$AGENT_TUI" wait --text "$pattern" --timeout "$timeout" --session "$session"
+    echo "tmux attach -t $tmux_session"
+}
+
+cmd_snapshot() {
+    local user_session="" json=false lines=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --json) json=true; shift ;;
+            --lines) lines=true; shift ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    # Use -e to capture escape sequences (helps with alternate screen)
+    # Also capture with -J to preserve wrapped lines
+    local content
+    content=$(tmux capture-pane -t "$tmux_session" -p -e -J 2>/dev/null || tmux capture-pane -t "$tmux_session" -p)
+
+    if $json; then
+        local agent_type
+        agent_type=$(detect_agent_type "$tmux_session")
+        local width height
+        width=$(tmux display -t "$tmux_session" -p '#{window_width}')
+        height=$(tmux display -t "$tmux_session" -p '#{window_height}')
+
+        python3 -c "
+import json, sys
+content = sys.stdin.read()
+print(json.dumps({
+    'session': '$(user_session_name "$tmux_session")',
+    'agent_type': '$agent_type',
+    'dimensions': {'width': $width, 'height': $height},
+    'content': content
+}, indent=2))
+" <<< "$content"
+    elif $lines; then
+        local i=1
+        while IFS= read -r line; do
+            printf "%3d│ %s\n" "$i" "$line"
+            ((i++))
+        done <<< "$content"
     else
-        "$AGENT_TUI" wait --stable --timeout "$timeout" --session "$session"
+        echo "$content"
     fi
+}
+
+cmd_status() {
+    local user_session="" json=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --json) json=true; shift ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    local agent_type
+    agent_type=$(detect_agent_type "$tmux_session")
+
+    local content
+    content=$(tmux capture-pane -t "$tmux_session" -p)
+
+    local status="unknown"
+    if echo "$content" | grep -qE "${AGENT_BUSY_PATTERN[$agent_type]:-⠋}"; then
+        status="busy"
+    elif echo "$content" | grep -qE "${AGENT_READY_PATTERN[$agent_type]:-^>}"; then
+        status="ready"
+    fi
+
+    if $json; then
+        echo "{\"session\":\"$(user_session_name "$tmux_session")\",\"agent_type\":\"$agent_type\",\"status\":\"$status\"}"
+    else
+        echo "$status"
+    fi
+}
+
+cmd_send() {
+    local user_session="" prompt="" nowait=false timeout=$DEFAULT_TIMEOUT
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --nowait) nowait=true; shift ;;
+            --timeout) timeout="$2"; shift 2 ;;
+            *)
+                if [[ -z "$prompt" ]]; then
+                    prompt="$1"; shift
+                else
+                    die "unexpected argument: $1"
+                fi
+                ;;
+        esac
+    done
+
+    [[ -n "$prompt" ]] || die "usage: agent-agent send <prompt> [--session <name>] [--nowait]"
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    local agent_type
+    agent_type=$(detect_agent_type "$tmux_session")
+
+    # Type the prompt
+    tmux send-keys -t "$tmux_session" -l -- "$prompt"
+    # Press Enter
+    tmux send-keys -t "$tmux_session" Enter
+
+    if $nowait; then
+        echo "Sent prompt (not waiting for response)"
+        return 0
+    fi
+
+    # Wait for agent to start processing, then wait for it to finish
+    local elapsed=0
+    local poll_sec
+    poll_sec=$(echo "scale=3; $POLL_INTERVAL / 1000" | bc)
+
+    # First, wait a moment for the agent to start
+    sleep 0.5
+
+    # Now wait for agent to become ready again
+    while [[ $elapsed -lt $timeout ]]; do
+        local content
+        content=$(tmux capture-pane -t "$tmux_session" -p)
+
+        # Check if agent is ready (not busy)
+        if ! echo "$content" | grep -qE "${AGENT_BUSY_PATTERN[$agent_type]:-⠋}"; then
+            if echo "$content" | grep -qE "${AGENT_READY_PATTERN[$agent_type]:-^>}"; then
+                echo "Response complete"
+                return 0
+            fi
+        fi
+
+        sleep "$poll_sec"
+        elapsed=$((elapsed + POLL_INTERVAL))
+    done
+
+    die "timeout waiting for agent response" 2
+}
+
+cmd_accept() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    tmux send-keys -t "$tmux_session" "y"
+    echo "Sent accept (y)"
+}
+
+cmd_reject() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    tmux send-keys -t "$tmux_session" "n"
+    echo "Sent reject (n)"
+}
+
+cmd_cancel() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    tmux send-keys -t "$tmux_session" C-c
+    echo "Sent cancel (Ctrl+C)"
+}
+
+cmd_escape() {
+    local user_session=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    tmux send-keys -t "$tmux_session" Escape
+    echo "Sent Escape"
 }
 
 # Main
-case "${1:-help}" in
-    start|spawn|new)
-        shift || true
-        cmd_start "$@"
-        ;;
-    send|prompt|ask)
-        shift
-        cmd_send "$@"
-        ;;
-    read|output|snapshot)
-        shift
-        cmd_read "$@"
-        ;;
-    list|ls)
-        cmd_list
-        ;;
-    stop|kill|end)
-        shift
-        cmd_stop "$@"
-        ;;
-    wait)
-        shift
-        cmd_wait "$@"
-        ;;
-    help|--help|-h)
-        show_help
-        ;;
-    *)
-        echo "Unknown command: $1"
-        echo "Try: agent-agent help"
-        exit 1
-        ;;
+case "${1:-}" in
+    spawn)    shift; cmd_spawn "$@" ;;
+    list)     shift; cmd_list "$@" ;;
+    kill)     shift; cmd_kill "$@" ;;
+    attach)   shift; cmd_attach "$@" ;;
+    snapshot) shift; cmd_snapshot "$@" ;;
+    status)   shift; cmd_status "$@" ;;
+    send)     shift; cmd_send "$@" ;;
+    accept)   shift; cmd_accept "$@" ;;
+    reject)   shift; cmd_reject "$@" ;;
+    cancel)   shift; cmd_cancel "$@" ;;
+    escape)   shift; cmd_escape "$@" ;;
+    -h|--help|help|"") show_help ;;
+    *)        die "unknown command: $1. Run 'agent-agent --help'." ;;
 esac
