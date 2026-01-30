@@ -207,7 +207,7 @@ def main():
         with open(page_dir / "manifest.json", 'w') as f:
             json.dump(page_manifest, f, separators=(',', ':'))
 
-        count = len([a for a in actions.values() if 'text' in a.get('Settings', {})])
+        count = len([a for a in actions.values() if 'pastedText' in a.get('Settings', {})])
         print(f"  Page {page_num + 1}: {count} skills")
 
     profile_manifest = {

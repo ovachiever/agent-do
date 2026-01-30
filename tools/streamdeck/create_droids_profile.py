@@ -238,7 +238,7 @@ def main():
         with open(page_dir / "manifest.json", 'w') as f:
             json.dump(page_manifest, f, separators=(',', ':'))
 
-        print(f"  Page {page_num + 1}: {len([a for a in actions.values() if 'text' in a.get('Settings', {})])} droids")
+        print(f"  Page {page_num + 1}: {len([a for a in actions.values() if 'pastedText' in a.get('Settings', {})])} droids")
 
     # Create profile manifest
     # Use your Stream Deck XL device info
