@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent-gui - Desktop GUI automation with semantic element refs
+# agent-macos - Desktop GUI automation with semantic element refs
 # macOS implementation using Accessibility APIs
 
 set -euo pipefail
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 show_help() {
     cat << 'EOF'
-agent-gui - Desktop GUI automation (macOS)
+agent-macos - Desktop GUI automation (macOS)
 
 APPLICATIONS
   apps                       List running applications
@@ -100,27 +100,27 @@ EXIT CODES
 
 EXAMPLES
   # List apps and focus one
-  agent-gui apps
-  agent-gui focus "Finder"
+  agent-macos apps
+  agent-macos focus "Finder"
   
   # Snapshot and interact
-  agent-gui snapshot -i
-  agent-gui click @g5
-  agent-gui type @g12 "search query"
-  agent-gui press Enter
+  agent-macos snapshot -i
+  agent-macos click @g5
+  agent-macos type @g12 "search query"
+  agent-macos press Enter
   
   # Menu navigation
-  agent-gui menu "File" "New Window"
-  agent-gui press "Cmd+S"
+  agent-macos menu "File" "New Window"
+  agent-macos press "Cmd+S"
   
   # Handle save dialog
-  agent-gui dialog detect
-  agent-gui dialog click "Save"
+  agent-macos dialog detect
+  agent-macos dialog click "Save"
   
   # Window management
-  agent-gui window minimize "Safari"
-  agent-gui window move "Finder" 100 100
-  agent-gui window resize "Finder" 800 600
+  agent-macos window minimize "Safari"
+  agent-macos window move "Finder" 100 100
+  agent-macos window resize "Finder" 800 600
 
 REQUIREMENTS
   - macOS with Accessibility permissions enabled
@@ -131,8 +131,8 @@ EOF
 }
 
 # Run Python module
-run_gui_ops() {
-    python3 "$SCRIPT_DIR/gui_ops.py" "$@"
+run_macos_ops() {
+    python3 "$SCRIPT_DIR/macos_ops.py" "$@"
 }
 
 # Main
@@ -141,6 +141,6 @@ case "${1:-help}" in
         show_help
         ;;
     *)
-        run_gui_ops "$@"
+        run_macos_ops "$@"
         ;;
 esac
