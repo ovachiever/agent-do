@@ -43,6 +43,7 @@ SPAWN
   spawn <type>                   Start an agent (claude, opencode, droid, amp)
   spawn <type> --session <name>  Named session
   spawn <type> --dir <path>      Working directory
+  spawn <type> --wait            Wait until agent is ready before returning
   spawn <type> --headless        Use non-interactive mode (Claude: -p flag)
 
 SESSION MANAGEMENT
@@ -57,6 +58,12 @@ INTERACTION
   snapshot --strip               Strip ANSI color codes (clean text)
   snapshot --scroll              Include scrollback history (1000 lines)
   status [--session <name>]      Check if agent is ready/busy
+  extract [--session <name>]     Extract code blocks from last response
+  extract --all                  Get all code blocks as JSON
+  extract --lang <lang>          Filter by language (python, bash, etc.)
+  extract --scroll               Include scrollback history
+  wait [--session <name>]        Wait until agent becomes ready
+  wait --timeout <ms>            Custom timeout (default: 5 minutes)
 
 SPECIAL COMMANDS
   accept [--session <name>]      Accept pending changes (press 'y')
@@ -108,8 +115,10 @@ resolve_session() {
     # Find single active session
     local sessions
     sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^${PREFIX}" || true)
-    local count
-    count=$(echo "$sessions" | grep -c . || echo 0)
+    local count=0
+    if [[ -n "$sessions" ]]; then
+        count=$(echo "$sessions" | wc -l | tr -d ' ')
+    fi
     if [[ "$count" -eq 0 ]]; then
         die "No agent sessions found. Run 'agent-agent spawn <type>' first."
     elif [[ "$count" -eq 1 ]]; then
@@ -152,11 +161,12 @@ detect_agent_type() {
 }
 
 cmd_spawn() {
-    local agent_type="" user_session="" workdir=""
+    local agent_type="" user_session="" workdir="" wait_ready=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --session) user_session="$2"; shift 2 ;;
             --dir) workdir="$2"; shift 2 ;;
+            --wait) wait_ready=true; shift ;;
             *)
                 if [[ -z "$agent_type" ]]; then
                     agent_type="$1"; shift
@@ -167,7 +177,7 @@ cmd_spawn() {
         esac
     done
 
-    [[ -n "$agent_type" ]] || die "usage: agent-agent spawn <type> [--session <name>] [--dir <path>]"
+    [[ -n "$agent_type" ]] || die "usage: agent-agent spawn <type> [--session <name>] [--dir <path>] [--wait]"
 
     # Validate agent type
     if [[ -z "${AGENT_CMD[$agent_type]:-}" ]]; then
@@ -201,6 +211,29 @@ cmd_spawn() {
 
     # Store agent type in session environment
     tmux set-environment -t "$tmux_session" AGENT_TYPE "$agent_type"
+
+    # Wait for agent to be ready if requested
+    if $wait_ready; then
+        local timeout=60000  # 60 seconds for startup
+        local elapsed=0
+        local poll_sec=0.5
+        
+        echo -n "Waiting for $agent_type to start..." >&2
+        while [[ $elapsed -lt $timeout ]]; do
+            local content
+            content=$(tmux capture-pane -t "$tmux_session" -p 2>/dev/null || true)
+            if echo "$content" | grep -qE "${AGENT_READY_PATTERN[$agent_type]}"; then
+                echo " ready" >&2
+                echo "$user_session"
+                return 0
+            fi
+            sleep "$poll_sec"
+            elapsed=$((elapsed + 500))
+            echo -n "." >&2
+        done
+        echo " timeout" >&2
+        die "agent failed to start within 60 seconds"
+    fi
 
     echo "$user_session"
 }
@@ -492,6 +525,118 @@ cmd_escape() {
     echo "Sent Escape"
 }
 
+cmd_wait() {
+    local user_session="" timeout=$DEFAULT_TIMEOUT
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --timeout) timeout="$2"; shift 2 ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    local agent_type
+    agent_type=$(detect_agent_type "$tmux_session")
+
+    local elapsed=0
+    local poll_sec
+    poll_sec=$(echo "scale=3; $POLL_INTERVAL / 1000" | bc)
+
+    echo -n "Waiting for agent..." >&2
+    while [[ $elapsed -lt $timeout ]]; do
+        local content
+        content=$(tmux capture-pane -t "$tmux_session" -p)
+
+        # Check if agent is ready (not busy)
+        if ! echo "$content" | grep -qE "${AGENT_BUSY_PATTERN[$agent_type]:-⠋}"; then
+            if echo "$content" | grep -qE "${AGENT_READY_PATTERN[$agent_type]:-^>}"; then
+                echo " ready" >&2
+                echo "ready"
+                return 0
+            fi
+        fi
+
+        sleep "$poll_sec"
+        elapsed=$((elapsed + POLL_INTERVAL))
+        # Print dot every 2 seconds
+        if [[ $((elapsed % 2000)) -eq 0 ]]; then
+            echo -n "." >&2
+        fi
+    done
+
+    echo " timeout" >&2
+    die "timeout waiting for agent to become ready" 2
+}
+
+cmd_extract() {
+    local user_session="" lang="" all=false scroll=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) user_session="$2"; shift 2 ;;
+            --lang) lang="$2"; shift 2 ;;
+            --all) all=true; shift ;;
+            --scroll) scroll=true; shift ;;
+            *) die "unexpected argument: $1" ;;
+        esac
+    done
+
+    local tmux_session
+    tmux_session=$(resolve_session "$user_session")
+    session_exists "$tmux_session" || die "session not found"
+
+    # Get screen content
+    local capture_opts="-p"
+    if $scroll; then
+        capture_opts="$capture_opts -S -1000"
+    fi
+    
+    local content
+    content=$(tmux capture-pane -t "$tmux_session" $capture_opts 2>/dev/null || tmux capture-pane -t "$tmux_session" -p)
+    # Strip ANSI codes for easier parsing
+    content=$(echo "$content" | sed 's/\x1b\[[0-9;]*m//g')
+
+    # Extract code blocks using Python for robust multiline regex
+    python3 << 'PYEOF' - "$content" "$lang" "$all"
+import sys
+import re
+import json
+
+content = sys.argv[1]
+filter_lang = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
+extract_all = sys.argv[3].lower() == 'true' if len(sys.argv) > 3 else False
+
+# Pattern for fenced code blocks: ```language\ncode\n```
+# Also handles ``` without language
+pattern = r'```(\w*)\n(.*?)```'
+matches = re.findall(pattern, content, re.DOTALL)
+
+blocks = []
+for lang, code in matches:
+    lang = lang.strip() if lang else 'text'
+    code = code.strip()
+    if filter_lang and lang != filter_lang:
+        continue
+    blocks.append({'lang': lang, 'code': code})
+
+if not blocks:
+    print("No code blocks found", file=sys.stderr)
+    sys.exit(0)
+
+if extract_all:
+    # Output all blocks as JSON
+    print(json.dumps(blocks, indent=2))
+else:
+    # Output just the last code block (most recent response)
+    last = blocks[-1]
+    print(f"# Language: {last['lang']}")
+    print(last['code'])
+PYEOF
+}
+
 # Main
 case "${1:-}" in
     spawn)    shift; cmd_spawn "$@" ;;
@@ -505,6 +650,8 @@ case "${1:-}" in
     reject)   shift; cmd_reject "$@" ;;
     cancel)   shift; cmd_cancel "$@" ;;
     escape)   shift; cmd_escape "$@" ;;
+    wait)     shift; cmd_wait "$@" ;;
+    extract)  shift; cmd_extract "$@" ;;
     -h|--help|help|"") show_help ;;
     *)        die "unknown command: $1. Run 'agent-agent --help'." ;;
 esac
