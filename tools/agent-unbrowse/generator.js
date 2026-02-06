@@ -1,0 +1,317 @@
+/**
+ * Skill package generator.
+ * Produces SKILL.md, auth.json, and api.sh from filtered+auth-extracted entries.
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { templatizePath } from './filter.js';
+
+const SKILLS_DIR = path.join(process.env.HOME || '~', '.agent-do', 'skills');
+
+/**
+ * Generate a skill package from filtered entries and auth info.
+ * @param {string} name - Skill name (e.g. "jsonplaceholder")
+ * @param {Array} entries - Filtered API entries
+ * @param {Object} auth - Auth descriptor from extractAuth()
+ * @returns {Object} { path, endpointCount, files }
+ */
+export function generateSkill(name, entries, auth) {
+    const skillDir = path.join(SKILLS_DIR, name);
+    fs.mkdirSync(skillDir, { recursive: true });
+
+    // Derive base URL from most common origin
+    const baseUrl = detectBaseUrl(entries);
+
+    // Build endpoint list
+    const endpoints = buildEndpoints(entries, baseUrl);
+
+    // 1. Write SKILL.md
+    const skillMd = generateSkillMd(name, baseUrl, auth, endpoints);
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), skillMd);
+
+    // 2. Write auth.json
+    fs.writeFileSync(path.join(skillDir, 'auth.json'), JSON.stringify(auth, null, 2));
+
+    // 3. Write api.sh
+    const apiSh = generateApiSh(name, baseUrl, auth, endpoints);
+    fs.writeFileSync(path.join(skillDir, 'api.sh'), apiSh);
+    fs.chmodSync(path.join(skillDir, 'api.sh'), 0o755);
+
+    return {
+        path: skillDir,
+        endpointCount: endpoints.length,
+        files: ['SKILL.md', 'auth.json', 'api.sh'],
+    };
+}
+
+/**
+ * Detect the most common base URL origin.
+ */
+function detectBaseUrl(entries) {
+    const counts = new Map();
+    for (const e of entries) {
+        try {
+            const u = new URL(e.request.url);
+            const origin = u.origin;
+            counts.set(origin, (counts.get(origin) || 0) + 1);
+        } catch { /* skip */ }
+    }
+    let best = '';
+    let bestCount = 0;
+    for (const [origin, count] of counts) {
+        if (count > bestCount) {
+            best = origin;
+            bestCount = count;
+        }
+    }
+    return best;
+}
+
+/**
+ * Build endpoint descriptors from entries.
+ */
+function buildEndpoints(entries, baseUrl) {
+    const endpoints = [];
+    for (const entry of entries) {
+        try {
+            const u = new URL(entry.request.url);
+            const templatePath = templatizePath(u.pathname);
+            const query = u.search || '';
+            const funcName = makeFuncName(entry.request.method, templatePath);
+
+            endpoints.push({
+                method: entry.request.method,
+                path: templatePath,
+                fullUrl: entry.request.url,
+                query,
+                funcName,
+                status: entry.response.status,
+                contentType: entry.response.contentType || '',
+                hasBody: !!entry.request.postData,
+                postData: entry.request.postData,
+                responsePreview: truncate(entry.response.body, 200),
+            });
+        } catch { /* skip */ }
+    }
+    return endpoints;
+}
+
+/**
+ * Turn method + path into a bash function name.
+ * GET /api/v1/users/{id}/posts → get_api_v1_users_id_posts
+ */
+function makeFuncName(method, templatePath) {
+    const segments = templatePath
+        .replace(/^\//,'')
+        .replace(/\{id\}/g, 'id')
+        .split('/')
+        .filter(Boolean);
+    const name = [method.toLowerCase(), ...segments].join('_');
+    // Sanitize: only alphanumeric + underscore
+    return name.replace(/[^a-z0-9_]/gi, '_').replace(/_+/g, '_');
+}
+
+/**
+ * Generate SKILL.md content.
+ */
+function generateSkillMd(name, baseUrl, auth, endpoints) {
+    const domains = new Set();
+    for (const ep of endpoints) {
+        try { domains.add(new URL(ep.fullUrl).hostname); } catch {}
+    }
+
+    let md = `---
+name: ${name}
+base_url: ${baseUrl}
+auth_type: ${auth.type}
+endpoint_count: ${endpoints.length}
+domains:
+${[...domains].map(d => `  - ${d}`).join('\n')}
+generated: ${new Date().toISOString()}
+---
+
+# ${name}
+
+API skill captured by agent-unbrowse.
+
+**Base URL:** ${baseUrl}
+**Auth:** ${auth.type}${auth.type !== 'none' ? ` (see auth.json)` : ''}
+**Endpoints:** ${endpoints.length}
+
+## Endpoints
+
+| Method | Path | Status | Function |
+|--------|------|--------|----------|
+`;
+
+    for (const ep of endpoints) {
+        md += `| ${ep.method} | ${ep.path}${ep.query ? ' ' + ep.query : ''} | ${ep.status} | \`${ep.funcName}\` |\n`;
+    }
+
+    md += `\n## Usage\n\n`;
+    md += `\`\`\`bash\n`;
+    md += `# Source the API functions\n`;
+    md += `source ~/.agent-do/skills/${name}/api.sh\n\n`;
+
+    if (endpoints.length > 0) {
+        const first = endpoints[0];
+        md += `# Call an endpoint\n`;
+        md += `${first.funcName}\n`;
+    }
+
+    md += `\`\`\`\n`;
+
+    return md;
+}
+
+/**
+ * Generate api.sh bash script with curl-based functions.
+ */
+function generateApiSh(name, baseUrl, auth, endpoints) {
+    let sh = `#!/usr/bin/env bash
+# API skill: ${name}
+# Generated by agent-unbrowse on ${new Date().toISOString()}
+# Source this file, then call functions below.
+#
+# Usage:
+#   source ~/.agent-do/skills/${name}/api.sh
+#   ${endpoints.length > 0 ? endpoints[0].funcName : 'function_name'}
+
+_UNBROWSE_SKILL_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+_UNBROWSE_BASE_URL="${baseUrl}"
+
+# Auth headers helper — reads from auth.json
+_unbrowse_auth_headers() {
+    local auth_file="\${_UNBROWSE_SKILL_DIR}/auth.json"
+    if [[ ! -f "\$auth_file" ]]; then
+        return
+    fi
+    python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    auth = json.load(f)
+headers = auth.get('headers', {})
+cookies = auth.get('cookies', {})
+args = []
+for k, v in headers.items():
+    args.append('-H')
+    args.append(f'{k}: {v}')
+if cookies:
+    cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
+    args.append('-H')
+    args.append(f'Cookie: {cookie_str}')
+print(' '.join(f'\\'{a}\\'' for a in args))
+" "\$auth_file"
+}
+
+`;
+
+    for (const ep of endpoints) {
+        sh += generateFunction(ep, baseUrl);
+        sh += '\n';
+    }
+
+    return sh;
+}
+
+/**
+ * Generate a single bash function for an endpoint.
+ */
+function generateFunction(ep, baseUrl) {
+    const method = ep.method.toUpperCase();
+    const pathTemplate = ep.path;
+
+    // Count {id} parameters
+    const paramMatches = pathTemplate.match(/\{id\}/g) || [];
+    const paramCount = paramMatches.length;
+
+    let fn = `# ${method} ${pathTemplate}`;
+    if (ep.status) fn += `  (${ep.status})`;
+    fn += '\n';
+
+    // Function signature
+    if (paramCount > 0) {
+        const args = [];
+        for (let i = 1; i <= paramCount; i++) {
+            args.push(`<id${paramCount > 1 ? i : ''}>`);
+        }
+        if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+            args.push('[json_body]');
+        }
+        fn += `# Usage: ${ep.funcName} ${args.join(' ')}\n`;
+    } else if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+        fn += `# Usage: ${ep.funcName} [json_body]\n`;
+    }
+
+    fn += `${ep.funcName}() {\n`;
+
+    // Build path with parameter substitution
+    if (paramCount > 0) {
+        let paramIdx = 0;
+        const pathExpr = pathTemplate.replace(/\{id\}/g, () => {
+            paramIdx++;
+            return `\${${paramIdx}}`;
+        });
+        fn += `    local _path="${pathExpr}"\n`;
+    } else {
+        fn += `    local _path="${pathTemplate}"\n`;
+    }
+
+    // Build curl command
+    fn += `    local _auth_args\n`;
+    fn += `    _auth_args=$(_unbrowse_auth_headers)\n`;
+    fn += `    eval curl -sS -X ${method} \\\n`;
+    fn += `        "\${_UNBROWSE_BASE_URL}\${_path}" \\\n`;
+    fn += `        -H "Content-Type: application/json" \\\n`;
+    fn += `        \\$_auth_args`;
+
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+        const bodyArgIdx = paramCount + 1;
+        fn += ` \\\n        -d "\${${bodyArgIdx}:-{}}"`;
+    }
+
+    fn += '\n}\n';
+    return fn;
+}
+
+/**
+ * List all skills in ~/.agent-do/skills/
+ */
+export function listSkills() {
+    if (!fs.existsSync(SKILLS_DIR)) return [];
+    return fs.readdirSync(SKILLS_DIR).filter(name => {
+        const dir = path.join(SKILLS_DIR, name);
+        return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'SKILL.md'));
+    });
+}
+
+/**
+ * Get skill info.
+ */
+export function getSkill(name) {
+    const dir = path.join(SKILLS_DIR, name);
+    if (!fs.existsSync(dir)) return null;
+    const skillMd = fs.existsSync(path.join(dir, 'SKILL.md'))
+        ? fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8')
+        : null;
+    const authJson = fs.existsSync(path.join(dir, 'auth.json'))
+        ? JSON.parse(fs.readFileSync(path.join(dir, 'auth.json'), 'utf8'))
+        : null;
+    return { name, path: dir, skillMd, auth: authJson };
+}
+
+/**
+ * Delete a skill.
+ */
+export function deleteSkill(name) {
+    const dir = path.join(SKILLS_DIR, name);
+    if (!fs.existsSync(dir)) return false;
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+}
+
+function truncate(str, max) {
+    if (!str) return null;
+    return str.length > max ? str.substring(0, max) + '...' : str;
+}

@@ -1058,3 +1058,39 @@ tools:
         command: "agent-swarm spawn 3 'search for best practices'"
       - intent: "run tests and linting in parallel"
         command: "agent-swarm parallel 'test' 'lint'"
+
+  unbrowse:
+    description: "Capture browser API traffic and generate reusable curl-based skills"
+    capabilities:
+      - capture XHR/fetch network traffic during browsing
+      - filter out static assets, CDN, and analytics noise
+      - extract authentication headers, cookies, and tokens
+      - generate source-able bash functions wrapping curl
+      - replay API calls without a browser (~100x faster)
+    commands:
+      capture: "Start headed browser and capture traffic: capture <url> [--headless]"
+      stop: "Stop capture and generate skill: stop <name>"
+      status: "Show capture status (requests, domains, elapsed)"
+      close: "Close browser and daemon"
+      list: "List generated skills"
+      show: "Show skill documentation: show <name>"
+      replay: "Call a skill function via curl: replay <name> <function> [args...]"
+      test: "Test GET endpoints: test <name>"
+      delete: "Remove a skill: delete <name>"
+    examples:
+      - intent: "capture API traffic from a website"
+        command: "agent-unbrowse capture https://api.example.com"
+      - intent: "stop capturing and save as a skill"
+        command: "agent-unbrowse stop myservice"
+      - intent: "what APIs did I capture"
+        command: "agent-unbrowse status"
+      - intent: "list my captured API skills"
+        command: "agent-unbrowse list"
+      - intent: "show endpoints for a service"
+        command: "agent-unbrowse show myservice"
+      - intent: "call the get_users API directly"
+        command: "agent-unbrowse replay myservice get_users"
+      - intent: "test if my captured APIs still work"
+        command: "agent-unbrowse test myservice"
+      - intent: "remove a captured skill"
+        command: "agent-unbrowse delete myservice"

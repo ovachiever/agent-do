@@ -1,0 +1,445 @@
+#!/usr/bin/env bash
+# agent-unbrowse - Capture browser API traffic and generate reusable curl-based skills
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SESSION="${AGENT_UNBROWSE_SESSION:-default}"
+TMPDIR_ACTUAL="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')"
+SOCKET_PATH="${TMPDIR_ACTUAL}/agent-unbrowse-${SESSION}.sock"
+PID_FILE="${TMPDIR_ACTUAL}/agent-unbrowse-${SESSION}.pid"
+SKILLS_DIR="${HOME}/.agent-do/skills"
+
+# ============================================================================
+# HELP
+# ============================================================================
+
+show_help() {
+    cat << 'EOF'
+agent-unbrowse - Capture browser API traffic → reusable curl skills
+
+CAPTURE (requires daemon):
+  capture <url>                Start headed browser, navigate, begin capturing
+    --headless                 Run headless (default: headed for manual browsing)
+  stop <name>                  Stop capture, filter traffic, generate skill
+  status                       Show capture status (requests, domains, elapsed)
+  close                        Close browser and daemon
+
+SKILLS (no daemon needed):
+  list                         List generated skills
+  show <name>                  Show skill documentation (SKILL.md)
+  replay <name> <fn> [args...] Source api.sh, call function (pure curl)
+  test <name>                  Test GET endpoints with HEAD requests
+  delete <name>                Remove a skill
+
+OPTIONS:
+  --session <name>             Named daemon session (default: "default")
+  --json                       JSON output for daemon commands
+  --help                       This help
+
+EXIT CODES:
+  0  Success
+  1  General error
+
+ENVIRONMENT:
+  AGENT_UNBROWSE_SESSION       Default session name
+  AGENT_BROWSER_EXECUTABLE_PATH  Custom Chromium path
+
+WORKFLOW:
+  1. agent-do unbrowse capture https://api.example.com
+  2. Browse around in the headed browser to trigger API calls
+  3. agent-do unbrowse status                    # see what's captured
+  4. agent-do unbrowse stop myservice            # generates skill
+  5. agent-do unbrowse show myservice            # view endpoints
+  6. agent-do unbrowse replay myservice get_users # call via curl
+
+Skills are saved to ~/.agent-do/skills/<name>/:
+  SKILL.md   - Endpoint docs with YAML frontmatter
+  auth.json  - Extracted auth headers/cookies/tokens
+  api.sh     - Source-able bash functions wrapping curl
+
+The key insight: calling discovered APIs directly is ~100x faster than
+browser automation. Capture once, replay forever.
+EOF
+}
+
+# ============================================================================
+# DAEMON MANAGEMENT
+# ============================================================================
+
+is_daemon_running() {
+    if [[ ! -f "$PID_FILE" ]]; then
+        return 1
+    fi
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null) || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+start_daemon() {
+    if is_daemon_running; then
+        return 0
+    fi
+
+    # Clean up stale socket
+    rm -f "$SOCKET_PATH" "$PID_FILE"
+
+    # Start daemon in background (redirect to avoid blocking subshell captures)
+    AGENT_UNBROWSE_SESSION="$SESSION" \
+    node "$SCRIPT_DIR/daemon.js" </dev/null >/dev/null 2>&1 &
+
+    local daemon_pid=$!
+    echo "$daemon_pid" > "$PID_FILE"
+
+    # Wait for socket to appear
+    local attempts=0
+    while [[ ! -S "$SOCKET_PATH" ]] && [[ $attempts -lt 50 ]]; do
+        sleep 0.1
+        attempts=$((attempts + 1))
+        if ! kill -0 "$daemon_pid" 2>/dev/null; then
+            echo "Error: Daemon failed to start" >&2
+            rm -f "$PID_FILE"
+            return 1
+        fi
+    done
+
+    if [[ ! -S "$SOCKET_PATH" ]]; then
+        echo "Error: Daemon socket not created" >&2
+        kill "$daemon_pid" 2>/dev/null || true
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+stop_daemon() {
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null) || true
+        if [[ -n "$pid" ]]; then
+            kill "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE" "$SOCKET_PATH"
+    fi
+}
+
+send_command() {
+    local json="$1"
+    local timeout="${2:-60}"
+
+    # Ensure daemon is running
+    start_daemon || return 1
+
+    local response
+    response=$(python3 << PYEOF
+import socket
+import sys
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect("$SOCKET_PATH")
+    sock.settimeout($timeout)
+    sock.sendall(b'$json\n')
+
+    response = b""
+    while True:
+        try:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            if b"\n" in response:
+                break
+        except socket.timeout:
+            print('{"success":false,"error":"Command timed out after ${timeout}s"}')
+            sys.exit(0)
+
+    print(response.decode().strip())
+except Exception as e:
+    print(f'{{"success":false,"error":"{e}"}}', file=sys.stderr)
+    sys.exit(1)
+finally:
+    sock.close()
+PYEOF
+    ) || {
+        echo "Error: Failed to communicate with daemon" >&2
+        return 1
+    }
+
+    echo "$response"
+}
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+cmd_id() {
+    echo "cmd-$(date +%s%N)"
+}
+
+parse_response() {
+    local response="$1"
+    local format="${2:-text}"
+
+    if echo "$response" | grep -q '"success":false'; then
+        local error
+        error=$(echo "$response" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('error','Unknown error'))" 2>/dev/null || echo "Unknown error")
+        echo "Error: $error" >&2
+        return 1
+    fi
+
+    if [[ "$format" == "json" ]]; then
+        echo "$response"
+    else
+        echo "$response" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    res = r.get('result', r)
+    if isinstance(res, str):
+        print(res)
+    elif isinstance(res, dict):
+        for k, v in res.items():
+            if isinstance(v, list):
+                joined = ', '.join(str(x) for x in v)
+                print(f'{k}: {joined}')
+            else:
+                print(f'{k}: {v}')
+    else:
+        print(json.dumps(res, indent=2))
+except Exception:
+    pass
+" 2>/dev/null || echo "$response"
+    fi
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+main() {
+    local output_format="text"
+
+    # Parse global options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            --session)
+                SESSION="$2"
+                SOCKET_PATH="${TMPDIR_ACTUAL}/agent-unbrowse-${SESSION}.sock"
+                PID_FILE="${TMPDIR_ACTUAL}/agent-unbrowse-${SESSION}.pid"
+                shift 2
+                ;;
+            --json)
+                output_format="json"
+                shift
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    if [[ $# -eq 0 ]]; then
+        show_help
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    local json response
+
+    case "$cmd" in
+        # === DAEMON COMMANDS ===
+
+        capture)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-unbrowse capture <url> [--headless]" >&2; exit 1; }
+            local url="$1"; shift
+            local headless="false"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --headless) headless="true"; shift ;;
+                    *) shift ;;
+                esac
+            done
+            json="{\"id\":\"$(cmd_id)\",\"action\":\"capture_start\",\"url\":\"$url\",\"headless\":$headless}"
+            response=$(send_command "$json" 30) || exit 1
+            parse_response "$response" "$output_format"
+            ;;
+
+        stop)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-unbrowse stop <name>" >&2; exit 1; }
+            local name="$1"
+            json="{\"id\":\"$(cmd_id)\",\"action\":\"capture_stop\",\"name\":\"$name\"}"
+            response=$(send_command "$json" 60) || exit 1
+            parse_response "$response" "$output_format"
+            ;;
+
+        status)
+            json="{\"id\":\"$(cmd_id)\",\"action\":\"capture_status\"}"
+            response=$(send_command "$json" 10) || exit 1
+            parse_response "$response" "$output_format"
+            ;;
+
+        close)
+            json="{\"id\":\"$(cmd_id)\",\"action\":\"close\"}"
+            response=$(send_command "$json" 10) 2>/dev/null || true
+            stop_daemon
+            echo "Browser closed"
+            exit 0
+            ;;
+
+        # === FILESYSTEM COMMANDS (no daemon) ===
+
+        list)
+            if [[ ! -d "$SKILLS_DIR" ]]; then
+                echo "(no skills yet)"
+                exit 0
+            fi
+            local found=false
+            for dir in "$SKILLS_DIR"/*/; do
+                [[ ! -d "$dir" ]] && continue
+                local name
+                name=$(basename "$dir")
+                if [[ -f "$dir/SKILL.md" ]]; then
+                    found=true
+                    # Extract endpoint count from frontmatter
+                    local count
+                    count=$(grep -m1 'endpoint_count:' "$dir/SKILL.md" 2>/dev/null | awk '{print $2}') || count="?"
+                    local auth_type
+                    auth_type=$(grep -m1 'auth_type:' "$dir/SKILL.md" 2>/dev/null | awk '{print $2}') || auth_type="?"
+                    echo "$name  (${count} endpoints, auth: ${auth_type})"
+                fi
+            done
+            if [[ "$found" == "false" ]]; then
+                echo "(no skills yet)"
+            fi
+            exit 0
+            ;;
+
+        show)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-unbrowse show <name>" >&2; exit 1; }
+            local name="$1"
+            local skill_file="$SKILLS_DIR/$name/SKILL.md"
+            if [[ ! -f "$skill_file" ]]; then
+                echo "Error: Skill '$name' not found" >&2
+                exit 1
+            fi
+            cat "$skill_file"
+            exit 0
+            ;;
+
+        replay)
+            [[ $# -lt 2 ]] && { echo "Usage: agent-unbrowse replay <name> <function> [args...]" >&2; exit 1; }
+            local name="$1"; shift
+            local func="$1"; shift
+            local api_file="$SKILLS_DIR/$name/api.sh"
+            if [[ ! -f "$api_file" ]]; then
+                echo "Error: Skill '$name' not found (no api.sh)" >&2
+                exit 1
+            fi
+            # Source and call
+            source "$api_file"
+            "$func" "$@"
+            exit $?
+            ;;
+
+        test)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-unbrowse test <name>" >&2; exit 1; }
+            local name="$1"
+            local skill_file="$SKILLS_DIR/$name/SKILL.md"
+            if [[ ! -f "$skill_file" ]]; then
+                echo "Error: Skill '$name' not found" >&2
+                exit 1
+            fi
+            local auth_file="$SKILLS_DIR/$name/auth.json"
+
+            # Parse SKILL.md for base_url and GET endpoints
+            local base_url
+            base_url=$(grep -m1 'base_url:' "$skill_file" | awk '{print $2}')
+
+            # Build auth curl args
+            local auth_args=""
+            if [[ -f "$auth_file" ]]; then
+                auth_args=$(python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    auth = json.load(f)
+headers = auth.get('headers', {})
+cookies = auth.get('cookies', {})
+args = []
+for k, v in headers.items():
+    args.append('-H')
+    args.append(f'{k}: {v}')
+if cookies:
+    cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
+    args.append('-H')
+    args.append(f'Cookie: {cookie_str}')
+for a in args:
+    print(a)
+" "$auth_file" 2>/dev/null) || auth_args=""
+            fi
+
+            echo "Testing $name endpoints..."
+            echo ""
+
+            # Extract GET endpoint paths from the table in SKILL.md
+            local pass=0 fail=0
+            while IFS='|' read -r _ method path_ status _ ; do
+                method=$(echo "$method" | xargs)
+                path_=$(echo "$path_" | xargs)
+                [[ "$method" != "GET" ]] && continue
+                [[ "$path_" == "Path" ]] && continue
+                # Skip paths with {id} — we can't test those without params
+                [[ "$path_" == *"{id}"* ]] && continue
+                # Remove query params for HEAD test
+                local test_path
+                test_path=$(echo "$path_" | awk '{print $1}')
+                local url="${base_url}${test_path}"
+                local code
+                if [[ -n "$auth_args" ]]; then
+                    code=$(echo "$auth_args" | xargs curl -sS -o /dev/null -w '%{http_code}' -I "$url" 2>/dev/null) || code="ERR"
+                else
+                    code=$(curl -sS -o /dev/null -w '%{http_code}' -I "$url" 2>/dev/null) || code="ERR"
+                fi
+                if [[ "$code" =~ ^2 ]]; then
+                    echo "  OK  $code  $method $test_path"
+                    pass=$((pass + 1))
+                else
+                    echo "  FAIL $code  $method $test_path"
+                    fail=$((fail + 1))
+                fi
+            done < "$skill_file"
+
+            echo ""
+            echo "Results: $pass passed, $fail failed"
+            [[ $fail -gt 0 ]] && exit 1
+            exit 0
+            ;;
+
+        delete)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-unbrowse delete <name>" >&2; exit 1; }
+            local name="$1"
+            local skill_dir="$SKILLS_DIR/$name"
+            if [[ ! -d "$skill_dir" ]]; then
+                echo "Error: Skill '$name' not found" >&2
+                exit 1
+            fi
+            rm -rf "$skill_dir"
+            echo "Deleted skill: $name"
+            exit 0
+            ;;
+
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'agent-unbrowse --help' for usage" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
