@@ -12,6 +12,7 @@ Commands:
   read [folder]              Read inbox (or specified folder)
   search <query>             Search emails
   count                      Count unread emails
+  snapshot                   Inbox state as JSON (accounts, unread, recent messages)
 
 Options:
   --body <text>              Email body
@@ -237,6 +238,92 @@ cmd_count() {
     fi
 }
 
+cmd_snapshot() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        python3 -c "
+import subprocess, json
+
+def osascript(script):
+    r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=10)
+    return r.stdout.strip()
+
+try:
+    # Get unread count
+    unread = osascript('tell application \"Mail\" to return unread count of inbox')
+    unread = int(unread) if unread.isdigit() else 0
+
+    # Get mailbox counts
+    mailbox_script = '''
+    tell application \"Mail\"
+        set output to \"\"
+        repeat with acct in accounts
+            set acctName to name of acct
+            set acctType to account type of acct as string
+            set output to output & acctName & \"\t\" & acctType & \"\n\"
+        end repeat
+        return output
+    end tell
+    '''
+    acct_raw = osascript(mailbox_script)
+    accounts = []
+    for line in acct_raw.strip().split('\n'):
+        if not line.strip():
+            continue
+        parts = line.split('\t')
+        accounts.append({
+            'name': parts[0] if parts else '',
+            'type': parts[1] if len(parts) > 1 else '',
+        })
+
+    # Get recent messages from inbox (last 10)
+    recent_script = '''
+    tell application \"Mail\"
+        set msgs to messages 1 thru (minimum of {10, count of messages of inbox}) of inbox
+        set output to \"\"
+        repeat with m in msgs
+            set subj to subject of m
+            set sndr to extract name from sender of m
+            set isRead to read status of m
+            set dt to date received of m
+            set readStr to \"read\"
+            if not isRead then set readStr to \"unread\"
+            set output to output & subj & \"\t\" & sndr & \"\t\" & readStr & \"\t\" & (dt as string) & \"\n\"
+        end repeat
+        return output
+    end tell
+    '''
+    recent_raw = osascript(recent_script)
+    recent = []
+    for line in recent_raw.strip().split('\n'):
+        if not line.strip():
+            continue
+        parts = line.split('\t')
+        recent.append({
+            'subject': parts[0] if parts else '',
+            'from': parts[1] if len(parts) > 1 else '',
+            'status': parts[2] if len(parts) > 2 else '',
+            'date': parts[3] if len(parts) > 3 else '',
+        })
+
+    snapshot = {
+        'platform': 'macOS Mail.app',
+        'accounts': {'count': len(accounts), 'items': accounts},
+        'inbox_unread': unread,
+        'recent_messages': {'count': len(recent), 'items': recent},
+    }
+    print(json.dumps(snapshot, indent=2))
+
+except subprocess.TimeoutExpired:
+    print(json.dumps({'error': 'Mail.app timed out - may not be running'}))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"
+    else
+        echo '{"error": "Email snapshot requires macOS Mail.app. Configure IMAP for cross-platform support."}'
+        return 1
+    fi
+}
+
 # Main
 case "${1:-help}" in
     send|compose|write)
@@ -253,6 +340,9 @@ case "${1:-help}" in
         ;;
     count|unread)
         cmd_count
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help

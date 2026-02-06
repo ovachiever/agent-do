@@ -14,6 +14,7 @@ Commands:
   update <id> <status>       Update issue status
   search <query>             Search issues
   teams                      List teams
+  snapshot                   Workspace state as JSON (teams, issues, cycles)
 
 Options:
   --team <team>              Team key/name
@@ -204,6 +205,99 @@ else:
 "
 }
 
+cmd_snapshot() {
+    local token="${LINEAR_API_KEY:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "LINEAR_API_KEY not set"}'
+        return 1
+    fi
+
+    local query="query {
+        viewer { id name email }
+        teams { nodes { key name issueCount } }
+        issues(first: 20, orderBy: updatedAt, filter: { assignee: { isMe: { eq: true } } }) {
+            nodes { identifier title state { name type } priority updatedAt url }
+        }
+        cycles(first: 5, filter: { isActive: { eq: true } }) {
+            nodes { name number startsAt endsAt progress { completed total } }
+        }
+    }"
+
+    # Escape for JSON embedding
+    local escaped_query
+    escaped_query=$(echo "$query" | tr '\n' ' ' | sed 's/"/\\"/g')
+
+    curl -s -X POST "https://api.linear.app/graphql" \
+        -H "Authorization: $token" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\": \"$escaped_query\"}" | \
+        python3 -c "
+import sys, json
+
+r = json.load(sys.stdin)
+data = r.get('data', {})
+
+if not data:
+    print(json.dumps({'error': r.get('errors', 'Unknown error')}, indent=2))
+    sys.exit(0)
+
+# User
+viewer = data.get('viewer', {})
+
+# Teams
+teams = []
+for t in data.get('teams', {}).get('nodes', []):
+    teams.append({
+        'key': t.get('key', ''),
+        'name': t.get('name', ''),
+        'issue_count': t.get('issueCount', 0),
+    })
+
+# My issues
+priorities = {0: 'none', 1: 'urgent', 2: 'high', 3: 'medium', 4: 'low'}
+my_issues = []
+for i in data.get('issues', {}).get('nodes', []):
+    my_issues.append({
+        'id': i.get('identifier', ''),
+        'title': i.get('title', ''),
+        'status': i.get('state', {}).get('name', ''),
+        'status_type': i.get('state', {}).get('type', ''),
+        'priority': priorities.get(i.get('priority', 0), 'none'),
+        'url': i.get('url', ''),
+    })
+
+# Active cycles
+cycles = []
+for c in data.get('cycles', {}).get('nodes', []):
+    progress = c.get('progress', {})
+    cycles.append({
+        'name': c.get('name', ''),
+        'number': c.get('number', 0),
+        'starts': c.get('startsAt', ''),
+        'ends': c.get('endsAt', ''),
+        'completed': progress.get('completed', 0),
+        'total': progress.get('total', 0),
+    })
+
+# Categorize issues
+in_progress = [i for i in my_issues if i['status_type'] == 'started']
+todo = [i for i in my_issues if i['status_type'] == 'unstarted']
+
+snapshot = {
+    'user': {'name': viewer.get('name', ''), 'email': viewer.get('email', '')},
+    'teams': {'count': len(teams), 'items': teams},
+    'my_issues': {
+        'total': len(my_issues),
+        'in_progress': len(in_progress),
+        'todo': len(todo),
+        'items': my_issues,
+    },
+    'active_cycles': {'count': len(cycles), 'items': cycles},
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     list|ls)
@@ -224,6 +318,9 @@ case "${1:-help}" in
         ;;
     teams)
         cmd_teams
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help

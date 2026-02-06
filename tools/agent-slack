@@ -11,6 +11,8 @@ Commands:
   send <channel> <message>   Send message to channel
   webhook <message>          Send via webhook URL
   upload <channel> <file>    Upload file to channel
+  snapshot                   Workspace state as JSON (channels, unread, recent messages)
+  channels                   List channels
 
 Environment:
   SLACK_TOKEN                Bot token (xoxb-...)
@@ -124,6 +126,90 @@ cmd_upload() {
         python3 -c "import sys,json; r=json.load(sys.stdin); print('Uploaded!' if r.get('ok') else f'Error: {r.get(\"error\")}')"
 }
 
+cmd_channels() {
+    local token="${SLACK_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo "Error: SLACK_TOKEN not set"
+        return 1
+    fi
+
+    curl -s "https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=100&exclude_archived=true" \
+        -H "Authorization: Bearer $token" | \
+        python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('ok'):
+    for ch in sorted(r['channels'], key=lambda c: c.get('name', '')):
+        prefix = '#' if not ch.get('is_private') else '🔒'
+        members = ch.get('num_members', 0)
+        print(f'{prefix}{ch[\"name\"]}  ({members} members)')
+else:
+    print(f'Error: {r.get(\"error\", \"unknown\")}')
+"
+}
+
+cmd_snapshot() {
+    local token="${SLACK_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "SLACK_TOKEN not set"}'
+        return 1
+    fi
+
+    python3 -c "
+import urllib.request, json, os
+
+token = os.environ.get('SLACK_TOKEN', '')
+headers = {'Authorization': f'Bearer {token}'}
+
+def slack_get(endpoint, params=''):
+    url = f'https://slack.com/api/{endpoint}?{params}'
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+# Get channels
+channels_resp = slack_get('conversations.list', 'types=public_channel,private_channel&limit=50&exclude_archived=true')
+channels = []
+unread_total = 0
+if channels_resp.get('ok'):
+    for ch in channels_resp.get('channels', []):
+        info = {
+            'name': ch['name'],
+            'id': ch['id'],
+            'private': ch.get('is_private', False),
+            'members': ch.get('num_members', 0),
+            'topic': ch.get('topic', {}).get('value', ''),
+        }
+
+        # Check unread (only for joined channels)
+        if ch.get('is_member'):
+            try:
+                unread_resp = slack_get('conversations.info', f'channel={ch[\"id\"]}')
+                if unread_resp.get('ok'):
+                    count = unread_resp.get('channel', {}).get('unread_count_display', 0)
+                    info['unread'] = count
+                    unread_total += count
+            except:
+                info['unread'] = 0
+
+        channels.append(info)
+
+# Get user info
+user_resp = slack_get('auth.test')
+user = user_resp.get('user', 'unknown') if user_resp.get('ok') else 'unknown'
+team = user_resp.get('team', 'unknown') if user_resp.get('ok') else 'unknown'
+
+snapshot = {
+    'team': team,
+    'user': user,
+    'channels': {'count': len(channels), 'items': sorted(channels, key=lambda c: c.get('unread', 0), reverse=True)},
+    'total_unread': unread_total,
+    'token_valid': channels_resp.get('ok', False),
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     send|message|msg)
@@ -137,6 +223,14 @@ case "${1:-help}" in
     upload|file)
         shift
         cmd_upload "$@"
+        ;;
+    snapshot|snap)
+        shift
+        cmd_snapshot
+        ;;
+    channels|ch)
+        shift
+        cmd_channels
         ;;
     help|--help|-h)
         show_help

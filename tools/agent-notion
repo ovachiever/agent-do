@@ -13,6 +13,7 @@ Commands:
   create <title>             Create new page
   append <id> <text>         Append text to page
   databases                  List databases
+  snapshot                   Workspace state as JSON (databases, recent pages)
 
 Environment:
   NOTION_TOKEN               Integration token (secret_xxx)
@@ -189,6 +190,79 @@ else:
 "
 }
 
+cmd_snapshot() {
+    local token="${NOTION_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "NOTION_TOKEN not set"}'
+        return 1
+    fi
+
+    python3 -c "
+import urllib.request, json, os
+
+token = os.environ.get('NOTION_TOKEN', '')
+headers = {
+    'Authorization': f'Bearer {token}',
+    'Content-Type': 'application/json',
+    'Notion-Version': '2022-06-28',
+}
+
+def notion_post(endpoint, data=None):
+    url = f'https://api.notion.com/v1{endpoint}'
+    body = json.dumps(data).encode() if data else b'{}'
+    req = urllib.request.Request(url, data=body, headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        return {'error': str(e)}
+
+# Get databases
+db_resp = notion_post('/search', {'filter': {'property': 'object', 'value': 'database'}})
+databases = []
+if db_resp.get('results'):
+    for db in db_resp['results'][:20]:
+        titles = db.get('title', [])
+        title = titles[0].get('plain_text', 'Untitled') if titles else 'Untitled'
+        databases.append({
+            'id': db['id'],
+            'title': title,
+            'url': db.get('url', ''),
+        })
+
+# Get recent pages
+page_resp = notion_post('/search', {
+    'filter': {'property': 'object', 'value': 'page'},
+    'sort': {'direction': 'descending', 'timestamp': 'last_edited_time'},
+    'page_size': 15,
+})
+pages = []
+if page_resp.get('results'):
+    for page in page_resp['results']:
+        title = 'Untitled'
+        props = page.get('properties', {})
+        for key, val in props.items():
+            if val.get('type') == 'title':
+                titles = val.get('title', [])
+                if titles:
+                    title = titles[0].get('plain_text', 'Untitled')
+                break
+        pages.append({
+            'id': page['id'],
+            'title': title,
+            'last_edited': page.get('last_edited_time', ''),
+            'url': page.get('url', ''),
+        })
+
+snapshot = {
+    'token_valid': not db_resp.get('error') and not page_resp.get('error'),
+    'databases': {'count': len(databases), 'items': databases},
+    'recent_pages': {'count': len(pages), 'items': pages},
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     search|find)
@@ -209,6 +283,9 @@ case "${1:-help}" in
         ;;
     databases|dbs)
         cmd_databases
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help

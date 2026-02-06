@@ -13,6 +13,7 @@ Commands:
   tomorrow                   Show tomorrow's events
   create <title>             Create event
   search <query>             Search events
+  snapshot [days]            Calendar state as JSON (today + upcoming events)
 
 Options:
   --date <date>              Event date (YYYY-MM-DD)
@@ -245,6 +246,115 @@ cmd_search() {
     fi
 }
 
+cmd_snapshot() {
+    local days="${1:-7}"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        python3 -c "
+import subprocess, json
+from datetime import datetime
+
+def osascript(script):
+    r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=15)
+    return r.stdout.strip()
+
+days = $days
+
+try:
+    # Get calendars
+    cal_script = '''
+    tell application \"Calendar\"
+        set output to \"\"
+        repeat with cal in calendars
+            set calName to name of cal
+            set calColor to color of cal
+            set output to output & calName & \"\n\"
+        end repeat
+        return output
+    end tell
+    '''
+    cal_raw = osascript(cal_script)
+    calendars = [c.strip() for c in cal_raw.strip().split('\n') if c.strip()]
+
+    # Get events for next N days
+    event_script = f'''
+    set output to \"\"
+    set today to current date
+    set endDate to today + ({days} * days)
+
+    tell application \"Calendar\"
+        repeat with cal in calendars
+            set calName to name of cal
+            set calEvents to (every event of cal whose start date >= today and start date <= endDate)
+            repeat with evt in calEvents
+                set evtTitle to summary of evt
+                set evtStart to start date of evt
+                set evtEnd to end date of evt
+                set evtLoc to location of evt
+                if evtLoc is missing value then set evtLoc to \"\"
+                set evtAllDay to allday event of evt
+                set output to output & evtTitle & \"\t\" & (evtStart as string) & \"\t\" & (evtEnd as string) & \"\t\" & evtLoc & \"\t\" & calName & \"\t\" & evtAllDay & \"\n\"
+            end repeat
+        end repeat
+    end tell
+
+    return output
+    '''
+    events_raw = osascript(event_script)
+    events = []
+    today_events = []
+    now_str = datetime.now().strftime('%Y-%m-%d')
+
+    for line in events_raw.strip().split('\n'):
+        if not line.strip():
+            continue
+        parts = line.split('\t')
+        evt = {
+            'title': parts[0] if parts else '',
+            'start': parts[1] if len(parts) > 1 else '',
+            'end': parts[2] if len(parts) > 2 else '',
+            'location': parts[3] if len(parts) > 3 else '',
+            'calendar': parts[4] if len(parts) > 4 else '',
+            'all_day': parts[5] == 'true' if len(parts) > 5 else False,
+        }
+        events.append(evt)
+        # Check if today
+        if now_str in evt.get('start', ''):
+            today_events.append(evt)
+
+    snapshot = {
+        'date': now_str,
+        'calendars': calendars,
+        'range_days': days,
+        'today': {'count': len(today_events), 'events': today_events},
+        'upcoming': {'count': len(events), 'events': events},
+    }
+    print(json.dumps(snapshot, indent=2))
+
+except subprocess.TimeoutExpired:
+    print(json.dumps({'error': 'Calendar.app timed out - may not be running'}))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+"
+    else
+        if command -v gcalcli &> /dev/null; then
+            # gcalcli fallback
+            python3 -c "
+import subprocess, json
+r = subprocess.run(['gcalcli', 'agenda', '--nocolor', '--tsv'], capture_output=True, text=True)
+events = []
+for line in r.stdout.strip().split('\n'):
+    if line.strip():
+        events.append({'raw': line.strip()})
+print(json.dumps({'platform': 'gcalcli', 'events': events}, indent=2))
+"
+        else
+            echo '{"error": "Calendar snapshot requires macOS Calendar.app or gcalcli"}'
+            return 1
+        fi
+    fi
+}
+
 # Main
 case "${1:-help}" in
     list|ls|agenda)
@@ -264,6 +374,10 @@ case "${1:-help}" in
     search|find)
         shift
         cmd_search "$@"
+        ;;
+    snapshot|snap)
+        shift || true
+        cmd_snapshot "$@"
         ;;
     help|--help|-h)
         show_help
