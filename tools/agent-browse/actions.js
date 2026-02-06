@@ -4,10 +4,15 @@ import { RequestTracker, setThrottle, clearThrottle, THROTTLE_PRESETS } from './
 import { generateTOTPSync, getTOTPTimeRemaining, detectLoginForm, autoFillLogin, detectCaptcha, waitForCaptchaSolved } from './auth.js';
 import { describePage, findByVisual, clickByVisual, analyzePattern, compareScreenshots, explainAction, captureForVision } from './vision.js';
 import { executeGoal, explorePage, explainPage, attemptRecovery } from './agent.js';
+import { filterEntries } from './capture-filter.js';
+import { extractAuth } from './capture-auth.js';
+import { generateSkill } from './capture-generator.js';
 // Callback for screencast frames - will be set by the daemon when streaming is active
 let screencastFrameCallback = null;
 // Phase 4: Request tracker for HAR export
 let requestTracker = new RequestTracker();
+// Capture session state for API skill generation
+let captureSession = null; // { entries: [], startTime: null, onRequest: null, onResponse: null }
 /**
  * Set the callback for screencast frames
  * This is called by the daemon to set up frame streaming
@@ -358,6 +363,13 @@ export async function executeCommand(command, browser) {
                 return await handleAgentExplain(command, browser);
             case 'agent_recover':
                 return await handleAgentRecover(command, browser);
+            // Capture: API skill generation (unbrowse integration)
+            case 'capture_start':
+                return await handleCaptureStart(command, browser);
+            case 'capture_stop':
+                return await handleCaptureStop(command, browser);
+            case 'capture_status':
+                return await handleCaptureStatus(command, browser);
             default: {
                 // TypeScript narrows to never here, but we handle it for safety
                 const unknownCommand = command;
@@ -1694,5 +1706,119 @@ async function handleAgentRecover(command, browser) {
     // Try to recover from any stuck state
     const result = await attemptRecovery(page, browser, new Error('manual recovery'), []);
     return successResponse(command.id, result);
+}
+// ============================================================================
+// Capture handlers (API skill generation - unbrowse integration)
+// ============================================================================
+
+async function handleCaptureStart(command, browser) {
+    const page = browser.getPage();
+    if (captureSession) {
+        return errorResponse(command.id, 'Capture already running. Stop first.');
+    }
+
+    const entries = [];
+    const startTime = Date.now();
+
+    const onRequest = (request) => {
+        captureSession._pendingRequests.set(request, {
+            url: request.url(),
+            method: request.method(),
+            headers: request.headers(),
+            postData: request.postData() || null,
+            resourceType: request.resourceType(),
+            timestamp: Date.now(),
+        });
+    };
+
+    const onResponse = async (response) => {
+        const request = response.request();
+        const reqData = captureSession._pendingRequests.get(request);
+        if (!reqData) return;
+        captureSession._pendingRequests.delete(request);
+
+        let body = null;
+        let contentType = '';
+        try {
+            contentType = response.headers()['content-type'] || '';
+            const buf = await response.body();
+            if (buf.length <= 1024 * 1024) {
+                if (contentType.includes('json') || contentType.includes('xml') ||
+                    contentType.includes('text') || contentType.includes('javascript') ||
+                    contentType.includes('html') || contentType.includes('form-urlencoded')) {
+                    body = buf.toString('utf8');
+                }
+            }
+        } catch {
+            // Some responses can't be read
+        }
+
+        entries.push({
+            request: reqData,
+            response: {
+                status: response.status(),
+                headers: response.headers(),
+                contentType,
+                body,
+            },
+        });
+    };
+
+    captureSession = { entries, startTime, onRequest, onResponse, _pendingRequests: new Map() };
+    page.on('request', onRequest);
+    page.on('response', onResponse);
+
+    return successResponse(command.id, {
+        message: 'Capture started',
+        url: page.url(),
+    });
+}
+
+async function handleCaptureStop(command, browser) {
+    const page = browser.getPage();
+    if (!captureSession) {
+        return errorResponse(command.id, 'No active capture session.');
+    }
+
+    page.removeListener('request', captureSession.onRequest);
+    page.removeListener('response', captureSession.onResponse);
+
+    const raw = captureSession.entries;
+    const filtered = filterEntries(raw);
+    const auth = extractAuth(filtered);
+    const result = generateSkill(command.name, filtered, auth);
+
+    captureSession = null;
+
+    return successResponse(command.id, {
+        message: `Skill "${command.name}" generated`,
+        rawRequests: raw.length,
+        filteredEndpoints: filtered.length,
+        authType: auth.type,
+        ...result,
+    });
+}
+
+async function handleCaptureStatus(command, browser) {
+    if (!captureSession) {
+        return successResponse(command.id, {
+            capturing: false,
+            requestCount: 0,
+            domains: [],
+            elapsed: 0,
+        });
+    }
+
+    const domains = new Set();
+    for (const e of captureSession.entries) {
+        try { domains.add(new URL(e.request.url).hostname); } catch {}
+    }
+
+    return successResponse(command.id, {
+        capturing: true,
+        requestCount: captureSession.entries.length,
+        domains: [...domains],
+        elapsed: Math.round((Date.now() - captureSession.startTime) / 1000),
+    });
 }
 //# sourceMappingURL=actions.js.map

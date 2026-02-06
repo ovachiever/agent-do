@@ -752,6 +752,17 @@ const windowNewSchema = baseCommandSchema.extend({
     })
         .optional(),
 });
+// Capture: API traffic capture for skill generation (unbrowse integration)
+const captureStartSchema = baseCommandSchema.extend({
+    action: z.literal('capture_start'),
+});
+const captureStopSchema = baseCommandSchema.extend({
+    action: z.literal('capture_stop'),
+    name: z.string().min(1),
+});
+const captureStatusSchema = baseCommandSchema.extend({
+    action: z.literal('capture_status'),
+});
 // Union schema for all commands
 const commandSchema = z.discriminatedUnion('action', [
     launchSchema,
@@ -903,6 +914,10 @@ const commandSchema = z.discriminatedUnion('action', [
     agentExploreSchema,
     agentExplainSchema,
     agentRecoverSchema,
+    // Capture: API skill generation
+    captureStartSchema,
+    captureStopSchema,
+    captureStatusSchema,
 ]);
 /**
  * Parse a JSON string into a validated command

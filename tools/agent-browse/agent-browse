@@ -162,6 +162,18 @@ BROWSER CONTROL:
   restart [url]                  Kill and restart browser (optionally navigate)
   status                         Show daemon status
 
+CAPTURE (API skill generation):
+  capture start                Start capturing API traffic on current page
+  capture stop <name>          Stop capture → filter → generate skill
+  capture status               Show capture progress (requests, domains)
+
+API SKILLS:
+  api <skill> <fn> [args...]   Call a captured skill function (pure curl)
+  api list                     List available skills
+  api show <skill>             Show skill documentation
+  api test <skill>             Test skill endpoints
+  api delete <skill>           Remove a skill
+
 OPTIONS:
   --session <name>               Use named session
   --headed                       Show browser window
@@ -1222,7 +1234,92 @@ main() {
                     ;;
             esac
             ;;
-            
+
+        # Capture (API skill generation)
+        capture)
+            [[ $# -eq 0 ]] && { echo "Usage: agent-browse capture <start|stop|status>" >&2; exit 1; }
+            local subcmd="$1"; shift
+            case "$subcmd" in
+                start)
+                    json='{"id":"'$(cmd_id)'","action":"capture_start"}'
+                    ;;
+                stop)
+                    [[ $# -lt 1 ]] && { echo "Usage: capture stop <name>" >&2; exit 1; }
+                    json='{"id":"'$(cmd_id)'","action":"capture_stop","name":"'"$1"'"}'
+                    ;;
+                status)
+                    json='{"id":"'$(cmd_id)'","action":"capture_status"}'
+                    ;;
+                *)
+                    echo "Unknown capture command: $subcmd" >&2
+                    echo "Usage: capture start|stop|status" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+
+        # API skills (filesystem only, no daemon)
+        api)
+            local skills_dir="${HOME}/.agent-do/skills"
+            if [[ $# -eq 0 ]]; then
+                echo "Usage: agent-browse api <skill> <function> [args...]" >&2
+                echo "       agent-browse api list|show|test|delete" >&2
+                exit 1
+            fi
+            case "$1" in
+                list)
+                    if [[ ! -d "$skills_dir" ]]; then
+                        echo "(no skills yet)"
+                        exit 0
+                    fi
+                    local found_skill=false
+                    for dir in "$skills_dir"/*/; do
+                        [[ ! -d "$dir" ]] && continue
+                        local sname
+                        sname=$(basename "$dir")
+                        if [[ -f "$dir/SKILL.md" ]]; then
+                            found_skill=true
+                            local count auth_type
+                            count=$(grep -m1 'endpoint_count:' "$dir/SKILL.md" 2>/dev/null | awk '{print $2}') || count="?"
+                            auth_type=$(grep -m1 'auth_type:' "$dir/SKILL.md" 2>/dev/null | awk '{print $2}') || auth_type="?"
+                            echo "$sname  (${count} endpoints, auth: ${auth_type})"
+                        fi
+                    done
+                    [[ "$found_skill" == "false" ]] && echo "(no skills yet)"
+                    exit 0
+                    ;;
+                show)
+                    [[ $# -lt 2 ]] && { echo "Usage: api show <skill>" >&2; exit 1; }
+                    local skill_file="$skills_dir/$2/SKILL.md"
+                    [[ ! -f "$skill_file" ]] && { echo "Error: Skill '$2' not found" >&2; exit 1; }
+                    cat "$skill_file"
+                    exit 0
+                    ;;
+                test)
+                    [[ $# -lt 2 ]] && { echo "Usage: api test <skill>" >&2; exit 1; }
+                    exec "$SCRIPT_DIR/../agent-unbrowse/agent-unbrowse" test "$2"
+                    ;;
+                delete)
+                    [[ $# -lt 2 ]] && { echo "Usage: api delete <skill>" >&2; exit 1; }
+                    local skill_path="$skills_dir/$2"
+                    [[ ! -d "$skill_path" ]] && { echo "Error: Skill '$2' not found" >&2; exit 1; }
+                    rm -rf "$skill_path"
+                    echo "Deleted skill: $2"
+                    exit 0
+                    ;;
+                *)
+                    # Treat as: api <skill> <function> [args...]
+                    local skill="$1"; shift
+                    local func="$1"; shift
+                    local api_file="$skills_dir/$skill/api.sh"
+                    [[ ! -f "$api_file" ]] && { echo "Error: Skill '$skill' not found (no api.sh)" >&2; exit 1; }
+                    source "$api_file"
+                    "$func" "$@"
+                    exit $?
+                    ;;
+            esac
+            ;;
+
         # State checks
         is)
             [[ $# -lt 2 ]] && { echo "Usage: agent-browse is <visible|enabled|checked> <selector>" >&2; exit 1; }
@@ -1301,7 +1398,7 @@ main() {
         *)
             echo "Unknown command: $cmd" >&2
             # Suggest similar commands (prefix match)
-            local commands="open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval session tab network auth vision agent is console errors highlight install close restart status"
+            local commands="open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval session tab network auth vision agent capture api is console errors highlight install close restart status"
             local suggestions=""
             for c in $commands; do
                 if [[ "$c" == "$cmd"* ]]; then
