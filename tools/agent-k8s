@@ -20,6 +20,7 @@ Commands:
   use <context>              Switch context
   namespace <ns>             Set default namespace
   port-forward <pod> <ports> Forward ports
+  snapshot                     Full cluster state as JSON (pods, services, deployments)
 
 Options:
   -n, --namespace <ns>       Namespace
@@ -296,6 +297,81 @@ cmd_port_forward() {
     kubectl port-forward $namespace "$pod" "$ports"
 }
 
+cmd_snapshot() {
+    check_kubectl
+    local namespace=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--namespace) namespace="-n $2"; shift 2 ;;
+            -A|--all-namespaces) namespace="-A"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    python3 -c "
+import subprocess, json
+
+ns = '$namespace'
+
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return r.stdout.strip()
+
+def kubectl_json(resource):
+    raw = run(f'kubectl get {resource} {ns} -o json 2>/dev/null')
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        items = data.get('items', [])
+        return [{
+            'name': i['metadata']['name'],
+            'namespace': i['metadata'].get('namespace', ''),
+            'status': extract_status(i, resource),
+            'age': i['metadata'].get('creationTimestamp', ''),
+        } for i in items]
+    except:
+        return []
+
+def extract_status(item, resource):
+    if resource == 'pods':
+        phase = item.get('status', {}).get('phase', 'Unknown')
+        containers = item.get('status', {}).get('containerStatuses', [])
+        ready = sum(1 for c in containers if c.get('ready'))
+        total = len(containers)
+        return f'{phase} ({ready}/{total} ready)'
+    elif resource in ('deployments', 'deploy'):
+        spec_replicas = item.get('spec', {}).get('replicas', 0)
+        ready = item.get('status', {}).get('readyReplicas', 0)
+        return f'{ready}/{spec_replicas} ready'
+    elif resource in ('services', 'svc'):
+        stype = item.get('spec', {}).get('type', 'ClusterIP')
+        ports = item.get('spec', {}).get('ports', [])
+        port_str = ','.join(f\"{p.get('port')}/{p.get('protocol','TCP')}\" for p in ports)
+        return f'{stype} [{port_str}]'
+    return ''
+
+# Current context
+context = run('kubectl config current-context 2>/dev/null') or 'unknown'
+current_ns = run('kubectl config view --minify -o jsonpath=\"{..namespace}\" 2>/dev/null') or 'default'
+
+pods = kubectl_json('pods')
+deployments = kubectl_json('deployments')
+services = kubectl_json('services')
+nodes = kubectl_json('nodes')
+
+snapshot = {
+    'context': context,
+    'namespace': current_ns if not ns else ns.replace('-n ', '').replace('-A', 'ALL'),
+    'nodes': {'count': len(nodes), 'items': nodes},
+    'pods': {'count': len(pods), 'items': pods},
+    'deployments': {'count': len(deployments), 'items': deployments},
+    'services': {'count': len(services), 'items': services},
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     pods|po)
@@ -344,6 +420,10 @@ case "${1:-help}" in
     port-forward|pf)
         shift
         cmd_port_forward "$@"
+        ;;
+    snapshot|snap)
+        shift || true
+        cmd_snapshot "$@"
         ;;
     help|--help|-h)
         show_help

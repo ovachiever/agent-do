@@ -20,6 +20,7 @@ Commands:
   images           List images
   compose up       Start compose stack
   compose down     Stop compose stack
+  snapshot          Full Docker state as JSON (containers, images, volumes, networks)
 
 Examples:
   agent-docker ps
@@ -147,6 +148,78 @@ cmd_compose() {
     esac
 }
 
+cmd_snapshot() {
+    check_docker
+    python3 -c "
+import subprocess, json
+
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return r.stdout.strip()
+
+# Containers
+containers = []
+raw = run('docker ps -a --format \"{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.State}}\"')
+for line in raw.split('\n'):
+    if not line.strip(): continue
+    parts = line.split('\t')
+    if len(parts) >= 5:
+        containers.append({
+            'name': parts[0], 'image': parts[1], 'status': parts[2],
+            'ports': parts[3], 'state': parts[4]
+        })
+
+# Images (top 20)
+images = []
+raw = run('docker images --format \"{{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.ID}}\" | head -20')
+for line in raw.split('\n'):
+    if not line.strip(): continue
+    parts = line.split('\t')
+    if len(parts) >= 4:
+        images.append({
+            'repository': parts[0], 'tag': parts[1], 'size': parts[2], 'id': parts[3]
+        })
+
+# Volumes
+volumes = []
+raw = run('docker volume ls --format \"{{.Name}}\t{{.Driver}}\"')
+for line in raw.split('\n'):
+    if not line.strip(): continue
+    parts = line.split('\t')
+    if len(parts) >= 2:
+        volumes.append({'name': parts[0], 'driver': parts[1]})
+
+# Networks
+networks = []
+raw = run('docker network ls --format \"{{.Name}}\t{{.Driver}}\t{{.Scope}}\"')
+for line in raw.split('\n'):
+    if not line.strip(): continue
+    parts = line.split('\t')
+    if len(parts) >= 3:
+        networks.append({'name': parts[0], 'driver': parts[1], 'scope': parts[2]})
+
+# Disk usage summary
+disk = run('docker system df --format \"{{.Type}}\t{{.TotalCount}}\t{{.Size}}\t{{.Reclaimable}}\"')
+disk_info = []
+for line in disk.split('\n'):
+    if not line.strip(): continue
+    parts = line.split('\t')
+    if len(parts) >= 4:
+        disk_info.append({'type': parts[0], 'count': parts[1], 'size': parts[2], 'reclaimable': parts[3]})
+
+snapshot = {
+    'containers': {'count': len(containers), 'items': containers},
+    'images': {'count': len(images), 'items': images},
+    'volumes': {'count': len(volumes), 'items': volumes},
+    'networks': {'count': len(networks), 'items': networks},
+    'disk': disk_info,
+    'running': sum(1 for c in containers if c.get('state') == 'running'),
+    'stopped': sum(1 for c in containers if c.get('state') != 'running'),
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     ps)
@@ -183,6 +256,9 @@ case "${1:-help}" in
     compose|dc)
         shift
         cmd_compose "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help

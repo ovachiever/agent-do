@@ -15,6 +15,7 @@ Commands:
   tunnel <host> <local:remote> Create SSH tunnel
   list                       List SSH config hosts
   test <host>                Test connection
+  snapshot                   Full SSH state as JSON (config hosts, active connections, keys)
 
 Options:
   -i, --identity <key>       Identity file
@@ -238,6 +239,80 @@ cmd_test() {
     fi
 }
 
+cmd_snapshot() {
+    python3 -c "
+import subprocess, json, os, re
+
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return r.stdout.strip()
+
+# Parse SSH config hosts
+config_path = os.environ.get('SSH_CONFIG', os.path.expanduser('~/.ssh/config'))
+hosts = []
+if os.path.exists(config_path):
+    current = None
+    with open(config_path) as f:
+        for line in f:
+            line = line.strip()
+            if line.lower().startswith('host ') and '*' not in line:
+                current = {'name': line.split()[1], 'hostname': '', 'user': '', 'port': '22'}
+                hosts.append(current)
+            elif current and line.lower().startswith('hostname '):
+                current['hostname'] = line.split()[1]
+            elif current and line.lower().startswith('user '):
+                current['user'] = line.split()[1]
+            elif current and line.lower().startswith('port '):
+                current['port'] = line.split()[1]
+
+# Active SSH connections (from process list)
+active = []
+ps_out = run('ps aux 2>/dev/null')
+for line in ps_out.split('\n'):
+    if 'ssh ' in line and 'grep' not in line and 'agent-ssh' not in line:
+        # Extract destination from ssh command
+        parts = line.split()
+        cmd_parts = []
+        found_ssh = False
+        for p in parts:
+            if p == 'ssh' or p.endswith('/ssh'):
+                found_ssh = True
+                continue
+            if found_ssh:
+                cmd_parts.append(p)
+        if cmd_parts:
+            dest = cmd_parts[-1] if cmd_parts else ''
+            is_tunnel = '-L' in line or '-R' in line or '-D' in line
+            active.append({'destination': dest, 'tunnel': is_tunnel, 'pid': parts[1]})
+
+# SSH keys
+keys = []
+ssh_dir = os.path.expanduser('~/.ssh')
+if os.path.isdir(ssh_dir):
+    for f in sorted(os.listdir(ssh_dir)):
+        if f.endswith('.pub'):
+            key_path = os.path.join(ssh_dir, f)
+            with open(key_path) as kf:
+                first_line = kf.readline().strip()
+            key_type = first_line.split()[0] if first_line else 'unknown'
+            keys.append({'name': f.replace('.pub', ''), 'type': key_type})
+
+# SSH agent
+agent_keys = run('ssh-add -l 2>/dev/null')
+agent_count = 0
+if agent_keys and 'no identities' not in agent_keys.lower() and 'error' not in agent_keys.lower():
+    agent_count = len([l for l in agent_keys.split('\n') if l.strip()])
+
+snapshot = {
+    'config_hosts': {'count': len(hosts), 'items': hosts},
+    'active_connections': {'count': len(active), 'items': active},
+    'keys': {'count': len(keys), 'items': keys},
+    'agent_loaded': agent_count,
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     connect|c)
@@ -266,6 +341,9 @@ case "${1:-help}" in
     test|check)
         shift
         cmd_test "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help

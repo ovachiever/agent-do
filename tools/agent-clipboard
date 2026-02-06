@@ -12,6 +12,7 @@ Commands:
   paste            Print clipboard contents
   clear            Clear clipboard
   file <path>      Copy file contents to clipboard
+  snapshot          Clipboard state as JSON (content preview, size, type)
 
 Examples:
   agent-clipboard copy "Hello, World!"
@@ -105,6 +106,60 @@ cmd_file() {
     echo "Copied $bytes bytes from $path to clipboard"
 }
 
+cmd_snapshot() {
+    local cmds
+    cmds=$(get_clipboard_cmd)
+    if [[ -z "$cmds" ]]; then
+        echo '{"error": "No clipboard command found"}'
+        return 1
+    fi
+
+    local paste_cmd="${cmds##*:}"
+    local content
+    content=$($paste_cmd 2>/dev/null) || content=""
+
+    python3 -c "
+import json, sys
+
+content = sys.stdin.read()
+length = len(content)
+
+# Detect content type
+content_type = 'text'
+trimmed = content.strip()
+if not trimmed:
+    content_type = 'empty'
+elif trimmed.startswith('{') or trimmed.startswith('['):
+    try:
+        json.loads(trimmed)
+        content_type = 'json'
+    except:
+        pass
+elif trimmed.startswith('<') and ('>' in trimmed):
+    content_type = 'html/xml'
+elif trimmed.startswith('http://') or trimmed.startswith('https://'):
+    content_type = 'url'
+elif '/' in trimmed and '\n' not in trimmed and length < 500:
+    content_type = 'path'
+
+# Preview (first 200 chars)
+preview = content[:200]
+if length > 200:
+    preview += '...'
+
+lines = content.count('\n') + (1 if content else 0)
+
+snapshot = {
+    'has_content': length > 0,
+    'length': length,
+    'lines': lines,
+    'type': content_type,
+    'preview': preview,
+}
+print(json.dumps(snapshot, indent=2))
+" <<< "$content"
+}
+
 # Main
 case "${1:-help}" in
     copy|cp)
@@ -120,6 +175,9 @@ case "${1:-help}" in
     file)
         shift
         cmd_file "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help

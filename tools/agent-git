@@ -19,6 +19,7 @@ Commands:
   pull             Pull with rebase
   push             Push to remote
   sync             Pull and push (sync with remote)
+  snapshot          Full repo state as JSON (branch, status, log, remotes, stashes)
 
 Examples:
   agent-git status
@@ -128,6 +129,82 @@ cmd_sync() {
     echo "Synced!"
 }
 
+cmd_snapshot() {
+    python3 -c "
+import subprocess, json
+
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return r.stdout.strip()
+
+# Branch info
+branch = run('git branch --show-current')
+all_branches = [b.strip().lstrip('* ') for b in run('git branch').split('\n') if b.strip()]
+
+# Remote info
+remotes = []
+for line in run('git remote -v').split('\n'):
+    if line.strip() and '(fetch)' in line:
+        parts = line.split()
+        remotes.append({'name': parts[0], 'url': parts[1]})
+
+# Status
+status_lines = run('git status --porcelain')
+staged = []
+unstaged = []
+untracked = []
+for line in status_lines.split('\n'):
+    if not line: continue
+    idx, wt = line[0], line[1]
+    path = line[3:]
+    if idx != ' ' and idx != '?':
+        staged.append({'status': idx, 'path': path})
+    if wt != ' ' and wt != '?':
+        unstaged.append({'status': wt, 'path': path})
+    if idx == '?' and wt == '?':
+        untracked.append(path)
+
+# Recent log
+log = []
+for line in run('git log --oneline -10').split('\n'):
+    if not line: continue
+    parts = line.split(' ', 1)
+    log.append({'hash': parts[0], 'message': parts[1] if len(parts) > 1 else ''})
+
+# Stashes
+stashes = [s.strip() for s in run('git stash list').split('\n') if s.strip()]
+
+# Ahead/behind
+ahead_behind = run('git rev-list --left-right --count HEAD...@{upstream} 2>/dev/null')
+ahead = 0
+behind = 0
+if ahead_behind:
+    parts = ahead_behind.split()
+    if len(parts) == 2:
+        ahead, behind = int(parts[0]), int(parts[1])
+
+# Repo info
+repo_root = run('git rev-parse --show-toplevel')
+repo_name = repo_root.split('/')[-1] if repo_root else ''
+
+snapshot = {
+    'repo': repo_name,
+    'branch': branch,
+    'branches': all_branches,
+    'remotes': remotes,
+    'ahead': ahead,
+    'behind': behind,
+    'staged': {'count': len(staged), 'files': staged},
+    'unstaged': {'count': len(unstaged), 'files': unstaged},
+    'untracked': {'count': len(untracked), 'files': untracked[:20]},
+    'clean': len(staged) == 0 and len(unstaged) == 0 and len(untracked) == 0,
+    'log': log,
+    'stashes': len(stashes),
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     status|st)
@@ -160,6 +237,9 @@ case "${1:-help}" in
         ;;
     sync)
         cmd_sync
+        ;;
+    snapshot|snap)
+        cmd_snapshot
         ;;
     help|--help|-h)
         show_help
