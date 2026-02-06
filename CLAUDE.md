@@ -29,6 +29,9 @@ cd tools/agent-manna && cargo test
 # agent-browse (Node.js)
 cd tools/agent-browse && npm install
 cd tools/agent-browse && node browser.test.js   # or protocol.test.js
+
+# agent-unbrowse (Node.js)
+cd tools/agent-unbrowse && npm install
 ```
 
 ## Architecture
@@ -89,7 +92,8 @@ Registries are loaded in reverse priority order so higher-priority sources win:
 
 | Tool | Tech | Notes |
 |------|------|-------|
-| `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js manages browser lifecycle |
+| `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js manages browser lifecycle. Also has `capture start/stop` for API skill generation and `api` subcommand for replaying captured skills. |
+| `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser for manual browsing. Shares filter/auth/generator pipeline with browse. |
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims, build with `cargo build --release` |
 
 Other tools (`agent-ios`, `agent-tui`, `agent-db`, etc.) are bash scripts symlinked from sibling `agent-CLIs` repo.
@@ -122,6 +126,7 @@ agent-do browse click @e7      # Use @refs, not raw selectors
 
 - **Python 3.10+**: `anthropic>=0.18.0`, `pyyaml>=6.0`
 - **agent-browse**: Node.js with `playwright-core`, `ws`, `zod`
+- **agent-unbrowse**: Node.js with `playwright-core`, `zod`
 - **agent-manna**: Rust with clap, serde, serde_yaml, chrono, sha2, fs2
 - **System**: tmux (for agent-tui), Xcode CLI Tools (for agent-ios)
 

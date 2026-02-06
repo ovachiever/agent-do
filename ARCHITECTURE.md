@@ -39,7 +39,8 @@ agent-do <tool> <command> [args...]
 |------|---------|---------|
 | `ios` | iOS Simulator | `agent-do ios tap-label "Sign In"` |
 | `android` | Android Emulator | `agent-do android screenshot` |
-| `browse` | Headless browser | `agent-do browse open https://example.com` |
+| `browse` | Headless browser + API capture | `agent-do browse open https://example.com` |
+| `unbrowse` | API traffic → curl skills | `agent-do unbrowse capture https://api.example.com` |
 | `tui` | Terminal apps | `agent-do tui spawn htop --session monitor` |
 | `gui` | Desktop automation | `agent-do gui click-text "Save"` |
 | `db` | Databases | `agent-do db query "SELECT * FROM users"` |
@@ -304,7 +305,8 @@ agent-do2/
 ├── tools/
 │   ├── agent-ios       # iOS Simulator
 │   ├── agent-android   # Android Emulator
-│   ├── agent-browse/   # Headless browser (Node.js)
+│   ├── agent-browse/   # Headless browser + API capture (Node.js)
+│   ├── agent-unbrowse/ # Standalone API capture → curl skills (Node.js)
 │   ├── agent-tui       # Terminal UI automation
 │   ├── agent-gui       # Desktop GUI automation
 │   └── ...             # 60+ more tools

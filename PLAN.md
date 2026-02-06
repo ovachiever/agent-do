@@ -648,6 +648,8 @@ agent-do/
 │   ├── pattern-matcher      # Offline fallback (python)
 │   └── status               # Status display (bash)
 ├── tools/                   # All 60 tools (symlinks to agent-CLIs or bundled)
+│   ├── agent-browse/   # Headless browser + API capture (Node.js, Playwright)
+│   ├── agent-unbrowse/ # Standalone API capture → curl skills (Node.js, Playwright)
 │   ├── agent-tui -> ../../agent-tui/agent-tui
 │   ├── agent-gui -> ../../agent-CLIs/agent-gui/agent-gui
 │   ├── agent-ide -> ../../agent-CLIs/agent-ide/agent-ide

@@ -39,7 +39,7 @@ Key tools by category:
 
 | Category | Tools | Use For |
 |----------|-------|---------|
-| **Core** | browse, ios, android, gui, tui, screen | Device/UI automation |
+| **Core** | browse, unbrowse, ios, android, gui, tui, screen | Device/UI automation + API capture |
 | **Data** | db, excel, manna, vision, ocr | Data access and tracking |
 | **Apps** | slack, email, calendar, notion | Communication |
 | **Infra** | docker, k8s, cloud, ci | Infrastructure |
@@ -139,11 +139,77 @@ agent-do browse wait --stable
 agent-do browse snapshot --csv -s "table"
 ```
 
+### API Capture & Replay (browse → unbrowse integration)
+```bash
+# Capture API traffic while browsing
+agent-do browse open https://app.example.com
+agent-do browse capture start              # Start recording XHR/fetch
+# ... click around, trigger API calls ...
+agent-do browse capture status             # See captured requests
+agent-do browse capture stop myservice     # Filter → extract auth → generate skill
+
+# Replay captured APIs directly (no browser, ~100x faster)
+agent-do browse api list                   # List generated skills
+agent-do browse api show myservice         # View endpoints
+agent-do browse api myservice get_users    # Call via curl
+agent-do browse api test myservice         # Verify endpoints still work
+agent-do browse api delete myservice       # Remove skill
+```
+
+Skills are saved to `~/.agent-do/skills/<name>/` with:
+- `SKILL.md` — Endpoint documentation with YAML frontmatter
+- `auth.json` — Extracted auth headers/cookies/tokens
+- `api.sh` — Source-able bash functions wrapping curl
+
 ### Common Mistakes
 - **DON'T** skip waits after navigation clicks
 - **DON'T** use stale @refs after page changes (always re-snapshot)
 - **DO** use `snapshot -i` for interactive elements only
 - **DO** use `wait --stable` instead of fixed delays when possible
+- **DO** use `capture start/stop` to discover APIs, then `api` to call them directly
+
+---
+
+## agent-do unbrowse (API Traffic → Curl Skills)
+
+Standalone tool: capture browser API traffic and generate reusable curl-based skills. Launches its own headed browser for manual browsing.
+
+### Core Workflow Pattern
+```bash
+agent-do unbrowse capture https://api.example.com  # 1. Open browser, start capture
+# Browse around manually in the headed browser...
+agent-do unbrowse status                            # 2. See captured requests
+agent-do unbrowse stop myservice                    # 3. Filter → generate skill
+agent-do unbrowse replay myservice get_users        # 4. Call API via curl
+```
+
+### Capture (requires daemon)
+```bash
+agent-do unbrowse capture <url>        # Launch headed browser + capture
+agent-do unbrowse capture <url> --headless  # Headless mode
+agent-do unbrowse stop <name>          # Stop → filter → generate skill
+agent-do unbrowse status               # Show capture progress
+agent-do unbrowse close                # Close browser + daemon
+```
+
+### Skills (no daemon needed)
+```bash
+agent-do unbrowse list                 # List generated skills
+agent-do unbrowse show <name>          # Show SKILL.md documentation
+agent-do unbrowse replay <name> <fn>   # Call function via curl
+agent-do unbrowse test <name>          # HEAD test GET endpoints
+agent-do unbrowse delete <name>        # Remove skill
+```
+
+### When to use unbrowse vs browse capture
+- **`unbrowse`**: Quick one-shot captures — launches its own browser, browse manually
+- **`browse capture`**: Integrated — start capture on an existing browse session with auth/sessions already set up
+
+### Common Mistakes
+- **DON'T** write custom HTTP client code — capture the API calls instead
+- **DON'T** use browser automation for data that has an API — use captured skills
+- **DO** use `browse capture` if you already have a browse session running
+- **DO** use `unbrowse` for standalone one-shot captures
 
 ---
 
@@ -615,6 +681,8 @@ All agent-do tools follow the same pattern:
 | Need To... | Use Tool | Not |
 |------------|----------|-----|
 | Automate browser | `agent-do browse` | Playwright scripts |
+| Capture API traffic | `agent-do unbrowse` or `browse capture` | Manual HAR analysis |
+| Replay captured APIs | `agent-do browse api` or `unbrowse replay` | Custom HTTP clients |
 | Control iOS Simulator | `agent-do ios` | xcrun simctl |
 | Query database | `agent-do db` | Python + psycopg2 |
 | Edit spreadsheet | `agent-do excel` | Python + openpyxl |
