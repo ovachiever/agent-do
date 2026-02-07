@@ -16,6 +16,9 @@ Commands:
   attach <pid>               Attach to running process
   core <binary> <core>       Debug core dump
 
+  snapshot                   Debug environment as JSON (debuggable processes, tools available)
+  processes [filter]         List debuggable processes
+
 Python pdb commands (when attached):
   break <file:line>          Set breakpoint
   continue                   Continue execution
@@ -193,6 +196,100 @@ cmd_strace() {
     fi
 }
 
+cmd_snapshot() {
+    python3 -c "
+import subprocess, json, shutil, os
+
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+    return r.stdout.strip()
+
+# Available debuggers
+tools = {}
+for tool in ['lldb', 'gdb', 'python3', 'node', 'strace', 'dtruss', 'dtrace']:
+    path = shutil.which(tool)
+    tools[tool] = {'available': path is not None, 'path': path or ''}
+
+# Check python debug modules
+for mod in ['pdb', 'debugpy', 'ipdb']:
+    try:
+        __import__(mod)
+        tools[f'python:{mod}'] = {'available': True}
+    except ImportError:
+        tools[f'python:{mod}'] = {'available': False}
+
+# Find debuggable processes (python, node, java)
+processes = []
+try:
+    ps_out = run('ps -eo pid,comm,args')
+    for line in ps_out.split('\n')[1:]:
+        parts = line.split(None, 2)
+        if len(parts) < 2:
+            continue
+        pid, comm = parts[0], parts[1]
+        args = parts[2] if len(parts) > 2 else ''
+        debuggable = False
+        ptype = ''
+        if 'python' in comm.lower():
+            debuggable = True
+            ptype = 'python'
+        elif 'node' in comm.lower():
+            debuggable = True
+            ptype = 'node'
+        elif 'java' in comm.lower():
+            debuggable = True
+            ptype = 'java'
+        if debuggable:
+            processes.append({
+                'pid': int(pid),
+                'type': ptype,
+                'command': args[:100],
+            })
+except:
+    pass
+
+# Core dumps
+cores = []
+for path in ['/cores', '/var/crash', os.path.expanduser('~')]:
+    if os.path.isdir(path):
+        for f in os.listdir(path):
+            if f.startswith('core') or f.endswith('.core') or f.endswith('.crash'):
+                cores.append(os.path.join(path, f))
+
+snapshot = {
+    'tools': {k: v for k, v in tools.items() if v.get('available')},
+    'missing_tools': {k: v for k, v in tools.items() if not v.get('available')},
+    'debuggable_processes': {'count': len(processes), 'items': processes[:20]},
+    'core_dumps': cores[:10],
+    'platform': run('uname -s'),
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+cmd_processes() {
+    local filter="${1:-}"
+    python3 - "$filter" << 'PYEOF'
+import subprocess, sys
+ps = subprocess.run(['ps', '-eo', 'pid,comm,args'], capture_output=True, text=True).stdout
+filt = sys.argv[1].lower() if len(sys.argv) > 1 else ''
+print(f'{"PID":>7}  {"TYPE":8}  COMMAND')
+print('-' * 60)
+for line in ps.strip().split('\n')[1:]:
+    parts = line.split(None, 2)
+    if len(parts) < 2: continue
+    pid, comm = parts[0], parts[1]
+    args = parts[2] if len(parts) > 2 else ''
+    ptype = ''
+    if 'python' in comm.lower(): ptype = 'python'
+    elif 'node' in comm.lower(): ptype = 'node'
+    elif 'java' in comm.lower(): ptype = 'java'
+    elif 'ruby' in comm.lower(): ptype = 'ruby'
+    if ptype and (not filt or filt in ptype or filt in args.lower()):
+        print(f'{pid:>7}  {ptype:8}  {args[:70]}')
+PYEOF
+}
+
 # Main
 case "${1:-help}" in
     python|py|pdb)
@@ -222,6 +319,13 @@ case "${1:-help}" in
     strace|trace)
         shift
         cmd_strace "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    processes|procs|ps)
+        shift || true
+        cmd_processes "$@"
         ;;
     help|--help|-h)
         show_help

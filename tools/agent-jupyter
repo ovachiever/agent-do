@@ -15,6 +15,7 @@ Commands:
   run <notebook>             Execute notebook
   convert <notebook> <fmt>   Convert notebook (html, pdf, py, md)
   create <name>              Create new notebook
+  snapshot [notebook]        Jupyter state as JSON (servers, kernels, notebook cells)
 
 Options:
   --port <port>              Server port (default: 8888)
@@ -220,6 +221,101 @@ cmd_kernels() {
     fi
 }
 
+cmd_snapshot() {
+    local notebook="${1:-}"
+
+    python3 -c "
+import subprocess, json, os, sys
+
+def run(cmd):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+    return r.stdout.strip()
+
+snapshot = {}
+
+# Running servers
+servers = []
+try:
+    raw = run('jupyter notebook list 2>/dev/null')
+    for line in raw.split('\n'):
+        line = line.strip()
+        if line.startswith('http'):
+            parts = line.split(' :: ')
+            url = parts[0].strip() if parts else line
+            directory = parts[1].strip() if len(parts) > 1 else ''
+            servers.append({'url': url, 'directory': directory})
+except:
+    pass
+
+snapshot['servers'] = {'count': len(servers), 'items': servers}
+
+# Available kernels
+kernels = []
+try:
+    raw = run('jupyter kernelspec list --json 2>/dev/null')
+    if raw:
+        kdata = json.loads(raw)
+        for name, info in kdata.get('kernelspecs', {}).items():
+            kernels.append({
+                'name': name,
+                'display_name': info.get('spec', {}).get('display_name', name),
+                'language': info.get('spec', {}).get('language', ''),
+            })
+except:
+    pass
+
+snapshot['kernels'] = {'count': len(kernels), 'items': kernels}
+
+# Notebook info (if path provided)
+notebook_path = '$notebook'
+if notebook_path and os.path.exists(notebook_path):
+    try:
+        with open(notebook_path) as f:
+            nb = json.load(f)
+        cells = nb.get('cells', [])
+        cell_summary = []
+        for i, cell in enumerate(cells):
+            source = ''.join(cell.get('source', []))
+            outputs = cell.get('outputs', [])
+            has_error = any(o.get('output_type') == 'error' for o in outputs)
+            cell_summary.append({
+                'index': i,
+                'type': cell.get('cell_type', ''),
+                'source_preview': source[:100] + ('...' if len(source) > 100 else ''),
+                'execution_count': cell.get('execution_count'),
+                'has_output': len(outputs) > 0,
+                'has_error': has_error,
+            })
+
+        kernel = nb.get('metadata', {}).get('kernelspec', {})
+        snapshot['notebook'] = {
+            'path': notebook_path,
+            'kernel': kernel.get('display_name', 'unknown'),
+            'language': kernel.get('language', ''),
+            'cell_count': len(cells),
+            'code_cells': sum(1 for c in cells if c.get('cell_type') == 'code'),
+            'markdown_cells': sum(1 for c in cells if c.get('cell_type') == 'markdown'),
+            'cells': cell_summary,
+        }
+    except Exception as e:
+        snapshot['notebook'] = {'error': str(e)}
+
+# Find notebooks in current directory
+local_notebooks = []
+for f in sorted(os.listdir('.')):
+    if f.endswith('.ipynb') and not f.startswith('.'):
+        size = os.path.getsize(f)
+        local_notebooks.append({'name': f, 'size': size})
+
+snapshot['local_notebooks'] = {'count': len(local_notebooks), 'items': local_notebooks[:20]}
+
+# Jupyter installed?
+snapshot['jupyter_available'] = bool(run('which jupyter 2>/dev/null'))
+
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     start|serve)
@@ -250,6 +346,10 @@ case "${1:-help}" in
         ;;
     kernels)
         cmd_kernels
+        ;;
+    snapshot|snap)
+        shift || true
+        cmd_snapshot "$@"
         ;;
     help|--help|-h)
         show_help

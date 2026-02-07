@@ -8,6 +8,7 @@ show_help() {
 agent-video - Video processing
 
 Commands:
+  snapshot                   Show available tools and video files (JSON)
   info <file>                Show video info
   convert <file> <format>    Convert format (mp4, webm, avi, mkv)
   trim <file> <start> <end>  Trim video (HH:MM:SS format)
@@ -281,8 +282,41 @@ cmd_compress() {
     echo "Output: $output"
 }
 
+cmd_snapshot() {
+    python3 -c "
+import json, os, shutil, subprocess
+
+tools = {}
+for t in ['ffmpeg', 'ffprobe', 'yt-dlp', 'youtube-dl']:
+    tools[t] = shutil.which(t) is not None
+
+videos = []
+exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv', '.wmv'}
+for f in sorted(os.listdir('.')):
+    if os.path.splitext(f)[1].lower() in exts:
+        size = os.path.getsize(f)
+        duration = ''
+        if tools.get('ffprobe'):
+            try:
+                r = subprocess.run(['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', f], capture_output=True, text=True, timeout=5)
+                if r.stdout.strip():
+                    secs = float(r.stdout.strip())
+                    duration = f'{int(secs//60)}m{int(secs%60)}s'
+            except: pass
+        videos.append({'name': f, 'size': size, 'duration': duration})
+
+print(json.dumps({
+    'tools': tools,
+    'videos': {'count': len(videos), 'items': videos[:20]},
+}, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     info|i)
         shift
         cmd_info "$@"

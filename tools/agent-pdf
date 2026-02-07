@@ -8,6 +8,7 @@ show_help() {
 agent-pdf - PDF operations
 
 Commands:
+  snapshot                   Show available tools and PDF files (JSON)
   read <file>                Extract text from PDF
   info <file>                Show PDF info
   merge <files...> <output>  Merge PDFs
@@ -221,8 +222,49 @@ PYTHON
     fi
 }
 
+cmd_snapshot() {
+    python3 -c "
+import json, os, shutil
+
+tools = {}
+for t in ['pdftotext', 'pdftk', 'qpdf', 'gs', 'pdfinfo']:
+    tools[t] = shutil.which(t) is not None
+
+# Python PDF libs
+for mod in ['PyPDF2', 'pdfplumber', 'reportlab']:
+    try:
+        __import__(mod)
+        tools[f'python:{mod}'] = True
+    except ImportError:
+        tools[f'python:{mod}'] = False
+
+pdfs = []
+for f in sorted(os.listdir('.')):
+    if f.lower().endswith('.pdf'):
+        size = os.path.getsize(f)
+        pages = ''
+        if tools.get('pdfinfo'):
+            import subprocess
+            try:
+                r = subprocess.run(['pdfinfo', f], capture_output=True, text=True, timeout=5)
+                for line in r.stdout.split('\n'):
+                    if line.startswith('Pages:'):
+                        pages = line.split(':')[1].strip()
+            except: pass
+        pdfs.append({'name': f, 'size': size, 'pages': pages})
+
+print(json.dumps({
+    'tools': tools,
+    'pdfs': {'count': len(pdfs), 'items': pdfs[:20]},
+}, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     read|extract|text)
         shift
         cmd_read "$@"

@@ -25,6 +25,7 @@ Commands:
   restore <vm> <name>        Restore snapshot
   status <vm>                Show VM status
   ssh <vm>                   SSH into VM (if configured)
+  state                      Show hypervisors and VMs overview (JSON)
 
 Examples:
   agent-vm list
@@ -337,6 +338,59 @@ cmd_status() {
     esac
 }
 
+cmd_state_snapshot() {
+    python3 -c "
+import json, shutil, subprocess, os
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip()
+    except:
+        return ''
+
+snapshot = {'hypervisors': {}, 'vms': []}
+
+# VirtualBox
+if shutil.which('VBoxManage'):
+    snapshot['hypervisors']['virtualbox'] = True
+    raw = run('VBoxManage list vms --long 2>/dev/null')
+    for line in raw.split('\n'):
+        if line.startswith('Name:'):
+            name = line.split(':', 1)[1].strip()
+            snapshot['vms'].append({'name': name, 'hypervisor': 'virtualbox'})
+
+# Docker (VMs)
+if shutil.which('docker'):
+    snapshot['hypervisors']['docker'] = True
+
+# UTM (macOS)
+if os.path.exists('/Applications/UTM.app'):
+    snapshot['hypervisors']['utm'] = True
+
+# Lima
+if shutil.which('limactl'):
+    snapshot['hypervisors']['lima'] = True
+    raw = run('limactl list --format json 2>/dev/null')
+    if raw:
+        try:
+            for vm in json.loads(raw):
+                snapshot['vms'].append({
+                    'name': vm.get('name', ''),
+                    'status': vm.get('status', ''),
+                    'hypervisor': 'lima',
+                })
+        except: pass
+
+# QEMU
+if shutil.which('qemu-system-x86_64') or shutil.which('qemu-system-aarch64'):
+    snapshot['hypervisors']['qemu'] = True
+
+snapshot['vm_count'] = len(snapshot['vms'])
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     list|ls)
@@ -373,6 +427,9 @@ case "${1:-help}" in
     status|info)
         shift
         cmd_status "$@"
+        ;;
+    state|overview)
+        cmd_state_snapshot
         ;;
     help|--help|-h)
         show_help

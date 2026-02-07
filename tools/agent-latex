@@ -8,6 +8,7 @@ show_help() {
 agent-latex - LaTeX document compilation and management
 
 Commands:
+  snapshot                 Show LaTeX environment and .tex files (JSON)
   compile <file>           Compile LaTeX to PDF
   watch <file>             Watch and auto-compile
   clean <dir>              Clean auxiliary files
@@ -133,14 +134,16 @@ cmd_clean() {
     )
 
     local count=0
+    shopt -s nullglob
     for ext in "${extensions[@]}"; do
-        for f in "$dir"/*."$ext" 2>/dev/null; do
+        for f in "$dir"/*."$ext"; do
             if [[ -f "$f" ]]; then
                 rm "$f"
                 ((count++))
             fi
         done
     done
+    shopt -u nullglob
 
     echo "Removed $count auxiliary files"
 }
@@ -431,8 +434,48 @@ cmd_check() {
     grep -n '[^\\]%' "$file" | head -5 && echo "  ^ Unescaped % (may be intentional comments)"
 }
 
+cmd_snapshot() {
+    python3 << 'PYEOF'
+import json, os, shutil, subprocess
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        return r.stdout.strip()
+    except:
+        return ''
+
+tools = {}
+for t in ['pdflatex', 'xelatex', 'lualatex', 'biber', 'bibtex', 'latexmk', 'pandoc']:
+    path = shutil.which(t)
+    tools[t] = {'available': path is not None}
+    if path and 'latex' in t:
+        ver = run(f'{t} --version 2>/dev/null | head -1')
+        if ver:
+            tools[t]['version'] = ver
+
+tex_files = []
+for f in sorted(os.listdir('.')):
+    if f.endswith('.tex'):
+        size = os.path.getsize(f)
+        # Check if PDF exists
+        pdf = f.replace('.tex', '.pdf')
+        has_pdf = os.path.exists(pdf)
+        tex_files.append({'name': f, 'size': size, 'pdf_exists': has_pdf})
+
+print(json.dumps({
+    'tools': {k: v for k, v in tools.items() if v.get('available')},
+    'missing': [k for k, v in tools.items() if not v.get('available')],
+    'tex_files': {'count': len(tex_files), 'items': tex_files[:20]},
+}, indent=2))
+PYEOF
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     compile|build|make)
         shift
         cmd_compile "$@"

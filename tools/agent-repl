@@ -16,6 +16,7 @@ Commands:
   read <session>             Read REPL output
   list                       List active REPLs
   kill <session>             Kill a REPL session
+  snapshot [session]         REPL state as JSON (active sessions, available interpreters)
 
 Supported REPLs:
   python, python3, ipython   Python
@@ -107,6 +108,79 @@ cmd_kill() {
     "$AGENT_TUI" kill --session "$session"
 }
 
+cmd_snapshot() {
+    local session="${1:-}"
+
+    python3 -c "
+import subprocess, json, shutil, os
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        return r.stdout.strip()
+    except:
+        return ''
+
+# Available interpreters
+interpreters = {}
+for name, cmd in [
+    ('python3', 'python3'), ('ipython', 'ipython'), ('node', 'node'),
+    ('ruby', 'ruby'), ('irb', 'irb'), ('psql', 'psql'), ('mysql', 'mysql'),
+    ('sqlite3', 'sqlite3'), ('lua', 'lua'), ('ghci', 'ghci'),
+]:
+    path = shutil.which(cmd)
+    if path:
+        version = ''
+        try:
+            if 'python' in name:
+                version = run(f'{cmd} --version 2>&1').split()[-1]
+            elif name == 'node':
+                version = run(f'{cmd} --version').lstrip('v')
+            elif name == 'ruby' or name == 'irb':
+                version = run(f'ruby --version 2>&1').split()[1]
+        except:
+            pass
+        interpreters[name] = {'path': path, 'version': version}
+
+# Active tmux sessions (agent-tui prefix)
+sessions = []
+raw = run('tmux list-sessions -F \"#{session_name}\t#{session_created}\t#{session_attached}\" 2>/dev/null')
+for line in raw.split('\n'):
+    if not line.strip():
+        continue
+    parts = line.split('\t')
+    name = parts[0]
+    if name.startswith('agent-tui-'):
+        sessions.append({
+            'name': name.replace('agent-tui-', ''),
+            'full_name': name,
+            'attached': parts[2] == '1' if len(parts) > 2 else False,
+        })
+
+# If specific session requested, get its current output
+session_id = '$session'
+session_output = None
+if session_id:
+    raw = run(f'tmux capture-pane -t agent-tui-{session_id} -p 2>/dev/null')
+    if raw:
+        lines = raw.strip().split('\n')
+        session_output = {
+            'session': session_id,
+            'lines': len(lines),
+            'last_lines': lines[-10:],
+        }
+
+snapshot = {
+    'interpreters': interpreters,
+    'active_sessions': {'count': len(sessions), 'items': sessions},
+}
+if session_output:
+    snapshot['session_output'] = session_output
+
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
     spawn|start|new)
@@ -117,9 +191,13 @@ case "${1:-help}" in
         shift
         cmd_send "$@"
         ;;
-    read|output|snapshot)
+    read|output)
         shift
         cmd_read "$@"
+        ;;
+    snapshot|snap)
+        shift || true
+        cmd_snapshot "$@"
         ;;
     list|ls)
         cmd_list

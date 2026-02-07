@@ -8,6 +8,7 @@ show_help() {
 agent-audio - Audio processing
 
 Commands:
+  snapshot                   Show available tools and audio files (JSON)
   info <file>                Show audio info
   convert <file> <format>    Convert format (mp3, wav, ogg, flac)
   trim <file> <start> <end>  Trim audio (HH:MM:SS format)
@@ -223,8 +224,32 @@ PYTHON
     fi
 }
 
+cmd_snapshot() {
+    python3 -c "
+import json, os, shutil
+
+tools = {}
+for t in ['ffmpeg', 'ffprobe', 'sox', 'play', 'rec', 'afplay', 'arecord']:
+    tools[t] = shutil.which(t) is not None
+
+audio = []
+exts = {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma', '.aiff'}
+for f in sorted(os.listdir('.')):
+    if os.path.splitext(f)[1].lower() in exts:
+        audio.append({'name': f, 'size': os.path.getsize(f)})
+
+print(json.dumps({
+    'tools': tools,
+    'audio_files': {'count': len(audio), 'items': audio[:20]},
+}, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     info|i)
         shift
         cmd_info "$@"

@@ -13,6 +13,9 @@ Commands:
   put <url> [data]             PUT request
   delete <url>                 DELETE request
   head <url>                   HEAD request
+  snapshot                     API state: environment, base URL, recent history
+  history                      Show last 20 requests with status codes
+  env [name] [url]             Set/show base URL environment (stored in ~/.agent-do/api-envs.json)
 
 Options:
   -H, --header "Key: Value"    Add header
@@ -143,6 +146,120 @@ do_request() {
     fi
 
     curl "${curl_args[@]}" "$url"
+
+    # Log to history
+    python3 -c "
+import json, os, time
+history_file = os.path.expanduser('~/.agent-do/api-history.json')
+os.makedirs(os.path.dirname(history_file), exist_ok=True)
+history = []
+if os.path.exists(history_file):
+    try:
+        with open(history_file) as f:
+            history = json.load(f)
+    except: pass
+history.append({'method': '$method', 'url': '$url', 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')})
+# Keep last 100
+history = history[-100:]
+with open(history_file, 'w') as f:
+    json.dump(history, f)
+" 2>/dev/null &
+}
+
+cmd_snapshot() {
+    python3 -c "
+import json, os
+
+env_file = os.path.expanduser('~/.agent-do/api-envs.json')
+history_file = os.path.expanduser('~/.agent-do/api-history.json')
+
+# Load envs
+envs = {}
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        envs = json.load(f)
+
+# Load history
+history = []
+if os.path.exists(history_file):
+    with open(history_file) as f:
+        history = json.load(f)
+
+base_url = os.environ.get('AGENT_API_BASE', '')
+
+snapshot = {
+    'base_url': base_url or '(not set)',
+    'environments': envs,
+    'recent_requests': history[-10:],
+    'total_requests': len(history),
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+cmd_history() {
+    python3 -c "
+import json, os
+
+history_file = os.path.expanduser('~/.agent-do/api-history.json')
+history = []
+if os.path.exists(history_file):
+    with open(history_file) as f:
+        history = json.load(f)
+
+if not history:
+    print('No request history')
+else:
+    for h in history[-20:]:
+        status = h.get('status', '?')
+        method = h.get('method', '?')
+        url = h.get('url', '?')
+        time_str = h.get('time', '?')
+        print(f'  {status}  {method:6s}  {url}  ({time_str}s)')
+"
+}
+
+cmd_env() {
+    local name="${1:-}"
+    local url="${2:-}"
+
+    python3 -c "
+import json, os, sys
+
+env_file = os.path.expanduser('~/.agent-do/api-envs.json')
+os.makedirs(os.path.dirname(env_file), exist_ok=True)
+
+envs = {}
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        envs = json.load(f)
+
+name = '$name'
+url = '$url'
+
+if not name:
+    # Show all envs
+    if not envs:
+        print('No environments configured')
+        print('Usage: agent-api env <name> <base_url>')
+    else:
+        for n, u in envs.items():
+            print(f'  {n}: {u}')
+elif url:
+    # Set env
+    envs[name] = url
+    with open(env_file, 'w') as f:
+        json.dump(envs, f, indent=2)
+    print(f'Set {name} = {url}')
+    print(f'Use: AGENT_API_BASE=\"{url}\" agent-api get /endpoint')
+else:
+    # Show specific env
+    if name in envs:
+        print(envs[name])
+    else:
+        print(f'Environment \"{name}\" not found')
+        sys.exit(1)
+"
 }
 
 # Main
@@ -170,6 +287,16 @@ case "${1:-help}" in
     head|HEAD)
         shift
         do_request HEAD -v "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    history|hist)
+        cmd_history
+        ;;
+    env|environment)
+        shift
+        cmd_env "$@"
         ;;
     help|--help|-h)
         show_help

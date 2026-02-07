@@ -8,6 +8,7 @@ show_help() {
 agent-image - Image processing
 
 Commands:
+  snapshot                   Show available tools and image files (JSON)
   info <file>                Show image info
   resize <file> <WxH>        Resize image
   crop <file> <WxH+X+Y>      Crop image
@@ -378,8 +379,49 @@ cmd_thumbnail() {
     echo "Thumbnail created: $output"
 }
 
+cmd_snapshot() {
+    python3 -c "
+import json, os, shutil, subprocess
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        return r.stdout.strip()
+    except:
+        return ''
+
+# Available tools
+tools = {}
+for t in ['convert', 'ffmpeg', 'sips', 'exiftool', 'identify']:
+    tools[t] = shutil.which(t) is not None
+
+# Image files in current dir
+images = []
+exts = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.tiff', '.ico'}
+for f in sorted(os.listdir('.')):
+    if os.path.splitext(f)[1].lower() in exts:
+        size = os.path.getsize(f)
+        # Get dimensions via sips on macOS
+        dims = ''
+        if tools.get('sips'):
+            w = run(f'sips -g pixelWidth \"{f}\" 2>/dev/null | tail -1').split()[-1:]
+            h = run(f'sips -g pixelHeight \"{f}\" 2>/dev/null | tail -1').split()[-1:]
+            if w and h:
+                dims = f'{w[0]}x{h[0]}'
+        images.append({'name': f, 'size': size, 'dimensions': dims})
+
+print(json.dumps({
+    'tools': tools,
+    'images': {'count': len(images), 'items': images[:30]},
+}, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     info|i)
         shift
         cmd_info "$@"
