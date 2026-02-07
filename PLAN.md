@@ -482,7 +482,7 @@ tui:
     command: "python3"
     started: "2024-01-15T10:00:00"
     label: "python REPL"
-    cwd: "/Users/erik/project"
+    cwd: "/path/to/project"
   - id: 2
     command: "htop"
     started: "2024-01-15T10:05:00"
