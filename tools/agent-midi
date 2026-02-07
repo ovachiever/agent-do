@@ -12,6 +12,7 @@ Commands:
   send <device> <msg>        Send MIDI message
   monitor [device]           Monitor MIDI input
   play <file>                Play MIDI file
+  snapshot                   MIDI environment as JSON (devices, ports)
 
 Message format:
   note <channel> <note> <velocity>     Note on (velocity 0 = note off)
@@ -159,8 +160,64 @@ cmd_play() {
     python_midi play "$file"
 }
 
+cmd_snapshot() {
+    python3 -c "
+import subprocess, json, shutil, os
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip()
+    except:
+        return ''
+
+snapshot = {'platform': '', 'devices': [], 'tools': {}}
+
+# Check tools
+for t in ['fluidsynth', 'timidity', 'aplaymidi']:
+    snapshot['tools'][t] = shutil.which(t) is not None
+
+# Check Python MIDI libs
+for mod in ['mido', 'rtmidi', 'pygame.midi']:
+    try:
+        __import__(mod.split('.')[0])
+        snapshot['tools'][f'python:{mod}'] = True
+    except ImportError:
+        snapshot['tools'][f'python:{mod}'] = False
+
+if os.uname().sysname == 'Darwin':
+    snapshot['platform'] = 'macOS (Core MIDI)'
+    raw = run('system_profiler SPMIDIDataType 2>/dev/null')
+    if raw:
+        current = None
+        for line in raw.split('\n'):
+            line = line.strip()
+            if line.endswith(':') and not line.startswith('MIDI'):
+                current = {'name': line.rstrip(':'), 'type': ''}
+                snapshot['devices'].append(current)
+            elif current and 'Manufacturer' in line:
+                current['manufacturer'] = line.split(':',1)[1].strip()
+else:
+    snapshot['platform'] = 'Linux/Other'
+    raw = run('aplaymidi -l 2>/dev/null')
+    if raw:
+        for line in raw.split('\n')[1:]:
+            if line.strip():
+                snapshot['devices'].append({'raw': line.strip()})
+
+# MIDI files in current dir
+midi_files = [f for f in os.listdir('.') if f.lower().endswith(('.mid', '.midi'))]
+snapshot['midi_files'] = {'count': len(midi_files), 'items': midi_files[:20]}
+
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     list|devices)
         cmd_list
         ;;

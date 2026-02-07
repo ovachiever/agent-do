@@ -10,6 +10,9 @@ agent-discord - Discord messaging
 Commands:
   send <channel-id> <message>  Send message to channel
   webhook <message>            Send via webhook URL
+  snapshot                   Discord state as JSON (guilds, channels)
+  guilds                     List servers the bot is in
+  channels <guild-id>        List channels in a server
 
 Environment:
   DISCORD_TOKEN                Bot token
@@ -83,8 +86,87 @@ cmd_webhook() {
     send_webhook "$message"
 }
 
+cmd_snapshot() {
+    local token="${DISCORD_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "DISCORD_TOKEN not set"}'
+        return 1
+    fi
+
+    python3 -c "
+import urllib.request, json, os
+
+token = os.environ.get('DISCORD_TOKEN', '')
+headers = {'Authorization': f'Bot {token}'}
+
+def discord_get(endpoint):
+    url = f'https://discord.com/api/v10{endpoint}'
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        return {'error': str(e)}
+
+# Get bot user
+user = discord_get('/users/@me')
+
+# Get guilds
+guilds_data = discord_get('/users/@me/guilds')
+guilds = []
+if isinstance(guilds_data, list):
+    for g in guilds_data[:20]:
+        guilds.append({'id': g['id'], 'name': g['name'], 'owner': g.get('owner', False)})
+
+snapshot = {
+    'bot': {'name': user.get('username', '?'), 'id': user.get('id', '?')} if isinstance(user, dict) and 'id' in user else {'error': str(user)},
+    'guilds': {'count': len(guilds), 'items': guilds},
+    'token_valid': isinstance(user, dict) and 'id' in user,
+    'webhook_configured': bool(os.environ.get('DISCORD_WEBHOOK_URL')),
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+cmd_guilds() {
+    local token="${DISCORD_TOKEN:-}"
+    [[ -z "$token" ]] && { echo "Error: DISCORD_TOKEN not set"; return 1; }
+    curl -s "https://discord.com/api/v10/users/@me/guilds" \
+        -H "Authorization: Bot $token" | \
+        python3 -c "import sys,json; [print(f'{g[\"name\"]} ({g[\"id\"]})') for g in json.load(sys.stdin)]"
+}
+
+cmd_channels() {
+    local guild_id="${1:-}"
+    local token="${DISCORD_TOKEN:-}"
+    [[ -z "$token" ]] && { echo "Error: DISCORD_TOKEN not set"; return 1; }
+    [[ -z "$guild_id" ]] && { echo "Usage: agent-discord channels <guild-id>"; return 1; }
+    curl -s "https://discord.com/api/v10/guilds/${guild_id}/channels" \
+        -H "Authorization: Bot $token" | \
+        python3 -c "
+import sys, json
+channels = json.load(sys.stdin)
+if isinstance(channels, list):
+    for ch in sorted(channels, key=lambda c: c.get('position', 0)):
+        prefix = '#' if ch.get('type', 0) == 0 else '🔊' if ch.get('type', 0) == 2 else '📁'
+        print(f'{prefix} {ch[\"name\"]} ({ch[\"id\"]})')
+else:
+    print(f'Error: {channels}')
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    guilds|servers)
+        cmd_guilds
+        ;;
+    channels|ch)
+        shift
+        cmd_channels "$@"
+        ;;
     send|message)
         shift
         cmd_send "$@"

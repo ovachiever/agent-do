@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# bin/health — Health check for agent-do tools
+# Usage: agent-do --health [tool...]
+# Checks if tools have their dependencies installed and are ready to use.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_DIR="$SCRIPT_DIR/../tools"
+
+check_tool() {
+    local name="$1"
+    local tool_path=""
+
+    # Find tool
+    if [[ -d "$TOOLS_DIR/agent-$name" ]]; then
+        tool_path="$TOOLS_DIR/agent-$name/agent-$name"
+    elif [[ -f "$TOOLS_DIR/agent-$name" ]]; then
+        tool_path="$TOOLS_DIR/agent-$name"
+    fi
+
+    if [[ -z "$tool_path" ]] || [[ ! -x "$tool_path" ]]; then
+        echo "  MISS  $name  (not found)"
+        return 1
+    fi
+
+    # Check if --help works
+    if "$tool_path" --help &>/dev/null; then
+        # Tool-specific dependency checks
+        local status="OK"
+        local note=""
+
+        case "$name" in
+            browse|unbrowse)
+                if ! command -v node &>/dev/null; then
+                    status="WARN"; note="node not found"
+                elif [[ -d "$TOOLS_DIR/agent-$name/node_modules" ]]; then
+                    status="OK"; note="node_modules present"
+                else
+                    status="WARN"; note="run: cd tools/agent-$name && npm install"
+                fi
+                ;;
+            manna)
+                local manna_bin="$TOOLS_DIR/agent-manna/target/release/agent-manna"
+                if [[ -x "$manna_bin" ]]; then
+                    status="OK"; note="binary built"
+                else
+                    status="WARN"; note="run: cd tools/agent-manna && cargo build --release"
+                fi
+                ;;
+            ios)
+                if command -v xcrun &>/dev/null; then
+                    status="OK"
+                else
+                    status="WARN"; note="Xcode CLI tools not found"
+                fi
+                ;;
+            docker)
+                if command -v docker &>/dev/null; then
+                    if docker info &>/dev/null; then
+                        status="OK"; note="Docker running"
+                    else
+                        status="WARN"; note="Docker installed but not running"
+                    fi
+                else
+                    status="WARN"; note="docker not found"
+                fi
+                ;;
+            k8s)
+                if command -v kubectl &>/dev/null; then
+                    if kubectl cluster-info &>/dev/null 2>&1; then
+                        status="OK"; note="cluster reachable"
+                    else
+                        status="WARN"; note="kubectl found but no cluster"
+                    fi
+                else
+                    status="WARN"; note="kubectl not found"
+                fi
+                ;;
+            slack)
+                [[ -n "${SLACK_TOKEN:-}" ]] && { status="OK"; note="token set"; } || { status="CONF"; note="SLACK_TOKEN not set"; }
+                ;;
+            notion)
+                [[ -n "${NOTION_TOKEN:-}" ]] && { status="OK"; note="token set"; } || { status="CONF"; note="NOTION_TOKEN not set"; }
+                ;;
+            linear)
+                [[ -n "${LINEAR_API_KEY:-}" ]] && { status="OK"; note="key set"; } || { status="CONF"; note="LINEAR_API_KEY not set"; }
+                ;;
+            discord)
+                [[ -n "${DISCORD_TOKEN:-}" ]] && { status="OK"; note="token set"; } || { status="CONF"; note="DISCORD_TOKEN not set"; }
+                ;;
+            tui)
+                command -v tmux &>/dev/null && { status="OK"; } || { status="WARN"; note="tmux not found"; }
+                ;;
+            jupyter)
+                command -v jupyter &>/dev/null && { status="OK"; } || { status="WARN"; note="jupyter not found"; }
+                ;;
+            latex)
+                command -v pdflatex &>/dev/null && { status="OK"; } || { status="WARN"; note="pdflatex not found"; }
+                ;;
+            *)
+                status="OK"
+                ;;
+        esac
+
+        local icon="✓"
+        [[ "$status" == "WARN" ]] && icon="⚠"
+        [[ "$status" == "CONF" ]] && icon="○"
+        [[ "$status" == "MISS" ]] && icon="✗"
+
+        if [[ -n "$note" ]]; then
+            echo "  $icon  $status  $name  ($note)"
+        else
+            echo "  $icon  OK    $name"
+        fi
+    else
+        echo "  ✗  ERR   $name  (--help failed)"
+        return 1
+    fi
+}
+
+main() {
+    echo "agent-do health check"
+    echo "===================="
+    echo ""
+
+    local tools=("$@")
+
+    if [[ ${#tools[@]} -eq 0 ]]; then
+        # Check all tools
+        for tool_path in "$TOOLS_DIR"/agent-*; do
+            local name
+            if [[ -d "$tool_path" ]]; then
+                name=$(basename "$tool_path" | sed 's/^agent-//')
+            else
+                name=$(basename "$tool_path" | sed 's/^agent-//')
+            fi
+            tools+=("$name")
+        done
+    fi
+
+    local ok=0 warn=0 conf=0 miss=0
+
+    for name in $(echo "${tools[@]}" | tr ' ' '\n' | sort -u); do
+        result=$(check_tool "$name" 2>/dev/null || echo "  ✗  MISS  $name")
+        echo "$result"
+        case "$result" in
+            *"OK"*) ok=$((ok + 1)) ;;
+            *"WARN"*) warn=$((warn + 1)) ;;
+            *"CONF"*) conf=$((conf + 1)) ;;
+            *) miss=$((miss + 1)) ;;
+        esac
+    done
+
+    echo ""
+    echo "Summary: $ok ready, $warn warnings, $conf need config, $miss missing"
+    echo ""
+    echo "Legend: ✓ OK = ready  ⚠ WARN = missing dependency  ○ CONF = needs env var"
+}
+
+main "$@"

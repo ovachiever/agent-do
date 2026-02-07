@@ -13,6 +13,7 @@ Commands:
   scenes                     List scenes
   run <scene>                Run a scene
   set <accessory> <state>    Set accessory state
+  snapshot                   HomeKit state as JSON (accessories, rooms, scenes)
 
 States:
   on, off                    For switches/lights
@@ -143,8 +144,67 @@ cmd_shortcuts() {
     shortcuts list 2>/dev/null || echo "Error: Could not list shortcuts"
 }
 
+cmd_snapshot() {
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo '{"error": "HomeKit requires macOS"}'
+        return 1
+    fi
+
+    python3 -c "
+import subprocess, json
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip()
+    except:
+        return ''
+
+def osascript(script):
+    r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=10)
+    return r.stdout.strip()
+
+snapshot = {
+    'platform': 'macOS HomeKit',
+    'home_app_available': True,
+    'shortcuts_available': bool(run('which shortcuts')),
+}
+
+# Try to get data via Home app AppleScript
+try:
+    rooms_raw = osascript('''
+    tell application \"Home\"
+        set output to \"\"
+        repeat with r in rooms of current home
+            set output to output & name of r & \"\n\"
+        end repeat
+        return output
+    end tell
+    ''')
+    snapshot['rooms'] = [r.strip() for r in rooms_raw.split('\n') if r.strip()]
+except:
+    snapshot['rooms'] = []
+    snapshot['note'] = 'Could not access Home app. May need to open it first.'
+
+# List available shortcuts related to HomeKit
+shortcuts_raw = run('shortcuts list 2>/dev/null')
+hk_shortcuts = []
+if shortcuts_raw:
+    for line in shortcuts_raw.split('\n'):
+        lower = line.strip().lower()
+        if any(k in lower for k in ['light', 'home', 'scene', 'room', 'thermostat', 'lock', 'blinds']):
+            hk_shortcuts.append(line.strip())
+snapshot['homekit_shortcuts'] = hk_shortcuts[:20]
+
+print(json.dumps(snapshot, indent=2))
+"
+}
+
 # Main
 case "${1:-help}" in
+    snapshot|snap)
+        cmd_snapshot
+        ;;
     list|devices|accessories)
         cmd_list
         ;;
