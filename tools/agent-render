@@ -1,0 +1,766 @@
+#!/usr/bin/env bash
+# agent-render - Render.com service management
+
+set -euo pipefail
+
+RENDER_API="https://api.render.com/v1"
+
+show_help() {
+    cat << 'EOF'
+agent-render - Render.com service management
+
+Commands:
+  services / ls                List all services
+  show <svc>                   Detailed service info
+  deploy <svc> [--commit SHA]  Trigger deploy
+  deploys <svc>                List recent deploys
+  logs <svc>                   View recent logs
+  restart <svc>                Restart service
+  suspend <svc>                Suspend service
+  resume <svc>                 Resume service
+  scale <svc> <n>              Scale instances
+  env <svc>                    List env vars
+  env-set <svc> <key> <val>    Set env var
+  env-del <svc> <key>          Delete env var
+  db list                      List PostgreSQL instances
+  db show <db>                 DB details + connection info
+  domains <svc>                List custom domains
+  metrics <svc> [--type T]     Service metrics (cpu|memory|bandwidth)
+  projects                     List projects
+  snapshot                     Full account state as JSON
+
+Services can be referenced by name or ID (srv-xxx).
+
+Environment:
+  RENDER_API_KEY               API key (Bearer token)
+
+Examples:
+  agent-render services
+  agent-render deploy my-api --commit abc123
+  agent-render env my-api
+  agent-render env-set my-api DATABASE_URL "postgres://..."
+  agent-render db list
+  agent-render snapshot
+EOF
+}
+
+# --- Helpers ---
+
+render_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+    local token="${RENDER_API_KEY:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: RENDER_API_KEY not set" >&2
+        return 1
+    fi
+
+    local args=(-s -X "$method" "${RENDER_API}${endpoint}" \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    curl "${args[@]}"
+}
+
+resolve_service() {
+    local name_or_id="$1"
+
+    # Already an ID
+    if [[ "$name_or_id" == srv-* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Resolve by name
+    local result
+    result=$(render_request GET "/services?name%5B%5D=${name_or_id}&limit=1")
+
+    local service_id
+    service_id=$(echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if items and len(items) > 0:
+    print(items[0].get('service', {}).get('id', ''))
+" 2>/dev/null)
+
+    if [[ -z "$service_id" ]]; then
+        echo "Error: Service '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$service_id"
+}
+
+resolve_postgres() {
+    local name_or_id="$1"
+
+    # Already an ID
+    if [[ "$name_or_id" == dpg-* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Resolve by name
+    local result
+    result=$(render_request GET "/postgres?limit=100")
+
+    local db_id
+    db_id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for item in items:
+    db = item.get('postgres', item)
+    if db.get('name', '') == name:
+        print(db.get('id', ''))
+        break
+" 2>/dev/null)
+
+    if [[ -z "$db_id" ]]; then
+        echo "Error: PostgreSQL instance '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$db_id"
+}
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+# --- Commands ---
+
+cmd_services() {
+    local result
+    result=$(render_request GET "/services?limit=50")
+
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No services found')
+    sys.exit(0)
+for item in items:
+    svc = item.get('service', item)
+    stype = svc.get('type', svc.get('serviceDetails', {}).get('type', '?'))
+    status = svc.get('suspended', 'unknown')
+    state = 'suspended' if status == 'suspended' else 'active'
+    url = svc.get('serviceDetails', {}).get('url', '') or ''
+    name = svc.get('name', '')
+    sid = svc.get('id', '')
+    print(f'{sid}  {name}  [{stype}]  {state}  {url}')
+"
+}
+
+cmd_show() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render show <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local result
+    result=$(render_request GET "/services/$sid")
+
+    echo "$result" | python3 -c "
+import sys, json
+svc = json.load(sys.stdin)
+print(f\"ID:       {svc.get('id', '')}\")
+print(f\"Name:     {svc.get('name', '')}\")
+print(f\"Type:     {svc.get('type', '')}\")
+print(f\"Repo:     {svc.get('repo', '')}\")
+print(f\"Branch:   {svc.get('branch', '')}\")
+print(f\"Region:   {svc.get('serviceDetails', {}).get('region', '')}\")
+print(f\"Plan:     {svc.get('serviceDetails', {}).get('plan', '')}\")
+print(f\"URL:      {svc.get('serviceDetails', {}).get('url', '')}\")
+print(f\"Suspended: {svc.get('suspended', '')}\")
+print(f\"Created:  {svc.get('createdAt', '')}\")
+print(f\"Updated:  {svc.get('updatedAt', '')}\")
+"
+}
+
+cmd_deploy() {
+    local name_or_id=""
+    local commit=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --commit|-c) commit="$2"; shift 2 ;;
+            *) name_or_id="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render deploy <service> [--commit SHA]"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local body="{}"
+    if [[ -n "$commit" ]]; then
+        body="{\"commitId\": \"$commit\"}"
+    fi
+
+    local result
+    result=$(render_request POST "/services/$sid/deploys" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f\"Deploy ID: {d.get('id', '')}\")
+print(f\"Status:    {d.get('status', '')}\")
+print(f\"Commit:    {d.get('commit', {}).get('id', 'latest')}\")
+print(f\"Created:   {d.get('createdAt', '')}\")
+"
+}
+
+cmd_deploys() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render deploys <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local result
+    result=$(render_request GET "/services/$sid/deploys?limit=10")
+
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No deploys found')
+    sys.exit(0)
+for item in items:
+    d = item.get('deploy', item)
+    commit = d.get('commit', {}).get('id', '?')[:8] if d.get('commit') else '?'
+    status = d.get('status', '?')
+    created = d.get('createdAt', '?')
+    did = d.get('id', '')
+    print(f'{did}  {status}  commit:{commit}  {created}')
+"
+}
+
+cmd_logs() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render logs <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local result
+    result=$(render_request GET "/services/$sid/logs")
+
+    echo "$result" | python3 -c "
+import sys, json
+try:
+    items = json.load(sys.stdin)
+    if isinstance(items, list):
+        for entry in items:
+            ts = entry.get('timestamp', '')
+            msg = entry.get('message', str(entry))
+            print(f'{ts}  {msg}')
+    else:
+        # Some service types return different formats
+        print(json.dumps(items, indent=2))
+except Exception as e:
+    print(sys.stdin.read() if hasattr(sys.stdin, 'read') else str(e))
+"
+}
+
+cmd_restart() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render restart <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    render_request POST "/services/$sid/restart" > /dev/null
+    echo "Restarted: $name_or_id ($sid)"
+}
+
+cmd_suspend() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render suspend <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    render_request POST "/services/$sid/suspend" > /dev/null
+    echo "Suspended: $name_or_id ($sid)"
+}
+
+cmd_resume() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render resume <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    render_request POST "/services/$sid/resume" > /dev/null
+    echo "Resumed: $name_or_id ($sid)"
+}
+
+cmd_scale() {
+    local name_or_id="${1:-}"
+    local count="${2:-}"
+
+    if [[ -z "$name_or_id" ]] || [[ -z "$count" ]]; then
+        echo "Usage: agent-render scale <service> <num_instances>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local result
+    result=$(render_request POST "/services/$sid/scale" "{\"numInstances\": $count}")
+
+    echo "Scaled $name_or_id ($sid) to $count instances"
+}
+
+cmd_env() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render env <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local result
+    result=$(render_request GET "/services/$sid/env-vars")
+
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No env vars')
+    sys.exit(0)
+for item in items:
+    ev = item.get('envVar', item)
+    key = ev.get('key', '')
+    val = ev.get('value', '')
+    if val:
+        # Mask values longer than 8 chars
+        display = val[:4] + '****' if len(val) > 8 else val
+    else:
+        display = '(generateValue)' if ev.get('generateValue') else '(empty)'
+    print(f'{key}={display}')
+"
+}
+
+cmd_env_set() {
+    local name_or_id="${1:-}"
+    local key="${2:-}"
+    local val="${3:-}"
+
+    if [[ -z "$name_or_id" ]] || [[ -z "$key" ]] || [[ -z "$val" ]]; then
+        echo "Usage: agent-render env-set <service> <KEY> <VALUE>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    # JSON-escape the value
+    local escaped_val
+    escaped_val=$(json_escape "$val")
+
+    local body="[{\"key\": \"$key\", \"value\": $escaped_val}]"
+
+    render_request PUT "/services/$sid/env-vars" "$body" > /dev/null
+    echo "Set $key on $name_or_id ($sid)"
+}
+
+cmd_env_del() {
+    local name_or_id="${1:-}"
+    local key="${2:-}"
+
+    if [[ -z "$name_or_id" ]] || [[ -z "$key" ]]; then
+        echo "Usage: agent-render env-del <service> <KEY>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    # Render's env-var delete: PUT with the key removed from the list
+    # Actually, use DELETE on the specific key
+    render_request DELETE "/services/$sid/env-vars/$key" > /dev/null
+    echo "Deleted $key from $name_or_id ($sid)"
+}
+
+cmd_db() {
+    local subcmd="${1:-list}"
+    shift || true
+
+    case "$subcmd" in
+        list|ls)
+            local result
+            result=$(render_request GET "/postgres?limit=50")
+
+            echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No PostgreSQL instances found')
+    sys.exit(0)
+for item in items:
+    db = item.get('postgres', item)
+    name = db.get('name', '')
+    did = db.get('id', '')
+    status = db.get('status', '')
+    plan = db.get('plan', '')
+    region = db.get('region', '')
+    print(f'{did}  {name}  [{plan}]  {status}  {region}')
+"
+            ;;
+        show|get)
+            local name_or_id="${1:-}"
+            if [[ -z "$name_or_id" ]]; then
+                echo "Usage: agent-render db show <database>"
+                return 1
+            fi
+
+            local dbid
+            dbid=$(resolve_postgres "$name_or_id") || return 1
+
+            local info
+            info=$(render_request GET "/postgres/$dbid")
+            local conn
+            conn=$(render_request GET "/postgres/$dbid/connection-info")
+
+            python3 -c "
+import sys, json
+
+info = json.loads('''$(echo "$info")''')
+conn = json.loads('''$(echo "$conn")''')
+
+print(f\"ID:       {info.get('id', '')}\")
+print(f\"Name:     {info.get('name', '')}\")
+print(f\"Status:   {info.get('status', '')}\")
+print(f\"Plan:     {info.get('plan', '')}\")
+print(f\"Region:   {info.get('region', '')}\")
+print(f\"Version:  {info.get('version', '')}\")
+print(f\"Created:  {info.get('createdAt', '')}\")
+print()
+print('Connection Info:')
+print(f\"  Internal: {conn.get('internalConnectionString', 'N/A')}\")
+print(f\"  External: {conn.get('externalConnectionString', 'N/A')}\")
+print(f\"  PSQL:     {conn.get('psqlCommand', 'N/A')}\")
+"
+            ;;
+        *)
+            echo "Usage: agent-render db [list|show <database>]"
+            return 1
+            ;;
+    esac
+}
+
+cmd_domains() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render domains <service>"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local result
+    result=$(render_request GET "/services/$sid/custom-domains")
+
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No custom domains')
+    sys.exit(0)
+for item in items:
+    d = item.get('customDomain', item)
+    name = d.get('name', '')
+    status = d.get('verificationStatus', '')
+    print(f'{name}  [{status}]')
+"
+}
+
+cmd_metrics() {
+    local name_or_id=""
+    local metric_type="cpu"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --type|-t) metric_type="$2"; shift 2 ;;
+            *) name_or_id="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render metrics <service> [--type cpu|memory|bandwidth]"
+        return 1
+    fi
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    # Compute time range: last 1 hour
+    local end_time start_time
+    end_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    # macOS vs Linux date compat
+    start_time=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d '1 hour ago' +"%Y-%m-%dT%H:%M:%SZ")
+
+    local result
+    result=$(render_request GET "/services/$sid/metrics/${metric_type}?start=${start_time}&end=${end_time}&resolution=300")
+
+    echo "$result" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    if isinstance(data, list):
+        for point in data:
+            ts = point.get('time', point.get('timestamp', ''))
+            val = point.get('value', point.get('avg', ''))
+            print(f'{ts}  {val}')
+    elif isinstance(data, dict):
+        # May be wrapped
+        items = data.get('metrics', data.get('data', []))
+        if items:
+            for point in items:
+                ts = point.get('time', point.get('timestamp', ''))
+                val = point.get('value', point.get('avg', ''))
+                print(f'{ts}  {val}')
+        else:
+            print(json.dumps(data, indent=2))
+    else:
+        print('No metrics data')
+except Exception as e:
+    print(f'Error: {e}')
+"
+}
+
+cmd_projects() {
+    local result
+    result=$(render_request GET "/projects?limit=50")
+
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No projects found')
+    sys.exit(0)
+for item in items:
+    p = item.get('project', item)
+    name = p.get('name', '')
+    pid = p.get('id', '')
+    env = p.get('environmentName', '')
+    print(f'{pid}  {name}  [{env}]')
+"
+}
+
+cmd_snapshot() {
+    local token="${RENDER_API_KEY:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "RENDER_API_KEY not set"}'
+        return 1
+    fi
+
+    python3 -c "
+import json, sys
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+API = 'https://api.render.com/v1'
+TOKEN = '$token'
+
+def api_get(path):
+    req = Request(API + path, headers={
+        'Authorization': 'Bearer ' + TOKEN,
+        'Accept': 'application/json',
+    })
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read())
+    except HTTPError as e:
+        if e.code == 401:
+            return {'error': 'unauthorized'}
+        return {'error': str(e)}
+    except Exception as e:
+        return {'error': str(e)}
+
+# Services
+raw_services = api_get('/services?limit=100')
+token_valid = not isinstance(raw_services, dict) or 'error' not in raw_services
+
+services = []
+by_type = {}
+suspended = 0
+if isinstance(raw_services, list):
+    for item in raw_services:
+        svc = item.get('service', item)
+        stype = svc.get('type', '?')
+        by_type[stype] = by_type.get(stype, 0) + 1
+        if svc.get('suspended') == 'suspended':
+            suspended += 1
+        services.append({
+            'id': svc.get('id', ''),
+            'name': svc.get('name', ''),
+            'type': stype,
+            'status': 'suspended' if svc.get('suspended') == 'suspended' else 'active',
+            'url': svc.get('serviceDetails', {}).get('url', ''),
+            'repo': svc.get('repo', ''),
+            'branch': svc.get('branch', ''),
+            'region': svc.get('serviceDetails', {}).get('region', ''),
+            'plan': svc.get('serviceDetails', {}).get('plan', ''),
+            'updated': svc.get('updatedAt', ''),
+        })
+
+# Databases
+raw_dbs = api_get('/postgres?limit=100')
+databases = []
+if isinstance(raw_dbs, list):
+    for item in raw_dbs:
+        db = item.get('postgres', item)
+        databases.append({
+            'id': db.get('id', ''),
+            'name': db.get('name', ''),
+            'status': db.get('status', ''),
+            'plan': db.get('plan', ''),
+            'region': db.get('region', ''),
+            'version': db.get('version', ''),
+        })
+
+# Projects
+raw_projects = api_get('/projects?limit=100')
+projects = []
+if isinstance(raw_projects, list):
+    for item in raw_projects:
+        p = item.get('project', item)
+        projects.append({
+            'id': p.get('id', ''),
+            'name': p.get('name', ''),
+            'environment': p.get('environmentName', ''),
+        })
+
+snapshot = {
+    'services': {
+        'count': len(services),
+        'by_type': by_type,
+        'suspended': suspended,
+        'items': services,
+    },
+    'databases': {
+        'count': len(databases),
+        'items': databases,
+    },
+    'projects': {
+        'count': len(projects),
+        'items': projects,
+    },
+    'token_valid': token_valid,
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+# --- Main ---
+
+case "${1:-help}" in
+    services|ls|list)
+        cmd_services
+        ;;
+    show|get)
+        shift
+        cmd_show "$@"
+        ;;
+    deploy)
+        shift
+        cmd_deploy "$@"
+        ;;
+    deploys)
+        shift
+        cmd_deploys "$@"
+        ;;
+    logs)
+        shift
+        cmd_logs "$@"
+        ;;
+    restart)
+        shift
+        cmd_restart "$@"
+        ;;
+    suspend)
+        shift
+        cmd_suspend "$@"
+        ;;
+    resume)
+        shift
+        cmd_resume "$@"
+        ;;
+    scale)
+        shift
+        cmd_scale "$@"
+        ;;
+    env)
+        shift
+        cmd_env "$@"
+        ;;
+    env-set)
+        shift
+        cmd_env_set "$@"
+        ;;
+    env-del|env-delete|env-rm)
+        shift
+        cmd_env_del "$@"
+        ;;
+    db|postgres)
+        shift || true
+        cmd_db "$@"
+        ;;
+    domains)
+        shift
+        cmd_domains "$@"
+        ;;
+    metrics)
+        shift
+        cmd_metrics "$@"
+        ;;
+    projects)
+        cmd_projects
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-render --help"
+        exit 1
+        ;;
+esac

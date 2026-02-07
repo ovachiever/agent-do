@@ -1094,3 +1094,46 @@ tools:
         command: "agent-unbrowse test myservice"
       - intent: "remove a captured skill"
         command: "agent-unbrowse delete myservice"
+
+  render:
+    description: "Control Render.com services, deploys, databases, and env vars"
+    capabilities:
+      - list and manage services
+      - trigger and view deploys
+      - view logs and metrics
+      - manage environment variables
+      - manage PostgreSQL databases
+      - view custom domains and projects
+    commands:
+      services: "List all services"
+      show: "Detailed service info"
+      deploy: "Trigger deploy"
+      deploys: "List recent deploys"
+      logs: "View service logs"
+      restart: "Restart service"
+      suspend: "Suspend service"
+      resume: "Resume service"
+      scale: "Scale instances"
+      env: "List env vars"
+      env-set: "Set env var"
+      env-del: "Delete env var"
+      db: "PostgreSQL management (list, show)"
+      domains: "List custom domains"
+      metrics: "View service metrics"
+      projects: "List projects"
+      snapshot: "Full account state as JSON"
+    examples:
+      - intent: "list my render services"
+        command: "agent-render services"
+      - intent: "deploy my-api on render"
+        command: "agent-render deploy my-api"
+      - intent: "show render service details"
+        command: "agent-render show my-api"
+      - intent: "view render service logs"
+        command: "agent-render logs my-api"
+      - intent: "set env var on render"
+        command: "agent-render env-set my-api DATABASE_URL postgres://..."
+      - intent: "list render databases"
+        command: "agent-render db list"
+      - intent: "get render account snapshot"
+        command: "agent-render snapshot"
