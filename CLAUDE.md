@@ -101,6 +101,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims. Build with `cargo build --release`. |
 | `agent-render` | Bash + curl | Render.com service management via REST API. Requires `RENDER_API_KEY`. |
 | `agent-vercel` | Bash + curl | Vercel project/deployment management via REST API. Requires `VERCEL_ACCESS_TOKEN`. Optional `--team <id>`. |
+| `agent-supabase` | Bash + curl | Supabase project/database/functions management via REST API. Requires `SUPABASE_ACCESS_TOKEN`. |
 
 Other tools are bash scripts symlinked from sibling `agent-CLIs` repo.
 
@@ -137,3 +138,4 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `MANNA_SESSION_ID`: Override session ID for agent-manna
 - `RENDER_API_KEY`: API key for agent-render (Render.com)
 - `VERCEL_ACCESS_TOKEN`: API token for agent-vercel (Vercel)
+- `SUPABASE_ACCESS_TOKEN`: API token for agent-supabase (Supabase)

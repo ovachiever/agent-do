@@ -1,0 +1,677 @@
+#!/usr/bin/env bash
+# agent-supabase - Supabase project and database management
+
+set -euo pipefail
+
+SUPABASE_API="https://api.supabase.com/v1"
+
+show_help() {
+    cat << 'EOF'
+agent-supabase - Supabase project and database management
+
+Commands:
+  projects / ls                List all projects
+  show <ref>                   Project details
+  pause <ref>                  Pause project
+  restore <ref>                Restore paused project
+  health <ref>                 Service health status
+  api-keys <ref>               List API keys (anon, service_role)
+  secrets <ref>                List secrets (env vars)
+  secret-set <ref> <k> <v>     Create/update secret
+  secret-del <ref> <name>      Delete secret
+  functions <ref>              List edge functions
+  function-show <ref> <slug>   Edge function details
+  domains <ref>                Custom hostname info
+  types <ref>                  Generate TypeScript types
+  orgs                         List organizations
+  regions                      List available regions
+  postgrest <ref>              PostgREST config
+  snapshot                     Full account state as JSON
+
+Projects are referenced by their ref (20-char project ID).
+
+Environment:
+  SUPABASE_ACCESS_TOKEN        API token (Bearer)
+
+Examples:
+  agent-supabase projects
+  agent-supabase show abcdefghijklmnopqrst
+  agent-supabase health abcdefghijklmnopqrst
+  agent-supabase api-keys abcdefghijklmnopqrst
+  agent-supabase secrets abcdefghijklmnopqrst
+  agent-supabase secret-set abcdefghijklmnopqrst MY_KEY "my_value"
+  agent-supabase secret-del abcdefghijklmnopqrst MY_KEY
+  agent-supabase functions abcdefghijklmnopqrst
+  agent-supabase orgs
+  agent-supabase snapshot
+EOF
+}
+
+# --- Helpers ---
+
+supabase_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+    local token="${SUPABASE_ACCESS_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: SUPABASE_ACCESS_TOKEN not set" >&2
+        return 1
+    fi
+
+    local args=(-s -X "$method" "${SUPABASE_API}${endpoint}" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    curl "${args[@]}"
+}
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+# --- Commands ---
+
+cmd_projects() {
+    local result
+    result=$(supabase_request GET "/projects")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No projects found')
+    sys.exit(0)
+for p in data:
+    ref = p.get('id', '')
+    name = p.get('name', '')
+    region = p.get('region', '')
+    status = p.get('status', '')
+    created = p.get('created_at', '')[:10] if p.get('created_at') else ''
+    print(f'{ref}  {name}  [{region}]  {status}  {created}')
+"
+}
+
+cmd_show() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase show <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref")
+
+    echo "$result" | python3 -c "
+import sys, json
+p = json.load(sys.stdin)
+if 'message' in p:
+    print(f\"Error: {p['message']}\")
+    sys.exit(1)
+print(f\"ID:         {p.get('id', '')}\")
+print(f\"Name:       {p.get('name', '')}\")
+print(f\"Org ID:     {p.get('organization_id', '')}\")
+print(f\"Region:     {p.get('region', '')}\")
+print(f\"Status:     {p.get('status', '')}\")
+print(f\"DB Version: {p.get('database', {}).get('version', '')}\")
+created = p.get('created_at', '')
+if created:
+    print(f'Created:    {created[:19]}')
+"
+}
+
+cmd_pause() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase pause <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request POST "/projects/$ref/pause")
+
+    if [[ -z "$result" || "$result" == "{}" ]]; then
+        echo "Paused project $ref"
+    else
+        echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'message' in d:
+    print(f\"Error: {d['message']}\")
+    sys.exit(1)
+print(f'Paused project: $ref')
+" 2>/dev/null || echo "Paused project $ref"
+    fi
+}
+
+cmd_restore() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase restore <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request POST "/projects/$ref/restore")
+
+    if [[ -z "$result" || "$result" == "{}" ]]; then
+        echo "Restoring project $ref"
+    else
+        echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'message' in d:
+    print(f\"Error: {d['message']}\")
+    sys.exit(1)
+print(f'Restoring project: $ref')
+" 2>/dev/null || echo "Restoring project $ref"
+    fi
+}
+
+cmd_health() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase health <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/health")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No health data')
+    sys.exit(0)
+for svc in data:
+    name = svc.get('name', '')
+    status = svc.get('status', '')
+    print(f'{name}: {status}')
+"
+}
+
+cmd_api_keys() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase api-keys <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/api-keys")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No API keys found')
+    sys.exit(0)
+for k in data:
+    name = k.get('name', '')
+    key = k.get('api_key', '')
+    display = key[:8] + '****' if len(key) > 12 else key
+    print(f'{name}: {display}')
+"
+}
+
+cmd_secrets() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase secrets <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/secrets")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No secrets found')
+    sys.exit(0)
+for s in data:
+    name = s.get('name', '')
+    value = s.get('value', '')
+    if value:
+        display = value[:4] + '****' if len(value) > 8 else value
+    else:
+        display = '(empty)'
+    print(f'{name}={display}')
+"
+}
+
+cmd_secret_set() {
+    local ref="${1:-}"
+    local key="${2:-}"
+    local val="${3:-}"
+
+    if [[ -z "$ref" ]] || [[ -z "$key" ]] || [[ -z "$val" ]]; then
+        echo "Usage: agent-supabase secret-set <ref> <KEY> <VALUE>"
+        return 1
+    fi
+
+    local escaped_val
+    escaped_val=$(json_escape "$val")
+
+    local body="[{\"name\": \"$key\", \"value\": $escaped_val}]"
+
+    local result
+    result=$(supabase_request POST "/projects/$ref/secrets" "$body")
+
+    if [[ -z "$result" || "$result" == "{}" ]]; then
+        echo "Set secret $key on $ref"
+    else
+        echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, dict) and 'message' in d:
+    print(f\"Error: {d['message']}\")
+    sys.exit(1)
+print(f'Set secret $key on $ref')
+" 2>/dev/null || echo "Set secret $key on $ref"
+    fi
+}
+
+cmd_secret_del() {
+    local ref="${1:-}"
+    local name="${2:-}"
+
+    if [[ -z "$ref" ]] || [[ -z "$name" ]]; then
+        echo "Usage: agent-supabase secret-del <ref> <SECRET_NAME>"
+        return 1
+    fi
+
+    local body="[\"$name\"]"
+
+    supabase_request DELETE "/projects/$ref/secrets" "$body" > /dev/null
+    echo "Deleted secret $name from $ref"
+}
+
+cmd_functions() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase functions <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/functions")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No edge functions found')
+    sys.exit(0)
+for f in data:
+    slug = f.get('slug', '')
+    name = f.get('name', '')
+    status = f.get('status', '')
+    version = f.get('version', '')
+    updated = f.get('updated_at', '')[:19] if f.get('updated_at') else ''
+    print(f'{slug}  {name}  [{status}]  v{version}  {updated}')
+"
+}
+
+cmd_function_show() {
+    local ref="${1:-}"
+    local slug="${2:-}"
+
+    if [[ -z "$ref" ]] || [[ -z "$slug" ]]; then
+        echo "Usage: agent-supabase function-show <ref> <slug>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/functions/$slug")
+
+    echo "$result" | python3 -c "
+import sys, json
+f = json.load(sys.stdin)
+if 'message' in f:
+    print(f\"Error: {f['message']}\")
+    sys.exit(1)
+print(f\"ID:       {f.get('id', '')}\")
+print(f\"Name:     {f.get('name', '')}\")
+print(f\"Slug:     {f.get('slug', '')}\")
+print(f\"Status:   {f.get('status', '')}\")
+print(f\"Version:  {f.get('version', '')}\")
+print(f\"Verify:   {f.get('verify_jwt', '')}\")
+created = f.get('created_at', '')
+if created:
+    print(f'Created:  {created[:19]}')
+updated = f.get('updated_at', '')
+if updated:
+    print(f'Updated:  {updated[:19]}')
+"
+}
+
+cmd_domains() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase domains <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/custom-hostname")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, dict) and 'message' in d:
+    print(f\"Error: {d['message']}\")
+    sys.exit(1)
+status = d.get('status', '')
+hostname = d.get('custom_hostname', '') or d.get('hostname', '')
+if hostname:
+    print(f'Hostname: {hostname}')
+    print(f'Status:   {status}')
+    data = d.get('data', {})
+    if data:
+        print(f'SSL:      {data.get(\"ssl\", {}).get(\"status\", \"\")}')
+else:
+    print('No custom hostname configured')
+"
+}
+
+cmd_types() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase types <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/types/typescript")
+
+    echo "$result" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    if isinstance(d, dict) and 'message' in d:
+        print(f\"Error: {d['message']}\")
+        sys.exit(1)
+    types = d.get('types', '')
+    if types:
+        print(types)
+    else:
+        print(json.dumps(d, indent=2))
+except:
+    # Response may be plain text
+    pass
+" 2>/dev/null || echo "$result"
+}
+
+cmd_orgs() {
+    local result
+    result=$(supabase_request GET "/organizations")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No organizations found')
+    sys.exit(0)
+for o in data:
+    oid = o.get('id', '')
+    name = o.get('name', '')
+    print(f'{oid}  {name}')
+"
+}
+
+cmd_regions() {
+    local result
+    result=$(supabase_request GET "/projects/available-regions")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Error: {data['message']}\")
+    sys.exit(1)
+if not data:
+    print('No regions available')
+    sys.exit(0)
+for r in data:
+    if isinstance(r, dict):
+        print(f\"{r.get('region', '')}  {r.get('display_name', '')}\")
+    else:
+        print(r)
+"
+}
+
+cmd_postgrest() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase postgrest <ref>"
+        return 1
+    fi
+
+    local result
+    result=$(supabase_request GET "/projects/$ref/postgrest")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'message' in d:
+    print(f\"Error: {d['message']}\")
+    sys.exit(1)
+print(f\"Max Rows:       {d.get('max_rows', '')}\")
+print(f\"DB Schema:      {d.get('db_schema', '')}\")
+print(f\"DB Extra Search: {d.get('db_extra_search_path', '')}\")
+print(f\"Pool Size:      {d.get('db_pool', '')}\")
+"
+}
+
+cmd_snapshot() {
+    local token="${SUPABASE_ACCESS_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "SUPABASE_ACCESS_TOKEN not set"}'
+        return 1
+    fi
+
+    python3 -c "
+import json, sys, os
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+API = 'https://api.supabase.com/v1'
+TOKEN = os.environ.get('SUPABASE_ACCESS_TOKEN', '')
+
+def api_get(path):
+    url = API + path
+    req = Request(url, headers={
+        'Authorization': 'Bearer ' + TOKEN,
+        'Content-Type': 'application/json',
+        'User-Agent': 'agent-supabase/1.0',
+    })
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read())
+    except HTTPError as e:
+        if e.code == 401:
+            return {'error': 'unauthorized'}
+        return {'error': str(e)}
+    except Exception as e:
+        return {'error': str(e)}
+
+# Organizations
+raw_orgs = api_get('/organizations')
+orgs = []
+token_valid = not isinstance(raw_orgs, dict) or 'error' not in raw_orgs
+if isinstance(raw_orgs, list):
+    for o in raw_orgs:
+        orgs.append({
+            'id': o.get('id', ''),
+            'name': o.get('name', ''),
+        })
+
+# Projects
+raw_projects = api_get('/projects')
+projects = []
+regions = {}
+statuses = {}
+if isinstance(raw_projects, list):
+    for p in raw_projects:
+        region = p.get('region', '') or 'unknown'
+        regions[region] = regions.get(region, 0) + 1
+        status = p.get('status', '') or 'unknown'
+        statuses[status] = statuses.get(status, 0) + 1
+        projects.append({
+            'id': p.get('id', ''),
+            'name': p.get('name', ''),
+            'organization_id': p.get('organization_id', ''),
+            'region': region,
+            'status': status,
+            'created_at': p.get('created_at', ''),
+        })
+
+# Per-project details (first 5)
+project_details = []
+for p in projects[:5]:
+    ref = p['id']
+    detail = {'ref': ref, 'name': p['name']}
+
+    # Health
+    health = api_get(f'/projects/{ref}/health')
+    if isinstance(health, list):
+        detail['health'] = {s.get('name', ''): s.get('status', '') for s in health}
+
+    # Secrets
+    secrets = api_get(f'/projects/{ref}/secrets')
+    if isinstance(secrets, list):
+        detail['secret_count'] = len(secrets)
+        detail['secret_names'] = [s.get('name', '') for s in secrets]
+
+    # Functions
+    functions = api_get(f'/projects/{ref}/functions')
+    if isinstance(functions, list):
+        detail['functions'] = [{
+            'slug': f.get('slug', ''),
+            'name': f.get('name', ''),
+            'status': f.get('status', ''),
+            'version': f.get('version', ''),
+        } for f in functions]
+
+    project_details.append(detail)
+
+snapshot = {
+    'organizations': {
+        'count': len(orgs),
+        'items': orgs,
+    },
+    'projects': {
+        'count': len(projects),
+        'by_region': regions,
+        'by_status': statuses,
+        'items': projects,
+    },
+    'project_details': project_details,
+    'token_valid': token_valid,
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+# --- Main ---
+
+case "${1:-help}" in
+    projects|ls|list)
+        cmd_projects
+        ;;
+    show|get)
+        shift
+        cmd_show "$@"
+        ;;
+    pause)
+        shift
+        cmd_pause "$@"
+        ;;
+    restore)
+        shift
+        cmd_restore "$@"
+        ;;
+    health)
+        shift
+        cmd_health "$@"
+        ;;
+    api-keys)
+        shift
+        cmd_api_keys "$@"
+        ;;
+    secrets)
+        shift
+        cmd_secrets "$@"
+        ;;
+    secret-set)
+        shift
+        cmd_secret_set "$@"
+        ;;
+    secret-del|secret-delete|secret-rm)
+        shift
+        cmd_secret_del "$@"
+        ;;
+    functions|fns)
+        shift
+        cmd_functions "$@"
+        ;;
+    function-show|fn-show)
+        shift
+        cmd_function_show "$@"
+        ;;
+    domains)
+        shift
+        cmd_domains "$@"
+        ;;
+    types)
+        shift
+        cmd_types "$@"
+        ;;
+    orgs|organizations)
+        cmd_orgs
+        ;;
+    regions)
+        cmd_regions
+        ;;
+    postgrest)
+        shift
+        cmd_postgrest "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-supabase --help"
+        exit 1
+        ;;
+esac
