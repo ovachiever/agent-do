@@ -99,6 +99,8 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. Has `capture start/stop` for API skill generation and `api` for replaying skills. |
 | `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser. Shares filter/auth/generator pipeline with browse. |
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims. Build with `cargo build --release`. |
+| `agent-render` | Bash + curl | Render.com service management via REST API. Requires `RENDER_API_KEY`. |
+| `agent-vercel` | Bash + curl | Vercel project/deployment management via REST API. Requires `VERCEL_ACCESS_TOKEN`. Optional `--team <id>`. |
 
 Other tools are bash scripts symlinked from sibling `agent-CLIs` repo.
 
@@ -133,3 +135,5 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `AGENT_DO_HOME`: Config/state directory (default: `~/.agent-do`)
 - `ANTHROPIC_API_KEY`: Required for natural language mode and `--dry-run`/`--how`
 - `MANNA_SESSION_ID`: Override session ID for agent-manna
+- `RENDER_API_KEY`: API key for agent-render (Render.com)
+- `VERCEL_ACCESS_TOKEN`: API token for agent-vercel (Vercel)

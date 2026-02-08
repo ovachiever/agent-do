@@ -1,0 +1,750 @@
+#!/usr/bin/env bash
+# agent-vercel - Vercel project and deployment management
+
+set -euo pipefail
+
+VERCEL_API="https://api.vercel.com"
+
+show_help() {
+    cat << 'EOF'
+agent-vercel - Vercel project and deployment management
+
+Commands:
+  projects / ls                List all projects
+  show <proj>                  Project details
+  deployments <proj>           Recent deployments
+  deploy <proj>                Trigger deployment
+  inspect <dpl-id>             Deployment details
+  logs <dpl-id>                Build logs
+  cancel <dpl-id>              Cancel deployment
+  promote <dpl-id>             Promote deployment to production
+  env <proj>                   List env vars
+  env-set <proj> <key> <val>   Set env var (--target prod|preview|dev)
+  env-del <proj> <env-id>      Delete env var by ID
+  domains <proj>               List project domains
+  teams                        List teams
+  snapshot                     Full account state as JSON
+
+Projects are referenced by name directly.
+
+Options:
+  --team <id>                  Team ID (appended as ?teamId=)
+
+Environment:
+  VERCEL_ACCESS_TOKEN           API token (Bearer)
+
+Examples:
+  agent-vercel projects
+  agent-vercel show my-app
+  agent-vercel deploy my-app
+  agent-vercel deployments my-app
+  agent-vercel env my-app
+  agent-vercel env-set my-app DATABASE_URL "postgres://..." --target prod
+  agent-vercel env-del my-app env_abc123
+  agent-vercel domains my-app
+  agent-vercel snapshot
+EOF
+}
+
+# --- Helpers ---
+
+TEAM_ID=""
+
+parse_global_opts() {
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --team) TEAM_ID="$2"; shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    REMAINING_ARGS=("${args[@]+"${args[@]}"}")
+}
+
+team_query() {
+    if [[ -n "$TEAM_ID" ]]; then
+        # Append teamId as query param
+        if [[ "$1" == *"?"* ]]; then
+            echo "&teamId=${TEAM_ID}"
+        else
+            echo "?teamId=${TEAM_ID}"
+        fi
+    fi
+}
+
+vercel_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+    local token="${VERCEL_ACCESS_TOKEN:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: VERCEL_ACCESS_TOKEN not set" >&2
+        return 1
+    fi
+
+    local tq
+    tq=$(team_query "$endpoint")
+
+    local args=(-s -X "$method" "${VERCEL_API}${endpoint}${tq}" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    curl "${args[@]}"
+}
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+# --- Commands ---
+
+cmd_projects() {
+    local result
+    result=$(vercel_request GET "/v10/projects?limit=50")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+items = data.get('projects', [])
+if not items:
+    print('No projects found')
+    sys.exit(0)
+for p in items:
+    name = p.get('name', '')
+    pid = p.get('id', '')
+    framework = p.get('framework', '') or ''
+    updated = p.get('updatedAt', '')
+    # updatedAt is epoch ms
+    import datetime
+    ts = ''
+    if updated:
+        try:
+            ts = datetime.datetime.fromtimestamp(updated/1000).strftime('%Y-%m-%d %H:%M')
+        except:
+            ts = str(updated)
+    print(f'{pid}  {name}  [{framework}]  updated:{ts}')
+"
+}
+
+cmd_show() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-vercel show <project>"
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request GET "/v10/projects/$name")
+
+    echo "$result" | python3 -c "
+import sys, json, datetime
+p = json.load(sys.stdin)
+if 'error' in p:
+    print(f\"Error: {p['error'].get('message', p['error'])}\")
+    sys.exit(1)
+print(f\"ID:         {p.get('id', '')}\")
+print(f\"Name:       {p.get('name', '')}\")
+print(f\"Framework:  {p.get('framework', '')}\")
+repo = p.get('link', {})
+if repo:
+    print(f\"Repo:       {repo.get('org', '')}/{repo.get('repo', '')} ({repo.get('type', '')})\")
+    print(f\"Branch:     {repo.get('productionBranch', '')}\")
+print(f\"Node Ver:   {p.get('nodeVersion', '')}\")
+updated = p.get('updatedAt', '')
+if updated:
+    try:
+        ts = datetime.datetime.fromtimestamp(updated/1000).strftime('%Y-%m-%d %H:%M')
+        print(f'Updated:    {ts}')
+    except:
+        print(f'Updated:    {updated}')
+created = p.get('createdAt', '')
+if created:
+    try:
+        ts = datetime.datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d %H:%M')
+        print(f'Created:    {ts}')
+    except:
+        print(f'Created:    {created}')
+targets = p.get('targets', {})
+prod = targets.get('production', {})
+if prod:
+    print(f\"Prod URL:   {prod.get('url', '')}\")
+"
+}
+
+cmd_deployments() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-vercel deployments <project>"
+        return 1
+    fi
+
+    # First get project ID
+    local proj
+    proj=$(vercel_request GET "/v10/projects/$name")
+    local project_id
+    project_id=$(echo "$proj" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+
+    if [[ -z "$project_id" ]]; then
+        echo "Error: Project '$name' not found" >&2
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request GET "/v6/deployments?projectId=${project_id}&limit=10")
+
+    echo "$result" | python3 -c "
+import sys, json, datetime
+data = json.load(sys.stdin)
+items = data.get('deployments', [])
+if not items:
+    print('No deployments found')
+    sys.exit(0)
+for d in items:
+    uid = d.get('uid', '')
+    state = d.get('state', d.get('readyState', '?'))
+    url = d.get('url', '')
+    created = d.get('created', '')
+    ts = ''
+    if created:
+        try:
+            ts = datetime.datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d %H:%M')
+        except:
+            ts = str(created)
+    target = d.get('target', '') or 'preview'
+    print(f'{uid}  {state}  [{target}]  {url}  {ts}')
+"
+}
+
+cmd_deploy() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-vercel deploy <project>"
+        return 1
+    fi
+
+    # Get project details for repo info
+    local proj
+    proj=$(vercel_request GET "/v10/projects/$name")
+
+    local body
+    body=$(echo "$proj" | python3 -c "
+import sys, json
+p = json.load(sys.stdin)
+if 'error' in p:
+    print('{\"error\": true}')
+    sys.exit(1)
+deploy = {
+    'name': p.get('name', ''),
+    'target': 'production',
+    'gitSource': {
+        'type': p.get('link', {}).get('type', 'github'),
+        'org': p.get('link', {}).get('org', ''),
+        'repo': p.get('link', {}).get('repo', ''),
+        'ref': p.get('link', {}).get('productionBranch', 'main'),
+    }
+}
+print(json.dumps(deploy))
+")
+
+    if echo "$body" | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin).get('error') else 1)" 2>/dev/null; then
+        echo "Error: Could not resolve project '$name'" >&2
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request POST "/v13/deployments" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'error' in d:
+    print(f\"Error: {d['error'].get('message', d['error'])}\")
+    sys.exit(1)
+print(f\"Deploy ID:  {d.get('id', '')}\")
+print(f\"State:      {d.get('readyState', d.get('state', ''))}\")
+print(f\"URL:        {d.get('url', '')}\")
+print(f\"Target:     {d.get('target', '')}\")
+"
+}
+
+cmd_inspect() {
+    local dpl_id="${1:-}"
+    if [[ -z "$dpl_id" ]]; then
+        echo "Usage: agent-vercel inspect <deployment-id>"
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request GET "/v13/deployments/$dpl_id")
+
+    echo "$result" | python3 -c "
+import sys, json, datetime
+d = json.load(sys.stdin)
+if 'error' in d:
+    print(f\"Error: {d['error'].get('message', d['error'])}\")
+    sys.exit(1)
+print(f\"ID:         {d.get('id', '')}\")
+print(f\"Name:       {d.get('name', '')}\")
+print(f\"URL:        {d.get('url', '')}\")
+print(f\"State:      {d.get('readyState', '')}\")
+print(f\"Target:     {d.get('target', '')}\")
+created = d.get('createdAt', d.get('created', ''))
+if created:
+    try:
+        ts = datetime.datetime.fromtimestamp(created/1000).strftime('%Y-%m-%d %H:%M')
+        print(f'Created:    {ts}')
+    except:
+        print(f'Created:    {created}')
+ready = d.get('ready', '')
+if ready:
+    try:
+        ts = datetime.datetime.fromtimestamp(ready/1000).strftime('%Y-%m-%d %H:%M')
+        print(f'Ready:      {ts}')
+    except:
+        print(f'Ready:      {ready}')
+meta = d.get('meta', {})
+if meta.get('githubCommitSha'):
+    print(f\"Commit:     {meta['githubCommitSha'][:8]}\")
+if meta.get('githubCommitMessage'):
+    print(f\"Message:    {meta['githubCommitMessage']}\")
+"
+}
+
+cmd_logs() {
+    local dpl_id="${1:-}"
+    if [[ -z "$dpl_id" ]]; then
+        echo "Usage: agent-vercel logs <deployment-id>"
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request GET "/v3/deployments/$dpl_id/events")
+
+    echo "$result" | python3 -c "
+import sys, json, datetime
+try:
+    items = json.load(sys.stdin)
+    if isinstance(items, dict) and 'error' in items:
+        print(f\"Error: {items['error'].get('message', items['error'])}\")
+        sys.exit(1)
+    if isinstance(items, list):
+        for entry in items:
+            ts = entry.get('date', entry.get('created', ''))
+            if ts:
+                try:
+                    ts = datetime.datetime.fromtimestamp(ts/1000).strftime('%H:%M:%S')
+                except:
+                    pass
+            text = entry.get('text', entry.get('payload', {}).get('text', ''))
+            if text:
+                print(f'{ts}  {text}')
+    else:
+        print(json.dumps(items, indent=2))
+except Exception as e:
+    print(f'Error: {e}')
+"
+}
+
+cmd_cancel() {
+    local dpl_id="${1:-}"
+    if [[ -z "$dpl_id" ]]; then
+        echo "Usage: agent-vercel cancel <deployment-id>"
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request PATCH "/v12/deployments/$dpl_id/cancel")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'error' in d:
+    print(f\"Error: {d['error'].get('message', d['error'])}\")
+    sys.exit(1)
+print(f\"Canceled: {d.get('id', dpl_id)}\")
+print(f\"State:    {d.get('readyState', d.get('state', ''))}\")
+" 2>/dev/null || echo "Canceled: $dpl_id"
+}
+
+cmd_promote() {
+    local dpl_id="${1:-}"
+    if [[ -z "$dpl_id" ]]; then
+        echo "Usage: agent-vercel promote <deployment-id>"
+        return 1
+    fi
+
+    # Promote = create alias to production
+    # First get deployment info
+    local dpl
+    dpl=$(vercel_request GET "/v13/deployments/$dpl_id")
+
+    local project_name
+    project_name=$(echo "$dpl" | python3 -c "import sys,json; print(json.load(sys.stdin).get('name',''))" 2>/dev/null)
+
+    if [[ -z "$project_name" ]]; then
+        echo "Error: Could not resolve deployment '$dpl_id'" >&2
+        return 1
+    fi
+
+    # Re-deploy targeting production
+    local body="{\"name\": \"$project_name\", \"target\": \"production\", \"deploymentId\": \"$dpl_id\"}"
+    local result
+    result=$(vercel_request POST "/v13/deployments" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'error' in d:
+    print(f\"Error: {d['error'].get('message', d['error'])}\")
+    sys.exit(1)
+print(f\"Promoted: {d.get('id', '')}\")
+print(f\"URL:      {d.get('url', '')}\")
+print(f\"Target:   {d.get('target', '')}\")
+"
+}
+
+cmd_env() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-vercel env <project>"
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request GET "/v10/projects/$name/env")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    print(f\"Error: {data['error'].get('message', data['error'])}\")
+    sys.exit(1)
+items = data.get('envs', [])
+if not items:
+    print('No env vars')
+    sys.exit(0)
+for ev in items:
+    key = ev.get('key', '')
+    val = ev.get('value', '')
+    eid = ev.get('id', '')
+    targets = ','.join(ev.get('target', []))
+    if val:
+        display = val[:4] + '****' if len(val) > 8 else val
+    else:
+        display = '(encrypted)' if ev.get('type') == 'encrypted' else '(empty)'
+    print(f'{eid}  {key}={display}  [{targets}]')
+"
+}
+
+cmd_env_set() {
+    local name=""
+    local key=""
+    local val=""
+    local target='["production","preview","development"]'
+
+    local positional=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --target)
+                case "$2" in
+                    prod|production) target='["production"]' ;;
+                    preview) target='["preview"]' ;;
+                    dev|development) target='["development"]' ;;
+                    *) target="[\"$2\"]" ;;
+                esac
+                shift 2
+                ;;
+            *)
+                positional+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    name="${positional[0]:-}"
+    key="${positional[1]:-}"
+    val="${positional[2]:-}"
+
+    if [[ -z "$name" ]] || [[ -z "$key" ]] || [[ -z "$val" ]]; then
+        echo "Usage: agent-vercel env-set <project> <KEY> <VALUE> [--target prod|preview|dev]"
+        return 1
+    fi
+
+    local escaped_val
+    escaped_val=$(json_escape "$val")
+
+    local body="{\"key\": \"$key\", \"value\": $escaped_val, \"type\": \"encrypted\", \"target\": $target}"
+
+    local result
+    result=$(vercel_request POST "/v10/projects/$name/env" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'error' in d:
+    print(f\"Error: {d['error'].get('message', d['error'])}\")
+    sys.exit(1)
+targets = ','.join(d.get('target', []))
+print(f\"Set {d.get('key', '$key')} on $name [{targets}]\")
+" 2>/dev/null || echo "Set $key on $name"
+}
+
+cmd_env_del() {
+    local name="${1:-}"
+    local env_id="${2:-}"
+
+    if [[ -z "$name" ]] || [[ -z "$env_id" ]]; then
+        echo "Usage: agent-vercel env-del <project> <env-id>"
+        echo "  (use 'agent-vercel env <project>' to find env var IDs)"
+        return 1
+    fi
+
+    vercel_request DELETE "/v10/projects/$name/env/$env_id" > /dev/null
+    echo "Deleted env var $env_id from $name"
+}
+
+cmd_domains() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-vercel domains <project>"
+        return 1
+    fi
+
+    local result
+    result=$(vercel_request GET "/v10/projects/$name/domains")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    print(f\"Error: {data['error'].get('message', data['error'])}\")
+    sys.exit(1)
+items = data.get('domains', [])
+if not items:
+    print('No domains configured')
+    sys.exit(0)
+for d in items:
+    name = d.get('name', '')
+    verified = 'verified' if d.get('verified') else 'unverified'
+    redirect = d.get('redirect', '')
+    git_branch = d.get('gitBranch', '') or ''
+    extra = f'  -> {redirect}' if redirect else ''
+    extra += f'  branch:{git_branch}' if git_branch else ''
+    print(f'{name}  [{verified}]{extra}')
+"
+}
+
+cmd_teams() {
+    local result
+    result=$(vercel_request GET "/v2/teams")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+items = data.get('teams', [])
+if not items:
+    print('No teams found')
+    sys.exit(0)
+for t in items:
+    tid = t.get('id', '')
+    name = t.get('name', '')
+    slug = t.get('slug', '')
+    print(f'{tid}  {name}  ({slug})')
+"
+}
+
+cmd_snapshot() {
+    local token="${VERCEL_ACCESS_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo '{"error": "VERCEL_ACCESS_TOKEN not set"}'
+        return 1
+    fi
+
+    local tq_param=""
+    if [[ -n "$TEAM_ID" ]]; then
+        tq_param="?teamId=${TEAM_ID}"
+    fi
+
+    python3 -c "
+import json, sys
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+API = 'https://api.vercel.com'
+TOKEN = '$token'
+TQ = '$tq_param'
+
+def api_get(path):
+    sep = '&' if '?' in path else '?'
+    url = API + path + (sep + TQ.lstrip('?') if TQ else '')
+    req = Request(url, headers={
+        'Authorization': 'Bearer ' + TOKEN,
+        'Content-Type': 'application/json',
+    })
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read())
+    except HTTPError as e:
+        if e.code == 401:
+            return {'error': 'unauthorized'}
+        return {'error': str(e)}
+    except Exception as e:
+        return {'error': str(e)}
+
+import datetime
+
+# Projects
+raw_projects = api_get('/v10/projects?limit=100')
+token_valid = not isinstance(raw_projects, dict) or 'error' not in raw_projects
+
+projects = []
+frameworks = {}
+if isinstance(raw_projects, dict) and 'projects' in raw_projects:
+    for p in raw_projects['projects']:
+        fw = p.get('framework', '') or 'unknown'
+        frameworks[fw] = frameworks.get(fw, 0) + 1
+        updated = p.get('updatedAt', '')
+        ts = ''
+        if updated:
+            try:
+                ts = datetime.datetime.fromtimestamp(updated/1000).isoformat()
+            except:
+                ts = str(updated)
+        link = p.get('link', {})
+        projects.append({
+            'id': p.get('id', ''),
+            'name': p.get('name', ''),
+            'framework': fw,
+            'repo': f\"{link.get('org','')}/{link.get('repo','')}\" if link else '',
+            'branch': link.get('productionBranch', '') if link else '',
+            'node_version': p.get('nodeVersion', ''),
+            'updated': ts,
+        })
+
+# Teams
+raw_teams = api_get('/v2/teams')
+teams = []
+if isinstance(raw_teams, dict) and 'teams' in raw_teams:
+    for t in raw_teams['teams']:
+        teams.append({
+            'id': t.get('id', ''),
+            'name': t.get('name', ''),
+            'slug': t.get('slug', ''),
+        })
+
+# Recent deployments (from first few projects)
+recent_deploys = []
+for p in projects[:5]:
+    pid = p['id']
+    raw = api_get(f'/v6/deployments?projectId={pid}&limit=3')
+    if isinstance(raw, dict) and 'deployments' in raw:
+        for d in raw['deployments']:
+            created = d.get('created', '')
+            ts = ''
+            if created:
+                try:
+                    ts = datetime.datetime.fromtimestamp(created/1000).isoformat()
+                except:
+                    ts = str(created)
+            recent_deploys.append({
+                'id': d.get('uid', ''),
+                'project': p['name'],
+                'state': d.get('state', d.get('readyState', '')),
+                'target': d.get('target', ''),
+                'url': d.get('url', ''),
+                'created': ts,
+            })
+
+snapshot = {
+    'projects': {
+        'count': len(projects),
+        'by_framework': frameworks,
+        'items': projects,
+    },
+    'teams': {
+        'count': len(teams),
+        'items': teams,
+    },
+    'recent_deployments': {
+        'count': len(recent_deploys),
+        'items': recent_deploys,
+    },
+    'token_valid': token_valid,
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+# --- Main ---
+
+parse_global_opts "$@"
+set -- "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
+
+case "${1:-help}" in
+    projects|ls|list)
+        cmd_projects
+        ;;
+    show|get)
+        shift
+        cmd_show "$@"
+        ;;
+    deployments|deploys)
+        shift
+        cmd_deployments "$@"
+        ;;
+    deploy)
+        shift
+        cmd_deploy "$@"
+        ;;
+    inspect)
+        shift
+        cmd_inspect "$@"
+        ;;
+    logs)
+        shift
+        cmd_logs "$@"
+        ;;
+    cancel)
+        shift
+        cmd_cancel "$@"
+        ;;
+    promote)
+        shift
+        cmd_promote "$@"
+        ;;
+    env)
+        shift
+        cmd_env "$@"
+        ;;
+    env-set)
+        shift
+        cmd_env_set "$@"
+        ;;
+    env-del|env-delete|env-rm)
+        shift
+        cmd_env_del "$@"
+        ;;
+    domains)
+        shift
+        cmd_domains "$@"
+        ;;
+    teams)
+        cmd_teams
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-vercel --help"
+        exit 1
+        ;;
+esac

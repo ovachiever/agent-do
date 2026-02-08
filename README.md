@@ -38,7 +38,7 @@ cd agent-do
 | **Data** | db, excel, sheets, pdf | Database queries, spreadsheet automation |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh | Container and cluster management |
+| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel | Containers, clusters, PaaS management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis tools |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
@@ -162,8 +162,10 @@ cd tools/agent-manna && cargo build --release && cd ../..
 ### Environment Variables
 
 ```bash
-AGENT_DO_HOME       # Config/state directory (default: ~/.agent-do)
-ANTHROPIC_API_KEY   # Required for natural language mode and --dry-run/--how
+AGENT_DO_HOME         # Config/state directory (default: ~/.agent-do)
+ANTHROPIC_API_KEY     # Required for natural language mode and --dry-run/--how
+RENDER_API_KEY        # API key for Render.com (agent-render)
+VERCEL_ACCESS_TOKEN   # API token for Vercel (agent-vercel)
 ```
 
 ## Adding Tools
