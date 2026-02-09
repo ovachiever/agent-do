@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# agent-pdf2md - Convert PDF files to Markdown
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+agent-pdf2md - Convert PDF files to Markdown
+
+Commands:
+  convert <file> [-o out.md] [--mode auto|table|prose] [--pages 1-5]
+  batch <dir|glob> [-o outdir] [--mode auto|table|prose]
+  snapshot                     Show available tools and PDF files (JSON)
+
+Modes:
+  auto   (default) Auto-detect: >40% numeric tokens → table, else prose
+  table  pdftotext -layout wrapped in fenced code block (preserves columns)
+  prose  markitdown output (headings, lists, links)
+
+Examples:
+  agent-pdf2md convert report.pdf
+  agent-pdf2md convert report.pdf -o report.md
+  agent-pdf2md convert data.pdf --mode table
+  agent-pdf2md convert doc.pdf --mode prose --pages 1-5
+  agent-pdf2md batch /path/to/pdfs/
+  agent-pdf2md batch /path/to/pdfs/ -o /path/to/output/
+  agent-pdf2md snapshot
+EOF
+}
+
+# --- Helpers ---
+
+check_tools() {
+    local has_pdftotext=false
+    local has_markitdown=false
+    local has_pdfinfo=false
+
+    command -v pdftotext &>/dev/null && has_pdftotext=true
+    command -v markitdown &>/dev/null && has_markitdown=true
+    command -v pdfinfo &>/dev/null && has_pdfinfo=true
+
+    if ! $has_pdftotext && ! $has_markitdown; then
+        echo "Error: No PDF converter found. Install poppler-utils or markitdown." >&2
+        return 1
+    fi
+
+    # Return available tools as variables
+    echo "$has_pdftotext:$has_markitdown:$has_pdfinfo"
+}
+
+get_page_count() {
+    local file="$1"
+    if command -v pdfinfo &>/dev/null; then
+        pdfinfo "$file" 2>/dev/null | grep "Pages:" | awk '{print $2}'
+    else
+        echo "?"
+    fi
+}
+
+detect_mode() {
+    local file="$1"
+
+    if ! command -v pdftotext &>/dev/null; then
+        echo "prose"
+        return
+    fi
+
+    # Extract first page text for analysis
+    local sample
+    sample=$(pdftotext -layout -l 1 "$file" - 2>/dev/null) || true
+
+    if [[ -z "$sample" ]]; then
+        echo "prose"
+        return
+    fi
+
+    # Count numeric vs total tokens
+    python3 -c "
+import sys, re
+
+text = sys.stdin.read()
+tokens = re.findall(r'\S+', text)
+total = len(tokens)
+if total == 0:
+    print('prose')
+    sys.exit(0)
+
+# Count tokens that are numeric-ish (numbers, percentages, decimals, comma-separated numbers)
+numeric = sum(1 for t in tokens if re.match(r'^[\d,]+\.?\d*%?$', t.strip('()+-')))
+ratio = numeric / total
+
+if ratio > 0.40:
+    print('table')
+else:
+    print('prose')
+" <<< "$sample"
+}
+
+convert_table() {
+    local file="$1"
+    local page_args="${2:-}"
+
+    local args=(-layout)
+    if [[ -n "$page_args" ]]; then
+        local first="${page_args%%-*}"
+        local last="${page_args##*-}"
+        args+=(-f "$first" -l "$last")
+    fi
+
+    pdftotext "${args[@]}" "$file" -
+}
+
+convert_prose() {
+    local file="$1"
+    markitdown "$file" 2>/dev/null
+}
+
+format_output() {
+    local filename="$1"
+    local pages="$2"
+    local mode="$3"
+    local content="$4"
+    local today
+    today=$(date +%Y-%m-%d)
+
+    echo "# ${filename}"
+    echo ""
+    echo "> Pages: ${pages} | Converted: ${today} | Mode: ${mode}"
+    echo ""
+
+    if [[ "$mode" == "table" ]]; then
+        echo '```'
+        echo "$content"
+        echo '```'
+    else
+        echo "$content"
+    fi
+}
+
+# --- Commands ---
+
+cmd_convert() {
+    local file=""
+    local output=""
+    local mode="auto"
+    local pages=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output)
+                output="${2:-}"
+                shift 2
+                ;;
+            --mode)
+                mode="${2:-auto}"
+                shift 2
+                ;;
+            --pages)
+                pages="${2:-}"
+                shift 2
+                ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$file" ]]; then
+                    file="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$file" ]]; then
+        echo "Error: PDF file required"
+        echo "Usage: agent-pdf2md convert <file> [-o output.md] [--mode auto|table|prose]"
+        return 1
+    fi
+
+    if [[ ! -f "$file" ]]; then
+        echo "Error: File not found: $file"
+        return 1
+    fi
+
+    # Check tools
+    local tools
+    tools=$(check_tools) || return 1
+    local has_pdftotext="${tools%%:*}"
+    local rest="${tools#*:}"
+    local has_markitdown="${rest%%:*}"
+
+    # Resolve mode
+    if [[ "$mode" == "auto" ]]; then
+        mode=$(detect_mode "$file")
+    fi
+
+    # Validate mode against available tools
+    if [[ "$mode" == "table" ]] && [[ "$has_pdftotext" != "true" ]]; then
+        echo "Error: pdftotext required for table mode (install poppler-utils)" >&2
+        return 1
+    fi
+    if [[ "$mode" == "prose" ]] && [[ "$has_markitdown" != "true" ]]; then
+        echo "Error: markitdown required for prose mode (pip install markitdown)" >&2
+        return 1
+    fi
+
+    # Get page count
+    local page_count
+    page_count=$(get_page_count "$file")
+
+    # Convert
+    local content
+    if [[ "$mode" == "table" ]]; then
+        content=$(convert_table "$file" "$pages")
+    else
+        content=$(convert_prose "$file")
+    fi
+
+    local filename
+    filename=$(basename "$file")
+
+    local result
+    result=$(format_output "$filename" "$page_count" "$mode" "$content")
+
+    # Output
+    if [[ -n "$output" ]]; then
+        echo "$result" > "$output"
+        echo "Converted: $filename → $output (mode: $mode, pages: $page_count)"
+    else
+        echo "$result"
+    fi
+}
+
+cmd_batch() {
+    local dir=""
+    local outdir=""
+    local mode="auto"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output)
+                outdir="${2:-}"
+                shift 2
+                ;;
+            --mode)
+                mode="${2:-auto}"
+                shift 2
+                ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$dir" ]]; then
+                    dir="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$dir" ]]; then
+        echo "Error: Directory required"
+        echo "Usage: agent-pdf2md batch <dir> [-o outdir] [--mode auto|table|prose]"
+        return 1
+    fi
+
+    if [[ ! -d "$dir" ]]; then
+        echo "Error: Directory not found: $dir"
+        return 1
+    fi
+
+    # Default output dir = input dir
+    if [[ -z "$outdir" ]]; then
+        outdir="$dir"
+    fi
+    mkdir -p "$outdir"
+
+    local count=0
+    local errors=0
+
+    for pdf in "$dir"/*.pdf "$dir"/*.PDF; do
+        [[ -f "$pdf" ]] || continue
+
+        local basename
+        basename=$(basename "$pdf" | sed 's/\.[pP][dD][fF]$//')
+        local outfile="${outdir}/${basename}.md"
+
+        local mode_args=()
+        [[ "$mode" != "auto" ]] && mode_args=(--mode "$mode")
+
+        if cmd_convert "$pdf" -o "$outfile" "${mode_args[@]}"; then
+            count=$((count + 1))
+        else
+            errors=$((errors + 1))
+            echo "  Error converting: $(basename "$pdf")" >&2
+        fi
+    done
+
+    echo ""
+    echo "Batch complete: $count converted, $errors errors"
+}
+
+cmd_snapshot() {
+    python3 -c "
+import json, os, shutil, subprocess
+
+tools = {}
+for t in ['pdftotext', 'pdfinfo', 'markitdown']:
+    path = shutil.which(t)
+    tools[t] = {'available': path is not None, 'path': path or ''}
+
+pdfs = []
+for f in sorted(os.listdir('.')):
+    if f.lower().endswith('.pdf'):
+        size = os.path.getsize(f)
+        pages = ''
+        if tools['pdfinfo']['available']:
+            try:
+                r = subprocess.run(['pdfinfo', f], capture_output=True, text=True, timeout=5)
+                for line in r.stdout.split('\n'):
+                    if line.startswith('Pages:'):
+                        pages = line.split(':')[1].strip()
+            except: pass
+        pdfs.append({'name': f, 'size': size, 'pages': pages})
+
+print(json.dumps({
+    'tools': tools,
+    'pdfs': {'count': len(pdfs), 'items': pdfs[:20]},
+}, indent=2))
+"
+}
+
+# --- Main ---
+
+case "${1:-help}" in
+    convert)
+        shift
+        cmd_convert "$@"
+        ;;
+    batch)
+        shift
+        cmd_batch "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-pdf2md --help"
+        exit 1
+        ;;
+esac
