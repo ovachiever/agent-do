@@ -4,7 +4,17 @@
 set -euo pipefail
 
 AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve through symlinks (macOS readlink, single-level)
+_source="${BASH_SOURCE[0]}"
+if [ -L "$_source" ]; then
+    _target="$(readlink "$_source")"
+    # Handle relative symlink targets
+    case "$_target" in
+        /*) _source="$_target" ;;
+        *)  _source="$(dirname "$_source")/$_target" ;;
+    esac
+fi
+SCRIPT_DIR="$(cd "$(dirname "$_source")" && pwd)"
 
 # Ensure home directory exists
 mkdir -p "$AGENT_DO_HOME"

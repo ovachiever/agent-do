@@ -9,7 +9,7 @@ show_help() {
     cat << 'EOF'
 agent-supabase - Supabase project and database management
 
-Commands:
+PROJECT MANAGEMENT
   projects / ls                List all projects
   show <ref>                   Project details
   pause <ref>                  Pause project
@@ -28,23 +28,101 @@ Commands:
   postgrest <ref>              PostgREST config
   snapshot                     Full account state as JSON
 
+DATA ACCESS — REST API (no DB password needed)
+  rest <ref> <table>                   Query table via PostgREST
+  rest <ref> <table> --select "a,b"    Select specific columns
+  rest <ref> <table> --filter "k=eq.v" Filter rows (PostgREST syntax)
+  rest <ref> <table> --limit N         Limit rows (default: 20)
+  rest <ref> <table> --single          Expect single row (.single())
+  rest <ref> <table> --count           Return count only
+
+DATA ACCESS — SQL via agent-db (requires DB password)
+  db-connect <ref>             Auto-create agent-db profile and connect
+  db-status <ref>              Check if agent-db profile exists
+  query <ref> "<sql>"          Run SQL (delegates to agent-db)
+  tables <ref>                 List tables (delegates to agent-db)
+  describe <ref> <table>       Describe table (delegates to agent-db)
+  sample <ref> <table> [n]     Sample rows (delegates to agent-db)
+
 Projects are referenced by their ref (20-char project ID).
 
 Environment:
-  SUPABASE_ACCESS_TOKEN        API token (Bearer)
+  SUPABASE_ACCESS_TOKEN        API token (Bearer) — required
+  SUPABASE_DB_PASSWORD         DB password for SQL access (optional)
 
 Examples:
+  # Project management
   agent-supabase projects
-  agent-supabase show abcdefghijklmnopqrst
   agent-supabase health abcdefghijklmnopqrst
-  agent-supabase api-keys abcdefghijklmnopqrst
-  agent-supabase secrets abcdefghijklmnopqrst
-  agent-supabase secret-set abcdefghijklmnopqrst MY_KEY "my_value"
-  agent-supabase secret-del abcdefghijklmnopqrst MY_KEY
-  agent-supabase functions abcdefghijklmnopqrst
-  agent-supabase orgs
-  agent-supabase snapshot
+
+  # REST API queries (easiest — no password needed)
+  agent-supabase rest <ref> users
+  agent-supabase rest <ref> orders --select "id,total,status" --filter "status=eq.pending" --limit 10
+
+  # SQL via agent-db (full SQL power)
+  agent-supabase db-connect <ref>
+  agent-supabase query <ref> "SELECT count(*) FROM users"
+  agent-supabase tables <ref>
+  agent-supabase sample <ref> orders 5
 EOF
+}
+
+# --- Resolve agent-db ---
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+find_agent_db() {
+    # 1. Sibling tool in the same tools/ directory
+    if [[ -x "$SCRIPT_DIR/agent-db/agent-db" ]]; then
+        echo "$SCRIPT_DIR/agent-db/agent-db"
+        return
+    fi
+    # 2. In PATH via agent-do dispatcher
+    if command -v agent-do &>/dev/null; then
+        echo "agent-do db"
+        return
+    fi
+    echo ""
+}
+
+AGENT_DB_CMD="$(find_agent_db)"
+
+run_agent_db() {
+    if [[ -z "$AGENT_DB_CMD" ]]; then
+        echo "Error: agent-db not found. Install agent-do or check tools/agent-db/" >&2
+        return 1
+    fi
+    $AGENT_DB_CMD "$@"
+}
+
+# Profile name convention: supabase-<ref>
+db_profile_name() {
+    echo "supabase-${1}"
+}
+
+# Get service_role key for a project (cached per invocation)
+_SERVICE_ROLE_CACHE=""
+_SERVICE_ROLE_REF=""
+get_service_role_key() {
+    local ref="$1"
+    if [[ "$_SERVICE_ROLE_REF" == "$ref" && -n "$_SERVICE_ROLE_CACHE" ]]; then
+        echo "$_SERVICE_ROLE_CACHE"
+        return
+    fi
+    local result
+    result=$(supabase_request GET "/projects/$ref/api-keys" 2>/dev/null)
+    local key
+    key=$(echo "$result" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for k in data:
+    if k.get('name') == 'service_role':
+        print(k.get('api_key', ''))
+        break
+" 2>/dev/null)
+    _SERVICE_ROLE_CACHE="$key"
+    _SERVICE_ROLE_REF="$ref"
+    echo "$key"
 }
 
 # --- Helpers ---
@@ -599,6 +677,283 @@ print(json.dumps(snapshot, indent=2))
 "
 }
 
+# --- REST API Data Access ---
+
+cmd_rest() {
+    local ref="${1:-}"
+    local table="${2:-}"
+    if [[ -z "$ref" ]] || [[ -z "$table" ]]; then
+        echo "Usage: agent-supabase rest <ref> <table> [--select cols] [--filter expr] [--limit N] [--single] [--count]"
+        return 1
+    fi
+    shift 2
+
+    # Parse options
+    local select_cols="*"
+    local filters=()
+    local limit=20
+    local single=false
+    local count_only=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --select) select_cols="$2"; shift 2 ;;
+            --filter) filters+=("$2"); shift 2 ;;
+            --limit)  limit="$2"; shift 2 ;;
+            --single) single=true; shift ;;
+            --count)  count_only=true; shift ;;
+            *) echo "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    # Get service_role key
+    local service_key
+    service_key=$(get_service_role_key "$ref")
+    if [[ -z "$service_key" ]]; then
+        echo "Error: Could not retrieve service_role key for project $ref" >&2
+        return 1
+    fi
+
+    # Build URL
+    local url="https://${ref}.supabase.co/rest/v1/${table}?select=${select_cols}&limit=${limit}"
+    for f in "${filters[@]+"${filters[@]}"}"; do
+        url="${url}&${f}"
+    done
+
+    # Build headers
+    local args=(-s -X GET "$url"
+        -H "apikey: $service_key"
+        -H "Authorization: Bearer $service_key"
+        -H "Content-Type: application/json")
+
+    if [[ "$single" == true ]]; then
+        args+=(-H "Accept: application/vnd.pgrst.object+json")
+    fi
+    if [[ "$count_only" == true ]]; then
+        args+=(-H "Prefer: count=exact" -H "Range: 0-0")
+    fi
+
+    local result
+    result=$(curl "${args[@]}")
+
+    if [[ "$count_only" == true ]]; then
+        # Extract count from content-range header
+        local count_result
+        count_result=$(curl "${args[@]}" -D - -o /dev/null 2>/dev/null | grep -i content-range | sed 's/.*\///')
+        echo "{\"table\": \"$table\", \"count\": ${count_result:-null}}"
+    else
+        # Pretty-print JSON
+        echo "$result" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if isinstance(data, dict) and 'message' in data:
+        print(f\"Error: {data['message']}\")
+        sys.exit(1)
+    if isinstance(data, list):
+        print(f'Rows: {len(data)}')
+        print(json.dumps(data, indent=2, default=str))
+    else:
+        print(json.dumps(data, indent=2, default=str))
+except json.JSONDecodeError:
+    print(sys.stdin.read())
+" 2>/dev/null || echo "$result"
+    fi
+}
+
+# --- Database Bridge (agent-db tandem) ---
+
+cmd_db_connect() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase db-connect <ref>"
+        return 1
+    fi
+
+    local profile
+    profile=$(db_profile_name "$ref")
+
+    # Check if profile already exists
+    local existing
+    existing=$(run_agent_db profiles 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for p in data.get('profiles', []):
+    if p.get('name') == '$profile':
+        print('exists')
+        break
+" 2>/dev/null)
+
+    if [[ "$existing" == "exists" ]]; then
+        echo "Profile '$profile' already exists. Connecting..."
+        run_agent_db connect "$profile"
+        return $?
+    fi
+
+    # Get DB host from Management API
+    local project_info
+    project_info=$(supabase_request GET "/projects/$ref")
+    local db_host
+    db_host=$(echo "$project_info" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+db = d.get('database', {})
+print(db.get('host', ''))
+" 2>/dev/null)
+
+    if [[ -z "$db_host" ]]; then
+        echo "Error: Could not get database host for project $ref" >&2
+        return 1
+    fi
+
+    # Get password from env
+    local db_password="${SUPABASE_DB_PASSWORD:-}"
+    # Also check ref-specific env var
+    local ref_upper
+    ref_upper=$(echo "$ref" | tr '[:lower:]' '[:upper:]')
+    local ref_env="SUPABASE_DB_PASSWORD_${ref_upper}"
+    if [[ -n "${!ref_env:-}" ]]; then
+        db_password="${!ref_env}"
+    fi
+
+    if [[ -z "$db_password" ]]; then
+        echo "Error: DB password required. Set SUPABASE_DB_PASSWORD or SUPABASE_DB_PASSWORD_${ref_upper}" >&2
+        echo "" >&2
+        echo "Find your password in the Supabase dashboard:" >&2
+        echo "  Project Settings → Database → Connection string" >&2
+        return 1
+    fi
+
+    # Create agent-db profile
+    echo "Creating agent-db profile '$profile' for $ref..."
+    run_agent_db profile add "$profile" \
+        --type postgres \
+        --host "$db_host" \
+        --port 5432 \
+        --database postgres \
+        --user postgres \
+        --password "$db_password"
+
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        echo "Error: Failed to create agent-db profile" >&2
+        return $rc
+    fi
+
+    # Connect
+    echo "Connecting..."
+    run_agent_db connect "$profile"
+}
+
+cmd_db_status() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase db-status <ref>"
+        return 1
+    fi
+
+    local profile
+    profile=$(db_profile_name "$ref")
+
+    local existing
+    existing=$(run_agent_db profiles 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for p in data.get('profiles', []):
+    if p.get('name') == '$profile':
+        print(json.dumps(p, indent=2))
+        break
+else:
+    print('{\"exists\": false}')
+" 2>/dev/null)
+
+    echo "$existing"
+}
+
+# Ensure db profile is connected, auto-connect if possible
+ensure_db_connected() {
+    local ref="$1"
+    local profile
+    profile=$(db_profile_name "$ref")
+
+    # Check current status
+    local status
+    status=$(run_agent_db status 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('profile', ''))
+" 2>/dev/null)
+
+    if [[ "$status" == "$profile" ]]; then
+        return 0
+    fi
+
+    # Try to connect to existing profile
+    local existing
+    existing=$(run_agent_db profiles 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for p in data.get('profiles', []):
+    if p.get('name') == '$profile':
+        print('exists')
+        break
+" 2>/dev/null)
+
+    if [[ "$existing" == "exists" ]]; then
+        run_agent_db connect "$profile" >/dev/null 2>&1
+        return $?
+    fi
+
+    echo "Error: No agent-db profile for project $ref" >&2
+    echo "Run: agent-supabase db-connect $ref" >&2
+    return 1
+}
+
+cmd_query() {
+    local ref="${1:-}"
+    local sql="${2:-}"
+    if [[ -z "$ref" ]] || [[ -z "$sql" ]]; then
+        echo "Usage: agent-supabase query <ref> \"<sql>\""
+        return 1
+    fi
+    shift 2
+    ensure_db_connected "$ref" || return $?
+    run_agent_db query "$sql" "$@"
+}
+
+cmd_tables() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase tables <ref>"
+        return 1
+    fi
+    ensure_db_connected "$ref" || return $?
+    run_agent_db snapshot --tables
+}
+
+cmd_describe() {
+    local ref="${1:-}"
+    local table="${2:-}"
+    if [[ -z "$ref" ]] || [[ -z "$table" ]]; then
+        echo "Usage: agent-supabase describe <ref> <table>"
+        return 1
+    fi
+    ensure_db_connected "$ref" || return $?
+    run_agent_db describe "$table"
+}
+
+cmd_sample() {
+    local ref="${1:-}"
+    local table="${2:-}"
+    local n="${3:-5}"
+    if [[ -z "$ref" ]] || [[ -z "$table" ]]; then
+        echo "Usage: agent-supabase sample <ref> <table> [n]"
+        return 1
+    fi
+    ensure_db_connected "$ref" || return $?
+    run_agent_db sample "$table" "$n"
+}
+
 # --- Main ---
 
 case "${1:-help}" in
@@ -665,6 +1020,36 @@ case "${1:-help}" in
         ;;
     snapshot|snap)
         cmd_snapshot
+        ;;
+    # --- REST API data access ---
+    rest)
+        shift
+        cmd_rest "$@"
+        ;;
+    # --- Database bridge (agent-db tandem) ---
+    db-connect|db-setup)
+        shift
+        cmd_db_connect "$@"
+        ;;
+    db-status)
+        shift
+        cmd_db_status "$@"
+        ;;
+    query|sql)
+        shift
+        cmd_query "$@"
+        ;;
+    tables)
+        shift
+        cmd_tables "$@"
+        ;;
+    describe|desc)
+        shift
+        cmd_describe "$@"
+        ;;
+    sample)
+        shift
+        cmd_sample "$@"
         ;;
     help|--help|-h)
         show_help

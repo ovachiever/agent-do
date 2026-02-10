@@ -1353,7 +1353,7 @@ tools:
         command: "agent-tail stop"
 
   supabase:
-    description: "Control Supabase projects, databases, secrets, edge functions, and orgs"
+    description: "Supabase project management + data access (REST API and SQL via agent-db)"
     capabilities:
       - list and manage projects
       - pause and restore projects
@@ -1363,6 +1363,9 @@ tools:
       - view custom domains
       - generate TypeScript types
       - list organizations and regions
+      - query tables via PostgREST REST API (no DB password needed)
+      - run SQL queries via agent-db bridge (full SQL power)
+      - list tables, describe schema, sample data via agent-db
     commands:
       projects: "List all projects"
       show: "Project details"
@@ -1381,6 +1384,13 @@ tools:
       regions: "List available regions"
       postgrest: "PostgREST config"
       snapshot: "Full account state as JSON"
+      rest: "Query table via PostgREST REST API"
+      db-connect: "Auto-create agent-db profile and connect"
+      db-status: "Check if agent-db profile exists"
+      query: "Run SQL via agent-db"
+      tables: "List tables via agent-db"
+      describe: "Describe table schema via agent-db"
+      sample: "Sample rows via agent-db"
     examples:
       - intent: "list my supabase projects"
         command: "agent-supabase projects"
@@ -1388,14 +1398,20 @@ tools:
         command: "agent-supabase show abcdefghijklmnopqrst"
       - intent: "check supabase project health"
         command: "agent-supabase health abcdefghijklmnopqrst"
-      - intent: "list supabase API keys"
-        command: "agent-supabase api-keys abcdefghijklmnopqrst"
+      - intent: "query supabase table"
+        command: "agent-supabase rest <ref> users --select id,email --limit 10"
+      - intent: "filter supabase data"
+        command: "agent-supabase rest <ref> orders --filter status=eq.pending"
+      - intent: "connect to supabase database"
+        command: "agent-supabase db-connect <ref>"
+      - intent: "run SQL on supabase"
+        command: "agent-supabase query <ref> \"SELECT count(*) FROM users\""
+      - intent: "list supabase tables"
+        command: "agent-supabase tables <ref>"
+      - intent: "sample supabase table data"
+        command: "agent-supabase sample <ref> orders 5"
       - intent: "list supabase secrets"
         command: "agent-supabase secrets abcdefghijklmnopqrst"
-      - intent: "set supabase secret"
-        command: "agent-supabase secret-set abcdefghijklmnopqrst MY_KEY my_value"
-      - intent: "list supabase edge functions"
-        command: "agent-supabase functions abcdefghijklmnopqrst"
       - intent: "list supabase organizations"
         command: "agent-supabase orgs"
       - intent: "get supabase account snapshot"
