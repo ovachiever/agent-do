@@ -1,10 +1,10 @@
 # agent-do
 
-Universal automation CLI for AI agents. 68 tools, two modes, one interface.
+Universal automation CLI for AI agents. 71 tools, two modes, one interface.
 
 ## What is agent-do?
 
-agent-do gives AI coding agents (Claude Code, Cursor, OpenCode, etc.) structured access to everything outside the editor: browsers, iOS simulators, databases, spreadsheets, Slack, Docker, and 60+ more tools. Instead of writing fragile automation scripts, agents call `agent-do <tool> <command>` and get JSON responses they can reason about.
+agent-do gives AI coding agents (Claude Code, Cursor, OpenCode, etc.) structured access to everything outside the editor: browsers, iOS simulators, databases, spreadsheets, Slack, Docker, and 65+ more tools. Instead of writing fragile automation scripts, agents call `agent-do <tool> <command>` and get JSON responses they can reason about.
 
 Two modes:
 - **Structured API** (for AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
@@ -34,19 +34,20 @@ cd agent-do
 |----------|-------|---------|
 | **Browser** | browse, unbrowse | Headless browser, API traffic capture, curl skill generation |
 | **Mobile** | ios, android | Simulator/emulator control, screenshots, gestures |
-| **Desktop** | gui, tui, screen, ide | App automation, terminal apps, screen capture |
-| **Data** | db, excel, sheets, pdf | Database queries, spreadsheet automation |
+| **Desktop** | macos, tui, screen, ide | Desktop GUI automation, terminal apps, screen capture |
+| **Data** | db, excel, sheets, pdf, pdf2md | Database queries, spreadsheet automation, PDF conversion |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
-| **Productivity** | calendar, notion, linear, figma | App integrations |
+| **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
 | **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase | Containers, clusters, PaaS management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis tools |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
-| **AI/Meta** | prompt, eval, memory, learn, swarm, agent | Agent orchestration |
+| **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
 | **Tracking** | manna | Git-backed issue tracking for AI agents |
-| **Utilities** | clipboard, ocr, vision, logs, metrics, debug | System utilities |
+| **Dev Tools** | git, api, tail, logs | Git operations, HTTP testing, log capture, log viewing |
+| **Utilities** | clipboard, ocr, vision, metrics, debug | System utilities |
 
-68 tools total. Run `agent-do --list` for the full list with descriptions.
+71 tools total. Run `agent-do --list` for the full list with descriptions.
 
 ## Key Concepts
 
@@ -121,7 +122,7 @@ agent-do ios snapshot          # Device state, running apps
                                     │
                                     ▼
                             tools/agent-<name>
-                            (68 executables)
+                            (71 executables)
 ```
 
 **Routing flow:**
@@ -178,7 +179,7 @@ SUPABASE_ACCESS_TOKEN # API token for Supabase (agent-supabase)
 Tools can be:
 - A standalone executable: `tools/agent-myname`
 - A directory with an executable inside: `tools/agent-myname/agent-myname`
-- A symlink to an external implementation
+- An executable found in `$PATH`
 
 ### Tool Resolution Order
 
@@ -224,7 +225,7 @@ agent-do                    # Main entry point (bash)
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   └── json-output.sh      # Shared --json flag support for tools
-├── tools/agent-*           # 68 tools (bundled or symlinked)
+├── tools/agent-*           # 71 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog (~1000 lines)
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies

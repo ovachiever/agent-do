@@ -330,6 +330,61 @@ tools:
       - intent: "find where 'Submit' button is"
         command: "agent-ocr find 'Submit'"
 
+  screen:
+    description: "Vision-based screen perception and control (macOS)"
+    capabilities:
+      - capture screenshots across multiple displays
+      - OCR text extraction from screen
+      - detect and locate UI elements
+      - mouse click, move, and keyboard control
+      - find text on screen with fuzzy matching
+    commands:
+      snapshot: "Capture screen with OCR: snapshot [display] [--no-ocr] [--output path]"
+      displays: "List connected displays"
+      elements: "List detected text elements from last snapshot"
+      find: "Find text on screen: find <text> [--exact]"
+      click: "Click at coordinates or text: click <x> <y> | click --text <text>"
+      type: "Type text: type <text>"
+      press: "Press key: press <key>"
+      cursor: "Get/move cursor: cursor | move <x> <y>"
+      scroll: "Scroll: scroll <direction>"
+    examples:
+      - intent: "capture the screen"
+        command: "agent-screen snapshot"
+      - intent: "find text on screen"
+        command: "agent-screen find 'Submit'"
+      - intent: "click on text"
+        command: "agent-screen click --text 'OK'"
+      - intent: "type text"
+        command: "agent-screen type 'hello world'"
+
+  vision:
+    description: "AI-first visual perception with object detection, OCR, and face detection"
+    capabilities:
+      - capture from webcam, screen, window, video file, or iOS simulator
+      - YOLO object detection and counting
+      - OCR text extraction from frames
+      - face detection and identification
+      - motion detection
+      - vision LLM analysis
+    commands:
+      source: "Set capture source: source webcam|screen|window|file|image|ios|rtsp"
+      snapshot: "Capture frame with analysis: snapshot [--yolo] [--ocr] [--faces] [--all]"
+      detect: "Run YOLO detection: detect [--classes person] [--annotate]"
+      count: "Count objects: count [class]"
+      ocr: "Extract text: ocr [--region x,y,w,h] [--find text]"
+      faces: "Detect faces: faces [--identify]"
+      status: "Show current source"
+    examples:
+      - intent: "detect objects on screen"
+        command: "agent-vision source screen && agent-vision snapshot --yolo"
+      - intent: "extract text from an image"
+        command: "agent-vision source image photo.png && agent-vision ocr"
+      - intent: "count people in webcam"
+        command: "agent-vision source webcam && agent-vision count person"
+      - intent: "detect faces"
+        command: "agent-vision snapshot --faces"
+
   slack:
     description: "Control Slack"
     capabilities:
@@ -452,6 +507,39 @@ tools:
     examples:
       - intent: "read A1:B10 from my sheet"
         command: "agent-sheets read A1:B10"
+
+  excel:
+    description: "AI-first Excel CLI for workbook automation"
+    capabilities:
+      - open and create Excel workbooks
+      - read/write cells and ranges
+      - manage sheets (create, rename, delete, copy)
+      - set formulas and formatting
+      - export to CSV and PDF
+      - insert/delete rows and columns
+    commands:
+      open: "Open workbook: open <path>"
+      new: "Create workbook: new [path]"
+      save: "Save workbook: save [path]"
+      snapshot: "Sheet overview: snapshot [--range A1:Z50] [--used] [--headers]"
+      get: "Read cell/range: get <cell|range>"
+      set: "Write cell/range: set <cell> <value>"
+      fill: "Fill range: fill <range> <value>"
+      formula: "Set formula: formula <cell> <expr>"
+      sheets: "List sheets"
+      sheet: "Switch/manage sheets: sheet <name|new|rename|delete>"
+      export: "Export: export csv|pdf <path>"
+    examples:
+      - intent: "open a spreadsheet"
+        command: "agent-excel open data.xlsx"
+      - intent: "read cell A1"
+        command: "agent-excel get A1"
+      - intent: "set cell B2 to 100"
+        command: "agent-excel set B2 100"
+      - intent: "export sheet to CSV"
+        command: "agent-excel export csv output.csv"
+      - intent: "get sheet overview"
+        command: "agent-excel snapshot --headers"
 
   pdf:
     description: "Control PDF operations"
@@ -780,6 +868,42 @@ tools:
         command: "agent-cad view drawing.dxf"
       - intent: "convert part.step to stl"
         command: "agent-cad convert part.step part.stl"
+
+  browse:
+    description: "AI-first headless browser automation with @ref element selection"
+    capabilities:
+      - navigate web pages
+      - interact with elements via @ref snapshots
+      - fill forms, click buttons, upload files
+      - capture API traffic and generate reusable curl skills
+      - extract text, HTML, attributes from elements
+      - authentication and session management
+    commands:
+      open: "Navigate to URL: open <url>"
+      snapshot: "Get page structure with @refs: snapshot [-i] [-c] [--csv] [--md]"
+      click: "Click element: click <@ref>"
+      fill: "Clear and fill input: fill <@ref> <text>"
+      type: "Append text: type <@ref> <text>"
+      press: "Press key: press <key>"
+      get: "Read data: get text|value|attr|title|url <@ref>"
+      wait: "Wait for condition: wait <ms|selector|--text|--stable>"
+      capture: "API traffic capture: capture start|stop <name>"
+      api: "Replay captured API: api <name> <function>"
+      auth: "Authentication: auth check-creds|login <domain>"
+      session: "Session management: session save|load <name>"
+    examples:
+      - intent: "open a website"
+        command: "agent-browse open https://example.com"
+      - intent: "get interactive elements"
+        command: "agent-browse snapshot -i"
+      - intent: "click a button"
+        command: "agent-browse click @e3"
+      - intent: "fill in a form field"
+        command: "agent-browse fill @e5 'hello world'"
+      - intent: "capture API traffic"
+        command: "agent-browse capture start"
+      - intent: "wait for page to load"
+        command: "agent-browse wait --stable"
 
   burp:
     description: "Burp Suite automation"

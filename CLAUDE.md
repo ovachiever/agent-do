@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 68 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 71 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
@@ -60,7 +60,7 @@ Tools live in `tools/agent-*`. The dispatcher checks (in order):
 2. `tools/agent-<name>` (standalone executable)
 3. `agent-<name>` in `$PATH`
 
-Most tools are **symlinks** to `../../agent-CLIs/agent-<name>/agent-<name>` (sibling repo).
+Most tools are standalone bash scripts. Some are directory-based with Python or Node.js backends.
 
 ### Key Components
 
@@ -77,7 +77,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   └── json-output.sh      # Shared --json flag and structured output for tools
-├── tools/agent-*           # 68 tools (mostly symlinks, some bundled)
+├── tools/agent-*           # 71 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -90,7 +90,7 @@ Registries merge in reverse priority order (higher-priority wins):
 
 ### Session State
 
-`lib/state.py` manages `~/.agent-do/state.yaml` — tracks active TUI/REPL/iOS/Android/Docker/SSH sessions. The intent router includes state in LLM context so "my python session" resolves correctly.
+`lib/state.py` manages `~/.agent-do/state.yaml` — tracks active TUI/REPL/iOS/Android/Docker/SSH/Tail sessions. The intent router includes state in LLM context so "my python session" resolves correctly.
 
 ### Key Bundled Tools
 
@@ -99,13 +99,18 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. Has `capture start/stop` for API skill generation and `api` for replaying skills. |
 | `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser. Shares filter/auth/generator pipeline with browse. |
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims. Build with `cargo build --release`. |
+| `agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |
+| `agent-excel/` | Bash + Python | Excel workbook automation via openpyxl. Read/write cells, formulas, sheets, export. |
+| `agent-macos/` | Bash + Python | Desktop GUI automation via macOS accessibility APIs. Click, type, UI tree inspection. |
+| `agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection, mouse/keyboard control. |
+| `agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection, motion detection. |
 | `agent-render` | Bash + curl | Render.com service management via REST API. Requires `RENDER_API_KEY`. |
 | `agent-vercel` | Bash + curl | Vercel project/deployment management via REST API. Requires `VERCEL_ACCESS_TOKEN`. Optional `--team <id>`. |
 | `agent-supabase` | Bash + curl | Supabase project/database/functions management via REST API. Requires `SUPABASE_ACCESS_TOKEN`. |
 | `agent-pdf2md` | Bash | PDF-to-Markdown converter. Auto-detects tabular vs prose PDFs. Uses `pdftotext -layout` for tables, `markitdown` for prose. |
 | `agent-tail` | Bash | Wraps dev commands, captures output to log files for AI agents. Multi-service, timestamped sessions, `latest` symlink. |
 
-Other tools are bash scripts symlinked from sibling `agent-CLIs` repo.
+Other tools are standalone bash scripts.
 
 ### Framework Libraries
 
