@@ -160,6 +160,18 @@ cd tools/agent-manna && cargo build --release && cd ../..
 ./agent-do --health
 ```
 
+### Claude Code Integration
+
+agent-do ships hooks that teach Claude Code to prefer `agent-do` tools over raw CLI commands:
+
+```bash
+./install.sh
+```
+
+This creates a PATH symlink, installs 3 Claude Code hooks (session start, prompt routing, command interception), and prints a `settings.json` snippet to register them.
+
+See [INTEGRATION.md](INTEGRATION.md) for details on the hook system, nudge vs block mode, and manual setup.
+
 ### Environment Variables
 
 ```bash
