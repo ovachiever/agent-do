@@ -1197,6 +1197,37 @@ tools:
       - intent: "get vercel account snapshot"
         command: "agent-vercel snapshot"
 
+  tail:
+    description: "Wrap dev commands, capture output to log files for AI agents"
+    capabilities:
+      - run multiple dev services with output capture
+      - individual and combined log files per session
+      - timestamped sessions with latest symlink
+      - search and filter log content
+    commands:
+      run: "Start services foreground: run 'name: cmd' ..."
+      start: "Start services background: start 'name: cmd' ..."
+      stop: "Stop services: stop [name]"
+      read: "Read log: read [name] [-n lines]"
+      follow: "Follow log: follow [name]"
+      grep: "Search logs: grep <pattern> [name]"
+      errors: "Show error lines: errors [name]"
+      list: "Show running services"
+      sessions: "List all sessions"
+      prune: "Remove old sessions"
+      snapshot: "Full state as JSON"
+    examples:
+      - intent: "run frontend and backend with logging"
+        command: "agent-tail start 'fe: npm run dev' 'api: uvicorn main:app'"
+      - intent: "check dev server output"
+        command: "agent-tail read fe"
+      - intent: "search for errors in logs"
+        command: "agent-tail errors"
+      - intent: "find pattern in api logs"
+        command: "agent-tail grep 'TypeError' api"
+      - intent: "stop all dev services"
+        command: "agent-tail stop"
+
   supabase:
     description: "Control Supabase projects, databases, secrets, edge functions, and orgs"
     capabilities:

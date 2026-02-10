@@ -74,6 +74,12 @@ def build_state_context(state: dict) -> str:
         for s in state['ssh']:
             lines.append(f"  - Session {s['id']}: {s.get('host', 'unknown')}")
 
+    if state.get('tail'):
+        lines.append("Active tail sessions:")
+        for s in state['tail']:
+            svc_names = ', '.join(sv.get('name', '?') for sv in s.get('services', []))
+            lines.append(f"  - Session {s['id']}: {svc_names} (cwd: {s.get('cwd', '?')})")
+
     return "\n".join(lines) if lines else "No active sessions."
 
 
@@ -147,4 +153,31 @@ def set_android_state(booted: Optional[str] = None, avd: Optional[str] = None) -
             state['android']['avd'] = avd
     elif 'android' in state:
         del state['android']
+    save_state(state)
+
+
+def add_tail_session(session_id: str, cwd: str, service_names: list) -> None:
+    """Add a tail session to state."""
+    state = load_state()
+    if 'tail' not in state:
+        state['tail'] = []
+
+    # Remove existing entry for this session
+    state['tail'] = [s for s in state['tail'] if s.get('id') != session_id]
+    services = [{'name': n} for n in service_names]
+    state['tail'].append({
+        'id': session_id,
+        'cwd': cwd,
+        'services': services,
+    })
+    save_state(state)
+
+
+def remove_tail_session(session_id: str) -> None:
+    """Remove a tail session from state."""
+    state = load_state()
+    if 'tail' in state:
+        state['tail'] = [s for s in state['tail'] if s.get('id') != session_id]
+        if not state['tail']:
+            del state['tail']
     save_state(state)

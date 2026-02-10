@@ -1,0 +1,817 @@
+#!/usr/bin/env bash
+# agent-tail - Wrap dev commands, capture output to log files for AI agents
+
+set -euo pipefail
+
+AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
+TAIL_STATE_DIR="$AGENT_DO_HOME/tail"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-tail - Wrap dev commands, capture output to log files for AI agents
+
+Lifecycle:
+  run   '<name: cmd>' [...]              Foreground, echoes to terminal + logs (Ctrl+C stops all)
+  start '<name: cmd>' [...]              Background, logs only (returns immediately)
+  stop  [<name>] [--session <id>]        Stop service(s) or entire session
+
+Log Access:
+  read   [<name>] [-n <lines>]           Read log (last 50 lines default, combined if no name)
+  follow [<name>]                        tail -f on log (Ctrl+C to stop)
+  grep   <pattern> [<name>]              Search logs
+  errors [<name>] [-n <lines>]           Show error/warning lines only
+
+Session:
+  list                                   Show running services
+  sessions                               List all session directories
+  prune  [--keep <n>]                    Remove old sessions (default: keep 10)
+
+Introspection:
+  snapshot                               JSON state (running services, log paths, sizes)
+
+Options:
+  --dir <path>                           Log base directory (default: tmp/logs)
+
+Service spec format: 'name: command with args'
+  The name is split from the command on the first colon.
+
+Log directory structure (in CWD):
+  tmp/logs/
+    latest -> 2026-02-10T14-30-00/       # symlink to newest session
+    2026-02-10T14-30-00/
+      fe.log                             # individual service log
+      api.log
+      combined.log                       # [name] prefix per line
+
+Examples:
+  agent-tail start 'fe: npm run dev' 'api: uvicorn main:app'
+  agent-tail read fe
+  agent-tail read -n 100
+  agent-tail errors
+  agent-tail grep 'TypeError' api
+  agent-tail run 'test: npm test'
+  agent-tail stop
+  agent-tail list
+  agent-tail sessions
+  agent-tail snapshot
+EOF
+}
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+# --- Helpers ---
+
+generate_session_id() {
+    date +%Y-%m-%dT%H-%M-%S
+}
+
+parse_service_spec() {
+    # Split 'name: command' on first colon
+    local spec="$1"
+    local name="${spec%%:*}"
+    local cmd="${spec#*:}"
+    # Trim whitespace from name and command
+    name="$(echo "$name" | xargs)"
+    cmd="$(echo "$cmd" | sed 's/^ *//')"
+    if [[ -z "$name" || -z "$cmd" || "$name" == "$spec" ]]; then
+        die "Invalid service spec: '$spec'. Use 'name: command' format."
+    fi
+    echo "$name"
+    echo "$cmd"
+}
+
+get_log_dir() {
+    local base_dir="${1:-tmp/logs}"
+    echo "$base_dir"
+}
+
+resolve_session() {
+    # Find active session from state dir, or use provided --session
+    local session_id="${1:-}"
+    if [[ -n "$session_id" ]]; then
+        echo "$session_id"
+        return
+    fi
+    # Find sessions with running PIDs
+    local active=()
+    if [[ -d "$TAIL_STATE_DIR" ]]; then
+        for d in "$TAIL_STATE_DIR"/*/; do
+            [[ -d "$d" ]] || continue
+            local sid
+            sid="$(basename "$d")"
+            for pidfile in "$d"*.pid; do
+                [[ -f "$pidfile" ]] || continue
+                local pid
+                pid="$(cat "$pidfile")"
+                if kill -0 "$pid" 2>/dev/null; then
+                    active+=("$sid")
+                    break
+                fi
+            done
+        done
+    fi
+    if [[ ${#active[@]} -eq 0 ]]; then
+        die "No active tail sessions. Run 'agent-tail start' or 'agent-tail run' first."
+    elif [[ ${#active[@]} -eq 1 ]]; then
+        echo "${active[0]}"
+    else
+        die "Multiple sessions active. Specify with --session. Run 'agent-tail list' to see them."
+    fi
+}
+
+resolve_log_dir() {
+    local base_dir="$1"
+    local session_id="$2"
+    echo "$base_dir/$session_id"
+}
+
+find_latest_log_dir() {
+    local base_dir="$1"
+    if [[ -L "$base_dir/latest" ]]; then
+        readlink "$base_dir/latest"
+    elif [[ -d "$base_dir" ]]; then
+        # Find most recent session dir
+        local latest
+        latest="$(ls -1 "$base_dir" 2>/dev/null | grep -E '^[0-9]{4}-' | sort -r | head -1)"
+        if [[ -n "$latest" ]]; then
+            echo "$latest"
+        fi
+    fi
+}
+
+check_gitignore() {
+    local base_dir="$1"
+    # Only warn if we're in a git repo and the dir isn't ignored
+    if git rev-parse --is-inside-work-tree &>/dev/null; then
+        if ! git check-ignore -q "$base_dir" 2>/dev/null; then
+            echo "Warning: '$base_dir' is not in .gitignore" >&2
+        fi
+    fi
+}
+
+update_state() {
+    local action="$1"
+    shift
+    python3 -c "
+import sys, os
+sys.path.insert(0, os.environ.get('SCRIPT_DIR', '.') + '/lib')
+from state import load_state, save_state
+
+action = sys.argv[1]
+state = load_state()
+
+if action == 'add':
+    session_id = sys.argv[2]
+    cwd = sys.argv[3]
+    names = sys.argv[4:]
+    if 'tail' not in state:
+        state['tail'] = []
+    # Remove existing entry for this session
+    state['tail'] = [s for s in state['tail'] if s.get('id') != session_id]
+    services = [{'name': n} for n in names]
+    state['tail'].append({'id': session_id, 'cwd': cwd, 'services': services})
+    save_state(state)
+
+elif action == 'remove':
+    session_id = sys.argv[2]
+    if 'tail' in state:
+        state['tail'] = [s for s in state['tail'] if s.get('id') != session_id]
+        if not state['tail']:
+            del state['tail']
+        save_state(state)
+" "$action" "$@" 2>/dev/null || true
+}
+
+# --- Commands ---
+
+cmd_start() {
+    local specs=()
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) base_dir="$2"; shift 2 ;;
+            *) specs+=("$1"); shift ;;
+        esac
+    done
+
+    [[ ${#specs[@]} -gt 0 ]] || die "Usage: agent-tail start '<name: cmd>' [...]"
+
+    local session_id
+    session_id="$(generate_session_id)"
+    local log_dir="$base_dir/$session_id"
+    local state_dir="$TAIL_STATE_DIR/$session_id"
+
+    mkdir -p "$log_dir" "$state_dir"
+    check_gitignore "$base_dir"
+
+    # Create latest symlink
+    ln -sfn "$session_id" "$base_dir/latest"
+
+    local names=()
+    for spec in "${specs[@]}"; do
+        local parsed
+        parsed="$(parse_service_spec "$spec")"
+        local name cmd
+        name="$(echo "$parsed" | head -1)"
+        cmd="$(echo "$parsed" | tail -1)"
+
+        local logfile="$log_dir/${name}.log"
+        local combined="$log_dir/combined.log"
+
+        # Start background process with output teed to individual + combined logs
+        bash -c "
+            exec 2>&1
+            $cmd | while IFS= read -r line; do
+                echo \"\$line\" >> \"$logfile\"
+                echo \"[$name] \$line\" >> \"$combined\"
+            done
+        " &
+        local pid=$!
+
+        echo "$pid" > "$state_dir/${name}.pid"
+        names+=("$name")
+        echo "Started $name (PID $pid)"
+    done
+
+    # Update state
+    update_state add "$session_id" "$(pwd)" "${names[@]}"
+
+    echo "Session: $session_id"
+    echo "Logs: $log_dir/"
+}
+
+cmd_run() {
+    local specs=()
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) base_dir="$2"; shift 2 ;;
+            *) specs+=("$1"); shift ;;
+        esac
+    done
+
+    [[ ${#specs[@]} -gt 0 ]] || die "Usage: agent-tail run '<name: cmd>' [...]"
+
+    local session_id
+    session_id="$(generate_session_id)"
+    local log_dir="$base_dir/$session_id"
+    local state_dir="$TAIL_STATE_DIR/$session_id"
+
+    mkdir -p "$log_dir" "$state_dir"
+    check_gitignore "$base_dir"
+
+    # Create latest symlink
+    ln -sfn "$session_id" "$base_dir/latest"
+
+    local pids=()
+    local names=()
+
+    cleanup() {
+        echo ""
+        echo "Stopping all services..."
+        for pid in "${pids[@]}"; do
+            kill "$pid" 2>/dev/null || true
+        done
+        # Wait briefly for processes to exit
+        for pid in "${pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+        done
+        # Clean up PID files
+        rm -rf "$state_dir"
+        update_state remove "$session_id"
+        echo "Stopped."
+    }
+    trap cleanup SIGINT SIGTERM
+
+    for spec in "${specs[@]}"; do
+        local parsed
+        parsed="$(parse_service_spec "$spec")"
+        local name cmd
+        name="$(echo "$parsed" | head -1)"
+        cmd="$(echo "$parsed" | tail -1)"
+
+        local logfile="$log_dir/${name}.log"
+        local combined="$log_dir/combined.log"
+
+        # Start process: tee to terminal, log to files
+        bash -c "
+            exec 2>&1
+            $cmd | while IFS= read -r line; do
+                echo \"[$name] \$line\"
+                echo \"\$line\" >> \"$logfile\"
+                echo \"[$name] \$line\" >> \"$combined\"
+            done
+        " &
+        local pid=$!
+
+        echo "$pid" > "$state_dir/${name}.pid"
+        pids+=("$pid")
+        names+=("$name")
+    done
+
+    # Update state
+    update_state add "$session_id" "$(pwd)" "${names[@]}"
+
+    echo "Running ${#names[@]} service(s): ${names[*]}"
+    echo "Logs: $log_dir/"
+    echo "Press Ctrl+C to stop all."
+    echo ""
+
+    # Wait for any process to exit
+    wait "${pids[@]}" 2>/dev/null || true
+    cleanup
+}
+
+cmd_stop() {
+    local name=""
+    local session_id=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) session_id="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+
+    session_id="$(resolve_session "$session_id")"
+    local state_dir="$TAIL_STATE_DIR/$session_id"
+
+    if [[ ! -d "$state_dir" ]]; then
+        die "No state directory for session $session_id"
+    fi
+
+    if [[ -n "$name" ]]; then
+        # Stop single service
+        local pidfile="$state_dir/${name}.pid"
+        if [[ ! -f "$pidfile" ]]; then
+            die "No PID file for service '$name' in session $session_id"
+        fi
+        local pid
+        pid="$(cat "$pidfile")"
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            echo "Stopped $name (PID $pid)"
+        else
+            echo "$name already stopped"
+        fi
+        rm -f "$pidfile"
+    else
+        # Stop all services in session
+        local stopped=0
+        for pidfile in "$state_dir"/*.pid; do
+            [[ -f "$pidfile" ]] || continue
+            local svc_name pid
+            svc_name="$(basename "$pidfile" .pid)"
+            pid="$(cat "$pidfile")"
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+                echo "Stopped $svc_name (PID $pid)"
+                stopped=$((stopped + 1))
+            fi
+        done
+        rm -rf "$state_dir"
+        update_state remove "$session_id"
+        if [[ $stopped -eq 0 ]]; then
+            echo "No running services in session $session_id"
+        fi
+    fi
+
+    # Check if any services remain; if not, clean up
+    if [[ -d "$state_dir" ]]; then
+        local remaining=0
+        for pidfile in "$state_dir"/*.pid; do
+            [[ -f "$pidfile" ]] || continue
+            remaining=$((remaining + 1))
+        done
+        if [[ $remaining -eq 0 ]]; then
+            rm -rf "$state_dir"
+            update_state remove "$session_id"
+        fi
+    fi
+}
+
+cmd_read() {
+    local name=""
+    local lines=50
+    local session_id=""
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n) lines="$2"; shift 2 ;;
+            --session) session_id="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+
+    local log_session
+    if [[ -n "$session_id" ]]; then
+        log_session="$session_id"
+    else
+        log_session="$(find_latest_log_dir "$base_dir")"
+    fi
+    [[ -n "$log_session" ]] || die "No log sessions found in $base_dir"
+
+    local log_dir="$base_dir/$log_session"
+    [[ -d "$log_dir" ]] || die "Log directory not found: $log_dir"
+
+    local logfile
+    if [[ -n "$name" ]]; then
+        logfile="$log_dir/${name}.log"
+    else
+        logfile="$log_dir/combined.log"
+    fi
+
+    [[ -f "$logfile" ]] || die "Log file not found: $logfile"
+    tail -n "$lines" "$logfile"
+}
+
+cmd_follow() {
+    local name=""
+    local session_id=""
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) session_id="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+
+    local log_session
+    if [[ -n "$session_id" ]]; then
+        log_session="$session_id"
+    else
+        log_session="$(find_latest_log_dir "$base_dir")"
+    fi
+    [[ -n "$log_session" ]] || die "No log sessions found in $base_dir"
+
+    local log_dir="$base_dir/$log_session"
+    local logfile
+    if [[ -n "$name" ]]; then
+        logfile="$log_dir/${name}.log"
+    else
+        logfile="$log_dir/combined.log"
+    fi
+
+    [[ -f "$logfile" ]] || die "Log file not found: $logfile"
+    tail -f "$logfile"
+}
+
+cmd_grep() {
+    local pattern=""
+    local name=""
+    local session_id=""
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --session) session_id="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
+            *)
+                if [[ -z "$pattern" ]]; then
+                    pattern="$1"
+                else
+                    name="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    [[ -n "$pattern" ]] || die "Usage: agent-tail grep <pattern> [<name>]"
+
+    local log_session
+    if [[ -n "$session_id" ]]; then
+        log_session="$session_id"
+    else
+        log_session="$(find_latest_log_dir "$base_dir")"
+    fi
+    [[ -n "$log_session" ]] || die "No log sessions found in $base_dir"
+
+    local log_dir="$base_dir/$log_session"
+    if [[ -n "$name" ]]; then
+        local logfile="$log_dir/${name}.log"
+        [[ -f "$logfile" ]] || die "Log file not found: $logfile"
+        grep -n "$pattern" "$logfile" || echo "No matches."
+    else
+        # Search all log files
+        for logfile in "$log_dir"/*.log; do
+            [[ -f "$logfile" ]] || continue
+            local basename
+            basename="$(basename "$logfile")"
+            local matches
+            matches="$(grep -n "$pattern" "$logfile" 2>/dev/null || true)"
+            if [[ -n "$matches" ]]; then
+                echo "=== $basename ==="
+                echo "$matches"
+            fi
+        done
+    fi
+}
+
+cmd_errors() {
+    local name=""
+    local lines=50
+    local session_id=""
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n) lines="$2"; shift 2 ;;
+            --session) session_id="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+
+    local log_session
+    if [[ -n "$session_id" ]]; then
+        log_session="$session_id"
+    else
+        log_session="$(find_latest_log_dir "$base_dir")"
+    fi
+    [[ -n "$log_session" ]] || die "No log sessions found in $base_dir"
+
+    local log_dir="$base_dir/$log_session"
+
+    if [[ -n "$name" ]]; then
+        local logfile="$log_dir/${name}.log"
+        [[ -f "$logfile" ]] || die "Log file not found: $logfile"
+        grep -iE 'error|exception|fatal|panic|traceback|warn' "$logfile" | tail -n "$lines" || echo "No errors found."
+    else
+        # Search combined log
+        local logfile="$log_dir/combined.log"
+        if [[ -f "$logfile" ]]; then
+            grep -iE 'error|exception|fatal|panic|traceback|warn' "$logfile" | tail -n "$lines" || echo "No errors found."
+        else
+            # Fallback: search all individual logs
+            for lf in "$log_dir"/*.log; do
+                [[ -f "$lf" ]] || continue
+                local basename
+                basename="$(basename "$lf")"
+                local matches
+                matches="$(grep -iE 'error|exception|fatal|panic|traceback|warn' "$lf" 2>/dev/null | tail -n "$lines" || true)"
+                if [[ -n "$matches" ]]; then
+                    echo "=== $basename ==="
+                    echo "$matches"
+                fi
+            done
+        fi
+    fi
+}
+
+cmd_list() {
+    local found=0
+    if [[ ! -d "$TAIL_STATE_DIR" ]]; then
+        echo "No active tail sessions."
+        return
+    fi
+
+    for d in "$TAIL_STATE_DIR"/*/; do
+        [[ -d "$d" ]] || continue
+        local session_id
+        session_id="$(basename "$d")"
+        local services=()
+        local running=0
+
+        for pidfile in "$d"*.pid; do
+            [[ -f "$pidfile" ]] || continue
+            local svc_name pid status
+            svc_name="$(basename "$pidfile" .pid)"
+            pid="$(cat "$pidfile")"
+            if kill -0 "$pid" 2>/dev/null; then
+                status="running"
+                running=$((running + 1))
+            else
+                status="stopped"
+            fi
+            services+=("$svc_name($status)")
+        done
+
+        if [[ $running -gt 0 ]]; then
+            echo "[$session_id] ${services[*]}"
+            found=$((found + 1))
+        fi
+    done
+
+    if [[ $found -eq 0 ]]; then
+        echo "No active tail sessions."
+    fi
+}
+
+cmd_sessions() {
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) base_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ ! -d "$base_dir" ]]; then
+        echo "No sessions found in $base_dir"
+        return
+    fi
+
+    local latest=""
+    if [[ -L "$base_dir/latest" ]]; then
+        latest="$(readlink "$base_dir/latest")"
+    fi
+
+    for d in "$base_dir"/*/; do
+        [[ -d "$d" ]] || continue
+        local name
+        name="$(basename "$d")"
+        [[ "$name" =~ ^[0-9]{4}- ]] || continue
+
+        local log_count size marker=""
+        log_count="$(ls "$d"*.log 2>/dev/null | wc -l | xargs)"
+        size="$(du -sh "$d" 2>/dev/null | cut -f1 | xargs)"
+        if [[ "$name" == "$latest" ]]; then
+            marker=" (latest)"
+        fi
+        echo "$name  ${log_count} logs  ${size}${marker}"
+    done
+}
+
+cmd_prune() {
+    local keep=10
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --keep) keep="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ ! -d "$base_dir" ]]; then
+        echo "No sessions to prune."
+        return
+    fi
+
+    local sessions=()
+    for d in "$base_dir"/*/; do
+        [[ -d "$d" ]] || continue
+        local name
+        name="$(basename "$d")"
+        [[ "$name" =~ ^[0-9]{4}- ]] || continue
+        sessions+=("$name")
+    done
+
+    # Sort in reverse (newest first)
+    IFS=$'\n' sessions=($(printf '%s\n' "${sessions[@]}" | sort -r))
+    unset IFS
+
+    local total=${#sessions[@]}
+    if [[ $total -le $keep ]]; then
+        echo "Nothing to prune ($total sessions, keeping $keep)."
+        return
+    fi
+
+    local removed=0
+    for ((i = keep; i < total; i++)); do
+        local session="${sessions[$i]}"
+        rm -rf "$base_dir/$session"
+        echo "Removed $session"
+        removed=$((removed + 1))
+    done
+    echo "Pruned $removed session(s), kept $keep."
+}
+
+cmd_snapshot() {
+    local base_dir="tmp/logs"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) base_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    python3 -c "
+import json, os, glob
+
+state_dir = '$TAIL_STATE_DIR'
+log_base = '$base_dir'
+
+# Running services
+services = []
+if os.path.isdir(state_dir):
+    for session_dir in sorted(os.listdir(state_dir)):
+        session_path = os.path.join(state_dir, session_dir)
+        if not os.path.isdir(session_path):
+            continue
+        for pidfile in glob.glob(os.path.join(session_path, '*.pid')):
+            name = os.path.splitext(os.path.basename(pidfile))[0]
+            with open(pidfile) as f:
+                pid = f.read().strip()
+            running = False
+            try:
+                os.kill(int(pid), 0)
+                running = True
+            except (OSError, ValueError):
+                pass
+            services.append({
+                'session': session_dir,
+                'name': name,
+                'pid': int(pid) if pid.isdigit() else pid,
+                'running': running,
+            })
+
+# Log sessions
+sessions = []
+if os.path.isdir(log_base):
+    latest = ''
+    latest_link = os.path.join(log_base, 'latest')
+    if os.path.islink(latest_link):
+        latest = os.readlink(latest_link)
+
+    for entry in sorted(os.listdir(log_base), reverse=True):
+        entry_path = os.path.join(log_base, entry)
+        if not os.path.isdir(entry_path) or entry == 'latest':
+            continue
+        logs = {}
+        for logfile in glob.glob(os.path.join(entry_path, '*.log')):
+            fname = os.path.basename(logfile)
+            size = os.path.getsize(logfile)
+            logs[fname] = {'size_bytes': size}
+        sessions.append({
+            'id': entry,
+            'is_latest': entry == latest,
+            'logs': logs,
+        })
+
+snapshot = {
+    'running_services': services,
+    'sessions': sessions,
+    'log_dir': os.path.abspath(log_base),
+    'state_dir': state_dir,
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+# --- Main ---
+
+case "${1:-help}" in
+    start)
+        shift
+        cmd_start "$@"
+        ;;
+    run)
+        shift
+        cmd_run "$@"
+        ;;
+    stop)
+        shift
+        cmd_stop "$@"
+        ;;
+    read)
+        shift
+        cmd_read "$@"
+        ;;
+    follow|tail)
+        shift
+        cmd_follow "$@"
+        ;;
+    grep|search)
+        shift
+        cmd_grep "$@"
+        ;;
+    errors)
+        shift
+        cmd_errors "$@"
+        ;;
+    list|ls)
+        cmd_list
+        ;;
+    sessions)
+        shift
+        cmd_sessions "$@"
+        ;;
+    prune)
+        shift
+        cmd_prune "$@"
+        ;;
+    snapshot|snap)
+        shift
+        cmd_snapshot "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-tail --help"
+        exit 1
+        ;;
+esac

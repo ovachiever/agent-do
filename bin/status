@@ -84,6 +84,12 @@ if state.get('ssh'):
     print("\033[1;33mSSH Sessions:\033[0m")
     for s in state['ssh']:
         print(f"  [{s['id']}] {s.get('host', 'unknown')}")
+
+if state.get('tail'):
+    print("\033[1;33mTail Sessions:\033[0m")
+    for s in state['tail']:
+        svcs = ', '.join(sv.get('name', '?') for sv in s.get('services', []))
+        print(f"  [{s['id']}] {svcs}  ({s.get('cwd', '?')})")
 PYTHON
 
 echo "───────────────────────────────────────"
