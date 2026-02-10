@@ -1,6 +1,6 @@
 # agent-do Tool Audit Report
 
-> Full analysis of 62 tools against the gold standard pattern.
+> Full analysis of 71 tools against the gold standard pattern.
 > Generated 2026-02-06 by 7-agent parallel audit swarm.
 > Updated 2026-02-06 after P0-P3 fixes (20 tools upgraded with snapshot commands).
 
@@ -184,7 +184,7 @@ Every tool SHOULD score against these criteria (0-3 scale):
 
 ### 1. The "Snapshot Gap" — Largely Closed
 
-**Before**: 42 of 62 tools scored 0-1 on snapshot. **After P0-P3**: 27 tools now have snapshot commands. The remaining ~35 tools without snapshot are either niche hardware (midi, serial, usb) or thin wrappers where the underlying CLI already provides adequate output (dns, network).
+**Before**: 42 of 71 tools scored 0-1 on snapshot. **After P0-P3**: 27 tools now have snapshot commands. The remaining tools without snapshot are either niche hardware (midi, serial, usb) or thin wrappers where the underlying CLI already provides adequate output (dns, network).
 
 **What "snapshot" should mean for each category:**
 
@@ -271,4 +271,4 @@ Every agent-do tool should answer these questions for an AI agent:
 4. **"What went wrong?"** → Actionable error codes
 5. **"How do I recover?"** → Recovery commands
 
-When all 62 tools answer these 5 questions reliably, agent-do becomes the universal AI-to-world interface.
+When all 71 tools answer these 5 questions reliably, agent-do becomes the universal AI-to-world interface.

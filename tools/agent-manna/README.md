@@ -34,7 +34,7 @@ Traditional issue trackers (Jira, Linear, GitHub Issues) are designed for human 
 ### Build
 
 ```bash
-cd /path/to/agent-do2/tools/agent-manna
+cd /path/to/agent-do/tools/agent-manna
 cargo build --release
 ```
 

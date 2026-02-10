@@ -43,8 +43,8 @@ One command. Natural language. Done.
 ┌─────────────────────────────────────────────────────────┐
 │                  Tool Executor                           │
 │                                                          │
-│   agent-tui  agent-gui  agent-ios  agent-db  ...        │
-│                     (60 tools)                           │
+│   agent-tui  agent-macos  agent-ios  agent-db  ...       │
+│                     (71 tools)                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -93,7 +93,7 @@ tools:
       - intent: "tap at 100, 200"
         command: "agent-ios tap 100 200"
 
-  gui:
+  macos:
     description: "Control native desktop applications via accessibility APIs"
     capabilities:
       - click buttons and UI elements
@@ -107,9 +107,9 @@ tools:
       find: "Find elements"
     examples:
       - intent: "click the Save button in Photoshop"
-        command: "agent-gui click Photoshop --title Save"
+        command: "agent-macos click Photoshop --title Save"
       - intent: "type hello into the search field"
-        command: "agent-gui type --role textfield hello"
+        command: "agent-macos type --role textfield hello"
 
   repl:
     description: "Control interactive REPLs (Python, Node, psql, etc.)"
@@ -146,7 +146,7 @@ tools:
       - intent: "view logs for postgres container"
         command: "agent-docker logs postgres"
 
-  # ... 55 more tools defined in full registry
+  # ... 66 more tools defined in full registry
 ```
 
 ### 2. Intent Router Prompt
@@ -262,7 +262,7 @@ agent-do --status              # Show active sessions/state
 # → Docker: 3 containers running
 
 agent-do --how "control a desktop application"
-# → Use agent-gui. It controls native apps via accessibility APIs.
+# → Use agent-macos. It controls native apps via accessibility APIs.
 #   Example: agent-do "click Save in Photoshop"
 
 agent-do --dry-run "screenshot iOS"
@@ -590,11 +590,11 @@ With caching, actual LLM calls drop 50%+ after initial learning period.
 6. [x] Pattern caching system
 7. [x] Offline fuzzy matching fallback
 
-### Phase 2: Full Registry (60/60 Tools Implemented) ✅ COMPLETE
+### Phase 2: Full Registry (71/71 Tools Implemented) ✅ COMPLETE
 8. [x] Complete registry.yaml with all tools defined
 9. [x] Tier 1 - Massive Unlock (9 tools): ✅ COMPLETE
    - [x] tui (integrate existing agent-tui)
-   - [x] gui (desktop app control via accessibility)
+   - [x] macos (desktop app control via accessibility)
    - [x] ide (VS Code/Cursor control)
    - [x] repl (Python/Node/psql REPLs)
    - [x] ssh (remote server sessions)
@@ -634,7 +634,7 @@ With caching, actual LLM calls drop 50%+ after initial learning period.
 20. [ ] Tool installation/update mechanism
 21. [ ] Hooks integration for Factory
 22. [ ] Skill wrapper for discoverability
-23. [ ] Symlinks to agent-CLIs implementations
+23. [x] All tools bundled directly (no external symlinks)
 
 ---
 
@@ -647,74 +647,28 @@ agent-do/
 │   ├── intent-router        # Haiku-powered router (python)
 │   ├── pattern-matcher      # Offline fallback (python)
 │   └── status               # Status display (bash)
-├── tools/                   # All 60 tools (symlinks to agent-CLIs or bundled)
-│   ├── agent-browse/   # Headless browser + API capture (Node.js, Playwright)
-│   ├── agent-unbrowse/ # Standalone API capture → curl skills (Node.js, Playwright)
-│   ├── agent-tui -> ../../agent-tui/agent-tui
-│   ├── agent-gui -> ../../agent-CLIs/agent-gui/agent-gui
-│   ├── agent-ide -> ../../agent-CLIs/agent-ide/agent-ide
-│   ├── agent-repl -> ../../agent-CLIs/agent-repl/agent-repl
-│   ├── agent-ssh -> ../../agent-CLIs/agent-ssh/agent-ssh
-│   ├── agent-docker -> ../../agent-CLIs/agent-docker/agent-docker
-│   ├── agent-ios -> ../../agent-CLIs/agent-ios/agent-ios
-│   ├── agent-android -> ../../agent-CLIs/agent-android/agent-android
-│   ├── agent-agent -> ../../agent-CLIs/agent-agent/agent-agent
-│   ├── agent-db -> ../../agent-CLIs/agent-db/agent-db
-│   ├── agent-k8s -> ../../agent-CLIs/agent-k8s/agent-k8s
-│   ├── agent-git -> ../../agent-CLIs/agent-git/agent-git
-│   ├── agent-debug -> ../../agent-CLIs/agent-debug/agent-debug
-│   ├── agent-jupyter -> ../../agent-CLIs/agent-jupyter/agent-jupyter
-│   ├── agent-api -> ../../agent-CLIs/agent-api/agent-api
-│   ├── agent-clipboard -> ../../agent-CLIs/agent-clipboard/agent-clipboard
-│   ├── agent-ocr -> ../../agent-CLIs/agent-ocr/agent-ocr
-│   ├── agent-slack -> ../../agent-CLIs/agent-slack/agent-slack
-│   ├── agent-discord -> ../../agent-CLIs/agent-discord/agent-discord
-│   ├── agent-email -> ../../agent-CLIs/agent-email/agent-email
-│   ├── agent-calendar -> ../../agent-CLIs/agent-calendar/agent-calendar
-│   ├── agent-notion -> ../../agent-CLIs/agent-notion/agent-notion
-│   ├── agent-linear -> ../../agent-CLIs/agent-linear/agent-linear
-│   ├── agent-figma -> ../../agent-CLIs/agent-figma/agent-figma
-│   ├── agent-sheets -> ../../agent-CLIs/agent-sheets/agent-sheets
-│   ├── agent-pdf -> ../../agent-CLIs/agent-pdf/agent-pdf
-│   ├── agent-cloud -> ../../agent-CLIs/agent-cloud/agent-cloud
-│   ├── agent-ci -> ../../agent-CLIs/agent-ci/agent-ci
-│   ├── agent-logs -> ../../agent-CLIs/agent-logs/agent-logs
-│   ├── agent-metrics -> ../../agent-CLIs/agent-metrics/agent-metrics
-│   ├── agent-vm -> ../../agent-CLIs/agent-vm/agent-vm
-│   ├── agent-network -> ../../agent-CLIs/agent-network/agent-network
-│   ├── agent-dns -> ../../agent-CLIs/agent-dns/agent-dns
-│   ├── agent-image -> ../../agent-CLIs/agent-image/agent-image
-│   ├── agent-video -> ../../agent-CLIs/agent-video/agent-video
-│   ├── agent-audio -> ../../agent-CLIs/agent-audio/agent-audio
-│   ├── agent-3d -> ../../agent-CLIs/agent-3d/agent-3d
-│   ├── agent-cad -> ../../agent-CLIs/agent-cad/agent-cad
-│   ├── agent-burp -> ../../agent-CLIs/agent-burp/agent-burp
-│   ├── agent-wireshark -> ../../agent-CLIs/agent-wireshark/agent-wireshark
-│   ├── agent-ghidra -> ../../agent-CLIs/agent-ghidra/agent-ghidra
-│   ├── agent-latex -> ../../agent-CLIs/agent-latex/agent-latex
-│   ├── agent-colab -> ../../agent-CLIs/agent-colab/agent-colab
-│   ├── agent-lab -> ../../agent-CLIs/agent-lab/agent-lab
-│   ├── agent-zoom -> ../../agent-CLIs/agent-zoom/agent-zoom
-│   ├── agent-meet -> ../../agent-CLIs/agent-meet/agent-meet
-│   ├── agent-teams -> ../../agent-CLIs/agent-teams/agent-teams
-│   ├── agent-voice -> ../../agent-CLIs/agent-voice/agent-voice
-│   ├── agent-sms -> ../../agent-CLIs/agent-sms/agent-sms
-│   ├── agent-serial -> ../../agent-CLIs/agent-serial/agent-serial
-│   ├── agent-midi -> ../../agent-CLIs/agent-midi/agent-midi
-│   ├── agent-homekit -> ../../agent-CLIs/agent-homekit/agent-homekit
-│   ├── agent-bluetooth -> ../../agent-CLIs/agent-bluetooth/agent-bluetooth
-│   ├── agent-usb -> ../../agent-CLIs/agent-usb/agent-usb
-│   ├── agent-printer -> ../../agent-CLIs/agent-printer/agent-printer
-│   ├── agent-prompt -> ../../agent-CLIs/agent-prompt/agent-prompt
-│   ├── agent-eval -> ../../agent-CLIs/agent-eval/agent-eval
-│   ├── agent-memory -> ../../agent-CLIs/agent-memory/agent-memory
-│   ├── agent-learn -> ../../agent-CLIs/agent-learn/agent-learn
-│   └── agent-swarm -> ../../agent-CLIs/agent-swarm/agent-swarm
+├── tools/                   # All 71 tools (standalone scripts + directory-based)
+│   ├── agent-browse/        # Headless browser + API capture (Node.js, Playwright)
+│   ├── agent-unbrowse/      # Standalone API capture → curl skills (Node.js)
+│   ├── agent-manna/         # Git-backed issue tracking (Rust)
+│   ├── agent-db/            # Database client (Bash + Python)
+│   ├── agent-excel/         # Excel automation (Bash + Python)
+│   ├── agent-macos/         # Desktop GUI automation (Bash + Python)
+│   ├── agent-screen/        # Screen perception + OCR (Bash + Python)
+│   ├── agent-vision/        # Visual perception + YOLO (Bash + Python)
+│   ├── agent-render         # Render.com management (Bash + curl)
+│   ├── agent-vercel         # Vercel management (Bash + curl)
+│   ├── agent-supabase       # Supabase management (Bash + curl)
+│   ├── agent-pdf2md         # PDF to Markdown converter (Bash)
+│   ├── agent-tail           # Dev server log capture (Bash)
+│   ├── agent-tui            # TUI automation via tmux (Bash)
+│   ├── agent-ios            # iOS Simulator control (Bash)
+│   └── ...                  # 56 more standalone bash tools
 ├── lib/
 │   ├── state.py             # State management
 │   ├── cache.py             # Pattern caching
 │   └── registry.py          # Registry loading
-├── registry.yaml            # All 60 tools defined
+├── registry.yaml            # All 71 tools defined
 ├── requirements.txt         # Python dependencies
 ├── PLAN.md                  # This file
 ├── README.md
@@ -768,7 +722,7 @@ ANTHROPIC_API_KEY  # Required for intent routing
 3. **Learning**: Improve routing based on corrections
    ```bash
    agent-do "screenshot my app"
-   → agent-gui screenshot
+   → agent-macos screenshot
    $ agent-do --correct "I meant the iOS simulator"
    # Updates pattern cache
    ```

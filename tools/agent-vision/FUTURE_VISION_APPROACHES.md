@@ -200,4 +200,4 @@ The key insight: **use the right tool for each app type** rather than one univer
 
 ## Status
 
-**Parked** - This exploration is for another day. Current agent-screen and agent-gui provide basic functionality.
+**Parked** - This exploration is for another day. Current agent-screen and agent-macos provide basic functionality.

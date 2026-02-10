@@ -6,7 +6,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
 2. **Natural Language Mode** — LLM-routed for human users
-3. **68 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, and more
+3. **71 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, and more
 
 ## Routing Flow
 
@@ -62,10 +62,10 @@ Successful routes are cached for future use. At 100 requests/day, LLM cost is ~$
 Tools live in `tools/agent-*`. The dispatcher (`exec_tool()`) checks in order:
 
 1. `tools/agent-<name>/agent-<name>` — directory with nested executable (e.g., agent-browse)
-2. `tools/agent-<name>` — standalone executable or symlink
+2. `tools/agent-<name>` — standalone executable
 3. `agent-<name>` in `$PATH` — external tool
 
-Most tools are **symlinks** pointing to `../../agent-CLIs/agent-<name>/agent-<name>` (sibling repo with full implementations).
+Most tools are standalone bash scripts. Some are directory-based with Python or Node.js backends.
 
 ## Key Components
 
@@ -82,7 +82,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
 │   └── json-output.sh      # Shared --json flag support for bash tools
-├── tools/agent-*           # 68 tools (bundled or symlinked)
+├── tools/agent-*           # 71 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -110,6 +110,7 @@ Tracks active sessions in `~/.agent-do/state.yaml`:
 - iOS/Android simulator state
 - Docker containers
 - SSH connections
+- Tail sessions (dev server log capture)
 
 The intent router includes state in LLM context so ambiguous references ("my python session", "the postgres container") resolve correctly.
 
@@ -141,13 +142,18 @@ json_result '{"key": "val"}' # Pass-through raw JSON
 
 ## Bundled Tools
 
-Three tools are bundled directly (not symlinked):
+Directory-based tools with complex backends:
 
 | Tool | Tech Stack | Notes |
 |------|-----------|-------|
 | `tools/agent-browse/` | Node.js, Playwright | Headless browser with @ref element selection. `daemon.js` manages browser lifecycle. Includes API capture (`capture start/stop`) and replay (`api` subcommand). |
 | `tools/agent-unbrowse/` | Node.js, Playwright | Standalone API traffic capture. Launches headed browser for manual browsing. Generates curl-based skill files. |
 | `tools/agent-manna/` | Rust | Git-backed issue tracking. Session-based claims prevent multi-agent conflicts. |
+| `tools/agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |
+| `tools/agent-excel/` | Bash + Python | Excel workbook automation via openpyxl. Read/write cells, formulas, sheets, export. |
+| `tools/agent-macos/` | Bash + Python | Desktop GUI automation via macOS accessibility APIs. Click, type, UI tree inspection. |
+| `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. |
+| `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
 
 ## Integration with AI Harnesses
 
@@ -174,7 +180,7 @@ Block raw commands and suggest agent-do alternatives:
 AGENT_DO_PATTERNS = {
     r'\bxcrun\s+simctl\b': ('ios', 'Use agent-do ios instead'),
     r'\badb\s+(shell|install)': ('android', 'Use agent-do android instead'),
-    r'\bosascript\b': ('gui', 'Use agent-do gui instead'),
+    r'\bosascript\b': ('macos', 'Use agent-do macos instead'),
     r'\bplaywright\b|\bpuppeteer\b': ('browse', 'Use agent-do browse instead'),
 }
 ```

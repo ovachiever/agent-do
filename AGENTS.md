@@ -10,17 +10,18 @@
 |----------|-------|-------------|
 | **Browser** | browse, unbrowse | Headless browser, API traffic capture → curl skills |
 | **Mobile** | ios, android | Simulator/emulator control |
-| **Desktop** | gui, tui, screen, ide | App/terminal automation |
-| **Data** | db, excel, sheets, pdf, ocr, vision | Data access and extraction |
+| **Desktop** | macos, tui, screen, ide | Desktop GUI automation, terminal apps |
+| **Data** | db, excel, sheets, pdf, pdf2md, ocr, vision | Data access and extraction |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
-| **Productivity** | calendar, notion, linear, figma | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh | Container/cluster/server management |
+| **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
+| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase | Container/cluster/server/PaaS management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
-| **AI/Meta** | prompt, eval, memory, learn, swarm, agent | Agent orchestration |
+| **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
 | **Tracking** | manna | Git-backed issue tracking |
-| **System** | clipboard, logs, metrics, debug, macos | System utilities |
+| **Dev Tools** | git, api, tail, logs | Git, HTTP testing, log capture |
+| **System** | clipboard, metrics, debug | System utilities |
 
 **Discovery:** `agent-do --list` | `agent-do <tool> --help` | `agent-do --health`
 
@@ -359,5 +360,5 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 | Edit spreadsheet | `agent-do excel` | Python + openpyxl |
 | Track issues | `agent-do manna` | Custom JSON files |
 | Detect objects in images | `agent-do vision` | Python + YOLO |
-| Control macOS apps | `agent-do gui` | AppleScript |
+| Control macOS apps | `agent-do macos` | AppleScript |
 | Automate terminal apps | `agent-do tui` | expect scripts |

@@ -422,7 +422,7 @@ def type_text(text):
 ### Phase 5: Polish
 - [ ] Watch/wait commands
 - [ ] Streaming output mode
-- [ ] Integration with agent-gui
+- [ ] Integration with agent-macos
 - [ ] Performance tuning for 5-monitor setup
 
 ---
@@ -477,18 +477,18 @@ agent-screen wait --text "hello, from agent-do!" --timeout 5
 
 ---
 
-## Integration with agent-gui
+## Integration with agent-macos
 
-agent-screen provides the **vision backbone** that agent-gui can use:
+agent-screen provides the **vision backbone** that agent-macos can use:
 
 ```bash
-# agent-gui can fall back to agent-screen when accessibility fails
-agent-gui click @g5              # Try accessibility first
+# agent-macos can fall back to agent-screen when accessibility fails
+agent-macos click @g5              # Try accessibility first
 # If element not found or action fails:
 agent-screen click --text "Send" # Fall back to vision
 ```
 
-Or agent-gui could use agent-screen internally for Electron apps:
+Or agent-macos could use agent-screen internally for Electron apps:
 
 ```python
 def click(self, ref_or_text):
