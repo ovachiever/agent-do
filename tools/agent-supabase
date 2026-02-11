@@ -29,12 +29,16 @@ PROJECT MANAGEMENT
   snapshot                     Full account state as JSON
 
 DATA ACCESS — REST API (no DB password needed)
-  rest <ref> <table>                   Query table via PostgREST
+  rest <ref> <table>                   Query table (GET)
   rest <ref> <table> --select "a,b"    Select specific columns
   rest <ref> <table> --filter "k=eq.v" Filter rows (PostgREST syntax)
   rest <ref> <table> --limit N         Limit rows (default: 20)
   rest <ref> <table> --single          Expect single row (.single())
   rest <ref> <table> --count           Return count only
+  rest <ref> <table> --update '{"k":"v"}' --filter "..."   Update matching rows (PATCH)
+  rest <ref> <table> --insert '{"k":"v"}'                  Insert row(s) (POST)
+  rest <ref> <table> --upsert '{"k":"v"}'                  Upsert row(s) (POST + merge)
+  rest <ref> <table> --delete --filter "..."               Delete matching rows (DELETE)
 
 DATA ACCESS — SQL via Management API (no DB password needed)
   sql <ref> "<sql>"            Run SQL via Management API
@@ -60,9 +64,15 @@ Examples:
   agent-supabase projects
   agent-supabase health abcdefghijklmnopqrst
 
-  # REST API queries (easiest — no password needed)
+  # REST API — read (easiest — no password needed)
   agent-supabase rest <ref> users
   agent-supabase rest <ref> orders --select "id,total,status" --filter "status=eq.pending" --limit 10
+
+  # REST API — write
+  agent-supabase rest <ref> reports --update '{"published": false}' --filter "slug=eq.my-report"
+  agent-supabase rest <ref> users --insert '{"name": "Alice", "email": "alice@example.com"}'
+  agent-supabase rest <ref> users --upsert '{"id": 1, "name": "Alice"}'
+  agent-supabase rest <ref> old_logs --delete --filter "created_at=lt.2024-01-01"
 
   # SQL via Management API (no password needed — uses access token)
   agent-supabase sql <ref> "SELECT count(*) FROM users"
@@ -789,7 +799,13 @@ cmd_rest() {
     local ref="${1:-}"
     local table="${2:-}"
     if [[ -z "$ref" ]] || [[ -z "$table" ]]; then
-        echo "Usage: agent-supabase rest <ref> <table> [--select cols] [--filter expr] [--limit N] [--single] [--count]"
+        echo "Usage: agent-supabase rest <ref> <table> [options]"
+        echo ""
+        echo "Read:   --select cols  --filter expr  --limit N  --single  --count"
+        echo "Write:  --update '{...}' --filter '...'  (PATCH)"
+        echo "        --insert '{...}'                  (POST)"
+        echo "        --upsert '{...}'                  (POST + merge)"
+        echo "        --delete --filter '...'           (DELETE)"
         return 1
     fi
     shift 2
@@ -800,6 +816,10 @@ cmd_rest() {
     local limit=20
     local single=false
     local count_only=false
+    local update_data=""
+    local insert_data=""
+    local upsert_data=""
+    local do_delete=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -808,6 +828,10 @@ cmd_rest() {
             --limit)  limit="$2"; shift 2 ;;
             --single) single=true; shift ;;
             --count)  count_only=true; shift ;;
+            --update) update_data="$2"; shift 2 ;;
+            --insert) insert_data="$2"; shift 2 ;;
+            --upsert) upsert_data="$2"; shift 2 ;;
+            --delete) do_delete=true; shift ;;
             *) echo "Unknown option: $1"; return 1 ;;
         esac
     done
@@ -820,23 +844,67 @@ cmd_rest() {
         return 1
     fi
 
+    # Determine HTTP method and body
+    local method="GET"
+    local body=""
+    local prefer_headers=()
+
+    if [[ -n "$update_data" ]]; then
+        method="PATCH"
+        body="$update_data"
+        prefer_headers+=("return=representation")
+        if [[ ${#filters[@]} -eq 0 ]]; then
+            echo "Error: --update requires --filter to avoid updating all rows" >&2
+            return 1
+        fi
+    elif [[ -n "$insert_data" ]]; then
+        method="POST"
+        body="$insert_data"
+        prefer_headers+=("return=representation")
+    elif [[ -n "$upsert_data" ]]; then
+        method="POST"
+        body="$upsert_data"
+        prefer_headers+=("return=representation" "resolution=merge-duplicates")
+    elif [[ "$do_delete" == true ]]; then
+        method="DELETE"
+        prefer_headers+=("return=representation")
+        if [[ ${#filters[@]} -eq 0 ]]; then
+            echo "Error: --delete requires --filter to avoid deleting all rows" >&2
+            return 1
+        fi
+    fi
+
     # Build URL
-    local url="https://${ref}.supabase.co/rest/v1/${table}?select=${select_cols}&limit=${limit}"
+    local url="https://${ref}.supabase.co/rest/v1/${table}?select=${select_cols}"
+    if [[ "$method" == "GET" ]]; then
+        url="${url}&limit=${limit}"
+    fi
     for f in "${filters[@]+"${filters[@]}"}"; do
         url="${url}&${f}"
     done
 
-    # Build headers
-    local args=(-s -X GET "$url"
+    # Build curl args
+    local args=(-s -X "$method" "$url"
         -H "apikey: $service_key"
         -H "Authorization: Bearer $service_key"
         -H "Content-Type: application/json")
+
+    # Add Prefer headers
+    if [[ ${#prefer_headers[@]} -gt 0 ]]; then
+        local IFS=","
+        args+=(-H "Prefer: ${prefer_headers[*]}")
+    fi
 
     if [[ "$single" == true ]]; then
         args+=(-H "Accept: application/vnd.pgrst.object+json")
     fi
     if [[ "$count_only" == true ]]; then
         args+=(-H "Prefer: count=exact" -H "Range: 0-0")
+    fi
+
+    # Add body for write operations
+    if [[ -n "$body" ]]; then
+        args+=(-d "$body")
     fi
 
     local result
@@ -857,7 +925,8 @@ try:
         print(f\"Error: {data['message']}\")
         sys.exit(1)
     if isinstance(data, list):
-        print(f'Rows: {len(data)}')
+        label = 'Rows' if '$method' == 'GET' else 'Affected'
+        print(f'{label}: {len(data)}')
         print(json.dumps(data, indent=2, default=str))
     else:
         print(json.dumps(data, indent=2, default=str))
