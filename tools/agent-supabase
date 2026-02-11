@@ -36,6 +36,11 @@ DATA ACCESS — REST API (no DB password needed)
   rest <ref> <table> --single          Expect single row (.single())
   rest <ref> <table> --count           Return count only
 
+DATA ACCESS — SQL via Management API (no DB password needed)
+  sql <ref> "<sql>"            Run SQL via Management API
+  sql <ref> --file <path>      Run SQL from a .sql file
+  sql <ref> "<sql>" --read-only  Run in read-only mode (prevents writes)
+
 DATA ACCESS — SQL via agent-db (requires DB password)
   db-connect <ref>             Auto-create agent-db profile and connect
   db-status <ref>              Check if agent-db profile exists
@@ -59,7 +64,13 @@ Examples:
   agent-supabase rest <ref> users
   agent-supabase rest <ref> orders --select "id,total,status" --filter "status=eq.pending" --limit 10
 
-  # SQL via agent-db (full SQL power)
+  # SQL via Management API (no password needed — uses access token)
+  agent-supabase sql <ref> "SELECT count(*) FROM users"
+  agent-supabase sql <ref> "CREATE TABLE foo (id serial primary key, name text)"
+  agent-supabase sql <ref> --file migrations/001_create_tables.sql
+  agent-supabase sql <ref> "SELECT * FROM users LIMIT 5" --read-only
+
+  # SQL via agent-db (direct Postgres connection — full SQL power)
   agent-supabase db-connect <ref>
   agent-supabase query <ref> "SELECT count(*) FROM users"
   agent-supabase tables <ref>
@@ -677,6 +688,101 @@ print(json.dumps(snapshot, indent=2))
 "
 }
 
+# --- SQL via Management API ---
+
+cmd_sql() {
+    local ref="${1:-}"
+    if [[ -z "$ref" ]]; then
+        echo "Usage: agent-supabase sql <ref> \"<sql>\" [--read-only] [--file <path>]"
+        return 1
+    fi
+    shift
+
+    local sql=""
+    local read_only=false
+    local file_path=""
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --read-only|-r) read_only=true; shift ;;
+            --file|-f) file_path="${2:-}"; shift 2 ;;
+            *) sql="${sql:+$sql }$1"; shift ;;
+        esac
+    done
+
+    # Read from file if specified
+    if [[ -n "$file_path" ]]; then
+        if [[ ! -f "$file_path" ]]; then
+            echo "Error: File not found: $file_path" >&2
+            return 1
+        fi
+        sql=$(cat "$file_path")
+    fi
+
+    if [[ -z "$sql" ]]; then
+        echo "Usage: agent-supabase sql <ref> \"<sql>\" [--read-only] [--file <path>]"
+        echo "  Either provide SQL inline or use --file <path>"
+        return 1
+    fi
+
+    local token="${SUPABASE_ACCESS_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+        echo "Error: SUPABASE_ACCESS_TOKEN not set" >&2
+        return 1
+    fi
+
+    # Build request body
+    local body
+    body=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'query': sys.argv[1],
+    'read_only': sys.argv[2] == 'true'
+}))
+" "$sql" "$read_only")
+
+    local result
+    result=$(curl -s -X POST "${SUPABASE_API}/projects/${ref}/database/query" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -d "$body")
+
+    # Format output
+    echo "$result" | python3 -c "
+import json, sys
+
+raw = sys.stdin.read().strip()
+if not raw:
+    print('(empty response)')
+    sys.exit(0)
+
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    print(raw)
+    sys.exit(0)
+
+# Error response
+if isinstance(data, dict) and ('message' in data or 'error' in data):
+    msg = data.get('message', data.get('error', ''))
+    detail = data.get('detail', data.get('hint', ''))
+    print(f'Error: {msg}')
+    if detail:
+        print(f'Detail: {detail}')
+    sys.exit(1)
+
+# Success — pretty print results
+if isinstance(data, list):
+    if not data:
+        print('(no rows returned)')
+    else:
+        print(json.dumps(data, indent=2, default=str))
+else:
+    print(json.dumps(data, indent=2, default=str))
+" 2>/dev/null || echo "$result"
+}
+
 # --- REST API Data Access ---
 
 cmd_rest() {
@@ -1020,6 +1126,11 @@ case "${1:-help}" in
         ;;
     snapshot|snap)
         cmd_snapshot
+        ;;
+    # --- SQL via Management API ---
+    sql|run-sql|migrate)
+        shift
+        cmd_sql "$@"
         ;;
     # --- REST API data access ---
     rest)
