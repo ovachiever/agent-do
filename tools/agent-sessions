@@ -1,0 +1,591 @@
+#!/usr/bin/env bash
+# agent-sessions - Search and retrieve AI coding session history
+# Queries the agent-sessions SQLite database for session metadata, summaries,
+# and targeted transcript access. Designed for token-efficient AI agent use.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/json-output.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/../lib/snapshot.sh" 2>/dev/null || true
+
+DB="${AGENT_SESSIONS_DB:-$HOME/.cache/agent-sessions/sessions.db}"
+
+show_help() {
+    cat << 'EOF'
+agent-sessions - Search and retrieve AI coding session history
+
+Commands:
+  search <query> [opts]     FTS/semantic search across sessions
+  list [opts]               List recent sessions
+  show <id>                 Session metadata + summary
+  context <id>              First prompt + last response + summary
+  projects [--limit 20]     Project names, session counts, last activity
+  stats                     Database overview statistics
+  snapshot                  Same as stats, structured JSON
+  grep <id> <pattern> [opts]  Regex search within a session transcript
+  turns <id> [opts]         Last N turns from a session
+
+Search/List options:
+  --limit N, -l N           Max results (default: 10)
+  --harness H, -H H        Filter by harness (claude-code, opencode, droid, cursor)
+  --project P, -p P        Filter by project name (substring match)
+
+Grep options:
+  --context N, -C N         Lines of context around match (default: 0)
+  --limit N, -l N           Max matches (default: 20)
+
+Turns options:
+  --last N                  Number of recent turns (default: 5)
+  --role R                  Filter by role (user or assistant)
+  --limit N, -l N           Max turns (default: 10)
+
+Global:
+  --json                    JSON output mode
+
+Examples:
+  agent-sessions search "authentication bug"
+  agent-sessions list --project IAMtheSTAR --limit 5
+  agent-sessions show 2017ab8f-8fbd-4ea8-94c2-bbba3ee38ef5
+  agent-sessions context 2017ab8f
+  agent-sessions projects
+  agent-sessions stats
+  agent-sessions grep 2017ab8f "broadcast" --limit 5
+  agent-sessions turns 2017ab8f --last 3 --role user
+EOF
+}
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+check_db() {
+    if [[ ! -f "$DB" ]]; then
+        json_error "Database not found: $DB" 1
+        exit 1
+    fi
+}
+
+# Resolve partial ID to full session ID
+resolve_id() {
+    local partial="$1"
+    local full
+    full=$(sqlite3 "$DB" "SELECT id FROM sessions WHERE id LIKE '${partial}%' LIMIT 2;")
+    local count
+    count=$(echo "$full" | grep -c . || true)
+    if [[ "$count" -eq 0 ]]; then
+        json_error "No session found matching: $partial" 1
+        exit 1
+    elif [[ "$count" -gt 1 ]]; then
+        json_error "Ambiguous ID prefix '$partial' matches multiple sessions. Use more characters." 1
+        exit 1
+    fi
+    echo "$full"
+}
+
+# Format epoch timestamp to human-readable
+format_ts() {
+    local ts="$1"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        date -r "$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts"
+    else
+        date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts"
+    fi
+}
+
+# Parse common filter options from args
+parse_filters() {
+    LIMIT=10
+    HARNESS=""
+    PROJECT=""
+    AFTER=""
+    QUERY=""
+    CONTEXT_LINES=0
+    LAST_N=5
+    ROLE=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --limit|-l) LIMIT="${2:-10}"; shift 2 ;;
+            --harness|-H) HARNESS="${2:-}"; shift 2 ;;
+            --project|-p) PROJECT="${2:-}"; shift 2 ;;
+            --after) AFTER="${2:-}"; shift 2 ;;
+            --context|-C) CONTEXT_LINES="${2:-0}"; shift 2 ;;
+            --last) LAST_N="${2:-5}"; shift 2 ;;
+            --role) ROLE="${2:-}"; shift 2 ;;
+            --json) shift ;;  # already parsed by json-output.sh
+            *) QUERY="${QUERY:+$QUERY }$1"; shift ;;
+        esac
+    done
+}
+
+# Build WHERE clause fragments from filters
+build_where() {
+    local clauses=()
+    if [[ -n "$HARNESS" ]]; then
+        clauses+=("harness = '$(echo "$HARNESS" | sed "s/'/''/g")'")
+    fi
+    if [[ -n "$PROJECT" ]]; then
+        clauses+=("project_name LIKE '%$(echo "$PROJECT" | sed "s/'/''/g")%'")
+    fi
+    if [[ -n "$AFTER" ]]; then
+        local after_ts
+        if [[ "$AFTER" == "today" ]]; then
+            if [[ "$(uname)" == "Darwin" ]]; then
+                after_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) 00:00:00" "+%s" 2>/dev/null || date "+%s")
+            else
+                after_ts=$(date -d "today 00:00:00" "+%s" 2>/dev/null || date "+%s")
+            fi
+        else
+            if [[ "$(uname)" == "Darwin" ]]; then
+                after_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$AFTER 00:00:00" "+%s" 2>/dev/null || echo "$AFTER")
+            else
+                after_ts=$(date -d "$AFTER" "+%s" 2>/dev/null || echo "$AFTER")
+            fi
+        fi
+        clauses+=("timestamp >= $after_ts")
+    fi
+    if [[ ${#clauses[@]} -gt 0 ]]; then
+        local IFS=" AND "
+        echo "AND ${clauses[*]}"
+    fi
+}
+
+# Output sqlite3 -json result, wrapping in envelope if --json mode
+sql_output() {
+    local data="${1:-}"
+    # sqlite3 -json returns empty string for no results
+    if [[ -z "$data" ]]; then
+        data="[]"
+    fi
+    if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+        json_result "$data"
+    else
+        echo "$data"
+    fi
+}
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_search() {
+    check_db
+    parse_filters "$@"
+
+    if [[ -z "$QUERY" ]]; then
+        json_error "Usage: agent-sessions search <query> [--limit N] [--harness H] [--project P]" 1
+        return 1
+    fi
+
+    # Try agent-sessions CLI first (hybrid semantic + FTS)
+    local cli_available=false
+    if command -v agent-sessions &>/dev/null; then
+        cli_available=true
+    fi
+
+    if [[ "$cli_available" == true && "$OUTPUT_FORMAT" != "json" ]]; then
+        # Use CLI for hybrid search with 5s timeout, then enrich with DB
+        local cli_args=("search" "$QUERY" "--limit" "$LIMIT")
+        [[ -n "$HARNESS" ]] && cli_args+=("--harness" "$HARNESS")
+        [[ -n "$PROJECT" ]] && cli_args+=("--project" "$PROJECT")
+
+        local cli_output="" tmpfile
+        tmpfile=$(mktemp)
+        agent-sessions "${cli_args[@]}" >"$tmpfile" 2>/dev/null &
+        local cli_pid=$!
+        local waited=0
+        while kill -0 "$cli_pid" 2>/dev/null && [[ $waited -lt 5 ]]; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+        if kill -0 "$cli_pid" 2>/dev/null; then
+            kill "$cli_pid" 2>/dev/null || true
+            wait "$cli_pid" 2>/dev/null || true
+        else
+            wait "$cli_pid" 2>/dev/null || true
+            cli_output=$(cat "$tmpfile")
+        fi
+        rm -f "$tmpfile"
+
+        if [[ -n "$cli_output" ]]; then
+            # Extract IDs from CLI output and enrich with DB data
+            local ids
+            ids=$(echo "$cli_output" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
+
+            if [[ -n "$ids" ]]; then
+                local id_list
+                id_list=$(echo "$ids" | sed "s/^/'/;s/$/'/" | tr '\n' ',' | sed 's/,$//')
+                local result
+                result=$(sqlite3 -json "$DB" "
+                    SELECT s.id, s.harness, s.project_name as project, s.timestamp,
+                           s.message_count, substr(s.first_prompt_preview, 1, 200) as first_prompt,
+                           substr(su.summary, 1, 150) as summary
+                    FROM sessions s
+                    LEFT JOIN summaries su ON s.id = su.session_id
+                    WHERE s.id IN ($id_list)
+                    ORDER BY s.timestamp DESC;
+                ")
+                sql_output "$result"
+                return 0
+            fi
+        fi
+    fi
+
+    # Fallback: FTS-only via sqlite3
+    local escaped_query
+    escaped_query=$(echo "$QUERY" | sed "s/'/''/g")
+    local where_extra
+    where_extra=$(build_where)
+
+    local result
+    result=$(sqlite3 -json "$DB" "
+        SELECT s.id, s.harness, s.project_name as project, s.timestamp,
+               s.message_count, substr(s.first_prompt_preview, 1, 200) as first_prompt,
+               substr(su.summary, 1, 150) as summary
+        FROM sessions s
+        LEFT JOIN summaries su ON s.id = su.session_id
+        JOIN messages_fts ON messages_fts.rowid IN (
+            SELECT rowid FROM messages_fts WHERE messages_fts MATCH '${escaped_query}'
+        )
+        JOIN messages m ON m.rowid = messages_fts.rowid AND m.session_id = s.id
+        WHERE 1=1 ${where_extra}
+        GROUP BY s.id
+        ORDER BY s.timestamp DESC
+        LIMIT ${LIMIT};
+    ")
+    sql_output "$result"
+}
+
+cmd_list() {
+    check_db
+    parse_filters "$@"
+
+    local where_extra
+    where_extra=$(build_where)
+
+    local result
+    result=$(sqlite3 -json "$DB" "
+        SELECT s.id, s.harness, s.project_name as project, s.timestamp,
+               s.message_count, s.turn_count,
+               substr(s.first_prompt_preview, 1, 120) as first_prompt
+        FROM sessions s
+        WHERE is_child = 0 ${where_extra}
+        ORDER BY s.timestamp DESC
+        LIMIT ${LIMIT};
+    ")
+    sql_output "$result"
+}
+
+cmd_show() {
+    check_db
+    local id_arg="${1:-}"
+    if [[ -z "$id_arg" ]]; then
+        json_error "Usage: agent-sessions show <session-id>" 1
+        return 1
+    fi
+
+    local id
+    id=$(resolve_id "$id_arg")
+
+    local result
+    result=$(sqlite3 -json "$DB" "
+        SELECT s.id, s.harness, s.project_name as project, s.project_path,
+               s.timestamp, s.timestamp_end, s.message_count, s.turn_count,
+               s.is_child, s.parent_id, s.auto_tags,
+               substr(s.first_prompt_preview, 1, 500) as first_prompt,
+               substr(s.last_response_preview, 1, 500) as last_response,
+               su.summary, su.model as summary_model
+        FROM sessions s
+        LEFT JOIN summaries su ON s.id = su.session_id
+        WHERE s.id = '$id';
+    ")
+    sql_output "$result"
+}
+
+cmd_context() {
+    check_db
+    local id_arg="${1:-}"
+    if [[ -z "$id_arg" ]]; then
+        json_error "Usage: agent-sessions context <session-id>" 1
+        return 1
+    fi
+
+    local id
+    id=$(resolve_id "$id_arg")
+
+    local result
+    result=$(sqlite3 -json "$DB" "
+        SELECT s.id, s.harness, s.project_name as project, s.timestamp,
+               s.first_prompt_preview as first_prompt,
+               s.last_response_preview as last_response,
+               su.summary
+        FROM sessions s
+        LEFT JOIN summaries su ON s.id = su.session_id
+        WHERE s.id = '$id';
+    ")
+    sql_output "$result"
+}
+
+cmd_projects() {
+    check_db
+    parse_filters "$@"
+    local limit="${LIMIT:-20}"
+
+    local result
+    result=$(sqlite3 -json "$DB" "
+        SELECT project_name as project, total_sessions, parent_sessions,
+               last_session_time as last_active, harness_counts,
+               total_messages
+        FROM project_stats
+        WHERE project_name IS NOT NULL AND project_name != ''
+        ORDER BY last_session_time DESC
+        LIMIT ${limit};
+    ")
+    sql_output "$result"
+}
+
+cmd_stats() {
+    check_db
+
+    local total_sessions total_messages total_chunks total_summaries
+    total_sessions=$(sqlite3 "$DB" "SELECT COUNT(*) FROM sessions;")
+    total_messages=$(sqlite3 "$DB" "SELECT COUNT(*) FROM messages;")
+    total_chunks=$(sqlite3 "$DB" "SELECT COUNT(*) FROM chunks;")
+    total_summaries=$(sqlite3 "$DB" "SELECT COUNT(*) FROM summaries;")
+
+    local by_harness
+    by_harness=$(sqlite3 -json "$DB" "
+        SELECT harness, COUNT(*) as count
+        FROM sessions GROUP BY harness ORDER BY count DESC;
+    ")
+
+    local top_projects
+    top_projects=$(sqlite3 -json "$DB" "
+        SELECT project_name as project, total_sessions as sessions, last_session_time as last_active
+        FROM project_stats
+        WHERE project_name IS NOT NULL AND project_name != ''
+        ORDER BY total_sessions DESC LIMIT 10;
+    ")
+
+    local embedded_chunks
+    embedded_chunks=$(sqlite3 "$DB" "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL;")
+
+    if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+        python3 -c "
+import json, sys
+print(json.dumps({
+    'success': True,
+    'result': {
+        'total_sessions': int(sys.argv[1]),
+        'total_messages': int(sys.argv[2]),
+        'total_chunks': int(sys.argv[3]),
+        'total_summaries': int(sys.argv[4]),
+        'embedded_chunks': int(sys.argv[5]),
+        'by_harness': json.loads(sys.argv[6]),
+        'top_projects': json.loads(sys.argv[7])
+    }
+}, indent=2))
+" "$total_sessions" "$total_messages" "$total_chunks" "$total_summaries" \
+  "$embedded_chunks" "$by_harness" "$top_projects"
+    else
+        echo "=== Agent Sessions Database ==="
+        echo "Sessions:   $total_sessions"
+        echo "Messages:   $total_messages"
+        echo "Chunks:     $total_chunks ($embedded_chunks with embeddings)"
+        echo "Summaries:  $total_summaries"
+        echo ""
+        echo "By harness:"
+        sqlite3 "$DB" "SELECT printf('  %-15s %d', harness, COUNT(*)) FROM sessions GROUP BY harness ORDER BY COUNT(*) DESC;"
+        echo ""
+        echo "Top projects:"
+        sqlite3 "$DB" "
+            SELECT printf('  %-25s %d sessions', project_name, total_sessions)
+            FROM project_stats
+            WHERE project_name IS NOT NULL AND project_name != ''
+            ORDER BY total_sessions DESC LIMIT 10;
+        "
+    fi
+}
+
+cmd_snapshot() {
+    check_db
+
+    local total_sessions total_messages total_summaries embedded_chunks
+    total_sessions=$(sqlite3 "$DB" "SELECT COUNT(*) FROM sessions;")
+    total_messages=$(sqlite3 "$DB" "SELECT COUNT(*) FROM messages;")
+    total_summaries=$(sqlite3 "$DB" "SELECT COUNT(*) FROM summaries;")
+    embedded_chunks=$(sqlite3 "$DB" "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL;")
+
+    local by_harness
+    by_harness=$(sqlite3 -json "$DB" "
+        SELECT harness, COUNT(*) as count
+        FROM sessions GROUP BY harness ORDER BY count DESC;
+    ")
+
+    snapshot_begin "sessions"
+    snapshot_field "db_path" "$DB"
+    snapshot_num_field "total_sessions" "$total_sessions"
+    snapshot_num_field "total_messages" "$total_messages"
+    snapshot_num_field "total_summaries" "$total_summaries"
+    snapshot_num_field "embedded_chunks" "$embedded_chunks"
+    snapshot_json_field "by_harness" "$by_harness"
+    snapshot_end
+}
+
+cmd_grep() {
+    check_db
+
+    local id_arg="${1:-}"
+    local pattern="${2:-}"
+    if [[ -z "$id_arg" || -z "$pattern" ]]; then
+        json_error "Usage: agent-sessions grep <session-id> <pattern> [--context N] [--limit N]" 1
+        return 1
+    fi
+
+    # Check jq availability
+    if ! command -v jq &>/dev/null; then
+        json_error "jq is required for grep. Install: brew install jq" 1
+        return 1
+    fi
+
+    shift 2
+    parse_filters "$@"
+    local limit="${LIMIT:-20}"
+
+    local id
+    id=$(resolve_id "$id_arg")
+
+    local file_path
+    file_path=$(sqlite3 "$DB" "SELECT file_path FROM sessions WHERE id = '$id';")
+    if [[ -z "$file_path" || ! -f "$file_path" ]]; then
+        json_error "Transcript file not found for session $id" 1
+        return 1
+    fi
+
+    # Extract user/assistant text messages, filter by pattern, truncate
+    jq -c --arg pat "$pattern" --argjson limit "$limit" --argjson ctx "$CONTEXT_LINES" '
+        select(.type == "user" or .type == "assistant") |
+        select(.message.role == "user" or .message.role == "assistant") |
+        {
+            role: .message.role,
+            content: (
+                if (.message.content | type) == "array" then
+                    [.message.content[] | select(.type == "text") | .text] | join("\n")
+                elif (.message.content | type) == "string" then
+                    .message.content
+                else
+                    ""
+                end
+            )
+        } |
+        select(.content != "") |
+        select(.content | test($pat; "i")) |
+        {role, text: (.content[:500] + (if (.content | length) > 500 then "..." else "" end))}
+    ' "$file_path" 2>/dev/null | head -n "$limit"
+}
+
+cmd_turns() {
+    check_db
+
+    local id_arg="${1:-}"
+    if [[ -z "$id_arg" ]]; then
+        json_error "Usage: agent-sessions turns <session-id> [--last N] [--role R] [--limit N]" 1
+        return 1
+    fi
+
+    # Check jq availability
+    if ! command -v jq &>/dev/null; then
+        json_error "jq is required for turns. Install: brew install jq" 1
+        return 1
+    fi
+
+    shift
+    parse_filters "$@"
+    local last="${LAST_N:-5}"
+    local limit="${LIMIT:-10}"
+    local role_filter="${ROLE:-}"
+
+    local id
+    id=$(resolve_id "$id_arg")
+
+    local file_path
+    file_path=$(sqlite3 "$DB" "SELECT file_path FROM sessions WHERE id = '$id';")
+    if [[ -z "$file_path" || ! -f "$file_path" ]]; then
+        json_error "Transcript file not found for session $id" 1
+        return 1
+    fi
+
+    # Build role filter
+    local role_jq='select(.message.role == "user" or .message.role == "assistant")'
+    if [[ -n "$role_filter" ]]; then
+        role_jq="select(.message.role == \"$role_filter\")"
+    fi
+
+    # Extract text content from user/assistant messages, skip tool_use/tool_result
+    jq -c "
+        select(.type == \"user\" or .type == \"assistant\") |
+        ${role_jq} |
+        {
+            role: .message.role,
+            content: (
+                if (.message.content | type) == \"array\" then
+                    [.message.content[] | select(.type == \"text\") | .text] | join(\"\n\")
+                elif (.message.content | type) == \"string\" then
+                    .message.content
+                else
+                    \"\"
+                end
+            )
+        } |
+        select(.content != \"\") |
+        {role, text: (.content[:800] + (if (.content | length) > 800 then \"...\" else \"\" end))}
+    " "$file_path" 2>/dev/null | tail -n "$last" | head -n "$limit"
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+# Parse --json flag early
+parse_output_format "$@"
+set -- "${PARSED_ARGS[@]}"
+
+case "${1:-help}" in
+    search|s)
+        shift
+        cmd_search "$@"
+        ;;
+    list|ls)
+        shift
+        cmd_list "$@"
+        ;;
+    show)
+        shift
+        cmd_show "$@"
+        ;;
+    context|ctx)
+        shift
+        cmd_context "$@"
+        ;;
+    projects|proj)
+        shift
+        cmd_projects "$@"
+        ;;
+    stats)
+        cmd_stats
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    grep|g)
+        shift
+        cmd_grep "$@"
+        ;;
+    turns|t)
+        shift
+        cmd_turns "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-sessions help"
+        exit 1
+        ;;
+esac

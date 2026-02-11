@@ -1416,3 +1416,42 @@ tools:
         command: "agent-supabase orgs"
       - intent: "get supabase account snapshot"
         command: "agent-supabase snapshot"
+
+  sessions:
+    description: "Search and retrieve AI coding session history"
+    capabilities:
+      - search past coding sessions by keyword
+      - list recent sessions by project or harness
+      - retrieve session context and summaries
+      - view project activity stats
+      - search within session transcripts by regex
+      - get recent conversation turns from a session
+    commands:
+      search: "FTS search across session prompts and metadata"
+      list: "List recent sessions with filters"
+      show: "Show session metadata and summary"
+      context: "Get session context (prompt + response + summary)"
+      projects: "List projects by session count"
+      stats: "Database overview statistics"
+      snapshot: "Database state as JSON"
+      grep: "Search within a session transcript by regex"
+      turns: "Get recent turns from a session"
+    examples:
+      - intent: "find sessions about authentication"
+        command: "agent-sessions search authentication"
+      - intent: "what did I work on in IAMtheSTAR today"
+        command: "agent-sessions list --project IAMtheSTAR --after today"
+      - intent: "show me that broadcast signal session"
+        command: "agent-sessions search 'broadcast signal'"
+      - intent: "show session details"
+        command: "agent-sessions show <session-id>"
+      - intent: "get session context for AI"
+        command: "agent-sessions context <session-id>"
+      - intent: "what was discussed about scoring in that session"
+        command: "agent-sessions grep <session-id> scoring"
+      - intent: "show me the last few messages from that session"
+        command: "agent-sessions turns <session-id> --last 5"
+      - intent: "list all projects"
+        command: "agent-sessions projects"
+      - intent: "session database stats"
+        command: "agent-sessions stats"
