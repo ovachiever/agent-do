@@ -1,6 +1,6 @@
 # agent-do
 
-Universal automation CLI for AI agents. 71 tools, two modes, one interface.
+Universal automation CLI for AI agents. 72 tools, two modes, one interface.
 
 ## What is agent-do?
 
@@ -47,7 +47,7 @@ cd agent-do
 | **Dev Tools** | git, api, tail, logs | Git operations, HTTP testing, log capture, log viewing |
 | **Utilities** | clipboard, ocr, vision, metrics, debug | System utilities |
 
-71 tools total. Run `agent-do --list` for the full list with descriptions.
+72 tools total. Run `agent-do --list` for the full list with descriptions.
 
 ## Key Concepts
 
@@ -237,7 +237,7 @@ agent-do                    # Main entry point (bash)
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   └── json-output.sh      # Shared --json flag support for tools
-├── tools/agent-*           # 71 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 72 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog (~1000 lines)
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
