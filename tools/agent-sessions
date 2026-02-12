@@ -229,8 +229,18 @@ cmd_search() {
     fi
 
     # Fallback: FTS-only via sqlite3
-    local escaped_query
-    escaped_query=$(echo "$QUERY" | sed "s/'/''/g")
+    # Quote each token individually for FTS5 safety:
+    #   "broadcast signal" → "broadcast" "signal"  (AND, not phrase)
+    #   "feature-dev"      → "feature-dev"          (safe from - operator)
+    #   "/commit"          → "/commit"              (safe from / syntax error)
+    local fts_query
+    fts_query=$(echo "$QUERY" | sed "s/'/''/g" | python3 -c "
+import sys
+q = sys.stdin.read().strip()
+# Quote each whitespace-separated token
+tokens = q.split()
+print(' '.join('\"' + t.replace('\"', '') + '\"' for t in tokens))
+")
     local where_extra
     where_extra=$(build_where)
 
@@ -242,7 +252,7 @@ cmd_search() {
         FROM sessions s
         LEFT JOIN summaries su ON s.id = su.session_id
         JOIN messages_fts ON messages_fts.rowid IN (
-            SELECT rowid FROM messages_fts WHERE messages_fts MATCH '${escaped_query}'
+            SELECT rowid FROM messages_fts WHERE messages_fts MATCH '${fts_query}'
         )
         JOIN messages m ON m.rowid = messages_fts.rowid AND m.session_id = s.id
         WHERE 1=1 ${where_extra}
