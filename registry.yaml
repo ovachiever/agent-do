@@ -1472,3 +1472,31 @@ tools:
         command: "agent-sessions projects"
       - intent: "session database stats"
         command: "agent-sessions stats"
+
+  dpt:
+    description: "Design Perception Tensor - automated design quality scoring"
+    capabilities:
+      - scan any webpage for design quality
+      - score 0-100 across 5 perception layers
+      - detect contrast, typography, spacing, hierarchy, coherence violations
+      - generate prioritized fix lists with CSS selectors
+      - baseline/diff for before/after comparison
+    commands:
+      scan: "Full scan → JSON with all 72 checks"
+      score: "Quick score + grade + dimension summary"
+      report: "Narrative design critique report"
+      violations: "Violations sorted by impact for AI fix loops"
+      baseline: "Save current scan as baseline"
+      diff: "Compare against baseline, show deltas"
+      build: "Rebuild engine from source"
+    examples:
+      - intent: "check the design quality of this page"
+        command: "agent-dpt score"
+      - intent: "scan stripe.com for design issues"
+        command: "agent-dpt scan https://stripe.com"
+      - intent: "what design violations are on this page"
+        command: "agent-dpt violations"
+      - intent: "save a design baseline before making changes"
+        command: "agent-dpt baseline"
+      - intent: "did my changes improve the design"
+        command: "agent-dpt diff"
