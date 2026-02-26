@@ -589,6 +589,60 @@ tools:
       - intent: "list EC2 instances"
         command: "agent-cloud list ec2"
 
+  gcp:
+    description: "Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials"
+    capabilities:
+      - authenticate via service account key, access token, or gcloud CLI
+      - list and inspect GCP projects
+      - enable and disable APIs on a project
+      - manage service accounts and keys
+      - create, read, and delete secrets via Secret Manager
+      - create OAuth consent screen and web app credentials via Console automation
+      - full account snapshot as JSON
+    commands:
+      auth status: "Current auth state and token validity"
+      auth token: "Print access token for piping"
+      projects: "List accessible projects"
+      project show: "Project details (number, state, labels)"
+      apis: "List enabled APIs"
+      api-enable: "Enable an API on a project"
+      api-disable: "Disable an API on a project"
+      service-accounts: "List service accounts"
+      sa-create: "Create service account"
+      sa-key-create: "Create and download service account key"
+      sa-key-list: "List keys for a service account"
+      secrets: "List secrets in Secret Manager"
+      secret-get: "Read latest secret version"
+      secret-set: "Create or update a secret"
+      secret-del: "Delete a secret"
+      oauth-setup: "Full OAuth workflow: consent screen + client creation (Console automation)"
+      oauth-create: "Create OAuth web app client (Console automation)"
+      oauth-list: "List OAuth credentials (Console automation)"
+      snapshot: "Full account state as JSON"
+    examples:
+      - intent: "list my GCP projects"
+        command: "agent-gcp projects"
+      - intent: "show GCP project details"
+        command: "agent-gcp project show my-project"
+      - intent: "check GCP auth status"
+        command: "agent-gcp auth status"
+      - intent: "enable secret manager API"
+        command: "agent-gcp api-enable my-project secretmanager.googleapis.com"
+      - intent: "list enabled GCP APIs"
+        command: "agent-gcp apis my-project"
+      - intent: "list GCP secrets"
+        command: "agent-gcp secrets my-project"
+      - intent: "set a GCP secret"
+        command: "agent-gcp secret-set my-project GOOGLE_CLIENT_ID my-client-id"
+      - intent: "get a GCP secret value"
+        command: "agent-gcp secret-get my-project GOOGLE_CLIENT_ID"
+      - intent: "create GCP service account"
+        command: "agent-gcp sa-create my-project my-service --display \"My Service\""
+      - intent: "create Google OAuth credentials"
+        command: "agent-gcp oauth-setup my-project --name \"My App\" --redirect \"http://localhost:3333/api/auth/callback/google\""
+      - intent: "get GCP account snapshot"
+        command: "agent-gcp snapshot"
+
   ci:
     description: "Control CI/CD pipelines"
     capabilities:

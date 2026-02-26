@@ -1,0 +1,1299 @@
+#!/usr/bin/env bash
+# agent-gcp - Google Cloud Platform management (REST API + Console automation)
+
+set -euo pipefail
+
+# --- API Endpoints ---
+
+CRM_API="https://cloudresourcemanager.googleapis.com/v3"
+SU_API="https://serviceusage.googleapis.com/v1"
+IAM_API="https://iam.googleapis.com/v1"
+SM_API="https://secretmanager.googleapis.com/v1"
+TOKEN_API="https://oauth2.googleapis.com/token"
+
+# --- Help ---
+
+show_help() {
+    cat << 'EOF'
+agent-gcp - Google Cloud Platform management
+
+REST API COMMANDS
+  auth status                          Current auth state (token validity, account)
+  auth token                           Print access token (for piping)
+
+  projects                             List accessible projects
+  project show <id>                    Project details (number, state, labels)
+
+  apis <project>                       List enabled APIs
+  api-enable <project> <api>           Enable an API
+  api-disable <project> <api>          Disable an API
+
+  service-accounts <project>           List service accounts
+  sa-create <project> <name>           Create service account (--display "...")
+  sa-key-create <project> <email>      Create and download JSON key
+  sa-key-list <project> <email>        List keys for service account
+
+  secrets <project>                    List secrets
+  secret-get <project> <name>          Read latest secret version
+  secret-set <project> <name> <value>  Create/update secret
+  secret-del <project> <name>          Delete secret
+
+  snapshot                             Full account state as JSON
+
+BROWSER COMMANDS (Console automation via agent-do browse)
+  oauth-setup <project> --name "App" --redirect "http://..."
+      Full workflow: consent screen check + client creation + return credentials
+      --store-secrets    Also save to Secret Manager as GOOGLE_CLIENT_ID/SECRET
+
+  oauth-create <project> --name "Client" --redirect "http://..."
+      Create OAuth web app client only (assumes consent screen configured)
+
+  oauth-list <project>
+      List OAuth credentials from Console
+
+Projects are referenced by ID. Set GCP_PROJECT to avoid repeating.
+
+Auth (in priority order):
+  GCP_ACCESS_TOKEN         Bearer token directly
+  GCP_SERVICE_ACCOUNT      Path to service account JSON key file
+  gcloud CLI               Falls back to gcloud auth print-access-token
+
+Environment:
+  GCP_ACCESS_TOKEN          Pre-obtained Bearer token
+  GCP_SERVICE_ACCOUNT       Path to service account JSON key file
+  GCP_PROJECT               Default project ID
+
+Examples:
+  agent-gcp auth status
+  agent-gcp projects
+  agent-gcp apis my-project
+  agent-gcp api-enable my-project secretmanager.googleapis.com
+  agent-gcp secrets my-project
+  agent-gcp secret-set my-project MY_KEY "my-value"
+  agent-gcp secret-get my-project MY_KEY
+  agent-gcp service-accounts my-project
+  agent-gcp sa-create my-project my-sa --display "My Service Account"
+  agent-gcp oauth-setup my-project --name "My App" --redirect "http://localhost:3333/callback"
+  agent-gcp snapshot
+EOF
+}
+
+# --- Helpers ---
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+base64url_encode() {
+    openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+# --- Auth ---
+
+_ACCESS_TOKEN=""
+_TOKEN_EXPIRY=0
+
+exchange_sa_token() {
+    local key_file="$1"
+    local scope="https://www.googleapis.com/auth/cloud-platform"
+
+    # Extract fields from service account JSON
+    local sa_email private_key
+    sa_email=$(python3 -c "import json; print(json.load(open('$key_file'))['client_email'])")
+    private_key=$(python3 -c "import json; print(json.load(open('$key_file'))['private_key'])")
+
+    local now
+    now=$(date +%s)
+
+    # JWT header + claims
+    local header claims
+    header=$(printf '{"alg":"RS256","typ":"JWT"}' | base64url_encode)
+    claims=$(printf '{"iss":"%s","scope":"%s","aud":"%s","iat":%d,"exp":%d}' \
+        "$sa_email" "$scope" "$TOKEN_API" "$now" "$((now + 3600))" | base64url_encode)
+
+    # Sign with RSA-SHA256
+    local signature
+    signature=$(printf '%s.%s' "$header" "$claims" | \
+        openssl dgst -sha256 -sign <(printf '%s\n' "$private_key") | base64url_encode)
+
+    local jwt="${header}.${claims}.${signature}"
+
+    # Exchange JWT for access token
+    curl -s -X POST "$TOKEN_API" \
+        --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+        --data-urlencode "assertion=$jwt" | \
+        python3 -c "import json,sys; print(json.load(sys.stdin).get('access_token', ''))"
+}
+
+get_access_token() {
+    # 1. Direct token from env
+    if [[ -n "${GCP_ACCESS_TOKEN:-}" ]]; then
+        echo "$GCP_ACCESS_TOKEN"
+        return
+    fi
+
+    # 2. Cached token (from service account exchange)
+    local now
+    now=$(date +%s)
+    if [[ -n "$_ACCESS_TOKEN" && $_TOKEN_EXPIRY -gt $now ]]; then
+        echo "$_ACCESS_TOKEN"
+        return
+    fi
+
+    # 3. Service account key
+    if [[ -n "${GCP_SERVICE_ACCOUNT:-}" ]]; then
+        if [[ ! -f "$GCP_SERVICE_ACCOUNT" ]]; then
+            echo "Error: GCP_SERVICE_ACCOUNT file not found: $GCP_SERVICE_ACCOUNT" >&2
+            return 1
+        fi
+        local token
+        token=$(exchange_sa_token "$GCP_SERVICE_ACCOUNT")
+        if [[ -n "$token" && "$token" != "null" && "$token" != "" ]]; then
+            _ACCESS_TOKEN="$token"
+            _TOKEN_EXPIRY=$((now + 3500))
+            echo "$token"
+            return
+        fi
+        echo "Error: Failed to exchange service account token" >&2
+        return 1
+    fi
+
+    # 4. gcloud fallback
+    if command -v gcloud &>/dev/null; then
+        local token
+        token=$(gcloud auth print-access-token 2>/dev/null)
+        if [[ -n "$token" ]]; then
+            echo "$token"
+            return
+        fi
+    fi
+
+    echo "Error: No GCP credentials configured" >&2
+    echo "  Set GCP_ACCESS_TOKEN, GCP_SERVICE_ACCOUNT, or install gcloud CLI" >&2
+    return 1
+}
+
+# --- Request Helper ---
+
+gcp_request() {
+    local method="$1"
+    local url="$2"
+    local data="${3:-}"
+
+    local token
+    token=$(get_access_token) || return 1
+
+    local args=(-s -X "$method" "$url" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    curl "${args[@]}"
+}
+
+# --- Project Resolution ---
+
+gcp_project() {
+    local arg="${1:-}"
+    local proj="${arg:-${GCP_PROJECT:-}}"
+    if [[ -z "$proj" ]]; then
+        echo "Error: project required (pass as argument or set GCP_PROJECT)" >&2
+        return 1
+    fi
+    echo "$proj"
+}
+
+# Project number cache (some APIs need number, not ID)
+_PROJECT_NUMBER=""
+_PROJECT_NUMBER_ID=""
+
+get_project_number() {
+    local project_id="$1"
+    if [[ "$_PROJECT_NUMBER_ID" == "$project_id" && -n "$_PROJECT_NUMBER" ]]; then
+        echo "$_PROJECT_NUMBER"
+        return
+    fi
+    local result
+    result=$(gcp_request GET "${CRM_API}/projects/$project_id")
+    local number
+    number=$(echo "$result" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+name = data.get('name', '')
+if '/' in name:
+    print(name.split('/')[-1])
+else:
+    print('')
+" 2>/dev/null)
+    if [[ -n "$number" ]]; then
+        _PROJECT_NUMBER="$number"
+        _PROJECT_NUMBER_ID="$project_id"
+        echo "$number"
+    else
+        echo "Error: Could not resolve project number for '$project_id'" >&2
+        return 1
+    fi
+}
+
+# --- Browse Helpers ---
+
+find_agent_browse() {
+    if [[ -x "$SCRIPT_DIR/agent-browse/agent-browse" ]]; then
+        echo "$SCRIPT_DIR/agent-browse/agent-browse"
+        return
+    fi
+    if command -v agent-do &>/dev/null; then
+        echo "agent-do browse"
+        return
+    fi
+    echo ""
+}
+
+AGENT_BROWSE_CMD="$(find_agent_browse)"
+
+run_browse() {
+    if [[ -z "$AGENT_BROWSE_CMD" ]]; then
+        echo "Error: agent-do browse not available" >&2
+        echo "  Start with: agent-do browse open https://console.cloud.google.com" >&2
+        return 1
+    fi
+    $AGENT_BROWSE_CMD "$@"
+}
+
+# Find an interactive element @ref by matching text in snapshot output
+browse_find_ref() {
+    local snapshot="$1"
+    local pattern="$2"
+    echo "$snapshot" | python3 -c "
+import sys, re
+pattern = sys.argv[1].lower()
+terms = pattern.split('|')
+for line in sys.stdin:
+    lower = line.lower()
+    for term in terms:
+        if term.strip() in lower:
+            m = re.search(r'@e\d+', line)
+            if m:
+                print(m.group())
+                sys.exit(0)
+" "$pattern" 2>/dev/null
+}
+
+# Extract a text value near a label in snapshot output
+browse_extract_value() {
+    local snapshot="$1"
+    local label="$2"
+    echo "$snapshot" | python3 -c "
+import sys, re
+label = sys.argv[1].lower()
+terms = label.split('|')
+for line in sys.stdin:
+    lower = line.lower()
+    for term in terms:
+        if term.strip() in lower:
+            # Try to extract value from quotes or after colon
+            m = re.search(r'value=\"([^\"]+)\"', line)
+            if m:
+                print(m.group(1))
+                sys.exit(0)
+            m = re.search(r'\"([^\"]{10,})\"', line)
+            if m:
+                print(m.group(1))
+                sys.exit(0)
+" "$label" 2>/dev/null
+}
+
+browse_ensure_session() {
+    if ! run_browse get url &>/dev/null 2>&1; then
+        echo "Error: No browser session active" >&2
+        echo "  Start with: agent-do browse open https://console.cloud.google.com" >&2
+        echo "  Log in to your Google account, then retry" >&2
+        return 1
+    fi
+}
+
+# --- Auth Commands ---
+
+cmd_auth_status() {
+    local token
+    token=$(get_access_token 2>/dev/null) || {
+        echo "Status: NOT AUTHENTICATED"
+        echo ""
+        echo "Configure one of:"
+        echo "  export GCP_ACCESS_TOKEN=ya29.xxx"
+        echo "  export GCP_SERVICE_ACCOUNT=/path/to/key.json"
+        echo "  gcloud auth login"
+        return 1
+    }
+
+    local masked="${token:0:8}****"
+    echo "Status: Authenticated"
+    echo "Token:  $masked"
+
+    if [[ -n "${GCP_ACCESS_TOKEN:-}" ]]; then
+        echo "Source: GCP_ACCESS_TOKEN env var"
+    elif [[ -n "${GCP_SERVICE_ACCOUNT:-}" ]]; then
+        local email
+        email=$(python3 -c "import json; print(json.load(open('${GCP_SERVICE_ACCOUNT}'))['client_email'])" 2>/dev/null)
+        echo "Source: Service account ($email)"
+    elif command -v gcloud &>/dev/null; then
+        echo "Source: gcloud CLI"
+    fi
+
+    if [[ -n "${GCP_PROJECT:-}" ]]; then
+        echo "Project: $GCP_PROJECT"
+    fi
+
+    # Validate token with a lightweight API call
+    local result
+    result=$(gcp_request GET "${CRM_API}/projects:search?pageSize=1" 2>/dev/null)
+    if echo "$result" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if 'error' in data:
+    print('Token: INVALID')
+    sys.exit(1)
+print('Token: VALID')
+" 2>/dev/null; then
+        :
+    else
+        echo "Token: COULD NOT VALIDATE"
+    fi
+}
+
+cmd_auth_token() {
+    get_access_token
+}
+
+# --- Project Commands ---
+
+cmd_projects() {
+    local result
+    result=$(gcp_request GET "${CRM_API}/projects:search?pageSize=50")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+items = data.get('projects', [])
+if not items:
+    print('No projects found')
+    sys.exit(0)
+for p in items:
+    pid = p.get('projectId', '')
+    name = p.get('displayName', '')
+    state = p.get('state', '')
+    number = p.get('name', '').split('/')[-1] if '/' in p.get('name', '') else ''
+    print(f'{pid}  ({number})  {name}  [{state}]')
+"
+}
+
+cmd_project_show() {
+    local project_id="${1:-}"
+    if [[ -z "$project_id" ]]; then
+        echo "Usage: agent-gcp project show <project-id>"
+        return 1
+    fi
+
+    local result
+    result=$(gcp_request GET "${CRM_API}/projects/$project_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+print(f\"Project ID:  {data.get('projectId', '')}\")
+name = data.get('name', '')
+number = name.split('/')[-1] if '/' in name else ''
+print(f\"Number:      {number}\")
+print(f\"Name:        {data.get('displayName', '')}\")
+print(f\"State:       {data.get('state', '')}\")
+print(f\"Parent:      {data.get('parent', '')}\")
+created = data.get('createTime', '')
+if created:
+    print(f\"Created:     {created[:19]}\")
+labels = data.get('labels', {})
+if labels:
+    for k, v in labels.items():
+        print(f\"Label:       {k}={v}\")
+"
+}
+
+# --- API Management Commands ---
+
+cmd_apis() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+
+    local number
+    number=$(get_project_number "$project") || return 1
+
+    local result
+    result=$(gcp_request GET "${SU_API}/projects/$number/services?filter=state:ENABLED&pageSize=200")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+services = data.get('services', [])
+if not services:
+    print('No APIs enabled')
+    sys.exit(0)
+for s in services:
+    config = s.get('config', {})
+    name = config.get('name', s.get('name', '').split('/')[-1])
+    title = config.get('title', '')
+    print(f'{name}  {title}')
+"
+}
+
+cmd_api_enable() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local api="${2:-}"
+
+    if [[ -z "$api" ]]; then
+        echo "Usage: agent-gcp api-enable <project> <api>"
+        echo "  Example: agent-gcp api-enable my-proj secretmanager.googleapis.com"
+        return 1
+    fi
+
+    local number
+    number=$(get_project_number "$project") || return 1
+
+    local result
+    result=$(gcp_request POST "${SU_API}/projects/$number/services/${api}:enable" '{}')
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+# Returns an Operation
+print(f'Enabling $api on $project...')
+name = data.get('name', '')
+if 'done' in str(data):
+    print('Done')
+else:
+    print(f'Operation: {name}')
+    print('API enablement may take a few moments')
+" 2>/dev/null || echo "Enabled $api on $project"
+}
+
+cmd_api_disable() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local api="${2:-}"
+
+    if [[ -z "$api" ]]; then
+        echo "Usage: agent-gcp api-disable <project> <api>"
+        return 1
+    fi
+
+    local number
+    number=$(get_project_number "$project") || return 1
+
+    local result
+    result=$(gcp_request POST "${SU_API}/projects/$number/services/${api}:disable" \
+        '{"disableDependentServices": false}')
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+print(f'Disabling $api on $project...')
+" 2>/dev/null || echo "Disabled $api on $project"
+}
+
+# --- Service Account Commands ---
+
+cmd_service_accounts() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+
+    local result
+    result=$(gcp_request GET "${IAM_API}/projects/$project/serviceAccounts")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+accounts = data.get('accounts', [])
+if not accounts:
+    print('No service accounts found')
+    sys.exit(0)
+for a in accounts:
+    email = a.get('email', '')
+    name = a.get('displayName', '')
+    disabled = ' [DISABLED]' if a.get('disabled') else ''
+    print(f'{email}  {name}{disabled}')
+"
+}
+
+cmd_sa_create() {
+    local project=""
+    local name=""
+    local display=""
+
+    local positional=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --display) display="$2"; shift 2 ;;
+            *) positional+=("$1"); shift ;;
+        esac
+    done
+
+    project=$(gcp_project "${positional[0]:-}") || return 1
+    name="${positional[1]:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-gcp sa-create <project> <account-id> [--display \"Display Name\"]"
+        return 1
+    fi
+
+    local display_escaped=""
+    if [[ -n "$display" ]]; then
+        display_escaped=$(json_escape "$display")
+    else
+        display_escaped="\"$name\""
+    fi
+
+    local body="{\"accountId\": \"$name\", \"serviceAccount\": {\"displayName\": $display_escaped}}"
+    local result
+    result=$(gcp_request POST "${IAM_API}/projects/$project/serviceAccounts" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+print(f\"Created: {data.get('email', '')}\")
+print(f\"Name:    {data.get('displayName', '')}\")
+print(f\"ID:      {data.get('uniqueId', '')}\")
+"
+}
+
+cmd_sa_key_create() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local email="${2:-}"
+
+    if [[ -z "$email" ]]; then
+        echo "Usage: agent-gcp sa-key-create <project> <service-account-email>"
+        return 1
+    fi
+
+    local result
+    result=$(gcp_request POST "${IAM_API}/projects/$project/serviceAccounts/$email/keys" \
+        '{"keyAlgorithm": "KEY_ALG_RSA_2048", "privateKeyType": "TYPE_GOOGLE_CREDENTIALS_FILE"}')
+
+    echo "$result" | python3 -c "
+import sys, json, base64
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}', file=sys.stderr)
+    sys.exit(1)
+key_data = data.get('privateKeyData', '')
+if key_data:
+    decoded = base64.b64decode(key_data).decode('utf-8')
+    name = data.get('name', '').split('/')[-1]
+    filename = f'$email-{name}.json'
+    with open(filename, 'w') as f:
+        f.write(decoded)
+    print(f'Key saved to: {filename}')
+    print(f'Key ID: {name}')
+    print(f'Valid:  {data.get(\"validAfterTime\", \"\")}')
+    print(f'Expires: {data.get(\"validBeforeTime\", \"\")}')
+else:
+    print('Error: No key data in response', file=sys.stderr)
+    sys.exit(1)
+"
+}
+
+cmd_sa_key_list() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local email="${2:-}"
+
+    if [[ -z "$email" ]]; then
+        echo "Usage: agent-gcp sa-key-list <project> <service-account-email>"
+        return 1
+    fi
+
+    local result
+    result=$(gcp_request GET "${IAM_API}/projects/$project/serviceAccounts/$email/keys")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+keys = data.get('keys', [])
+if not keys:
+    print('No keys found')
+    sys.exit(0)
+for k in keys:
+    name = k.get('name', '').split('/')[-1]
+    algo = k.get('keyAlgorithm', '')
+    origin = k.get('keyOrigin', '')
+    valid = k.get('validAfterTime', '')[:10]
+    expires = k.get('validBeforeTime', '')[:10]
+    print(f'{name}  {algo}  {origin}  valid:{valid}  expires:{expires}')
+"
+}
+
+# --- Secrets Manager Commands ---
+
+cmd_secrets() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+
+    local result
+    result=$(gcp_request GET "${SM_API}/projects/$project/secrets")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+secrets = data.get('secrets', [])
+if not secrets:
+    print('No secrets found')
+    sys.exit(0)
+for s in secrets:
+    name = s.get('name', '').split('/')[-1]
+    created = s.get('createTime', '')[:19]
+    repl = 'auto' if 'automatic' in str(s.get('replication', {})) else 'user'
+    print(f'{name}  created:{created}  replication:{repl}')
+"
+}
+
+cmd_secret_get() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local name="${2:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-gcp secret-get <project> <name>"
+        return 1
+    fi
+
+    local result
+    result=$(gcp_request GET "${SM_API}/projects/$project/secrets/$name/versions/latest:access")
+
+    echo "$result" | python3 -c "
+import sys, json, base64
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+payload = data.get('payload', {})
+encoded = payload.get('data', '')
+if encoded:
+    value = base64.b64decode(encoded).decode('utf-8')
+    print(value)
+else:
+    print('(empty)')
+"
+}
+
+cmd_secret_set() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local name="${2:-}"
+    local value="${3:-}"
+
+    if [[ -z "$name" || -z "$value" ]]; then
+        echo "Usage: agent-gcp secret-set <project> <name> <value>"
+        return 1
+    fi
+
+    # Create secret (ignore error if already exists)
+    gcp_request POST "${SM_API}/projects/$project/secrets?secretId=$name" \
+        '{"replication": {"automatic": {}}}' >/dev/null 2>&1 || true
+
+    # Add version with the value
+    local encoded
+    encoded=$(printf '%s' "$value" | openssl base64 -A)
+
+    local result
+    result=$(gcp_request POST "${SM_API}/projects/$project/secrets/$name:addVersion" \
+        "{\"payload\": {\"data\": \"$encoded\"}}")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+name = data.get('name', '')
+version = name.split('/')[-1] if '/' in name else '?'
+print(f'Set secret $name (version {version})')
+" 2>/dev/null || echo "Set secret $name"
+}
+
+cmd_secret_del() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+    local name="${2:-}"
+
+    if [[ -z "$name" ]]; then
+        echo "Usage: agent-gcp secret-del <project> <name>"
+        return 1
+    fi
+
+    local result
+    result=$(gcp_request DELETE "${SM_API}/projects/$project/secrets/$name")
+
+    if [[ -z "$result" || "$result" == "{}" ]]; then
+        echo "Deleted secret $name"
+    else
+        echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'error' in data:
+    msg = data['error'].get('message', data['error'])
+    print(f'Error: {msg}')
+    sys.exit(1)
+print(f'Deleted secret $name')
+" 2>/dev/null || echo "Deleted secret $name"
+    fi
+}
+
+# --- Browse Commands (Console Automation) ---
+
+cmd_oauth_setup() {
+    local project=""
+    local app_name=""
+    local redirect_uris=()
+    local store_secrets=false
+
+    local positional=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) app_name="$2"; shift 2 ;;
+            --redirect) redirect_uris+=("$2"); shift 2 ;;
+            --store-secrets) store_secrets=true; shift ;;
+            *) positional+=("$1"); shift ;;
+        esac
+    done
+
+    project=$(gcp_project "${positional[0]:-}") || return 1
+
+    if [[ -z "$app_name" ]]; then
+        echo "Usage: agent-gcp oauth-setup <project> --name \"App Name\" --redirect \"http://...\""
+        return 1
+    fi
+
+    if [[ ${#redirect_uris[@]} -eq 0 ]]; then
+        echo "Error: at least one --redirect URI required" >&2
+        return 1
+    fi
+
+    echo "(Browser automation — this may take a moment)"
+    echo ""
+
+    browse_ensure_session || return 1
+
+    # Step 1: Navigate to OAuth client creation page
+    echo "Navigating to OAuth client creation..."
+    run_browse open "https://console.cloud.google.com/apis/credentials/oauthclient?project=${project}" >/dev/null
+    run_browse wait --stable >/dev/null 2>&1
+    sleep 2
+
+    # Step 2: Check if we got redirected to consent screen setup
+    local current_url
+    current_url=$(run_browse get url 2>/dev/null)
+    if [[ "$current_url" == *"oauthconsent"* || "$current_url" == *"consent"* || "$current_url" == *"brandingEdit"* ]]; then
+        echo "OAuth consent screen not configured — setting up first..."
+        echo ""
+
+        # Take snapshot of consent screen page
+        local snap
+        snap=$(run_browse snapshot -i 2>/dev/null)
+
+        # Try to find and fill the app name field
+        local name_ref
+        name_ref=$(browse_find_ref "$snap" "app name|application name")
+        if [[ -n "$name_ref" ]]; then
+            run_browse fill "$name_ref" "$app_name" >/dev/null 2>&1
+        fi
+
+        # Try to find and fill support email
+        local email_ref
+        email_ref=$(browse_find_ref "$snap" "support email|user support email")
+        if [[ -n "$email_ref" ]]; then
+            # Leave empty or use a placeholder — user may need to fill this
+            echo "  Note: Support email field found. You may need to fill it manually."
+        fi
+
+        # Try to find save/continue button
+        local save_ref
+        save_ref=$(browse_find_ref "$snap" "save|save and continue|continue")
+        if [[ -n "$save_ref" ]]; then
+            run_browse click "$save_ref" >/dev/null 2>&1
+            run_browse wait --stable >/dev/null 2>&1
+            sleep 2
+        else
+            echo "Error: Could not find Save button on consent screen" >&2
+            echo "Snapshot for debugging:" >&2
+            echo "$snap" >&2
+            return 1
+        fi
+
+        # Navigate back to OAuth client creation
+        echo "Consent screen configured. Navigating to client creation..."
+        run_browse open "https://console.cloud.google.com/apis/credentials/oauthclient?project=${project}" >/dev/null
+        run_browse wait --stable >/dev/null 2>&1
+        sleep 2
+    fi
+
+    # Step 3: Create the OAuth client
+    _oauth_create_client "$project" "$app_name" "${redirect_uris[@]}" || return 1
+
+    # Step 4: Store secrets if requested
+    if $store_secrets; then
+        echo ""
+        echo "Storing credentials in Secret Manager..."
+
+        # Re-read the credentials from the last step (stored in _LAST_CLIENT_ID / _LAST_CLIENT_SECRET)
+        if [[ -n "${_LAST_CLIENT_ID:-}" && -n "${_LAST_CLIENT_SECRET:-}" ]]; then
+            cmd_secret_set "$project" "GOOGLE_CLIENT_ID" "$_LAST_CLIENT_ID"
+            cmd_secret_set "$project" "GOOGLE_CLIENT_SECRET" "$_LAST_CLIENT_SECRET"
+            echo "Stored as GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
+        else
+            echo "Warning: Could not store secrets — credentials not captured" >&2
+        fi
+    fi
+}
+
+# Internal: create OAuth client via Console (called by oauth-setup and oauth-create)
+_LAST_CLIENT_ID=""
+_LAST_CLIENT_SECRET=""
+
+_oauth_create_client() {
+    local project="$1"
+    local client_name="$2"
+    shift 2
+    local redirect_uris=("$@")
+
+    local snap
+    snap=$(run_browse snapshot -i 2>/dev/null)
+
+    # Select "Web application" type
+    echo "Selecting Web application type..."
+    local type_ref
+    type_ref=$(browse_find_ref "$snap" "application type")
+    if [[ -n "$type_ref" ]]; then
+        run_browse click "$type_ref" >/dev/null 2>&1
+        sleep 1
+        snap=$(run_browse snapshot -i 2>/dev/null)
+        local web_ref
+        web_ref=$(browse_find_ref "$snap" "web application")
+        if [[ -n "$web_ref" ]]; then
+            run_browse click "$web_ref" >/dev/null 2>&1
+            run_browse wait 1000 >/dev/null 2>&1
+            snap=$(run_browse snapshot -i 2>/dev/null)
+        fi
+    fi
+
+    # Fill name
+    echo "Setting client name: $client_name"
+    local name_ref
+    name_ref=$(browse_find_ref "$snap" "name")
+    if [[ -n "$name_ref" ]]; then
+        run_browse fill "$name_ref" "$client_name" >/dev/null 2>&1
+    fi
+
+    # Add redirect URIs
+    for uri in "${redirect_uris[@]}"; do
+        echo "Adding redirect URI: $uri"
+        snap=$(run_browse snapshot -i 2>/dev/null)
+        local add_ref
+        add_ref=$(browse_find_ref "$snap" "add uri|add redirect")
+        if [[ -n "$add_ref" ]]; then
+            run_browse click "$add_ref" >/dev/null 2>&1
+            run_browse wait 1000 >/dev/null 2>&1
+            snap=$(run_browse snapshot -i 2>/dev/null)
+        fi
+        # Find the URI input field (usually the last input)
+        local uri_ref
+        uri_ref=$(echo "$snap" | python3 -c "
+import sys, re
+refs = []
+for line in sys.stdin:
+    if 'input' in line.lower() and ('uri' in line.lower() or 'redirect' in line.lower() or 'url' in line.lower()):
+        m = re.search(r'@e\d+', line)
+        if m:
+            refs.append(m.group())
+if refs:
+    print(refs[-1])
+" 2>/dev/null)
+        if [[ -n "$uri_ref" ]]; then
+            run_browse fill "$uri_ref" "$uri" >/dev/null 2>&1
+        fi
+    done
+
+    # Click Create
+    echo "Creating OAuth client..."
+    snap=$(run_browse snapshot -i 2>/dev/null)
+    local create_ref
+    create_ref=$(browse_find_ref "$snap" "create")
+    if [[ -n "$create_ref" ]]; then
+        run_browse click "$create_ref" >/dev/null 2>&1
+        run_browse wait --stable >/dev/null 2>&1
+        sleep 3
+    else
+        echo "Error: Could not find Create button" >&2
+        echo "Snapshot:" >&2
+        echo "$snap" >&2
+        return 1
+    fi
+
+    # Extract credentials from the confirmation dialog
+    snap=$(run_browse snapshot -i 2>/dev/null)
+    local client_id client_secret
+    client_id=$(browse_extract_value "$snap" "client id|your client id")
+    client_secret=$(browse_extract_value "$snap" "client secret|your client secret")
+
+    if [[ -n "$client_id" ]]; then
+        _LAST_CLIENT_ID="$client_id"
+        _LAST_CLIENT_SECRET="$client_secret"
+        echo ""
+        echo "OAuth client created:"
+        echo "  Client ID:     $client_id"
+        echo "  Client Secret: $client_secret"
+    else
+        # Try getting the full page text for credentials
+        echo ""
+        echo "Warning: Could not auto-extract credentials from dialog" >&2
+        echo "The client may have been created. Check the Console or snapshot below:" >&2
+        echo "$snap" >&2
+    fi
+}
+
+cmd_oauth_create() {
+    local project=""
+    local client_name=""
+    local redirect_uris=()
+
+    local positional=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) client_name="$2"; shift 2 ;;
+            --redirect) redirect_uris+=("$2"); shift 2 ;;
+            *) positional+=("$1"); shift ;;
+        esac
+    done
+
+    project=$(gcp_project "${positional[0]:-}") || return 1
+
+    if [[ -z "$client_name" ]]; then
+        echo "Usage: agent-gcp oauth-create <project> --name \"Client Name\" --redirect \"http://...\""
+        return 1
+    fi
+
+    if [[ ${#redirect_uris[@]} -eq 0 ]]; then
+        echo "Error: at least one --redirect URI required" >&2
+        return 1
+    fi
+
+    echo "(Browser automation — this may take a moment)"
+    echo ""
+
+    browse_ensure_session || return 1
+
+    # Navigate to OAuth client creation page
+    echo "Navigating to OAuth client creation..."
+    run_browse open "https://console.cloud.google.com/apis/credentials/oauthclient?project=${project}" >/dev/null
+    run_browse wait --stable >/dev/null 2>&1
+    sleep 2
+
+    _oauth_create_client "$project" "$client_name" "${redirect_uris[@]}"
+}
+
+cmd_oauth_list() {
+    local project
+    project=$(gcp_project "${1:-}") || return 1
+
+    echo "(Browser automation — this may take a moment)"
+    echo ""
+
+    browse_ensure_session || return 1
+
+    # Navigate to credentials page
+    run_browse open "https://console.cloud.google.com/apis/credentials?project=${project}" >/dev/null
+    run_browse wait --stable >/dev/null 2>&1
+    sleep 2
+
+    # Take snapshot and extract credential info
+    local snap
+    snap=$(run_browse snapshot -i 2>/dev/null)
+
+    echo "OAuth 2.0 Client IDs (from Console):"
+    echo "$snap" | python3 -c "
+import sys, re
+lines = sys.stdin.readlines()
+found = False
+for line in lines:
+    # Look for lines containing client ID patterns
+    if '.apps.googleusercontent.com' in line or 'oauth' in line.lower():
+        # Clean up and print
+        text = line.strip()
+        if text:
+            found = True
+            print(f'  {text}')
+if not found:
+    print('  (Could not parse credentials list from Console)')
+    print('  Use the snapshot below to locate credentials:')
+    for line in lines[:30]:
+        if line.strip():
+            print(f'    {line.rstrip()}')
+" 2>/dev/null
+}
+
+# --- Snapshot ---
+
+cmd_snapshot() {
+    local token
+    token=$(get_access_token 2>/dev/null)
+    if [[ -z "$token" ]]; then
+        echo '{"error": "Not authenticated. Set GCP_ACCESS_TOKEN, GCP_SERVICE_ACCOUNT, or install gcloud."}'
+        return 1
+    fi
+
+    python3 -c "
+import json, sys
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+TOKEN = '$token'
+PROJECT = '${GCP_PROJECT:-}'
+
+def api_get(url):
+    req = Request(url, headers={
+        'Authorization': 'Bearer ' + TOKEN,
+        'Content-Type': 'application/json',
+    })
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read())
+    except HTTPError as e:
+        if e.code == 401:
+            return {'error': 'unauthorized'}
+        return {'error': str(e)}
+    except Exception as e:
+        return {'error': str(e)}
+
+# Projects
+raw = api_get('https://cloudresourcemanager.googleapis.com/v3/projects:search?pageSize=100')
+token_valid = not isinstance(raw, dict) or 'error' not in raw
+
+projects = []
+if isinstance(raw, dict) and 'projects' in raw:
+    for p in raw['projects']:
+        pid = p.get('projectId', '')
+        name_field = p.get('name', '')
+        number = name_field.split('/')[-1] if '/' in name_field else ''
+        projects.append({
+            'projectId': pid,
+            'number': number,
+            'displayName': p.get('displayName', ''),
+            'state': p.get('state', ''),
+            'createTime': p.get('createTime', ''),
+        })
+
+# Per-project details (first project or GCP_PROJECT)
+target_project = PROJECT
+target_number = ''
+if not target_project and projects:
+    target_project = projects[0]['projectId']
+    target_number = projects[0]['number']
+elif target_project:
+    for p in projects:
+        if p['projectId'] == target_project:
+            target_number = p['number']
+            break
+
+enabled_apis = []
+service_accounts = []
+secrets = []
+
+if target_number:
+    # Enabled APIs
+    raw = api_get(f'https://serviceusage.googleapis.com/v1/projects/{target_number}/services?filter=state:ENABLED&pageSize=200')
+    if isinstance(raw, dict) and 'services' in raw:
+        for s in raw['services']:
+            config = s.get('config', {})
+            enabled_apis.append({
+                'name': config.get('name', ''),
+                'title': config.get('title', ''),
+            })
+
+if target_project:
+    # Service accounts
+    raw = api_get(f'https://iam.googleapis.com/v1/projects/{target_project}/serviceAccounts')
+    if isinstance(raw, dict) and 'accounts' in raw:
+        for a in raw['accounts']:
+            service_accounts.append({
+                'email': a.get('email', ''),
+                'displayName': a.get('displayName', ''),
+                'disabled': a.get('disabled', False),
+            })
+
+    # Secrets
+    raw = api_get(f'https://secretmanager.googleapis.com/v1/projects/{target_project}/secrets')
+    if isinstance(raw, dict) and 'secrets' in raw:
+        for s in raw['secrets']:
+            secrets.append({
+                'name': s.get('name', '').split('/')[-1],
+                'createTime': s.get('createTime', ''),
+            })
+
+snapshot = {
+    'token_valid': token_valid,
+    'active_project': target_project,
+    'projects': {
+        'count': len(projects),
+        'items': projects,
+    },
+    'enabled_apis': {
+        'project': target_project,
+        'count': len(enabled_apis),
+        'items': enabled_apis,
+    },
+    'service_accounts': {
+        'project': target_project,
+        'count': len(service_accounts),
+        'items': service_accounts,
+    },
+    'secrets': {
+        'project': target_project,
+        'count': len(secrets),
+        'items': secrets,
+    },
+}
+print(json.dumps(snapshot, indent=2))
+"
+}
+
+# --- Main ---
+
+case "${1:-help}" in
+    auth)
+        shift
+        case "${1:-status}" in
+            status) cmd_auth_status ;;
+            token)  cmd_auth_token ;;
+            *)      echo "Unknown auth command: $1"; echo "Try: auth status, auth token"; exit 1 ;;
+        esac
+        ;;
+    projects|ls|list)
+        cmd_projects
+        ;;
+    project)
+        shift
+        case "${1:-}" in
+            show|get) shift; cmd_project_show "$@" ;;
+            *)        cmd_project_show "$@" ;;
+        esac
+        ;;
+    apis)
+        shift
+        cmd_apis "$@"
+        ;;
+    api-enable|enable-api)
+        shift
+        cmd_api_enable "$@"
+        ;;
+    api-disable|disable-api)
+        shift
+        cmd_api_disable "$@"
+        ;;
+    service-accounts|sa|sas)
+        shift
+        cmd_service_accounts "$@"
+        ;;
+    sa-create)
+        shift
+        cmd_sa_create "$@"
+        ;;
+    sa-key-create)
+        shift
+        cmd_sa_key_create "$@"
+        ;;
+    sa-key-list|sa-keys)
+        shift
+        cmd_sa_key_list "$@"
+        ;;
+    secrets)
+        shift
+        cmd_secrets "$@"
+        ;;
+    secret-get)
+        shift
+        cmd_secret_get "$@"
+        ;;
+    secret-set)
+        shift
+        cmd_secret_set "$@"
+        ;;
+    secret-del|secret-delete|secret-rm)
+        shift
+        cmd_secret_del "$@"
+        ;;
+    oauth-setup)
+        shift
+        cmd_oauth_setup "$@"
+        ;;
+    oauth-create)
+        shift
+        cmd_oauth_create "$@"
+        ;;
+    oauth-list|oauth-ls)
+        shift
+        cmd_oauth_list "$@"
+        ;;
+    snapshot|snap)
+        cmd_snapshot
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Try: agent-gcp --help"
+        exit 1
+        ;;
+esac
