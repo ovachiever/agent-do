@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# context7 - CLI wrapper for Context7 documentation API
+# Replaces the MCP server (saves ~7s startup per session)
+#
+# Usage:
+#   context7 search <library-name> [query]    Search for a library ID
+#   context7 docs <library-id> <query>        Get documentation
+#   context7 --help                           Show this help
+#
+# Examples:
+#   context7 search nextjs
+#   context7 search "react hook form" "validation"
+#   context7 docs /vercel/next.js "app router middleware"
+#   context7 docs /supabase/supabase "row level security"
+
+set -euo pipefail
+
+BASE_URL="https://context7.com/api/v2"
+HEADER="X-Context7-Source: cli"
+
+# Optional API key from environment
+AUTH_HEADER=""
+if [[ -n "${CONTEXT7_API_KEY:-}" ]]; then
+  AUTH_HEADER="Authorization: Bearer $CONTEXT7_API_KEY"
+fi
+
+_curl() {
+  local args=(-s -H "$HEADER")
+  [[ -n "$AUTH_HEADER" ]] && args+=(-H "$AUTH_HEADER")
+  curl "${args[@]}" "$@"
+}
+
+_urlencode() {
+  python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+}
+
+cmd_search() {
+  local library_name="${1:?Usage: context7 search <library-name> [query]}"
+  local query="${2:-$library_name}"
+
+  local enc_name enc_query
+  enc_name=$(_urlencode "$library_name")
+  enc_query=$(_urlencode "$query")
+
+  _curl "$BASE_URL/libs/search?query=$enc_query&libraryName=$enc_name" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+results = data.get('results', [])
+if not results:
+    print('No libraries found.')
+    sys.exit(0)
+for r in results[:10]:
+    lib_id = r.get('id', '')
+    title = r.get('title', '')
+    snippets = r.get('codeSnippetCount', 0)
+    score = r.get('benchmarkScore', '')
+    print(f'{lib_id:45s} {title:30s} snippets={snippets} score={score}')
+"
+}
+
+cmd_docs() {
+  local library_id="${1:?Usage: context7 docs <library-id> <query>}"
+  local query="${2:?Usage: context7 docs <library-id> <query>}"
+
+  local enc_id enc_query
+  enc_id=$(_urlencode "$library_id")
+  enc_query=$(_urlencode "$query")
+
+  _curl "$BASE_URL/context?query=$enc_query&libraryId=$enc_id"
+}
+
+cmd_help() {
+  sed -n '2,15s/^# \?//p' "$0"
+}
+
+case "${1:-help}" in
+  search)  shift; cmd_search "$@" ;;
+  docs)    shift; cmd_docs "$@" ;;
+  help|--help|-h) cmd_help ;;
+  *) echo "Unknown command: $1. Use --help"; exit 1 ;;
+esac

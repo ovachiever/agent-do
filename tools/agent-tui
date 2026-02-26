@@ -100,7 +100,8 @@ cmd_spawn() {
         die "session '$user_session' already exists"
     fi
     
-    tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" -- $command
+    tmux new-session -d -s "$tmux_session" -x "$width" -y "$height" -- $command \
+        \; set-option -t "$tmux_session" destroy-unattached off
     echo "$user_session"
 }
 
