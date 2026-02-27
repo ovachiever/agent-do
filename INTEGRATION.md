@@ -39,7 +39,8 @@ Analyzes every user prompt and suggests relevant agent-do tools. Covers 17 tool 
 |----------|-----------------|
 | ios | "screenshot the simulator", "tap on the button in iOS" |
 | android | "android emulator", "adb shell" |
-| gui | "click the button in Finder", "desktop automation" |
+| macos | "click the button in Finder", "desktop automation" |
+| gcp | "GCP project", "google cloud", "oauth credentials" |
 | tui | "interactive terminal", "run vim" |
 | browser | "open website", "web scraping", "playwright" |
 | db | "database query", "SQL command" |
@@ -141,10 +142,10 @@ CHECK if agent-do has a tool:
 
     agent-do <tool> <command> [args...]   # Structured API (AI/scripts)
     agent-do -n "what you want"           # Natural language (humans)
-    agent-do --list                       # List all 72 tools
+    agent-do --list                       # List all 74 tools
     agent-do <tool> --help                # Per-tool help
 
-Key tools: vercel, render, supabase, browse, ios, android, gui, tui, db,
+Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,
 docker, k8s, cloud, ssh, excel, slack, image, video, audio
 ```
 

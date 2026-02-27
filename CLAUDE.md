@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 72 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 74 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
@@ -77,7 +77,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   └── json-output.sh      # Shared --json flag and structured output for tools
-├── tools/agent-*           # 72 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 74 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -107,8 +107,11 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-render` | Bash + curl | Render.com service management via REST API. Requires `RENDER_API_KEY`. |
 | `agent-vercel` | Bash + curl | Vercel project/deployment management via REST API. Requires `VERCEL_ACCESS_TOKEN`. Optional `--team <id>`. |
 | `agent-supabase` | Bash + curl | Supabase project management + data access. REST API queries (no password) and SQL via agent-db bridge. Requires `SUPABASE_ACCESS_TOKEN`. |
+| `agent-gcp` | Bash + curl | Google Cloud Platform management via REST API + Console automation. Projects, APIs, secrets, service accounts, OAuth credential creation. |
+| `agent-dpt` | Bash + Python | Design Perception Tensor — visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-pdf2md` | Bash | PDF-to-Markdown converter. Auto-detects tabular vs prose PDFs. Uses `pdftotext -layout` for tables, `markitdown` for prose. |
 | `agent-tail` | Bash | Wraps dev commands, captures output to log files for AI agents. Multi-service, timestamped sessions, `latest` symlink. |
+| `agent-sessions` | Bash + Python | AI coding session history search. FTS5 full-text search across transcripts and summaries. |
 
 Other tools are standalone bash scripts.
 
@@ -146,3 +149,6 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `RENDER_API_KEY`: API key for agent-render (Render.com)
 - `VERCEL_ACCESS_TOKEN`: API token for agent-vercel (Vercel)
 - `SUPABASE_ACCESS_TOKEN`: API token for agent-supabase (Supabase)
+- `GCP_SERVICE_ACCOUNT`: Path to service account JSON key for agent-gcp
+- `GCP_ACCESS_TOKEN`: Bearer token for agent-gcp (alternative to service account)
+- `GCP_PROJECT`: Default GCP project ID for agent-gcp

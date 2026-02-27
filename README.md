@@ -1,10 +1,10 @@
 # agent-do
 
-Universal automation CLI for AI agents. 72 tools, two modes, one interface.
+Universal automation CLI for AI agents. 74 tools, two modes, one interface.
 
 ## What is agent-do?
 
-agent-do gives AI coding agents (Claude Code, Cursor, OpenCode, etc.) structured access to everything outside the editor: browsers, iOS simulators, databases, spreadsheets, Slack, Docker, and 65+ more tools. Instead of writing fragile automation scripts, agents call `agent-do <tool> <command>` and get JSON responses they can reason about.
+agent-do gives AI coding agents (Claude Code, Cursor, OpenCode, etc.) structured access to everything outside the editor: browsers, iOS simulators, databases, cloud platforms, spreadsheets, Slack, Docker, and 60+ more tools. Instead of writing fragile automation scripts, agents call `agent-do <tool> <command>` and get JSON responses they can reason about.
 
 Two modes:
 - **Structured API** (for AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
@@ -38,16 +38,17 @@ cd agent-do
 | **Data** | db, excel, sheets, pdf, pdf2md | Database queries, spreadsheet automation, PDF conversion |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase | Containers, clusters, PaaS management |
+| **Infrastructure** | docker, k8s, cloud, gcp, ci, vm, network, dns, ssh, render, vercel, supabase | Containers, clusters, cloud platforms, PaaS management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis tools |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
 | **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
 | **Tracking** | manna | Git-backed issue tracking for AI agents |
-| **Dev Tools** | git, api, tail, logs | Git operations, HTTP testing, log capture, log viewing |
+| **Dev Tools** | git, api, tail, logs, sessions | Git operations, HTTP testing, log capture, log viewing, session history |
+| **Design** | dpt | Design quality scoring (72 rules, 0-100 score) |
 | **Utilities** | clipboard, ocr, vision, metrics, debug | System utilities |
 
-72 tools total. Run `agent-do --list` for the full list with descriptions.
+74 tools total. Run `agent-do --list` for the full list with descriptions.
 
 ## Key Concepts
 
@@ -122,7 +123,7 @@ agent-do ios snapshot          # Device state, running apps
                                     │
                                     ▼
                             tools/agent-<name>
-                            (71 executables)
+                            (74 executables)
 ```
 
 **Routing flow:**
@@ -180,6 +181,9 @@ ANTHROPIC_API_KEY     # Required for natural language mode and --dry-run/--how
 RENDER_API_KEY        # API key for Render.com (agent-render)
 VERCEL_ACCESS_TOKEN   # API token for Vercel (agent-vercel)
 SUPABASE_ACCESS_TOKEN # API token for Supabase (agent-supabase)
+GCP_SERVICE_ACCOUNT   # Path to service account JSON key (agent-gcp)
+GCP_ACCESS_TOKEN      # Bearer token for Google Cloud (agent-gcp)
+GCP_PROJECT           # Default GCP project ID (agent-gcp)
 ```
 
 ## Adding Tools
@@ -237,7 +241,7 @@ agent-do                    # Main entry point (bash)
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   └── json-output.sh      # Shared --json flag support for tools
-├── tools/agent-*           # 72 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 74 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog (~1000 lines)
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies

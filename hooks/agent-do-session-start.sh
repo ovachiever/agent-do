@@ -62,7 +62,8 @@ KEY TOOLS:
 - browse: Browser automation (NOT playwright, puppeteer, or selenium)
 - ios: iOS Simulator (NOT xcrun simctl)
 - android: Android Emulator (NOT adb directly)
-- gui: macOS desktop automation (NOT osascript)
+- macos: macOS desktop automation (NOT osascript)
+- gcp: Google Cloud Platform (NOT gcloud CLI or curl to googleapis.com)
 - tui: Terminal UI automation (NOT raw expect/tmux)
 - db: Database queries (NOT psql/mysql directly)
 - docker/k8s/cloud/ssh: Infrastructure tools

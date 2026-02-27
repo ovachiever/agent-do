@@ -46,8 +46,12 @@ AGENT_DO_PATTERNS = {
     r'\bemulator\s': ('android', 'agent-do android'),
 
     # === Desktop GUI ===
-    r'\bosascript\b': ('gui', 'agent-do gui'),
-    r'\bautomator\b': ('gui', 'agent-do gui'),
+    r'\bosascript\b': ('macos', 'agent-do macos'),
+    r'\bautomator\b': ('macos', 'agent-do macos'),
+
+    # === Google Cloud ===
+    r'\bgcloud\s+(auth|projects|iam|secrets|run|functions|compute)\b': ('gcp', 'agent-do gcp'),
+    r'\bcurl\b.*\bgoogleapis\.com\b': ('gcp', 'agent-do gcp'),
 
     # === Docker ===
     r'\bdocker\s+(ps|logs|exec|run|start|stop|compose)\b': ('docker', 'agent-do docker'),
@@ -65,7 +69,6 @@ AGENT_DO_PATTERNS = {
 
     # === Cloud ===
     r'\baws\s+(s3|ec2|lambda|iam)\b': ('cloud', 'agent-do cloud'),
-    r'\bgcloud\s': ('cloud', 'agent-do cloud'),
     r'\baz\s+(vm|storage|webapp)\b': ('cloud', 'agent-do cloud'),
 
     # === Image ===
@@ -83,7 +86,7 @@ AGENT_DO_PATTERNS = {
 # Skip these entirely — no nudge needed
 SKIP_PATTERNS = [
     r'(^|/)agent-do\b',
-    r'(^|/)agent-(browse|browser|tui|ios|android|gui|manna|render|vercel|supabase)',
+    r'(^|/)agent-(browse|browser|tui|ios|android|macos|manna|render|vercel|supabase|gcp)',
     r'^(ls|cat|head|tail|wc|grep|rg|find|which|pwd|cd|echo|printf)\b',
     r'^(mkdir|rm|cp|mv|touch|chmod|chown|ln|stat|file|diff)\b',
     r'^(git|npm|yarn|pnpm|pip|python|node|ruby|cargo|go|make|cmake|just)\b',

@@ -259,11 +259,11 @@ CHECK if agent-do has a tool:
 ```bash
 agent-do <tool> <command> [args...]   # Structured API (AI/scripts)
 agent-do -n "what you want"           # Natural language (humans)
-agent-do --list                       # List all 72 tools
+agent-do --list                       # List all 74 tools
 agent-do <tool> --help                # Per-tool help
 ```
 
-Key tools: vercel, render, supabase, browse, ios, android, gui, tui, db,
+Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,
 docker, k8s, cloud, ssh, excel, slack, image, video, audio
 CLAUDE_SNIPPET
 echo ""

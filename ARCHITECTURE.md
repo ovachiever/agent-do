@@ -6,7 +6,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
 2. **Natural Language Mode** — LLM-routed for human users
-3. **72 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, and more
+3. **74 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, and more
 
 ## Routing Flow
 
@@ -82,7 +82,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
 │   └── json-output.sh      # Shared --json flag support for bash tools
-├── tools/agent-*           # 72 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 74 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies

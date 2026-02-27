@@ -36,7 +36,7 @@ PROMPT_ROUTES = {
         ],
         'suggestion': 'This looks like Android Emulator work. Use: `agent-do android --help` or `agent-do "your Android task"`'
     },
-    'gui': {
+    'macos': {
         'patterns': [
             r'\b(click|press)\s*(button|menu)\b.*\b(app|application|finder|safari|photoshop)\b',
             r'\bdesktop\s*(app|automation)\b',
@@ -46,7 +46,16 @@ PROMPT_ROUTES = {
             r'\bfocus\s*(window|app)\b',
             r'\bmenu\s*item\b',
         ],
-        'suggestion': 'This looks like desktop GUI automation. Use: `agent-do gui --help` or `agent-do "your GUI task"`'
+        'suggestion': 'This looks like desktop GUI automation. Use: `agent-do macos --help` or `agent-do "your GUI task"`'
+    },
+    'gcp': {
+        'patterns': [
+            r'\bgcp\s*(project|api|secret|service.account|oauth)\b',
+            r'\bgoogle\s*cloud\b',
+            r'\b(gcloud|googleapis)\b',
+            r'\boauth\s*(client|credential|consent)\b.*\bgoogle\b',
+        ],
+        'suggestion': 'Use `agent-do gcp` for GCP operations (NOT gcloud CLI). Run: `agent-do gcp --help`'
     },
     'tui': {
         'patterns': [
