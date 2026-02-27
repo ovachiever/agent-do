@@ -1,107 +1,147 @@
 # agent-do
 
-Universal automation CLI for AI agents. 75 tools, two modes, one interface.
-
-## What is agent-do?
-
-agent-do gives AI coding agents (Claude Code, Cursor, OpenCode, etc.) structured access to everything outside the editor: browsers, iOS simulators, databases, cloud platforms, spreadsheets, Slack, Docker, and 60+ more tools. Instead of writing fragile automation scripts, agents call `agent-do <tool> <command>` and get JSON responses they can reason about.
-
-Two modes:
-- **Structured API** (for AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
-- **Natural language** (for humans): `agent-do -n "what you want"` — LLM-routed
-
-## Quick Start
+75 tools that give AI agents structured access to everything outside the editor. Two modes, one interface.
 
 ```bash
-git clone https://github.com/your-org/agent-do.git
-cd agent-do
-
-# See what's available
-./agent-do --list
-
-# Use structured API (AI-optimized, no LLM needed)
-./agent-do browse open https://example.com
-./agent-do browse snapshot -i
-./agent-do browse click @e3
-
-# Use natural language (human-friendly, requires ANTHROPIC_API_KEY)
-./agent-do -n "take a screenshot of the iOS simulator"
+agent-do <tool> <command> [args...]   # Structured API (AI/scripts — instant, no LLM)
+agent-do -n "what you want"           # Natural language (humans — LLM-routed)
 ```
 
-## Tools by Category
+## The Tools That Change How Agents Work
 
-| Category | Tools | Examples |
-|----------|-------|---------|
-| **Browser** | browse, unbrowse | Headless browser, API traffic capture, curl skill generation |
+Most of agent-do's 75 tools are solid wrappers — they give AI agents clean interfaces to Docker, Kubernetes, Slack, SSH, and dozens more. But a few tools do something no other framework offers.
+
+### browse — AI-Native Browser
+
+Headless Playwright browser with `@ref`-based element selection. Agents don't write CSS selectors or XPaths. They snapshot the page, get semantic references (`@e1`, `@e3`, `@e7`), and interact by reference.
+
+```bash
+agent-do browse open https://app.example.com
+agent-do browse snapshot -i          # Interactive elements with @e1, @e2, @e3...
+agent-do browse fill @e3 "admin"     # Fill by reference
+agent-do browse click @e7            # Click by reference
+agent-do browse wait --stable        # Wait for network + DOM to settle
+```
+
+The capture pipeline turns any browsing session into a reusable API skill:
+
+```bash
+agent-do browse capture start        # Record all XHR/fetch traffic
+# ... click around, trigger API calls ...
+agent-do browse capture stop myapi   # Filter → extract auth → generate curl skill
+agent-do browse api myapi get_users  # Call via curl (~100x faster than browser)
+```
+
+One session of manual browsing produces a permanent, authenticated API client.
+
+### zpc — Structured Project Memory
+
+AI agents forget everything between sessions. ZPC fixes that. Lessons, decisions, and patterns persist in `.zpc/memory/` and compound over time.
+
+```bash
+agent-do zpc init                    # Initialize in any project
+agent-do zpc learn "deploying" "missing env var" "added .env.example" "always ship env templates" --tags "deploy,env"
+agent-do zpc decide "Which DB?" --options "postgres,sqlite" --chosen postgres --rationale "team expertise" --confidence 0.9
+agent-do zpc harvest --auto          # Consolidate lessons into patterns
+```
+
+Format enforcement at the tool boundary — agents can't write malformed JSONL. The `inject` command feeds memory into spawned agents with baseline counts that ground self-reports against verifiable reality. The single change that moved multi-agent compliance from 0% to 100%.
+
+```bash
+agent-do zpc inject                  # Context blob for spawned agents
+agent-do zpc status                  # Health check: lessons, decisions, patterns, gaps
+agent-do zpc query --tag deploy      # Search across all memory
+agent-do zpc promote --tag mypy --to team  # Share patterns via git-tracked team scope
+```
+
+### dpt — Design Perception Tensor
+
+72 rules across 5 perception layers. Scores any UI screenshot 0–100 with specific, actionable findings.
+
+```bash
+agent-do browse screenshot /tmp/ui.png
+agent-do dpt score /tmp/ui.png       # → 73/100 with per-layer breakdown
+```
+
+Five layers: Visual Hierarchy, Spacing & Rhythm, Color & Contrast, Typography, Interaction Affordances. Each rule fires or doesn't — no subjective "looks good." Agents use DPT to verify their own UI work before reporting done.
+
+### unbrowse — API Capture → Curl Skills
+
+Launch a headed browser, browse manually, stop the capture. Out comes a documented, authenticated curl-based API skill file.
+
+```bash
+agent-do unbrowse capture https://dashboard.example.com
+# Browse around in the visible browser window...
+agent-do unbrowse stop myservice     # → ~/.agent-do/skills/myservice/
+agent-do unbrowse replay myservice get_users   # Call endpoint via curl
+```
+
+No API documentation needed. No auth token hunting. The skill file captures everything: endpoints, headers, auth tokens, request shapes. Works against any web application with an API.
+
+### manna — Git-Backed Issue Tracking
+
+Purpose-built for AI agent swarms. Claims prevent two agents from working the same issue. Dependencies block work automatically.
+
+```bash
+agent-do manna init
+agent-do manna create "Add auth" "JWT with refresh tokens"   # → mn-a1b2c3
+agent-do manna create "Add login UI" "Form with validation"  # → mn-d4e5f6
+agent-do manna block mn-d4e5f6 mn-a1b2c3                     # Login blocked by auth
+agent-do manna claim mn-a1b2c3       # Agent claims ownership
+# ... work ...
+agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
+```
+
+---
+
+## All 75 Tools
+
+| Category | Tools | What They Do |
+|----------|-------|-------------|
+| **Browser** | browse, unbrowse | Headless browser + @ref selection, API traffic capture → curl skills |
+| **Memory** | zpc | Structured project memory — lessons, decisions, patterns, harvest, inject |
+| **Design** | dpt | Visual quality scoring — 72 rules, 5 perception layers, 0–100 score |
+| **Tracking** | manna | Git-backed issue tracking with claims and dependencies |
 | **Mobile** | ios, android | Simulator/emulator control, screenshots, gestures |
-| **Desktop** | macos, tui, screen, ide | Desktop GUI automation, terminal apps, screen capture |
-| **Data** | db, excel, sheets, pdf, pdf2md | Database queries, spreadsheet automation, PDF conversion |
+| **Desktop** | macos, tui, screen, ide | GUI automation, terminal apps, multi-display vision |
+| **Data** | db, excel, sheets, pdf, pdf2md | Database queries, spreadsheets, PDF conversion |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, gcp, ci, vm, network, dns, ssh, render, vercel, supabase | Containers, clusters, cloud platforms, PaaS management |
+| **Infrastructure** | docker, k8s, cloud, gcp, ci, vm, network, dns, ssh, render, vercel, supabase | Containers, clusters, cloud, PaaS |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
-| **Security** | burp, wireshark, ghidra | Security analysis tools |
+| **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
 | **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
-| **Memory** | zpc | Structured project memory for AI agents (lessons, decisions, patterns) |
-| **Tracking** | manna | Git-backed issue tracking for AI agents |
-| **Dev Tools** | git, api, tail, logs, sessions | Git operations, HTTP testing, log capture, log viewing, session history |
-| **Design** | dpt | Design quality scoring (72 rules, 0-100 score) |
+| **Dev Tools** | git, api, tail, logs, sessions | Git, HTTP testing, log capture, session history |
 | **Utilities** | clipboard, ocr, vision, metrics, debug | System utilities |
 
-75 tools total. Run `agent-do --list` for the full list with descriptions.
+Run `agent-do --list` for the full list. Run `agent-do <tool> --help` for any tool.
 
-## Key Concepts
+## The Universal Pattern
 
-### Structured API vs Natural Language
-
-AI agents should use the structured API for speed and reliability:
-
-```bash
-# Structured (instant, deterministic) — use this in AI agents
-agent-do ios screenshot ~/screen.png
-agent-do db query "SELECT count(*) FROM users"
-
-# Natural language (LLM-routed) — use this as a human
-agent-do -n "screenshot my iPhone simulator"
-agent-do -n "how many users do we have"
-```
-
-### The Universal Pattern
-
-All tools follow: **Connect → Snapshot → Interact → Verify → Save**
+Every tool follows: **Connect → Snapshot → Interact → Verify → Save**
 
 ```bash
 agent-do db connect mydb          # 1. Connect
-agent-do db snapshot              # 2. See schema (tables, columns, types)
+agent-do db snapshot              # 2. See current state (schema, tables, types)
 agent-do db query "SELECT ..."    # 3. Interact
 agent-do db sample orders 5       # 4. Verify
 agent-do db disconnect            # 5. Clean up
 ```
 
-The **snapshot** step is critical — it gives AI agents structured visibility into the current state. Without it, agents are blind.
+The **snapshot** step is the key insight. AI agents can't see a database schema, a browser page, or an iOS screen directly. Snapshot gives them structured understanding of the current state. Without it, agents are blind.
 
-### @ref-Based Element Selection
-
-Browser and GUI tools use semantic element references from snapshots:
+## Two Modes
 
 ```bash
-agent-do browse open https://example.com
-agent-do browse snapshot -i        # Returns elements with @e1, @e2, @e3...
-agent-do browse click @e3          # Click by reference, not brittle selectors
-agent-do browse fill @e5 "hello"
-```
+# Structured API — instant, deterministic, no LLM. Use this in AI agents.
+agent-do ios screenshot ~/screen.png
+agent-do db query "SELECT count(*) FROM users"
+agent-do zpc learn "ctx" "prob" "sol" "takeaway" --tags "tag"
 
-### Snapshot Commands
-
-Every tool supports a `snapshot` command that returns JSON state for AI consumption:
-
-```bash
-agent-do docker snapshot       # Running containers, images, volumes
-agent-do git snapshot          # Branch, status, recent commits
-agent-do slack snapshot        # Channels, unread counts
-agent-do ios snapshot          # Device state, running apps
-agent-do zpc status            # Lessons, decisions, patterns, health
+# Natural language — LLM-routed. Use this as a human.
+agent-do -n "screenshot my iPhone simulator"
+agent-do -n "how many users do we have"
 ```
 
 ## Architecture
@@ -128,126 +168,47 @@ agent-do zpc status            # Lessons, decisions, patterns, health
                             (75 executables)
 ```
 
-**Routing flow:**
-1. **Structured API**: `agent-do ios screenshot` → `is_tool()` matches `ios` → dispatches to `tools/agent-ios`
-2. **Natural language** (`-n`): SQLite cache → Jaccard fuzzy match → Claude API call
-3. **Offline** (`--offline`): regex patterns + keyword matching, no API needed
+Structured API calls bypass the LLM entirely — direct dispatch to the tool executable. Natural language routes through a 3-tier fallback: SQLite cache, Jaccard fuzzy match, then Claude API. Offline mode uses regex + keyword matching with no API key.
 
 ## Installation
 
-### Prerequisites
-
-- **Python 3.10+** with `anthropic` and `pyyaml` (for natural language routing)
-- **Node.js 18+** (for browse and unbrowse tools)
-- **Rust** (to build agent-manna from source)
-- **tmux** (for agent-tui)
-- **Xcode CLI Tools** (for agent-ios on macOS)
-
-### Setup
-
 ```bash
-git clone https://github.com/your-org/agent-do.git
+git clone https://github.com/ovachiever/agent-do.git
 cd agent-do
-
-# Python dependencies (for natural language mode)
-pip install -r requirements.txt
-
-# Browser tools
-cd tools/agent-browse && npm install && cd ../..
-cd tools/agent-unbrowse && npm install && cd ../..
-
-# Issue tracker (Rust)
-cd tools/agent-manna && cargo build --release && cd ../..
-
-# Check what's ready
-./agent-do --health
-```
-
-### Claude Code Integration
-
-agent-do ships hooks that teach Claude Code to prefer `agent-do` tools over raw CLI commands:
-
-```bash
 ./install.sh
 ```
 
-This creates a PATH symlink, installs 3 Claude Code hooks (session start, prompt routing, command interception), and prints a `settings.json` snippet to register them.
+The installer symlinks `agent-do` into PATH, copies Claude Code hooks, installs Python dependencies, and optionally builds the Node.js and Rust tools.
 
-See [INTEGRATION.md](INTEGRATION.md) for details on the hook system, nudge vs block mode, and manual setup.
+See [INTEGRATION.md](INTEGRATION.md) for Claude Code hook details (nudge vs block mode, manual setup).
+
+### Prerequisites
+
+- **Python 3.10+** with `anthropic` and `pyyaml`
+- **Node.js 18+** (for browse and unbrowse)
+- **Rust** (for agent-manna)
+- **tmux** (for agent-tui)
 
 ### Environment Variables
 
 ```bash
 AGENT_DO_HOME         # Config/state directory (default: ~/.agent-do)
-ANTHROPIC_API_KEY     # Required for natural language mode and --dry-run/--how
-RENDER_API_KEY        # API key for Render.com (agent-render)
-VERCEL_ACCESS_TOKEN   # API token for Vercel (agent-vercel)
-SUPABASE_ACCESS_TOKEN # API token for Supabase (agent-supabase)
-GCP_SERVICE_ACCOUNT   # Path to service account JSON key (agent-gcp)
-GCP_ACCESS_TOKEN      # Bearer token for Google Cloud (agent-gcp)
-GCP_PROJECT           # Default GCP project ID (agent-gcp)
+ANTHROPIC_API_KEY     # Required for natural language mode
+RENDER_API_KEY        # Render.com (agent-render)
+VERCEL_ACCESS_TOKEN   # Vercel (agent-vercel)
+SUPABASE_ACCESS_TOKEN # Supabase (agent-supabase)
+GCP_SERVICE_ACCOUNT   # Google Cloud (agent-gcp)
 ```
 
 ## Adding Tools
 
-1. Create an executable at `tools/agent-<name>` (must support `--help` flag)
-2. Add an entry to `registry.yaml` with description, capabilities, commands, and examples
-3. The `--list` command auto-discovers tools via filesystem scan of `tools/agent-*`
-
-Tools can be:
-- A standalone executable: `tools/agent-myname`
-- A directory with an executable inside: `tools/agent-myname/agent-myname`
-- An executable found in `$PATH`
-
-### Tool Resolution Order
-
-1. `tools/agent-<name>/agent-<name>` (directory with nested executable)
-2. `tools/agent-<name>` (standalone executable)
-3. `agent-<name>` in `$PATH` (external)
-
-## Framework Libraries
-
-Shared libraries for building tools with consistent output:
-
-| Library | Purpose | Usage |
-|---------|---------|-------|
-| `lib/snapshot.sh` | Structured JSON snapshot output | `source lib/snapshot.sh` then `snapshot_begin`, `snapshot_field`, `snapshot_end` |
-| `lib/json-output.sh` | `--json` flag support and structured responses | `source lib/json-output.sh` then `json_success`, `json_error`, `json_result` |
-| `bin/health` | Dependency health checking | `agent-do --health [tool...]` |
-
-## Running Tests
-
 ```bash
-./test.sh              # All tests (checks help, status, offline, pattern-matcher)
+tools/agent-<name>/agent-<name>   # Directory with nested executable
+tools/agent-<name>                # Standalone executable
+agent-<name> in $PATH             # External tool
 ```
 
-Tool-specific tests:
-
-```bash
-cd tools/agent-manna && cargo test
-cd tools/agent-browse && node browser.test.js
-```
-
-## Project Structure
-
-```
-agent-do                    # Main entry point (bash)
-├── bin/
-│   ├── intent-router       # LLM router (Python): cache → fuzzy → Claude API
-│   ├── pattern-matcher     # Offline router (Python): regex + keyword matching
-│   ├── health              # Tool dependency checker (bash)
-│   └── status              # Session status display (bash)
-├── lib/
-│   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
-│   ├── registry.py         # Tool registry loader (merges user/bundled/plugin)
-│   ├── cache.py            # SQLite pattern cache + fuzzy matching
-│   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
-│   └── json-output.sh      # Shared --json flag support for tools
-├── tools/agent-*           # 75 tools (standalone scripts + directory-based tools)
-├── registry.yaml           # Master tool catalog (~1000 lines)
-├── test.sh                 # Test suite
-└── requirements.txt        # Python dependencies
-```
+Create an executable, add an entry to `registry.yaml`, and `--list` auto-discovers it. Shared libraries `lib/snapshot.sh` and `lib/json-output.sh` give every bash tool JSON output and `--json` flag support for free.
 
 ## License
 
