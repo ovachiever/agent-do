@@ -1,4 +1,10 @@
-# agent-do
+# agent-do 💪🏼😄🪽
+
+## What This Is
+
+agent-do is a harness on top of the harness. Claude Code (or Cursor, or any AI coding agent) is the inner harness — it reads code, writes code, runs commands. agent-do is the outer layer that gives the inner harness structured control over everything else: browsers, simulators, databases, cloud platforms, design quality, project memory, issue tracking, media processing, hardware devices.
+
+The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 75 tools. The agent learns the pattern once, then it works everywhere.
 
 One interface for Claude to control the world. 75 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
 
@@ -130,11 +136,6 @@ agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
 
 `agent-do --list` for the full list. `agent-do <tool> --help` for any tool.
 
-## What This Is
-
-agent-do is a harness on top of the harness. Claude Code (or Cursor, or any AI coding agent) is the inner harness — it reads code, writes code, runs commands. agent-do is the outer layer that gives the inner harness structured control over everything else: browsers, simulators, databases, cloud platforms, design quality, project memory, issue tracking, media processing, hardware devices.
-
-The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 75 tools. The agent learns the pattern once, then it works everywhere.
 
 ## Architecture
 
