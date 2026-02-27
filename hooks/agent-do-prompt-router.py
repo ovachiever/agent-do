@@ -184,6 +184,17 @@ PROMPT_ROUTES = {
         ],
         'suggestion': 'Use `agent-do supabase` for Supabase operations (NOT the supabase CLI). Run: `agent-do supabase --help`'
     },
+    'zpc': {
+        'patterns': [
+            r'\b(lesson|lessons)\s*(log|capture|record)\b',
+            r'\b(decision|decisions)\s*(log|record|track)\b',
+            r'\bproject\s*memory\b',
+            r'\bpatterns?\s*(consolidat|harvest|extract)\b',
+            r'\b\.zpc\b',
+            r'\bzpc\b',
+        ],
+        'suggestion': 'This looks like project memory work. Use: `agent-do zpc --help` or `agent-do zpc status`'
+    },
 }
 
 def analyze_prompt(prompt: str) -> list[tuple[str, str]]:

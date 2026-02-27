@@ -19,6 +19,7 @@
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
 | **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
+| **Memory** | zpc | Structured project memory (lessons, decisions, patterns) |
 | **Tracking** | manna | Git-backed issue tracking |
 | **Dev Tools** | git, api, tail, logs | Git, HTTP testing, log capture |
 | **System** | clipboard, metrics, debug | System utilities |
@@ -307,6 +308,49 @@ agent-do manna context               # Context blob for AI prompts
 
 ---
 
+## agent-do zpc (Project Memory)
+
+Structured project memory for AI coding agents. Lessons, decisions, and patterns persist across sessions.
+
+### Core Workflow
+```bash
+agent-do zpc init                    # 1. Initialize .zpc/ in project
+agent-do zpc status                  # 2. Memory snapshot + health
+agent-do zpc patterns                # 3. Review conventions before coding
+# ... work ...
+agent-do zpc learn "ctx" "problem" "solution" "takeaway" --tags "t1,t2"  # 4. Capture lesson
+agent-do zpc decide "problem" --options "a,b" --chosen a --rationale "why"  # 5. Log decision
+agent-do zpc harvest                 # 6. Consolidate lessons into patterns
+```
+
+### Memory Operations
+```bash
+agent-do zpc learn <ctx> <prob> <sol> <takeaway> --tags "t1,t2"   # Capture lesson
+agent-do zpc decide <problem> --options "a,b,c" --chosen b --rationale "why" --confidence 0.8  # Log decision
+agent-do zpc query --tag mypy        # Search by tag
+agent-do zpc query --type decisions  # Search by type
+agent-do zpc query --text "docker"   # Free text search
+```
+
+### Intelligence
+```bash
+agent-do zpc harvest                 # Consolidation scan + pattern drafting
+agent-do zpc harvest --auto          # Auto-write patterns for tags with 5+ lessons
+agent-do zpc patterns                # View established patterns
+agent-do zpc patterns --score        # Score pattern effectiveness
+agent-do zpc promote --tag mypy --to team   # Promote lessons to team scope
+```
+
+### Integration
+```bash
+agent-do zpc inject                  # Emit agent context blob (for spawned agents)
+agent-do zpc status --json           # JSON snapshot for automation
+agent-do zpc profile                 # View project profile
+agent-do zpc profile detect          # Auto-detect project stack
+```
+
+---
+
 ## Snapshot Commands
 
 Every tool supports a `snapshot` command that returns JSON state for AI consumption:
@@ -326,6 +370,9 @@ agent-do calendar snapshot     # Upcoming events, free/busy
 # Productivity
 agent-do notion snapshot       # Recent pages, databases
 agent-do linear snapshot       # Active issues, sprints
+
+# Memory
+agent-do zpc status            # Lessons, decisions, patterns, health
 
 # System
 agent-do clipboard snapshot    # Current clipboard contents
@@ -362,3 +409,4 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 | Detect objects in images | `agent-do vision` | Python + YOLO |
 | Control macOS apps | `agent-do macos` | AppleScript |
 | Automate terminal apps | `agent-do tui` | expect scripts |
+| Persist project memory | `agent-do zpc` | Manual JSONL files |

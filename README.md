@@ -1,6 +1,6 @@
 # agent-do
 
-Universal automation CLI for AI agents. 74 tools, two modes, one interface.
+Universal automation CLI for AI agents. 75 tools, two modes, one interface.
 
 ## What is agent-do?
 
@@ -43,12 +43,13 @@ cd agent-do
 | **Security** | burp, wireshark, ghidra | Security analysis tools |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
 | **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
+| **Memory** | zpc | Structured project memory for AI agents (lessons, decisions, patterns) |
 | **Tracking** | manna | Git-backed issue tracking for AI agents |
 | **Dev Tools** | git, api, tail, logs, sessions | Git operations, HTTP testing, log capture, log viewing, session history |
 | **Design** | dpt | Design quality scoring (72 rules, 0-100 score) |
 | **Utilities** | clipboard, ocr, vision, metrics, debug | System utilities |
 
-74 tools total. Run `agent-do --list` for the full list with descriptions.
+75 tools total. Run `agent-do --list` for the full list with descriptions.
 
 ## Key Concepts
 
@@ -100,6 +101,7 @@ agent-do docker snapshot       # Running containers, images, volumes
 agent-do git snapshot          # Branch, status, recent commits
 agent-do slack snapshot        # Channels, unread counts
 agent-do ios snapshot          # Device state, running apps
+agent-do zpc status            # Lessons, decisions, patterns, health
 ```
 
 ## Architecture
@@ -123,7 +125,7 @@ agent-do ios snapshot          # Device state, running apps
                                     │
                                     ▼
                             tools/agent-<name>
-                            (74 executables)
+                            (75 executables)
 ```
 
 **Routing flow:**
@@ -241,7 +243,7 @@ agent-do                    # Main entry point (bash)
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   └── json-output.sh      # Shared --json flag support for tools
-├── tools/agent-*           # 74 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 75 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog (~1000 lines)
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies

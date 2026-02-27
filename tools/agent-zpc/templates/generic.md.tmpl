@@ -1,0 +1,52 @@
+# ZPC — Structured Project Memory
+
+This project uses Zero Point Coder (ZPC) for persistent memory across AI coding sessions. All memory operations use the `agent-do zpc` CLI tool.
+
+## Setup
+
+```bash
+agent-do zpc init
+```
+
+## Session Start
+
+```bash
+agent-do zpc status          # Memory state
+agent-do zpc patterns        # Established conventions — follow these
+```
+
+## During Work
+
+### Capture Lessons
+When an error resolves, a correction occurs, or a convention is discovered:
+```bash
+agent-do zpc learn "context" "problem" "solution" "takeaway" --tags "tag1,tag2"
+```
+
+### Log Decisions
+For architectural choices or trade-offs:
+```bash
+agent-do zpc decide "problem" --options "a,b,c" --chosen "b" --rationale "why" --confidence 0.8
+```
+
+### Search Memory
+```bash
+agent-do zpc query --tag mypy          # By tag
+agent-do zpc query --type decisions    # All decisions
+agent-do zpc query --text "docker"     # Free text
+```
+
+## After Work
+
+```bash
+agent-do zpc harvest                   # Consolidate lessons into patterns
+```
+
+## Multi-Agent
+
+Include `agent-do zpc inject` output in spawned agent context.
+
+Before reporting completion:
+1. Log all error-resolution pairs
+2. Log significant decisions
+3. Include: "Lessons logged: N (new) | Decisions logged: N (new)"

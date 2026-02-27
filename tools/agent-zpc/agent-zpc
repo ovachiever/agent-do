@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# agent-zpc — Structured project memory for AI coding agents
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+
+# Source agent-do shared libraries
+source "${SCRIPT_DIR}/../../lib/json-output.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/../../lib/snapshot.sh" 2>/dev/null || true
+
+# Source ZPC libraries
+source "$LIB_DIR/common.sh"
+source "$LIB_DIR/memory.sh" 2>/dev/null || true
+source "$LIB_DIR/intelligence.sh" 2>/dev/null || true
+source "$LIB_DIR/integration.sh" 2>/dev/null || true
+
+# Parse --json flag
+parse_output_format "$@" 2>/dev/null || true
+set -- "${PARSED_ARGS[@]+"${PARSED_ARGS[@]}"}"
+
+show_help() {
+    cat << 'EOF'
+agent-zpc - Structured project memory for AI coding agents
+
+Commands:
+  learn <ctx> <prob> <sol> <takeaway> --tags "t1,t2"   Capture a lesson
+  decide <problem> --options "a,b" --chosen a ...       Log a decision
+  harvest [--auto] [--dry-run]                          Consolidation scan
+  query [--tag X] [--since DATE] [--text "..."]         Search memory
+  patterns [--score]                                    View/score patterns
+  promote <source> --to team|global                     Promote lessons
+  inject                                                Emit agent context blob
+  init [--platform claude|cursor|codex|generic]         Initialize .zpc/
+  status                                                Memory snapshot
+  profile [show|update|detect]                          Manage project profile
+
+Global flags:
+  --json        Output as JSON
+  --help, -h    Show this help
+
+Examples:
+  agent-zpc init
+  agent-zpc learn "testing" "assertion failed" "added null check" "validate inputs" --tags "testing,validation"
+  agent-zpc decide "Which ORM?" --options "prisma,drizzle,raw" --chosen prisma --rationale "team knows it"
+  agent-zpc status
+  agent-zpc harvest
+  agent-zpc query --tag testing --since 2025-01-01
+  agent-zpc inject
+EOF
+}
+
+CMD="${1:-help}"
+shift 2>/dev/null || true
+
+case "$CMD" in
+    learn)
+        cmd_learn "$@"
+        ;;
+    decide|decision)
+        cmd_decide "$@"
+        ;;
+    harvest|consolidate)
+        cmd_harvest "$@"
+        ;;
+    query|search|find)
+        cmd_query "$@"
+        ;;
+    patterns)
+        cmd_patterns "$@"
+        ;;
+    promote)
+        cmd_promote "$@"
+        ;;
+    inject|context)
+        cmd_inject "$@"
+        ;;
+    init|setup)
+        cmd_init "$@"
+        ;;
+    status|snapshot)
+        cmd_status "$@"
+        ;;
+    profile)
+        cmd_profile "$@"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $CMD" >&2
+        echo "Run 'agent-zpc help' for usage." >&2
+        exit 1
+        ;;
+esac

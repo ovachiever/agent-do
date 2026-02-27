@@ -67,6 +67,7 @@ KEY TOOLS:
 - tui: Terminal UI automation (NOT raw expect/tmux)
 - db: Database queries (NOT psql/mysql directly)
 - docker/k8s/cloud/ssh: Infrastructure tools
+- zpc: Structured project memory (NOT manual JSONL writes)
 
 Prefer agent-do over raw CLI commands when a tool exists.
 Use agent-do <tool> --help to see available commands."

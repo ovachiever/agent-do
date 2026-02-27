@@ -44,7 +44,7 @@ One command. Natural language. Done.
 │                  Tool Executor                           │
 │                                                          │
 │   agent-tui  agent-macos  agent-ios  agent-db  ...       │
-│                     (74 tools)                           │
+│                     (75 tools)                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -647,7 +647,7 @@ agent-do/
 │   ├── intent-router        # Haiku-powered router (python)
 │   ├── pattern-matcher      # Offline fallback (python)
 │   └── status               # Status display (bash)
-├── tools/                   # All 74 tools (standalone scripts + directory-based)
+├── tools/                   # All 75 tools (standalone scripts + directory-based)
 │   ├── agent-browse/        # Headless browser + API capture (Node.js, Playwright)
 │   ├── agent-unbrowse/      # Standalone API capture → curl skills (Node.js)
 │   ├── agent-manna/         # Git-backed issue tracking (Rust)
@@ -661,6 +661,7 @@ agent-do/
 │   ├── agent-supabase       # Supabase management (Bash + curl)
 │   ├── agent-pdf2md         # PDF to Markdown converter (Bash)
 │   ├── agent-tail           # Dev server log capture (Bash)
+│   ├── agent-zpc/           # Structured project memory (Bash + Python)
 │   ├── agent-tui            # TUI automation via tmux (Bash)
 │   ├── agent-ios            # iOS Simulator control (Bash)
 │   └── ...                  # 56 more standalone bash tools
@@ -668,7 +669,7 @@ agent-do/
 │   ├── state.py             # State management
 │   ├── cache.py             # Pattern caching
 │   └── registry.py          # Registry loading
-├── registry.yaml            # All 74 tools defined
+├── registry.yaml            # All 75 tools defined
 ├── requirements.txt         # Python dependencies
 ├── PLAN.md                  # This file
 ├── README.md

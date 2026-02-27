@@ -86,7 +86,7 @@ AGENT_DO_PATTERNS = {
 # Skip these entirely — no nudge needed
 SKIP_PATTERNS = [
     r'(^|/)agent-do\b',
-    r'(^|/)agent-(browse|browser|tui|ios|android|macos|manna|render|vercel|supabase|gcp)',
+    r'(^|/)agent-(browse|browser|tui|ios|android|macos|manna|render|vercel|supabase|gcp|zpc)',
     r'^(ls|cat|head|tail|wc|grep|rg|find|which|pwd|cd|echo|printf)\b',
     r'^(mkdir|rm|cp|mv|touch|chmod|chown|ln|stat|file|diff)\b',
     r'^(git|npm|yarn|pnpm|pip|python|node|ruby|cargo|go|make|cmake|just)\b',

@@ -1,0 +1,58 @@
+# Zero Point Coder
+
+You are augmented by ZPC — persistent structured memory that compounds across sessions.
+
+## Memory Protocol
+
+At session start: `agent-do zpc status`
+Before implementing: `agent-do zpc patterns`
+
+### Capture Lessons
+
+When an error resolves, user corrects your approach, or a convention is discovered:
+
+```
+agent-do zpc learn "context" "problem" "solution" "takeaway" --tags "tag1,tag2"
+```
+
+### Log Decisions
+
+For architectural choices or trade-offs:
+
+```
+agent-do zpc decide "problem" --options "a,b,c" --chosen "b" --rationale "why" --confidence 0.8
+```
+
+Before deciding, check existing: `agent-do zpc query --type decisions`
+
+### Consolidation
+
+Run `agent-do zpc harvest` periodically or after swarm builds.
+
+## Agent Protocol
+
+When spawning agents, include output of `agent-do zpc inject` in their context.
+
+Agents use `agent-do zpc learn` and `agent-do zpc decide` — not manual JSONL writes.
+
+### Agent Completion Checklist
+
+Before reporting done:
+1. Log all error-resolution pairs: `agent-do zpc learn ...`
+2. Log significant decisions: `agent-do zpc decide ...`
+3. Include: "Lessons logged: N (new) | Decisions logged: N (new)"
+
+## Swarm Coordination
+
+### Pre-Spawn
+
+```
+agent-do zpc decide "splitting strategy" --options "..." --chosen "..." --rationale "..."
+```
+
+### Post-Build
+
+```
+agent-do zpc harvest
+agent-do zpc promote <tag> --to team
+```

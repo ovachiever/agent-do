@@ -6,7 +6,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
 2. **Natural Language Mode** — LLM-routed for human users
-3. **74 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, and more
+3. **75 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -82,7 +82,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
 │   └── json-output.sh      # Shared --json flag support for bash tools
-├── tools/agent-*           # 74 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 75 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -154,6 +154,7 @@ Directory-based tools with complex backends:
 | `tools/agent-macos/` | Bash + Python | Desktop GUI automation via macOS accessibility APIs. Click, type, UI tree inspection. |
 | `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. |
 | `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
+| `tools/agent-zpc/` | Bash + Python | Structured project memory. Lessons, decisions, patterns, harvest, inject. Sources `lib/json-output.sh` + `lib/snapshot.sh`. |
 
 ## Integration with AI Harnesses
 
