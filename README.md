@@ -1,19 +1,36 @@
 # agent-do
 
-75 tools that give AI agents structured access to everything outside the editor. Two modes, one interface.
+One interface for Claude to control the world. 75 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
 
 ```bash
-agent-do <tool> <command> [args...]   # Structured API (AI/scripts — instant, no LLM)
-agent-do -n "what you want"           # Natural language (humans — LLM-routed)
+agent-do <tool> <command> [args...]
 ```
 
-## The Tools That Change How Agents Work
+## The Universal Pattern
 
-Most of agent-do's 75 tools are solid wrappers — they give AI agents clean interfaces to Docker, Kubernetes, Slack, SSH, and dozens more. But a few tools do something no other framework offers.
+Every tool follows the same five-step contract:
+
+```
+Connect → Snapshot → Interact → Verify → Save
+```
+
+**Snapshot** is the critical step. An AI agent can't see a database schema, a browser page, or an iOS screen. Snapshot gives it structured understanding of the current state. Without that, the agent is blind.
+
+```bash
+agent-do db connect mydb          # Connect
+agent-do db snapshot              # See schema: tables, columns, types, FKs
+agent-do db query "SELECT ..."    # Interact
+agent-do db sample orders 5       # Verify
+agent-do db disconnect            # Clean up
+```
+
+This pattern holds across all 75 tools — browsers, simulators, spreadsheets, containers, Slack channels, Kubernetes clusters, MIDI devices. Same five verbs. Same JSON responses. One interface to learn, then it works everywhere.
+
+## Standout Tools
 
 ### browse — AI-Native Browser
 
-Headless Playwright browser with `@ref`-based element selection. Agents don't write CSS selectors or XPaths. They snapshot the page, get semantic references (`@e1`, `@e3`, `@e7`), and interact by reference.
+Headless Playwright browser with `@ref`-based element selection. Snapshot the page, get semantic references (`@e1`, `@e3`, `@e7`), interact by reference.
 
 ```bash
 agent-do browse open https://app.example.com
@@ -32,11 +49,11 @@ agent-do browse capture stop myapi   # Filter → extract auth → generate curl
 agent-do browse api myapi get_users  # Call via curl (~100x faster than browser)
 ```
 
-One session of manual browsing produces a permanent, authenticated API client.
+One session of browsing produces a permanent, authenticated API client. No documentation needed. No auth token hunting.
 
 ### zpc — Structured Project Memory
 
-AI agents forget everything between sessions. ZPC fixes that. Lessons, decisions, and patterns persist in `.zpc/memory/` and compound over time.
+Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions.
 
 ```bash
 agent-do zpc init                    # Initialize in any project
@@ -45,7 +62,7 @@ agent-do zpc decide "Which DB?" --options "postgres,sqlite" --chosen postgres --
 agent-do zpc harvest --auto          # Consolidate lessons into patterns
 ```
 
-Format enforcement at the tool boundary — agents can't write malformed JSONL. The `inject` command feeds memory into spawned agents with baseline counts that ground self-reports against verifiable reality. The single change that moved multi-agent compliance from 0% to 100%.
+Format enforcement at the tool boundary — agents can't write malformed JSONL. The `inject` command feeds memory into spawned agents with baseline counts that ground self-reports against verifiable reality.
 
 ```bash
 agent-do zpc inject                  # Context blob for spawned agents
@@ -63,11 +80,11 @@ agent-do browse screenshot /tmp/ui.png
 agent-do dpt score /tmp/ui.png       # → 73/100 with per-layer breakdown
 ```
 
-Five layers: Visual Hierarchy, Spacing & Rhythm, Color & Contrast, Typography, Interaction Affordances. Each rule fires or doesn't — no subjective "looks good." Agents use DPT to verify their own UI work before reporting done.
+Visual Hierarchy, Spacing & Rhythm, Color & Contrast, Typography, Interaction Affordances. Each rule fires or doesn't — the agent verifies its own UI work before reporting done.
 
 ### unbrowse — API Capture → Curl Skills
 
-Launch a headed browser, browse manually, stop the capture. Out comes a documented, authenticated curl-based API skill file.
+Launch a headed browser, browse manually, stop the capture. Out comes a documented, authenticated curl-based API skill.
 
 ```bash
 agent-do unbrowse capture https://dashboard.example.com
@@ -76,19 +93,15 @@ agent-do unbrowse stop myservice     # → ~/.agent-do/skills/myservice/
 agent-do unbrowse replay myservice get_users   # Call endpoint via curl
 ```
 
-No API documentation needed. No auth token hunting. The skill file captures everything: endpoints, headers, auth tokens, request shapes. Works against any web application with an API.
-
 ### manna — Git-Backed Issue Tracking
 
-Purpose-built for AI agent swarms. Claims prevent two agents from working the same issue. Dependencies block work automatically.
+Purpose-built for multi-agent coordination. Claims prevent two agents from working the same issue. Dependencies block and unblock automatically.
 
 ```bash
-agent-do manna init
 agent-do manna create "Add auth" "JWT with refresh tokens"   # → mn-a1b2c3
 agent-do manna create "Add login UI" "Form with validation"  # → mn-d4e5f6
 agent-do manna block mn-d4e5f6 mn-a1b2c3                     # Login blocked by auth
 agent-do manna claim mn-a1b2c3       # Agent claims ownership
-# ... work ...
 agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
 ```
 
@@ -115,60 +128,27 @@ agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
 | **Dev Tools** | git, api, tail, logs, sessions | Git, HTTP testing, log capture, session history |
 | **Utilities** | clipboard, ocr, vision, metrics, debug | System utilities |
 
-Run `agent-do --list` for the full list. Run `agent-do <tool> --help` for any tool.
+`agent-do --list` for the full list. `agent-do <tool> --help` for any tool.
 
-## The Universal Pattern
+## What This Is
 
-Every tool follows: **Connect → Snapshot → Interact → Verify → Save**
+agent-do is a harness on top of the harness. Claude Code (or Cursor, or any AI coding agent) is the inner harness — it reads code, writes code, runs commands. agent-do is the outer layer that gives the inner harness structured control over everything else: browsers, simulators, databases, cloud platforms, design quality, project memory, issue tracking, media processing, hardware devices.
 
-```bash
-agent-do db connect mydb          # 1. Connect
-agent-do db snapshot              # 2. See current state (schema, tables, types)
-agent-do db query "SELECT ..."    # 3. Interact
-agent-do db sample orders 5       # 4. Verify
-agent-do db disconnect            # 5. Clean up
-```
-
-The **snapshot** step is the key insight. AI agents can't see a database schema, a browser page, or an iOS screen directly. Snapshot gives them structured understanding of the current state. Without it, agents are blind.
-
-## Two Modes
-
-```bash
-# Structured API — instant, deterministic, no LLM. Use this in AI agents.
-agent-do ios screenshot ~/screen.png
-agent-do db query "SELECT count(*) FROM users"
-agent-do zpc learn "ctx" "prob" "sol" "takeaway" --tags "tag"
-
-# Natural language — LLM-routed. Use this as a human.
-agent-do -n "screenshot my iPhone simulator"
-agent-do -n "how many users do we have"
-```
+The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 75 tools. The agent learns the pattern once, then it works everywhere.
 
 ## Architecture
 
 ```
-                          agent-do "intent or tool"
-                                    │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-              Structured API   Natural Language   Offline
-              (is_tool?)       (-n flag)          (--offline)
-                    │               │               │
-                    │         ┌─────┴─────┐    pattern-matcher
-                    │         │ 3-tier    │    (regex + keywords)
-                    │         │ fallback: │
-                    │         │ 1. cache  │
-                    │         │ 2. fuzzy  │
-                    │         │ 3. LLM    │
-                    │         └─────┬─────┘
-                    └───────────────┼───────────────┘
+                          agent-do <tool> <command>
                                     │
                                     ▼
                             tools/agent-<name>
                             (75 executables)
 ```
 
-Structured API calls bypass the LLM entirely — direct dispatch to the tool executable. Natural language routes through a 3-tier fallback: SQLite cache, Jaccard fuzzy match, then Claude API. Offline mode uses regex + keyword matching with no API key.
+Direct dispatch. The agent says which tool and which command. agent-do finds the executable and runs it.
+
+A natural language mode exists for human use (`agent-do -n "what you want"`) — it routes through a 3-tier fallback (SQLite cache → Jaccard fuzzy match → Claude API). An offline mode (`--offline`) uses regex + keyword matching with no API key. These are secondary interfaces; the structured API is the primary path.
 
 ## Installation
 
