@@ -3,9 +3,10 @@
 ## v0.8 — 2026-02-27
 
 ### Added
-- **agent-zpc**: Structured project memory for AI coding agents (tool #75)
+- **agent-zpc**: Structured project memory for AI coding agents (tool #75), 12 commands:
   - `learn` — Capture validated lessons with tags → `lessons.jsonl`
   - `decide` — Log decisions with rationale, confidence, bias detection → `decisions.jsonl`
+  - `decide-batch` — Batch-log decisions from planning phase via stdin or file (pipe-delimited)
   - `harvest` — Consolidation scan: format health, pattern drafting, auto-write for 5+ lesson tags
   - `query` — Search by tag, date, text, or type (lessons/decisions/all)
   - `patterns` — View established patterns, score effectiveness
@@ -13,20 +14,28 @@
   - `inject` — Emit agent context blob for spawned agents (baseline counts for self-report grounding)
   - `init` — Initialize `.zpc/` with stack auto-detection and platform-specific instructions
   - `status` — Memory snapshot with health check (human + JSON output)
+  - `checkpoint` — Swarm phase boundary: memory inventory, agent compliance, format health, consolidation gaps
   - `profile` — View/update project profile, auto-detect stack
   - 4 platform templates: Claude Code, Cursor, Codex, Generic
   - Full `--json` support via `lib/json-output.sh` + `lib/snapshot.sh`
   - Per-project memory (`.zpc/`) + global memory (`~/.agent-do/zpc/`)
   - Team scope (`.zpc/team/`) for git-tracked shared memory
-- Registry entry for zpc in `registry.yaml`
+- Registry entry for zpc in `registry.yaml` (12 commands, 8 examples)
 - zpc patterns in prompt router hook
 - zpc in PreToolUse skip patterns
 - zpc in SessionStart key tools list
 - zpc entry in runtime index and catalog
+- Frontend/design intent detection in prompt router (two-stage: UI keywords + action keywords)
+- Frontend project detection at session start (monorepo-aware: apps/\*, packages/\*)
+- ZPC project detection at session start (.zpc/ directory → memory reminder)
 
 ### Changed
 - Tool count: 74 → 75 across all documentation
 - Updated README, CLAUDE.md, AGENTS.md, ARCHITECTURE.md, PLAN.md, TOOL_AUDIT.md, INTEGRATION.md, install.sh
+- Session-start hook: auto-detects agent-do location (3-tier fallback), no hardcoded paths
+- Session-start hook: added macos, gcp, zpc to key tools list
+- Prompt router: tightened iOS/Android patterns to prevent false positives (bare "ios" no longer matches)
+- Prompt router: added design toolkit injection for frontend/visual prompts
 
 ---
 

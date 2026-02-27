@@ -150,3 +150,133 @@ PYTHON
         echo "Decision logged: $chosen (confidence: $confidence)"
     fi
 }
+
+cmd_decide_batch() {
+    ensure_zpc
+
+    local input_file="" tags="" confidence="0.8"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --file|-f) input_file="$2"; shift 2 ;;
+            --tags|-t) tags="$2"; shift 2 ;;
+            --confidence) confidence="$2"; shift 2 ;;
+            --help|-h)
+                cat << 'BATCHHELP'
+Usage: agent-zpc decide-batch [--file <path>] [--tags "t1,t2"] [--confidence 0.8]
+
+Log multiple architectural decisions in one call. Designed for the planning
+phase of swarm work, where 5-15 decisions are made before agents spawn.
+
+Input: pipe-delimited lines via stdin or --file, one decision per line:
+  problem | chosen | rationale [| confidence]
+
+Examples:
+  # Pipe from stdin
+  cat << 'EOF' | agent-do zpc decide-batch --tags "design-system"
+  Color system | oklch dark theme | perceptual uniformity
+  Type scale | Major Second 1.125 | data-dense dashboard | 0.95
+  Component lib | shadcn/ui wrappers | consistent API surface
+  EOF
+
+  # From file
+  agent-do zpc decide-batch --file decisions.txt --tags "architecture"
+
+Confidence defaults to 0.8 unless specified per-line in the 4th field.
+All decisions get mode: "batch" to distinguish from interactive PRAYER+BR.
+BATCHHELP
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    local lines=""
+    if [[ -n "$input_file" ]]; then
+        [[ -f "$input_file" ]] || die "File not found: $input_file"
+        lines=$(<"$input_file")
+    else
+        # Read from stdin
+        if [[ -t 0 ]]; then
+            die "No input. Pipe decisions via stdin or use --file. Run with --help for format."
+        fi
+        lines=$(cat)
+    fi
+
+    [[ -z "$lines" ]] && die "No decisions provided."
+
+    local date_str
+    date_str="$(today)"
+
+    local result
+    result=$(python3 << 'PYTHON' - "$date_str" "$confidence" "$tags" "$lines"
+import json, sys
+
+date_str = sys.argv[1]
+default_confidence = float(sys.argv[2])
+default_tags = [t.strip() for t in sys.argv[3].split(",") if t.strip()] if sys.argv[3] else []
+raw_lines = sys.argv[4]
+
+entries = []
+errors = []
+for i, line in enumerate(raw_lines.strip().split("\n"), 1):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    parts = [p.strip() for p in line.split("|")]
+    if len(parts) < 3:
+        errors.append({"line": i, "error": f"Need at least 3 pipe-delimited fields, got {len(parts)}"})
+        continue
+
+    problem = parts[0]
+    chosen = parts[1]
+    rationale = parts[2]
+    conf = float(parts[3]) if len(parts) > 3 and parts[3] else default_confidence
+
+    entry = {
+        "date": date_str,
+        "decision": problem,
+        "options": [chosen],
+        "chosen": chosen,
+        "rationale": rationale,
+        "confidence": conf,
+        "mode": "batch"
+    }
+    if default_tags:
+        entry["tags"] = default_tags
+    entries.append(entry)
+
+print(json.dumps({"entries": [json.dumps(e, ensure_ascii=False) for e in entries], "errors": errors, "count": len(entries)}))
+PYTHON
+    )
+
+    # Write entries to decisions.jsonl
+    local count errors
+    count=$(echo "$result" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['count'])")
+    errors=$(echo "$result" | python3 -c "import json,sys; print(len(json.loads(sys.stdin.read())['errors']))")
+
+    if [[ "$count" -gt 0 ]]; then
+        python3 << 'PYTHON' - "$result" "$ZPC_MEMORY_DIR/decisions.jsonl"
+import json, sys
+data = json.loads(sys.argv[1])
+with open(sys.argv[2], "a") as f:
+    for entry_json in data["entries"]:
+        f.write(entry_json + "\n")
+PYTHON
+    fi
+
+    if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
+        json_result "$result"
+    else
+        echo "Batch logged: $count decisions"
+        if [[ "$errors" -gt 0 ]]; then
+            echo "  Errors: $errors lines skipped (malformed)"
+            echo "$result" | python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+for e in data['errors']:
+    print(f\"  Line {e['line']}: {e['error']}\")
+"
+        fi
+    fi
+}

@@ -461,3 +461,205 @@ PYTHON
             ;;
     esac
 }
+
+cmd_checkpoint() {
+    ensure_zpc
+    mkdir -p "$ZPC_STATE_DIR"
+
+    local phase="" agents="" verify_compliance=true
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --phase|-p) phase="$2"; shift 2 ;;
+            --agents|-a) agents="$2"; shift 2 ;;
+            --no-compliance) verify_compliance=false; shift ;;
+            --help|-h)
+                cat << 'CPHELP'
+Usage: agent-zpc checkpoint [--phase "name"] [--agents "a1,a2,a3"]
+
+Run at swarm phase boundaries. Performs:
+1. Memory inventory: lesson/decision counts since last checkpoint
+2. Agent compliance: which agents logged lessons/decisions (if --agents given)
+3. Format health: JSONL validation
+4. Consolidation scan: tags at 3+ without patterns
+5. Harvest log: records checkpoint state for incremental tracking
+
+Designed for the team lead to run between swarm phases:
+  Phase 1 complete → checkpoint → Phase 2 spawn → ... → checkpoint → done
+
+Examples:
+  agent-do zpc checkpoint --phase "Phase 1: design tokens"
+  agent-do zpc checkpoint --phase "Phase 2: layout + shared" --agents "layout-shell,shared-components"
+  agent-do zpc checkpoint --phase "Integration" --agents "overview,innovations,data"
+CPHELP
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    local lessons_file="$ZPC_MEMORY_DIR/lessons.jsonl"
+    local decisions_file="$ZPC_MEMORY_DIR/decisions.jsonl"
+    local patterns_file="$ZPC_MEMORY_DIR/patterns.md"
+    local checkpoint_log="$ZPC_STATE_DIR/checkpoint-log.jsonl"
+
+    # Get previous checkpoint baseline
+    local prev_lessons=0 prev_decisions=0
+    if [[ -f "$checkpoint_log" && -s "$checkpoint_log" ]]; then
+        prev_lessons=$(tail -1 "$checkpoint_log" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('total_lessons',0))" 2>/dev/null || echo 0)
+        prev_decisions=$(tail -1 "$checkpoint_log" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('total_decisions',0))" 2>/dev/null || echo 0)
+    fi
+
+    local result
+    result=$(python3 << 'PYTHON' - "$lessons_file" "$decisions_file" "$patterns_file" "$prev_lessons" "$prev_decisions" "$agents" "$verify_compliance" "$phase"
+import json, sys, os, re
+from collections import Counter
+from datetime import datetime
+
+lessons_file = sys.argv[1]
+decisions_file = sys.argv[2]
+patterns_file = sys.argv[3]
+prev_lessons = int(sys.argv[4])
+prev_decisions = int(sys.argv[5])
+agents_str = sys.argv[6]
+verify_compliance = sys.argv[7] == "true"
+phase = sys.argv[8] if sys.argv[8] else f"Checkpoint {datetime.now().strftime('%H:%M')}"
+
+agent_list = [a.strip() for a in agents_str.split(",") if a.strip()] if agents_str else []
+
+# --- Memory inventory ---
+lessons = []
+format_issues = []
+if os.path.exists(lessons_file):
+    with open(lessons_file) as f:
+        for i, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                lessons.append((i, obj))
+                required = ["date", "context", "problem", "solution", "takeaway", "tags"]
+                missing = [k for k in required if k not in obj]
+                if missing:
+                    format_issues.append({"line": i, "missing": missing})
+                elif not isinstance(obj.get("tags"), list):
+                    format_issues.append({"line": i, "missing": ["tags (not array)"]})
+            except json.JSONDecodeError:
+                format_issues.append({"line": i, "missing": ["INVALID JSON"]})
+
+decisions = []
+if os.path.exists(decisions_file):
+    with open(decisions_file) as f:
+        for i, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                decisions.append((i, json.loads(line)))
+            except:
+                pass
+
+total_lessons = len(lessons)
+total_decisions = len(decisions)
+new_lessons = total_lessons - prev_lessons
+new_decisions = total_decisions - prev_decisions
+
+# --- Agent compliance ---
+compliance = {}
+if agent_list and verify_compliance:
+    # Check new lessons/decisions for agent attribution
+    # Lessons don't have an "agent" field, but we can check context field
+    new_lesson_objs = [obj for i, obj in lessons if i > prev_lessons]
+    new_decision_objs = [obj for i, obj in decisions if i > prev_decisions]
+
+    for agent in agent_list:
+        agent_lower = agent.lower()
+        agent_lessons = sum(1 for obj in new_lesson_objs
+                          if agent_lower in json.dumps(obj).lower())
+        agent_decisions = sum(1 for obj in new_decision_objs
+                            if agent_lower in json.dumps(obj).lower())
+        compliance[agent] = {
+            "lessons": agent_lessons,
+            "decisions": agent_decisions,
+            "compliant": agent_lessons > 0 or agent_decisions > 0
+        }
+
+# --- Consolidation gaps ---
+pattern_tags = set()
+pattern_count = 0
+if os.path.exists(patterns_file):
+    with open(patterns_file) as f:
+        for line in f:
+            m = re.match(r"^## (.+)$", line.strip())
+            if m:
+                pattern_count += 1
+                pattern_tags.add(m.group(1).strip())
+
+tag_counter = Counter()
+for _, obj in lessons:
+    for tag in obj.get("tags", []):
+        if isinstance(tag, str):
+            tag_counter[tag] += 1
+
+gaps = [{"tag": tag, "count": count}
+        for tag, count in tag_counter.most_common()
+        if count >= 3 and tag not in pattern_tags]
+
+output = {
+    "phase": phase,
+    "timestamp": datetime.now().isoformat(),
+    "total_lessons": total_lessons,
+    "total_decisions": total_decisions,
+    "new_lessons": new_lessons,
+    "new_decisions": new_decisions,
+    "pattern_count": pattern_count,
+    "format_issues": len(format_issues),
+    "format_issue_details": format_issues[:5],
+    "consolidation_gaps": gaps,
+    "agent_compliance": compliance,
+    "agents_checked": len(agent_list),
+    "agents_compliant": sum(1 for v in compliance.values() if v["compliant"]),
+}
+
+print(json.dumps(output))
+PYTHON
+    )
+
+    # Log checkpoint
+    echo "$result" >> "$checkpoint_log"
+
+    if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
+        json_result "$result"
+    else
+        python3 << 'PYTHON' - "$result"
+import json, sys
+data = json.loads(sys.argv[1])
+
+print(f"ZPC CHECKPOINT: {data['phase']}")
+print(f"  Lessons:    {data['total_lessons']} total ({data['new_lessons']:+d} since last)")
+print(f"  Decisions:  {data['total_decisions']} total ({data['new_decisions']:+d} since last)")
+print(f"  Patterns:   {data['pattern_count']}")
+print(f"  Format:     {'clean' if data['format_issues'] == 0 else str(data['format_issues']) + ' issues'}")
+
+gaps = data["consolidation_gaps"]
+if gaps:
+    print(f"  Gaps:       {len(gaps)} tags need patterns")
+    for g in gaps:
+        print(f"              {g['tag']} ({g['count']} lessons)")
+else:
+    print(f"  Gaps:       none")
+
+compliance = data["agent_compliance"]
+if compliance:
+    print(f"\n  Agent Compliance ({data['agents_compliant']}/{data['agents_checked']}):")
+    for agent, info in compliance.items():
+        status = "OK" if info["compliant"] else "MISSING"
+        print(f"    {agent:<25} L:{info['lessons']} D:{info['decisions']}  [{status}]")
+    noncompliant = [a for a, v in compliance.items() if not v["compliant"]]
+    if noncompliant:
+        print(f"\n  WARNING: {len(noncompliant)} agent(s) logged nothing: {', '.join(noncompliant)}")
+        print(f"  Review their git diffs and extract lessons manually.")
+PYTHON
+    fi
+}

@@ -59,7 +59,7 @@ One session of browsing produces a permanent, authenticated API client. No docum
 
 ### zpc — Structured Project Memory
 
-Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions.
+Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions. 12 commands.
 
 ```bash
 agent-do zpc init                    # Initialize in any project
@@ -75,6 +75,20 @@ agent-do zpc inject                  # Context blob for spawned agents
 agent-do zpc status                  # Health check: lessons, decisions, patterns, gaps
 agent-do zpc query --tag deploy      # Search across all memory
 agent-do zpc promote --tag mypy --to team  # Share patterns via git-tracked team scope
+```
+
+For multi-agent swarms, batch-log planning decisions and check compliance at phase boundaries:
+
+```bash
+# Planning phase: batch-log 10 decisions in one call
+cat << 'EOF' | agent-do zpc decide-batch --tags "design-system"
+Color system | oklch dark theme | perceptual uniformity
+Type scale | Major Second 1.125 | data-dense dashboard | 0.95
+Component lib | shadcn/ui wrappers | consistent API surface
+EOF
+
+# Phase boundary: inventory + agent compliance check
+agent-do zpc checkpoint --phase "Phase 2: pages" --agents "overview,innovations,data"
 ```
 
 ### dpt — Design Perception Tensor

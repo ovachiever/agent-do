@@ -15,7 +15,7 @@ import re
 PROMPT_ROUTES = {
     'ios': {
         'patterns': [
-            r'\b(ios|iphone|ipad)\s*(sim|simulator|emulator)?\b',
+            r'\b(ios|iphone|ipad)\s+(sim|simulator|emulator)\b',
             r'\bsimulator\b(?!.*android)',
             r'\bxcode\s*(sim|preview)?\b',
             r'\bmobile\s*app\b.*\b(ios|iphone|apple)\b',
@@ -23,12 +23,14 @@ PROMPT_ROUTES = {
             r'\bswipe\b.*\b(simulator|app)\b',
             r'\blaunch\s*(app|application)\b.*\b(simulator|ios)\b',
             r'\bscreenshot\b.*\b(simulator|ios|iphone)\b',
+            r'\bios\s+(app|build|deploy|test|run|debug)\b',
+            r'\b(build|deploy|test|run)\s+(for|on)\s+ios\b',
         ],
         'suggestion': 'This looks like iOS Simulator work. Use: `agent-do ios --help` or `agent-do "your iOS task"`'
     },
     'android': {
         'patterns': [
-            r'\bandroid\s*(emulator|device|app)?\b',
+            r'\bandroid\s+(emulator|device|app)\b',
             r'\bavd\b',
             r'\bpixel\s*(emulator)?\b',
             r'\badb\b',
@@ -197,6 +199,63 @@ PROMPT_ROUTES = {
     },
 }
 
+# Frontend/design intent detection — two-stage: UI keywords + action keywords
+# If both present, it's a design task. Also catches direct design phrases.
+_UI_KEYWORDS = re.compile(
+    r'\b(ui|ux|visual|design|styling|css|scss|tailwind|layout|spacing|padding|margin|'
+    r'color|colour|font|typography|hierarchy|theme|palette|appearance|aesthetic|'
+    r'dashboard|sidebar|navbar|header|footer|card|modal|form|page|screen|component|'
+    r'landing.page|homepage|frontend|front.end)\b', re.IGNORECASE
+)
+_ACTION_KEYWORDS = re.compile(
+    r'\b(improv|fix|updat|redesign|refactor|polish|refine|beautif|overhaul|'
+    r'make.{0,20}(look|prettier|better|beautiful|modern|cleaner|nicer)|'
+    r'chang|adjust|tweak|enhance|redo|rework|clean.up|revamp)\w*\b', re.IGNORECASE
+)
+# Direct match patterns that don't need two-stage
+FRONTEND_DESIGN_DIRECT = [
+    r'\b(ugly|bad.looking|needs.work|looks\s*(bad|wrong|off|weird|terrible|awful))\b',
+    r'\bdpt\s*(score|audit|check|review|baseline)\b',
+    r'\bartful\b',
+    r'\bdesign\s*(system|token|review|audit|score|quality)\b',
+    r'\b(screenshot|browse).*(before|after|baseline|compare)\b',
+]
+
+DESIGN_TOOLKIT_CONTEXT = """## Design Toolkit — ACTIVE for this task
+
+This request involves visual/UI work. Follow this protocol:
+
+### Step 1: Load Design Skills
+Read and apply ALL THREE for any UI work:
+- `~/.claude/skills/artful-ux/SKILL.md` — layout, hierarchy, interaction, spacing, anti-patterns
+- `~/.claude/skills/artful-colors/SKILL.md` — color perception, palette, cultural context
+- `~/.claude/skills/artful-typography/SKILL.md` — typeface selection, hierarchy, responsive type
+
+### Step 2: Browser Verification (MANDATORY)
+```
+agent-do browse open <dev-url>
+agent-do browse screenshot /tmp/before.png   # BASELINE — view with Read tool
+```
+
+### Step 3: Code → Verify → Score loop
+```
+# After each change:
+agent-do browse reload
+agent-do browse wait --stable
+agent-do browse screenshot /tmp/after.png    # View with Read tool
+agent-do dpt score /tmp/after.png            # 0-100 score with breakdown
+```
+
+### Step 4: Structural audit
+```
+agent-do browse snapshot -i                  # Interactive elements, affordances, labels
+```
+
+Screenshots = visual truth. Snapshots = structural truth. Both, in that order.
+Never ship UI changes without this verification loop.
+"""
+
+
 def analyze_prompt(prompt: str) -> list[tuple[str, str]]:
     """Analyze prompt and return list of (tool, suggestion) tuples."""
     prompt_lower = prompt.lower()
@@ -210,6 +269,22 @@ def analyze_prompt(prompt: str) -> list[tuple[str, str]]:
 
     return matches
 
+
+def detect_frontend_design(prompt: str) -> bool:
+    """Detect if prompt involves frontend/design/visual work."""
+    # Two-stage: UI keyword + action keyword = design intent
+    has_ui = bool(_UI_KEYWORDS.search(prompt))
+    has_action = bool(_ACTION_KEYWORDS.search(prompt))
+    if has_ui and has_action:
+        return True
+    # Direct match patterns
+    prompt_lower = prompt.lower()
+    for pattern in FRONTEND_DESIGN_DIRECT:
+        if re.search(pattern, prompt_lower):
+            return True
+    return False
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -222,12 +297,19 @@ def main():
         sys.exit(0)
 
     matches = analyze_prompt(prompt)
+    is_design = detect_frontend_design(prompt)
 
-    if matches:
-        context = "## agent-do Tool Suggestion\n\nBased on your request, consider using agent-do tools:\n\n"
-        for tool, suggestion in matches:
-            context += f"**{tool}**: {suggestion}\n\n"
-        context += "Reference: `agent-do --list` (all tools) | `agent-do <tool> --help` (per-tool)\n"
+    if matches or is_design:
+        context = ""
+
+        if matches:
+            context += "## agent-do Tool Suggestion\n\nBased on your request, consider using agent-do tools:\n\n"
+            for tool, suggestion in matches:
+                context += f"**{tool}**: {suggestion}\n\n"
+            context += "Reference: `agent-do --list` (all tools) | `agent-do <tool> --help` (per-tool)\n"
+
+        if is_design:
+            context += "\n" + DESIGN_TOOLKIT_CONTEXT
 
         output = {
             "hookSpecificOutput": {

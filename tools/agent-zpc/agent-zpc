@@ -26,6 +26,7 @@ agent-zpc - Structured project memory for AI coding agents
 Commands:
   learn <ctx> <prob> <sol> <takeaway> --tags "t1,t2"   Capture a lesson
   decide <problem> --options "a,b" --chosen a ...       Log a decision
+  decide-batch [--file F] [--tags "t1,t2"]             Batch-log decisions (stdin)
   harvest [--auto] [--dry-run]                          Consolidation scan
   query [--tag X] [--since DATE] [--text "..."]         Search memory
   patterns [--score]                                    View/score patterns
@@ -33,6 +34,7 @@ Commands:
   inject                                                Emit agent context blob
   init [--platform claude|cursor|codex|generic]         Initialize .zpc/
   status                                                Memory snapshot
+  checkpoint [--phase "name"] [--agents "a1,a2"]        Swarm phase boundary
   profile [show|update|detect]                          Manage project profile
 
 Global flags:
@@ -43,7 +45,9 @@ Examples:
   agent-zpc init
   agent-zpc learn "testing" "assertion failed" "added null check" "validate inputs" --tags "testing,validation"
   agent-zpc decide "Which ORM?" --options "prisma,drizzle,raw" --chosen prisma --rationale "team knows it"
+  echo "Color | oklch dark | perceptual" | agent-zpc decide-batch --tags "design"
   agent-zpc status
+  agent-zpc checkpoint --phase "Phase 1" --agents "agent-a,agent-b"
   agent-zpc harvest
   agent-zpc query --tag testing --since 2025-01-01
   agent-zpc inject
@@ -59,6 +63,12 @@ case "$CMD" in
         ;;
     decide|decision)
         cmd_decide "$@"
+        ;;
+    decide-batch|batch-decide|batch)
+        cmd_decide_batch "$@"
+        ;;
+    checkpoint|cp)
+        cmd_checkpoint "$@"
         ;;
     harvest|consolidate)
         cmd_harvest "$@"
