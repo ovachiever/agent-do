@@ -30,6 +30,7 @@ Commands:
   harvest [--auto] [--dry-run]                          Consolidation scan
   query [--tag X] [--since DATE] [--text "..."]         Search memory
   patterns [--score]                                    View/score patterns
+  review [--since DATE] [--auto] [--dry-run]             Post-sprint lesson extraction
   promote <source> --to team|global                     Promote lessons
   inject                                                Emit agent context blob
   init [--platform claude|cursor|codex|generic]         Initialize .zpc/
@@ -48,6 +49,7 @@ Examples:
   echo "Color | oklch dark | perceptual" | agent-zpc decide-batch --tags "design"
   agent-zpc status
   agent-zpc checkpoint --phase "Phase 1" --agents "agent-a,agent-b"
+  agent-zpc review --since HEAD~20 --dry-run
   agent-zpc harvest
   agent-zpc query --tag testing --since 2025-01-01
   agent-zpc inject
@@ -78,6 +80,9 @@ case "$CMD" in
         ;;
     patterns)
         cmd_patterns "$@"
+        ;;
+    review)
+        cmd_review "$@"
         ;;
     promote)
         cmd_promote "$@"

@@ -59,7 +59,7 @@ One session of browsing produces a permanent, authenticated API client. No docum
 
 ### zpc — Structured Project Memory
 
-Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions. 12 commands.
+Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions. 13 commands.
 
 ```bash
 agent-do zpc init                    # Initialize in any project
@@ -89,6 +89,10 @@ EOF
 
 # Phase boundary: inventory + agent compliance check
 agent-do zpc checkpoint --phase "Phase 2: pages" --agents "overview,innovations,data"
+
+# Post-sprint: extract lessons from git history
+agent-do zpc review --since HEAD~20 --dry-run
+agent-do zpc review --auto --phase "Sprint 3"  # Auto-write drafts
 ```
 
 ### dpt — Design Perception Tensor

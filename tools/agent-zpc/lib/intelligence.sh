@@ -451,6 +451,304 @@ PYTHON
     fi
 }
 
+cmd_review() {
+    ensure_zpc
+    mkdir -p "$ZPC_STATE_DIR"
+
+    local since="" phase="" auto=false dry_run=false limit=50
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since|-s) since="$2"; shift 2 ;;
+            --phase|-p) phase="$2"; shift 2 ;;
+            --auto) auto=true; shift ;;
+            --dry-run) dry_run=true; shift ;;
+            --limit|-n) limit="$2"; shift 2 ;;
+            --help|-h)
+                cat << 'REVIEWHELP'
+Usage: agent-zpc review [--since DATE|COMMIT] [--phase "name"] [--auto] [--dry-run]
+
+Post-sprint review: analyze git history and draft lessons/decisions from commits.
+Solves the capture discipline problem — lessons that weren't logged during work
+get extracted after the fact.
+
+The command reads git log, categorizes commits, and drafts structured entries:
+  - fix/bug/error/workaround commits → lesson drafts (error-resolution pairs)
+  - revert/undo commits → lesson drafts (corrections)
+  - feat/add/implement commits → decision drafts (what was chosen)
+  - refactor/migrate/replace commits → decision drafts (architectural changes)
+
+Options:
+  --since DATE|COMMIT   Start point (date like 2025-01-15, or commit SHA/tag)
+  --phase "name"        Label for this review (stored in review log)
+  --auto                Write drafts directly to lessons/decisions JSONL
+  --dry-run             Show drafts without writing anything
+  --limit N             Max commits to analyze (default 50)
+
+Examples:
+  agent-do zpc review --since 2025-02-25               # Since date
+  agent-do zpc review --since v0.8                      # Since tag
+  agent-do zpc review --since HEAD~20                   # Last 20 commits
+  agent-do zpc review --phase "Sprint 3" --auto         # Auto-write with label
+  agent-do zpc review --dry-run                         # Preview only
+
+Without --since, uses the last checkpoint or review timestamp as baseline.
+REVIEWHELP
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    # Determine since baseline
+    local since_ref="$since"
+    if [[ -z "$since_ref" ]]; then
+        # Check last review log, then last checkpoint log
+        local review_log="$ZPC_STATE_DIR/review-log.jsonl"
+        local checkpoint_log="$ZPC_STATE_DIR/checkpoint-log.jsonl"
+        if [[ -f "$review_log" && -s "$review_log" ]]; then
+            since_ref=$(tail -1 "$review_log" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('last_commit',''))" 2>/dev/null || echo "")
+        fi
+        if [[ -z "$since_ref" && -f "$checkpoint_log" && -s "$checkpoint_log" ]]; then
+            since_ref=$(tail -1 "$checkpoint_log" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('timestamp','')[:10])" 2>/dev/null || echo "")
+        fi
+        if [[ -z "$since_ref" ]]; then
+            since_ref="HEAD~${limit}"
+        fi
+    fi
+
+    # Get git log — try ref range first, then date, then raw limit
+    local git_log=""
+    # Try as commit ref range (SHA, tag, HEAD~N)
+    git_log=$(git log --oneline --no-merges -n "$limit" "${since_ref}..HEAD" 2>/dev/null) || true
+    # If empty, try as date with --since
+    if [[ -z "$git_log" ]]; then
+        git_log=$(git log --oneline --no-merges -n "$limit" --since="$since_ref" 2>/dev/null) || true
+    fi
+    # Last resort: just get the last N commits
+    if [[ -z "$git_log" ]]; then
+        git_log=$(git log --oneline --no-merges -n "$limit" 2>/dev/null) || true
+    fi
+
+    if [[ -z "$git_log" ]]; then
+        if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
+            json_result '{"commits_analyzed":0,"lesson_drafts":[],"decision_drafts":[],"message":"No commits found"}'
+        else
+            echo "No commits found since $since_ref"
+        fi
+        return 0
+    fi
+
+    local date_str
+    date_str="$(today)"
+
+    local result
+    result=$(python3 << 'PYTHON' - "$git_log" "$date_str" "$phase"
+import json, sys, re
+
+git_log = sys.argv[1]
+date_str = sys.argv[2]
+phase = sys.argv[3] if sys.argv[3] else "post-sprint review"
+
+fix_patterns = re.compile(r'\b(fix|bug|error|workaround|hotfix|patch|resolve|crash|broken|fail)', re.I)
+revert_patterns = re.compile(r'\b(revert|undo|rollback|wrong|restore|back\s*out)', re.I)
+feat_patterns = re.compile(r'\b(feat|add|implement|create|introduce|build|wire|integrate|complete|enable)', re.I)
+refactor_patterns = re.compile(r'\b(refactor|migrate|replace|restructure|rewrite|reorganize|rename|extract|simplify|consolidate|refine|improve|update|rework|redesign)', re.I)
+# Auto-commit pattern from agent swarms — skip these (no semantic content)
+auto_commit = re.compile(r'^\[agent-[a-f0-9]+\]\s+Auto-commit:', re.I)
+
+lesson_drafts = []
+decision_drafts = []
+uncategorized = []
+
+for line in git_log.strip().split("\n"):
+    line = line.strip()
+    if not line:
+        continue
+    parts = line.split(" ", 1)
+    sha = parts[0]
+    msg = parts[1] if len(parts) > 1 else ""
+
+    # Skip auto-commits from agent swarms (no semantic content to extract)
+    if auto_commit.search(msg):
+        continue
+
+    # Strip conventional commit prefix for cleaner analysis
+    clean_msg = re.sub(r'^(fix|feat|refactor|chore|docs|test|style|perf|ci|build|refine|improve|update)(\(.+?\))?:\s*', '', msg, flags=re.I)
+
+    if revert_patterns.search(msg):
+        lesson_drafts.append({
+            "date": date_str,
+            "context": f"git review: {sha[:7]}",
+            "problem": clean_msg,
+            "solution": "Reverted — original approach was incorrect",
+            "takeaway": f"[REVIEW DRAFT] {clean_msg}",
+            "tags": ["review", "correction"],
+            "source_commit": sha,
+            "source_message": msg,
+            "category": "revert"
+        })
+    elif fix_patterns.search(msg):
+        lesson_drafts.append({
+            "date": date_str,
+            "context": f"git review: {sha[:7]}",
+            "problem": clean_msg,
+            "solution": f"Fixed in commit {sha[:7]}",
+            "takeaway": f"[REVIEW DRAFT] {clean_msg}",
+            "tags": ["review", "bugfix"],
+            "source_commit": sha,
+            "source_message": msg,
+            "category": "fix"
+        })
+    elif refactor_patterns.search(msg):
+        decision_drafts.append({
+            "date": date_str,
+            "decision": clean_msg,
+            "options": ["[fill in alternatives]"],
+            "chosen": clean_msg,
+            "rationale": f"[REVIEW DRAFT] from commit {sha[:7]}",
+            "confidence": 0.7,
+            "mode": "review",
+            "tags": ["review", "architecture"],
+            "source_commit": sha,
+            "source_message": msg,
+            "category": "refactor"
+        })
+    elif feat_patterns.search(msg):
+        decision_drafts.append({
+            "date": date_str,
+            "decision": clean_msg,
+            "options": ["[fill in alternatives]"],
+            "chosen": clean_msg,
+            "rationale": f"[REVIEW DRAFT] from commit {sha[:7]}",
+            "confidence": 0.7,
+            "mode": "review",
+            "tags": ["review", "feature"],
+            "source_commit": sha,
+            "source_message": msg,
+            "category": "feat"
+        })
+    else:
+        uncategorized.append({"sha": sha[:7], "message": msg})
+
+# Get the latest commit SHA for baseline tracking
+latest_sha = git_log.strip().split("\n")[0].split(" ", 1)[0] if git_log.strip() else ""
+
+output = {
+    "commits_analyzed": len(git_log.strip().split("\n")),
+    "lesson_drafts": lesson_drafts,
+    "decision_drafts": decision_drafts,
+    "uncategorized": uncategorized,
+    "latest_commit": latest_sha,
+    "phase": phase
+}
+print(json.dumps(output))
+PYTHON
+    )
+
+    # Write drafts if --auto (and not --dry-run)
+    local lessons_written=0 decisions_written=0
+    if [[ "$auto" == "true" && "$dry_run" == "false" ]]; then
+        local write_result
+        write_result=$(python3 << 'PYTHON' - "$result" "$ZPC_MEMORY_DIR/lessons.jsonl" "$ZPC_MEMORY_DIR/decisions.jsonl"
+import json, sys
+
+data = json.loads(sys.argv[1])
+lessons_file = sys.argv[2]
+decisions_file = sys.argv[3]
+
+written_lessons = 0
+written_decisions = 0
+
+if data["lesson_drafts"]:
+    with open(lessons_file, "a") as f:
+        for draft in data["lesson_drafts"]:
+            entry = {k: v for k, v in draft.items() if k not in ("source_commit", "source_message", "category")}
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            written_lessons += 1
+
+if data["decision_drafts"]:
+    with open(decisions_file, "a") as f:
+        for draft in data["decision_drafts"]:
+            entry = {k: v for k, v in draft.items() if k not in ("source_commit", "source_message", "category")}
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            written_decisions += 1
+
+print(json.dumps({"written_lessons": written_lessons, "written_decisions": written_decisions}))
+PYTHON
+        )
+        lessons_written=$(echo "$write_result" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['written_lessons'])")
+        decisions_written=$(echo "$write_result" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['written_decisions'])")
+    fi
+
+    # Log review
+    if [[ "$dry_run" == "false" ]]; then
+        local review_entry
+        review_entry=$(python3 << 'PYTHON' - "$result" "$lessons_written" "$decisions_written"
+import json, sys
+from datetime import datetime
+data = json.loads(sys.argv[1])
+entry = {
+    "date": datetime.now().strftime("%Y-%m-%d"),
+    "timestamp": datetime.now().isoformat(),
+    "phase": data["phase"],
+    "commits_analyzed": data["commits_analyzed"],
+    "lesson_drafts": len(data["lesson_drafts"]),
+    "decision_drafts": len(data["decision_drafts"]),
+    "lessons_written": int(sys.argv[2]),
+    "decisions_written": int(sys.argv[3]),
+    "last_commit": data["latest_commit"]
+}
+print(json.dumps(entry))
+PYTHON
+        )
+        echo "$review_entry" >> "$ZPC_STATE_DIR/review-log.jsonl"
+    fi
+
+    # Output
+    if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
+        json_result "$result"
+    else
+        python3 << 'PYTHON' - "$result" "$dry_run" "$auto" "$lessons_written" "$decisions_written"
+import json, sys
+data = json.loads(sys.argv[1])
+dry_run = sys.argv[2] == "true"
+auto = sys.argv[3] == "true"
+lessons_written = int(sys.argv[4])
+decisions_written = int(sys.argv[5])
+
+prefix = "DRY RUN — " if dry_run else ""
+print(f"{prefix}ZPC REVIEW: {data['phase']}")
+print(f"  Commits analyzed: {data['commits_analyzed']}")
+print(f"  Lesson drafts:    {len(data['lesson_drafts'])}")
+print(f"  Decision drafts:  {len(data['decision_drafts'])}")
+print(f"  Uncategorized:    {len(data['uncategorized'])}")
+
+if auto and not dry_run:
+    print(f"\n  Written: {lessons_written} lessons, {decisions_written} decisions")
+
+if data["lesson_drafts"]:
+    print("\n--- Lesson Drafts ---")
+    for d in data["lesson_drafts"]:
+        cat = d.get("category", "?")
+        print(f"  [{cat}] {d['source_message']}")
+        print(f"    → {d['takeaway']}")
+
+if data["decision_drafts"]:
+    print("\n--- Decision Drafts ---")
+    for d in data["decision_drafts"]:
+        cat = d.get("category", "?")
+        print(f"  [{cat}] {d['source_message']}")
+        print(f"    → {d['chosen']}")
+
+if data["uncategorized"]:
+    print(f"\n--- Uncategorized ({len(data['uncategorized'])}) ---")
+    for u in data["uncategorized"]:
+        print(f"  {u['sha']} {u['message']}")
+PYTHON
+    fi
+}
+
 cmd_promote() {
     ensure_zpc
 

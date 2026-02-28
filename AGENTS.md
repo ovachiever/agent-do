@@ -339,6 +339,14 @@ agent-do zpc harvest --auto          # Auto-write patterns for tags with 5+ less
 agent-do zpc patterns                # View established patterns
 agent-do zpc patterns --score        # Score pattern effectiveness
 agent-do zpc promote --tag mypy --to team   # Promote lessons to team scope
+agent-do zpc review --since HEAD~20 --dry-run  # Extract lessons from git history
+agent-do zpc review --auto --phase "Sprint 3"  # Auto-write lesson/decision drafts
+```
+
+### Swarm Coordination
+```bash
+agent-do zpc decide-batch --tags "design" < decisions.txt  # Batch-log planning decisions
+agent-do zpc checkpoint --phase "Phase 2" --agents "a,b,c" # Phase boundary compliance check
 ```
 
 ### Integration

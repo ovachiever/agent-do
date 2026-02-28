@@ -3,7 +3,7 @@
 ## v0.8 — 2026-02-27
 
 ### Added
-- **agent-zpc**: Structured project memory for AI coding agents (tool #75), 12 commands:
+- **agent-zpc**: Structured project memory for AI coding agents (tool #75), 13 commands:
   - `learn` — Capture validated lessons with tags → `lessons.jsonl`
   - `decide` — Log decisions with rationale, confidence, bias detection → `decisions.jsonl`
   - `decide-batch` — Batch-log decisions from planning phase via stdin or file (pipe-delimited)
@@ -15,12 +15,13 @@
   - `init` — Initialize `.zpc/` with stack auto-detection and platform-specific instructions
   - `status` — Memory snapshot with health check (human + JSON output)
   - `checkpoint` — Swarm phase boundary: memory inventory, agent compliance, format health, consolidation gaps
+  - `review` — Post-sprint lesson extraction: analyze git history, draft lessons/decisions from commits
   - `profile` — View/update project profile, auto-detect stack
   - 4 platform templates: Claude Code, Cursor, Codex, Generic
   - Full `--json` support via `lib/json-output.sh` + `lib/snapshot.sh`
   - Per-project memory (`.zpc/`) + global memory (`~/.agent-do/zpc/`)
   - Team scope (`.zpc/team/`) for git-tracked shared memory
-- Registry entry for zpc in `registry.yaml` (12 commands, 8 examples)
+- Registry entry for zpc in `registry.yaml` (13 commands, 10 examples)
 - zpc patterns in prompt router hook
 - zpc in PreToolUse skip patterns
 - zpc in SessionStart key tools list
