@@ -275,17 +275,21 @@ send_command() {
     start_daemon || return 1
     
     # Send command via python for reliable bidirectional socket communication
+    # JSON payload passed via env var to avoid quoting conflicts in Python source
     local response
-    response=$(python3 << EOF
-import socket
-import sys
+    response=$(_BROWSE_CMD="$json" _BROWSE_SOCK="$SOCKET_PATH" _BROWSE_TIMEOUT="$timeout" python3 << 'PYEOF'
+import socket, sys, os
+
+payload = os.environ['_BROWSE_CMD'] + '\n'
+sock_path = os.environ['_BROWSE_SOCK']
+timeout = int(os.environ['_BROWSE_TIMEOUT'])
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 try:
-    sock.connect("$SOCKET_PATH")
-    sock.settimeout($timeout)
-    sock.sendall(b'$json\n')
-    
+    sock.connect(sock_path)
+    sock.settimeout(timeout)
+    sock.sendall(payload.encode('utf-8'))
+
     response = b""
     while True:
         try:
@@ -296,17 +300,17 @@ try:
             if b"\n" in response:
                 break
         except socket.timeout:
-            # Return partial/timeout response
-            print('{"success":false,"error":"Command timed out after ${timeout}s","partial":true}')
+            print('{"success":false,"error":"Command timed out","partial":true}')
             sys.exit(0)
-    
+
     print(response.decode().strip())
 except Exception as e:
-    print(f'{{"success":false,"error":"{e}"}}', file=sys.stderr)
+    import json
+    print(json.dumps({"success": False, "error": str(e)}), file=sys.stderr)
     sys.exit(1)
 finally:
     sock.close()
-EOF
+PYEOF
     ) || {
         echo "Error: Failed to communicate with daemon" >&2
         return 1
