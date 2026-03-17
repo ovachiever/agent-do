@@ -222,8 +222,8 @@ export class StreamServer {
             await this.browser.startScreencast((frame) => this.broadcastFrame(frame), {
                 format: 'jpeg',
                 quality: 80,
-                maxWidth: 1280,
-                maxHeight: 720,
+                maxWidth: 2560,
+                maxHeight: 1440,
                 everyNthFrame: 1,
             });
             // Notify all clients

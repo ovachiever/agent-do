@@ -157,6 +157,8 @@ DEBUG:
   highlight <selector>           Highlight element
   
 BROWSER CONTROL:
+  viewport <width> <height>      Set viewport size (e.g. viewport 1920 1080)
+  viewport                       Show current viewport size
   install                        Install browser binaries
   close                          Close browser and daemon
   restart [url]                  Kill and restart browser (optionally navigate)
@@ -1347,6 +1349,20 @@ main() {
             ;;
             
         # Browser control
+        viewport)
+            if [[ $# -ge 2 ]]; then
+                # Set viewport
+                local vw="$1" vh="$2"
+                json='{"id":"'$(cmd_id)'","action":"viewport","width":'"$vw"',"height":'"$vh"'}'
+            elif [[ $# -eq 1 && "$1" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+                # Support WxH format: viewport 1920x1080
+                local vw="${BASH_REMATCH[1]}" vh="${BASH_REMATCH[2]}"
+                json='{"id":"'$(cmd_id)'","action":"viewport","width":'"$vw"',"height":'"$vh"'}'
+            else
+                # Show current viewport
+                json='{"id":"'$(cmd_id)'","action":"evaluate","script":"JSON.stringify((() => { const s = window.innerWidth + \"x\" + window.innerHeight; return { width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio, display: s }; })())"}'
+            fi
+            ;;
         install)
             echo "Installing Playwright browsers..."
             npx playwright install chromium
