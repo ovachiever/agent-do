@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.9 — 2026-03-17
+
+### Added
+- **agent-context**: Curated docs and context for AI agents (tool #76), 22 commands:
+  - `fetch <url>` — Fetch markdown from any URL
+  - `fetch-llms <domain>` — Fetch llms.txt / llms-full.txt from any domain
+  - `fetch-repo <owner/repo>` — Fetch docs from GitHub via gh CLI
+  - `scan-local` — Index project context files (CLAUDE.md, .cursorrules, etc.)
+  - `scan-skills` — Index ~/.claude/skills/ as searchable context
+  - `search <query>` — FTS5 BM25 search with keyword expansion, trust-tier boosting, feedback weighting
+  - `get <id>` — Retrieve cached doc with annotations, incremental fetch (--file, --full)
+  - `list` — List all indexed packages with trust badges
+  - `budget <tokens> <query>` — Token-aware greedy knapsack context assembly
+  - `inject --max-tokens N` — Structured context blob for spawned agents
+  - `annotate <id> <note>` — Persistent notes displayed inline on future gets
+  - `feedback <id> up|down` — Ratings that influence search ranking
+  - `build <dir>` — Validate and package private content with registry.json
+  - `cache list|clear|pin|stats` — Full cache management with pinning
+  - `sources` / `add-source` / `remove-source` — Multi-source config management
+  - `status` / `init` — Storage management
+  - Full `--json` support via `lib/json-output.sh` + `lib/snapshot.sh`
+  - SQLite FTS5 index with 50-entry keyword expansion table
+  - Trust tiers: official, maintainer, community, local
+  - 31 integration tests (tools/agent-context/test/integration.sh)
+- Registry entry for context in `registry.yaml` (22 commands, 8 examples)
+- Exceeds Context Hub (chub): any-source fetching, token budgets, skills indexing, no Node.js dependency
+
+### Changed
+- Tool count: 75 → 76 across all documentation
+- Updated README, CLAUDE.md, ARCHITECTURE.md, PLAN.md, TOOL_AUDIT.md, INTEGRATION.md, CHANGELOG.md, install.sh
+
+---
+
 ## v0.8 — 2026-02-27
 
 ### Added

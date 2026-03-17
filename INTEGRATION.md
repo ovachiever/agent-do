@@ -142,7 +142,7 @@ CHECK if agent-do has a tool:
 
     agent-do <tool> <command> [args...]   # Structured API (AI/scripts)
     agent-do -n "what you want"           # Natural language (humans)
-    agent-do --list                       # List all 75 tools
+    agent-do --list                       # List all 76 tools
     agent-do <tool> --help                # Per-tool help
 
 Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,

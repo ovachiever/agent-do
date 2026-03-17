@@ -4,9 +4,9 @@
 
 agent-do is a harness on top of the harness. Claude Code (or Cursor, or any AI coding agent) is the inner harness — it reads code, writes code, runs commands. agent-do is the outer layer that gives the inner harness structured control over everything else: browsers, simulators, databases, cloud platforms, design quality, project memory, issue tracking, media processing, hardware devices.
 
-The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 75 tools. The agent learns the pattern once, then it works everywhere.
+The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 76 tools. The agent learns the pattern once, then it works everywhere.
 
-One interface for Claude to control the world. 75 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
+One interface for Claude to control the world. 76 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
 
 ```bash
 agent-do <tool> <command> [args...]
@@ -30,7 +30,7 @@ agent-do db sample orders 5       # Verify
 agent-do db disconnect            # Clean up
 ```
 
-This pattern holds across all 75 tools — browsers, simulators, spreadsheets, containers, Slack channels, Kubernetes clusters, MIDI devices. Same five verbs. Same JSON responses. One interface to learn, then it works everywhere.
+This pattern holds across all 76 tools — browsers, simulators, spreadsheets, containers, Slack channels, Kubernetes clusters, MIDI devices. Same five verbs. Same JSON responses. One interface to learn, then it works everywhere.
 
 ## Standout Tools
 
@@ -117,6 +117,21 @@ agent-do unbrowse stop myservice     # → ~/.agent-do/skills/myservice/
 agent-do unbrowse replay myservice get_users   # Call endpoint via curl
 ```
 
+### context — Curated Docs for Agents
+
+Fetches documentation from any URL, GitHub repo, or domain's `llms.txt`. Indexes it into a searchable FTS5 store with token counting, trust tiers, and budget-aware assembly. 22 commands.
+
+```bash
+agent-do context fetch-llms stripe.com           # Fetch llms.txt from any domain
+agent-do context fetch-repo vercel/next.js docs/ # Fetch docs from GitHub
+agent-do context scan-skills                     # Index all ~/.claude/skills/
+agent-do context search "payments api"           # BM25 search with trust-tier boosting
+agent-do context budget 4000 "react hooks"       # Best content within token limit
+agent-do context annotate stripe-llms "Use idempotency keys"  # Persistent notes
+```
+
+Exceeds [Context Hub](https://github.com/andrewyng/context-hub) — fetches from any source (not just one CDN), does token-aware budgeting, indexes 500+ local skills, and runs on bash + python3 with no npm dependency.
+
 ### manna — Git-Backed Issue Tracking
 
 Purpose-built for multi-agent coordination. Claims prevent two agents from working the same issue. Dependencies block and unblock automatically.
@@ -131,11 +146,12 @@ agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
 
 ---
 
-## All 75 Tools
+## All 76 Tools
 
 | Category | Tools | What They Do |
 |----------|-------|-------------|
 | **Browser** | browse, unbrowse | Headless browser + @ref selection, API traffic capture → curl skills |
+| **Context** | context | Curated docs for agents — fetch llms.txt, search, token budgets, annotations |
 | **Memory** | zpc | Structured project memory — lessons, decisions, patterns, harvest, inject |
 | **Design** | dpt | Visual quality scoring — 72 rules, 5 perception layers, 0–100 score |
 | **Tracking** | manna | Git-backed issue tracking with claims and dependencies |
@@ -162,7 +178,7 @@ agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
                                     │
                                     ▼
                             tools/agent-<name>
-                            (75 executables)
+                            (76 executables)
 ```
 
 Direct dispatch. The agent says which tool and which command. agent-do finds the executable and runs it.
