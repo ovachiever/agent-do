@@ -1,4 +1,53 @@
 tools:
+  context:
+    description: "Curated docs and context for AI agents"
+    capabilities:
+      - fetch documentation from any URL, llms.txt, or GitHub repo
+      - search across all indexed content with BM25 + fuzzy matching
+      - index local project files and Claude skills
+      - token-aware context budgeting for agents
+      - persistent annotations and feedback ratings
+      - build and validate private content packages
+      - multi-source registry with trust-tier resolution
+    commands:
+      search: "Search across all indexed content"
+      get: "Fetch doc/skill by ID: get <id> [--file F] [--full]"
+      list: "List available packages: list [--source S] [--tags T]"
+      fetch: "Fetch markdown from URL: fetch <url>"
+      fetch-llms: "Fetch llms.txt from domain: fetch-llms <domain>"
+      fetch-repo: "Fetch docs from GitHub: fetch-repo <owner/repo> [path]"
+      scan-local: "Index project files: scan-local [path]"
+      scan-skills: "Index ~/.claude/skills/"
+      sources: "List configured content sources"
+      add-source: "Register a source: add-source <name> <url|path>"
+      remove-source: "Unregister a source: remove-source <name>"
+      cache: "Cache management: cache [list|clear|pin|stats]"
+      annotate: "Attach note: annotate <id> <note>"
+      feedback: "Rate a package: feedback <id> up|down"
+      budget: "Best content within token limit: budget <tokens> <query>"
+      inject: "Context blob for agents: inject [--max-tokens N]"
+      build: "Package content directory: build <dir> [-o output]"
+      validate: "Check frontmatter + structure: validate <dir>"
+      status: "Sources, cache stats, index freshness"
+      init: "Initialize ~/.agent-do/context/"
+    examples:
+      - intent: "fetch stripe documentation"
+        command: "agent-context fetch-llms stripe.com"
+      - intent: "search for authentication docs"
+        command: "agent-context search authentication"
+      - intent: "get the supabase docs"
+        command: "agent-context get supabase-llms"
+      - intent: "what docs do I have"
+        command: "agent-context list"
+      - intent: "give me 4000 tokens of react context"
+        command: "agent-context budget 4000 react"
+      - intent: "index my claude skills"
+        command: "agent-context scan-skills"
+      - intent: "fetch docs from a github repo"
+        command: "agent-context fetch-repo vercel/next.js docs/README.md"
+      - intent: "add a note to a doc"
+        command: "agent-context annotate stripe-llms 'Use idempotency keys for POST'"
+
   zpc:
     description: "Structured project memory for AI coding agents"
     capabilities:

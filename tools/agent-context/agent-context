@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# agent-context — Curated docs and context for AI agents
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+
+# Source agent-do shared libraries
+source "${SCRIPT_DIR}/../../lib/json-output.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/../../lib/snapshot.sh" 2>/dev/null || true
+
+# Source context libraries
+source "$LIB_DIR/common.sh"
+source "$LIB_DIR/fetch.sh" 2>/dev/null || true
+source "$LIB_DIR/search.sh" 2>/dev/null || true
+source "$LIB_DIR/cache.sh" 2>/dev/null || true
+source "$LIB_DIR/sources.sh" 2>/dev/null || true
+source "$LIB_DIR/annotate.sh" 2>/dev/null || true
+source "$LIB_DIR/build.sh" 2>/dev/null || true
+source "$LIB_DIR/budget.sh" 2>/dev/null || true
+
+# Parse --json flag
+parse_output_format "$@" 2>/dev/null || true
+set -- "${PARSED_ARGS[@]+"${PARSED_ARGS[@]}"}"
+
+show_help() {
+    cat << 'EOF'
+agent-context - Curated docs and context for AI agents
+
+Core:
+  search <query>                    Search across all indexed content
+  get <id> [--file F] [--full]      Fetch doc/skill by ID
+  list [--source S] [--tags T]      List available packages
+
+Sources:
+  sources                           List configured sources
+  add-source <name> <url|path>      Register a content source
+  remove-source <name>              Unregister a source
+
+Fetching:
+  fetch <url>                       Fetch markdown from any URL
+  fetch-llms <domain>               Fetch llms.txt / llms-full.txt from domain
+  fetch-repo <owner/repo> [path]    Fetch docs from GitHub repo
+  scan-local [path]                 Index project files (CLAUDE.md, etc.)
+  scan-skills                       Index ~/.claude/skills/
+
+Cache:
+  cache list                        Show cached packages
+  cache clear [id]                  Clear cache (all or specific)
+  cache pin <id>                    Pin package (never evict)
+  cache stats                       Cache hit/miss stats
+
+Annotations:
+  annotate <id> <note>              Attach persistent note
+  annotate <id> --clear             Remove annotation
+  annotate --list                   List all annotations
+
+Feedback:
+  feedback <id> up|down [reason]    Rate a package
+
+Budget:
+  budget <tokens> <query>           Best content within token limit
+  inject [--max-tokens N]           Context blob for agent consumption
+
+Build:
+  build <dir> [-o output]           Package content directory
+  validate <dir>                    Check frontmatter + structure
+
+Meta:
+  status                            Sources, cache stats, index freshness
+  init                              Initialize ~/.agent-do/context/
+
+Global flags:
+  --json        Output as JSON
+  --help, -h    Show this help
+
+Examples:
+  agent-context init
+  agent-context fetch https://docs.example.com/api.md
+  agent-context fetch-llms stripe.com
+  agent-context search "authentication"
+  agent-context get stripe-llms
+  agent-context list
+  agent-context budget 4000 "react hooks"
+EOF
+}
+
+CMD="${1:-help}"
+shift 2>/dev/null || true
+
+case "$CMD" in
+    # Core
+    search|find|query)
+        cmd_search "$@"
+        ;;
+    get)
+        cmd_get "$@"
+        ;;
+    list|ls)
+        cmd_list "$@"
+        ;;
+
+    # Sources
+    sources)
+        cmd_sources "$@"
+        ;;
+    add-source)
+        cmd_add_source "$@"
+        ;;
+    remove-source)
+        cmd_remove_source "$@"
+        ;;
+
+    # Fetching
+    fetch)
+        cmd_fetch "$@"
+        ;;
+    fetch-llms)
+        cmd_fetch_llms "$@"
+        ;;
+    fetch-repo)
+        cmd_fetch_repo "$@"
+        ;;
+    scan-local)
+        cmd_scan_local "$@"
+        ;;
+    scan-skills)
+        cmd_scan_skills "$@"
+        ;;
+
+    # Cache
+    cache)
+        cmd_cache "$@"
+        ;;
+
+    # Annotations & Feedback
+    annotate)
+        cmd_annotate "$@"
+        ;;
+    feedback)
+        cmd_feedback "$@"
+        ;;
+
+    # Budget
+    budget)
+        cmd_budget "$@"
+        ;;
+    inject)
+        cmd_inject "$@"
+        ;;
+
+    # Build
+    build)
+        cmd_build "$@"
+        ;;
+    validate)
+        cmd_validate "$@"
+        ;;
+
+    # Meta
+    status|snapshot)
+        cmd_status "$@"
+        ;;
+    init|setup)
+        cmd_init "$@"
+        ;;
+
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $CMD" >&2
+        echo "Run 'agent-context help' for usage." >&2
+        exit 1
+        ;;
+esac
