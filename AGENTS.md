@@ -90,12 +90,52 @@ agent-do browse wait --text "Welcome"  # Wait for text to appear
 agent-do browse wait --stable      # Wait for network idle + DOM stable
 ```
 
-### Authentication
+### Login (SSO/MFA → Headless Handoff)
+
+For sites requiring SSO, MFA, CAPTCHA, or any manual authentication flow. Opens a headed browser, user completes auth, then transfers the authenticated state to the headless daemon.
+
 ```bash
-agent-do browse auth check-creds <domain>   # Check if credentials exist
-agent-do browse auth login <domain> --submit  # Auto-login with stored creds
-agent-do browse session save mysite "desc"  # Save cookies/storage
-agent-do browse session load mysite         # Restore session
+agent-do browse login <url>                  # Open headed Chromium window
+# User completes SSO/MFA/CAPTCHA in the visible window...
+agent-do browse login done                   # Extract auth → reinitialize headless context
+agent-do browse login done --save <name>     # Same, plus persist session for future use
+agent-do browse login status                 # Check if login window is open
+agent-do browse login cancel                 # Close window without transferring
+```
+
+`login done` extracts `storageState()` (cookies + localStorage) from the headed browser, closes it, and creates a new headless browser context initialized with that auth. All subsequent `browse` commands operate with full authentication.
+
+### Sessions (Persistent Auth)
+
+Sessions save complete browser auth state. `session load` creates a new browser context with saved cookies + localStorage injected at context creation time — auth is live from the first request.
+
+```bash
+agent-do browse session save <name> [desc]   # Save cookies + localStorage + sessionStorage + URL
+agent-do browse session load <name>           # Restore: new context with saved auth, navigate to URL
+agent-do browse session list                  # List saved sessions
+agent-do browse session delete <name>         # Delete saved session
+agent-do browse session export <name> <file>  # Export to portable file
+agent-do browse session import <file> [name]  # Import from file
+agent-do browse session active                # List running daemon sessions
+```
+
+Session storage: `~/.agent-browse/sessions/<name>/` — `storage.json` (Playwright storageState), `session-storage.json`, `state.json` (URL, viewport, scroll), `meta.json`.
+
+### Credential Auth (Username/Password)
+```bash
+agent-do browse auth check-creds <domain>      # Check if credentials exist
+agent-do browse auth store-creds <dom> <e> <p>  # Store in OS keychain
+agent-do browse auth login <domain> --submit    # Auto-login with stored creds
+agent-do browse auth login <domain> --auto      # Navigate + fill + submit + verify
+```
+
+### Tabs
+```bash
+agent-do browse tab                    # Show active tab
+agent-do browse tab list               # List all tabs
+agent-do browse tab new [url]          # Open new tab
+agent-do browse tab close              # Close current tab
+agent-do browse tab <n>                # Switch to tab N
 ```
 
 ### API Capture & Replay
@@ -116,18 +156,33 @@ agent-do browse api delete myservice       # Remove skill
 
 Skills saved to `~/.agent-do/skills/<name>/` with `SKILL.md`, `auth.json`, and `api.sh`.
 
+### Exit Codes
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | General error |
+| `2` | User input needed (credentials missing) |
+| `3` | Browser crashed (run `restart`) |
+| `5` | Ref collision (use nth selector) |
+| `6` | Stale refs (re-snapshot) |
+| `7` | Element not found |
+| `8` | Timeout |
+
 ### Mistakes to Avoid
 - **DON'T** skip waits after navigation clicks
 - **DON'T** use stale @refs after page changes (always re-snapshot)
+- **DON'T** use `unbrowse` for SSO login → headless handoff (use `browse login` instead)
 - **DO** use `snapshot -i` for interactive elements only
 - **DO** use `wait --stable` instead of fixed delays
+- **DO** use `browse login <url>` for SSO/MFA sites, then `login done --save <name>`
+- **DO** use `session load <name>` to restore auth in future sessions
 - **DO** use `capture start/stop` to discover APIs, then `api` to call them directly
 
 ---
 
 ## agent-do unbrowse (API Traffic → Curl Skills)
 
-Standalone API capture: launches headed browser, captures XHR/fetch, generates reusable curl-based skills.
+Standalone API capture: launches headed browser, captures XHR/fetch, generates reusable curl-based skills. Minimal footprint: `daemon.js` + `protocol.js`. Capture pipeline shared with browse via `lib/capture/`.
 
 ### Core Workflow
 ```bash
@@ -156,9 +211,13 @@ agent-do unbrowse test <name>          # HEAD test GET endpoints
 agent-do unbrowse delete <name>        # Remove skill
 ```
 
-### When to Use unbrowse vs browse capture
-- **`unbrowse`**: Quick one-shot captures — launches its own browser, browse manually
-- **`browse capture`**: Integrated — start capture on an existing browse session with auth/sessions already set up
+### When to Use What
+| Goal | Tool | Why |
+|------|------|-----|
+| SSO/MFA login → headless automation | `browse login <url>` | One daemon, session handoff built in |
+| Quick one-shot API capture | `unbrowse capture <url>` | Own headed browser, browse manually |
+| Capture APIs during existing automation | `browse capture start/stop` | Piggybacks on current browse session |
+| Restore previous auth session | `browse session load <name>` | Cookies injected at context creation |
 
 ---
 

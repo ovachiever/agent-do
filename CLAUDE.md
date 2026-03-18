@@ -79,7 +79,12 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── registry.py         # Tool registry loader (merges user/bundled/plugin registries)
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
-│   └── json-output.sh      # Shared --json flag and structured output for tools
+│   ├── json-output.sh      # Shared --json flag and structured output for tools
+│   └── capture/            # Shared capture pipeline (used by browse + unbrowse)
+│       ├── capture.js      # CaptureSession class — request/response correlation
+│       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
+│       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
+│       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
 ├── tools/agent-*           # 76 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
@@ -99,8 +104,8 @@ Registries merge in reverse priority order (higher-priority wins):
 
 | Tool | Tech | Notes |
 |------|------|-------|
-| `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. Has `capture start/stop` for API skill generation and `api` for replaying skills. |
-| `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser. Shares filter/auth/generator pipeline with browse. |
+| `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. `login <url>` opens headed browser for SSO/MFA, `login done` transfers auth to headless. `session save/load` persists and restores full auth state (cookies + localStorage injected at context creation). `capture start/stop` records API traffic, `api` replays captured skills. |
+| `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser. 2 files: `daemon.js` + `protocol.js`. Capture pipeline shared via `lib/capture/`. |
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims. Build with `cargo build --release`. |
 | `agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |
 | `agent-excel/` | Bash + Python | Excel workbook automation via openpyxl. Read/write cells, formulas, sheets, export. |
@@ -126,6 +131,7 @@ Other tools are standalone bash scripts.
 |---------|---------|
 | `lib/snapshot.sh` | JSON snapshot helpers: `snapshot_begin`, `snapshot_field`, `snapshot_end` |
 | `lib/json-output.sh` | `--json` flag support: `json_success`, `json_error`, `json_result`, `json_list` |
+| `lib/capture/` | Shared capture pipeline: `CaptureSession` (request/response correlation), `filterEntries` (noise removal), `extractAuth` (auth detection), `generateSkill` (skill package writer). Used by both `agent-browse` and `agent-unbrowse`. |
 | `bin/health` | Per-tool dependency checking with status levels (OK, WARN, CONF, MISS) |
 
 ### Universal Tool Pattern

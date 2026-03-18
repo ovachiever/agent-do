@@ -46,6 +46,15 @@ agent-do browse click @e7            # Click by reference
 agent-do browse wait --stable        # Wait for network + DOM to settle
 ```
 
+For sites that require SSO, MFA, or CAPTCHA — the login flow opens a real browser window, you complete auth manually, and the agent takes over headlessly with your session:
+
+```bash
+agent-do browse login https://2.strety.com    # Headed window opens
+# Complete Microsoft SSO, MFA, whatever it takes...
+agent-do browse login done --save strety      # Auth transfers to headless, saved for later
+agent-do browse session load strety           # Next time: instant authenticated access
+```
+
 The capture pipeline turns any browsing session into a reusable API skill:
 
 ```bash

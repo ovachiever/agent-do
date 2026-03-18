@@ -81,7 +81,12 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── registry.py         # Registry loader (merges user/bundled/plugin)
 │   ├── cache.py            # SQLite pattern cache + fuzzy matching
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
-│   └── json-output.sh      # Shared --json flag support for bash tools
+│   ├── json-output.sh      # Shared --json flag support for bash tools
+│   └── capture/            # Shared capture pipeline (browse + unbrowse)
+│       ├── capture.js      # CaptureSession — request/response correlation
+│       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
+│       ├── auth.js         # Auth extraction from captured headers/cookies
+│       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
 ├── tools/agent-*           # 76 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
@@ -146,8 +151,8 @@ Directory-based tools with complex backends:
 
 | Tool | Tech Stack | Notes |
 |------|-----------|-------|
-| `tools/agent-browse/` | Node.js, Playwright | Headless browser with @ref element selection. `daemon.js` manages browser lifecycle. Includes API capture (`capture start/stop`) and replay (`api` subcommand). |
-| `tools/agent-unbrowse/` | Node.js, Playwright | Standalone API traffic capture. Launches headed browser for manual browsing. Generates curl-based skill files. |
+| `tools/agent-browse/` | Node.js, Playwright | Headless browser with @ref element selection. `daemon.js` manages browser lifecycle. `login <url>` opens headed browser for SSO/MFA → `login done` transfers auth to headless. `session load` creates new context with saved cookies. API capture via `capture start/stop`, replay via `api` subcommand. |
+| `tools/agent-unbrowse/` | Node.js, Playwright | Standalone API traffic capture. 2 files (`daemon.js`, `protocol.js`). Launches headed browser for manual browsing. Capture pipeline shared via `lib/capture/`. |
 | `tools/agent-manna/` | Rust | Git-backed issue tracking. Session-based claims prevent multi-agent conflicts. |
 | `tools/agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |
 | `tools/agent-excel/` | Bash + Python | Excel workbook automation via openpyxl. Read/write cells, formulas, sheets, export. |

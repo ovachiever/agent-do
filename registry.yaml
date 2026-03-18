@@ -1018,14 +1018,19 @@ tools:
         command: "agent-cad convert part.step part.stl"
 
   browse:
-    description: "AI-first headless browser automation with @ref element selection"
+    description: "AI-first headless browser automation with @ref element selection, SSO/MFA login handoff, persistent sessions"
     capabilities:
       - navigate web pages
       - interact with elements via @ref snapshots
       - fill forms, click buttons, upload files
+      - SSO/MFA login via headed browser with automatic handoff to headless
+      - persistent session save/load with cookies injected at context creation
       - capture API traffic and generate reusable curl skills
       - extract text, HTML, attributes from elements
-      - authentication and session management
+      - credential management via OS keychain
+      - tab management (new, switch, close, list)
+      - vision-powered element finding and page description
+      - autonomous goal execution and page exploration
     commands:
       open: "Navigate to URL: open <url>"
       snapshot: "Get page structure with @refs: snapshot [-i] [-c] [--csv] [--md]"
@@ -1035,10 +1040,16 @@ tools:
       press: "Press key: press <key>"
       get: "Read data: get text|value|attr|title|url <@ref>"
       wait: "Wait for condition: wait <ms|selector|--text|--stable>"
-      capture: "API traffic capture: capture start|stop <name>"
-      api: "Replay captured API: api <name> <function>"
-      auth: "Authentication: auth check-creds|login <domain>"
-      session: "Session management: session save|load <name>"
+      login: "SSO/MFA auth: login <url> opens headed browser; login done [--save <name>] transfers auth to headless; login status; login cancel"
+      session: "Persistent auth: session save|load|list|delete|export|import <name>"
+      capture: "API traffic capture: capture start|stop <name>|status"
+      api: "Replay captured API: api <name> <function>|list|show|test|delete"
+      auth: "Credentials: auth check-creds|store-creds|login|get-creds <domain>"
+      tab: "Tab management: tab list|new|close|<n>"
+      viewport: "Set viewport size: viewport <width> <height>"
+      screenshot: "Capture screenshot: screenshot [path] [--full]"
+      vision: "AI vision: vision describe|find|click|analyze|explain|compare"
+      agent: "Autonomous: agent goal|explore|explain|recover"
     examples:
       - intent: "open a website"
         command: "agent-browse open https://example.com"
@@ -1048,6 +1059,12 @@ tools:
         command: "agent-browse click @e3"
       - intent: "fill in a form field"
         command: "agent-browse fill @e5 'hello world'"
+      - intent: "login with SSO"
+        command: "agent-browse login https://app.example.com"
+      - intent: "finish SSO login and save session"
+        command: "agent-browse login done --save mysite"
+      - intent: "restore a saved session"
+        command: "agent-browse session load mysite"
       - intent: "capture API traffic"
         command: "agent-browse capture start"
       - intent: "wait for page to load"
@@ -1351,13 +1368,14 @@ tools:
         command: "agent-swarm parallel 'test' 'lint'"
 
   unbrowse:
-    description: "Capture browser API traffic and generate reusable curl-based skills"
+    description: "Standalone API traffic capture → reusable curl-based skills. For SSO/MFA → headless handoff, use browse login instead."
     capabilities:
-      - capture XHR/fetch network traffic during browsing
+      - capture XHR/fetch network traffic during manual browsing
       - filter out static assets, CDN, and analytics noise
       - extract authentication headers, cookies, and tokens
       - generate source-able bash functions wrapping curl
       - replay API calls without a browser (~100x faster)
+      - capture pipeline shared with browse via lib/capture/
     commands:
       capture: "Start headed browser and capture traffic: capture <url> [--headless]"
       stop: "Stop capture and generate skill: stop <name>"
