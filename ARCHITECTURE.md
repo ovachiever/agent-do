@@ -159,7 +159,8 @@ Directory-based tools with complex backends:
 | `tools/agent-macos/` | Bash + Python | Desktop GUI automation via macOS accessibility APIs. Click, type, UI tree inspection. |
 | `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. |
 | `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
-| `tools/agent-zpc/` | Bash + Python | Structured project memory. Lessons, decisions, patterns, harvest, inject. Sources `lib/json-output.sh` + `lib/snapshot.sh`. |
+| `tools/agent-context/` | Bash + Python | **Knowledge library.** Fetches external docs (URLs, llms.txt, GitHub repos). SQLite FTS5 index, BM25 + trust-tier ranking, token-budgeted retrieval. Storage: `~/.agent-do/context/` (global). 22 commands. |
+| `tools/agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons, decisions, patterns. Harvest consolidation, git review, swarm checkpoints, promotion (local → team → global). Storage: `.zpc/` (per-project). Complementary to context: context = *what docs say*, zpc = *what we learned*. |
 
 ## Integration with AI Harnesses
 

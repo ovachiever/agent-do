@@ -66,9 +66,9 @@ agent-do browse api myapi get_users  # Call via curl (~100x faster than browser)
 
 One session of browsing produces a permanent, authenticated API client. No documentation needed. No auth token hunting.
 
-### zpc — Structured Project Memory
+### zpc — Experience Journal
 
-Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions. 13 commands.
+The agent's field notebook. Lessons, decisions, and patterns persist in `.zpc/memory/` and compound across sessions. Where context stores what the docs say, zpc stores what you learned applying them. 13 commands.
 
 ```bash
 agent-do zpc init                    # Initialize in any project
@@ -126,9 +126,9 @@ agent-do unbrowse stop myservice     # → ~/.agent-do/skills/myservice/
 agent-do unbrowse replay myservice get_users   # Call endpoint via curl
 ```
 
-### context — Curated Docs for Agents
+### context — Knowledge Library
 
-Fetches documentation from any URL, GitHub repo, or domain's `llms.txt`. Indexes it into a searchable FTS5 store with token counting, trust tiers, and budget-aware assembly. 22 commands.
+The agent's reference shelf. Fetches documentation from any URL, GitHub repo, or domain's `llms.txt`. Indexes it into a searchable FTS5 store with token counting, trust tiers, and budget-aware assembly. 22 commands.
 
 ```bash
 agent-do context fetch-llms stripe.com           # Fetch llms.txt from any domain

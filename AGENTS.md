@@ -367,9 +367,76 @@ agent-do manna context               # Context blob for AI prompts
 
 ---
 
-## agent-do zpc (Project Memory)
+## agent-do context (Knowledge Library)
 
-Structured project memory for AI coding agents. Lessons, decisions, and patterns persist across sessions.
+Fetches, indexes, and serves external reference documentation. SQLite FTS5 with BM25 scoring, trust tiers, feedback-influenced ranking, and token-budgeted retrieval. Storage: `~/.agent-do/context/` (global, per-user). 22 commands.
+
+**Not for experiential memory** — that's `zpc`. Context stores *what the docs say*. ZPC stores *what we learned using them*.
+
+### Core Workflow
+```bash
+agent-do context init                            # 1. Create ~/.agent-do/context/ with FTS5 index
+agent-do context scan-skills                     # 2. Index all ~/.claude/skills/
+agent-do context fetch-llms stripe.com           # 3. Fetch llms.txt from any domain
+agent-do context search "payment intents"        # 4. BM25 search with trust-tier boosting
+agent-do context budget 4000 "stripe payments"   # 5. Best content within token limit
+```
+
+### Fetching
+```bash
+agent-do context fetch <url>                     # Download + cache + index markdown from URL
+agent-do context fetch-llms <domain>             # Fetch llms-full.txt or llms.txt from domain
+agent-do context fetch-repo <owner/repo> [path]  # Fetch docs from GitHub repo via gh API
+agent-do context scan-local [path]               # Index CLAUDE.md, README.md, .cursorrules from project
+agent-do context scan-skills                     # Index all ~/.claude/skills/*/SKILL.md
+```
+
+### Search & Retrieval
+```bash
+agent-do context search "<query>"                # FTS5 BM25 search, re-ranked by trust + feedback
+agent-do context get <id>                        # Retrieve cached content by package ID
+agent-do context list                            # List all indexed packages with type/trust/tokens
+agent-do context budget <tokens> "<query>"       # Greedy knapsack: best content within token limit
+agent-do context inject [--max-tokens N]         # Emit context blob of most-accessed packages
+```
+
+### Curation
+```bash
+agent-do context annotate <id> "<note>"          # Attach persistent note to a package
+agent-do context feedback <id> up|down           # Rate package (influences search ranking)
+agent-do context cache list                      # Show cached packages with disk usage
+agent-do context cache pin <id>                  # Pin package from eviction
+agent-do context cache clear [id]                # Clear specific or all cached content
+```
+
+### Sources
+```bash
+agent-do context sources                         # List configured content sources
+agent-do context add-source <url> [--type T]     # Add a source to config
+agent-do context remove-source <url>             # Remove a source
+```
+
+### Data Layout
+```
+~/.agent-do/context/
+├── config.yaml              # Sources, trust policy, defaults
+├── index.db                 # SQLite FTS5 index (packages + package_meta tables)
+├── annotations.jsonl        # Persistent notes on packages
+├── feedback.jsonl           # Up/down ratings (influence search ranking)
+└── cache/
+    ├── fetched/<id>/        # Downloaded content: content.md + meta.json
+    ├── local/<id>/          # Scanned local project files
+    ├── skills/<id>/         # Indexed skill files
+    └── _pins.json           # Pinned package IDs
+```
+
+---
+
+## agent-do zpc (Experience Journal)
+
+Structured project memory for AI coding agents. Lessons, decisions, and patterns persist across sessions. Storage: `.zpc/` (per-project, in cwd).
+
+**Not for reference docs** — that's `context`. ZPC stores *what we learned from doing work*. Context stores *what external docs say*.
 
 ### Core Workflow
 ```bash
@@ -415,6 +482,43 @@ agent-do zpc status --json           # JSON snapshot for automation
 agent-do zpc profile                 # View project profile
 agent-do zpc profile detect          # Auto-detect project stack
 ```
+
+### Data Layout
+```
+.zpc/                                # Per-project, in cwd
+├── memory/
+│   ├── lessons.jsonl                # {date, context, problem, solution, takeaway, tags}
+│   ├── decisions.jsonl              # {date, decision, options, chosen, rationale, confidence, tags}
+│   ├── patterns.md                  # ## tag-name sections with bullet-point takeaways
+│   └── profile.md                   # Stack, Architecture, Testing, Conventions
+├── team/
+│   └── shared-lessons.jsonl         # Promoted lessons (shared via git)
+└── .state/
+    ├── harvest-log.jsonl            # Harvest timestamps and counts
+    ├── review-log.jsonl             # Git review phase/baseline/counts
+    └── checkpoint-log.jsonl         # Swarm checkpoint snapshots
+
+~/.agent-do/zpc/                     # Global (cross-project)
+├── global-lessons.jsonl             # Promoted cross-project lessons
+└── project-index.jsonl              # {project, initialized, last_activity}
+```
+
+---
+
+## context vs zpc — Decision Guide
+
+| Question | Tool |
+|----------|------|
+| "What does the Stripe API look like?" | `context` — fetch external reference docs |
+| "What did we learn last time we touched auth?" | `zpc` — query experiential lessons |
+| "Give my agent the Playwright docs" | `context fetch-llms playwright.dev` |
+| "Log that we chose Postgres over SQLite" | `zpc decide` |
+| "Search for everything about authentication" | **Both** — `context search "auth"` + `zpc query --text "auth"` |
+| "Fill a spawned agent's context window" | **Both** — `context inject` for docs, `zpc inject` for memory |
+| "What patterns have we established?" | `zpc patterns` |
+| "Index our project's README and CLAUDE.md" | `context scan-local` |
+
+**Complementary, not overlapping.** Context provides the *what* (reference material). ZPC provides the *so what* (lessons from applying it). Both have `inject` — use both when spawning agents that need full context.
 
 ---
 

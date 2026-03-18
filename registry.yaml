@@ -1,14 +1,15 @@
 tools:
   context:
-    description: "Curated docs and context for AI agents"
+    description: "Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal)."
     capabilities:
       - fetch documentation from any URL, llms.txt, or GitHub repo
-      - search across all indexed content with BM25 + fuzzy matching
+      - search across all indexed content with FTS5 BM25 + trust-tier ranking
       - index local project files and Claude skills
-      - token-aware context budgeting for agents
-      - persistent annotations and feedback ratings
+      - token-aware context budgeting for agents (knapsack packing)
+      - persistent annotations and feedback-influenced search ranking
       - build and validate private content packages
       - multi-source registry with trust-tier resolution
+      - global storage at ~/.agent-do/context/ (per-user, not per-project)
     commands:
       search: "Search across all indexed content"
       get: "Fetch doc/skill by ID: get <id> [--file F] [--full]"
@@ -49,14 +50,17 @@ tools:
         command: "agent-context annotate stripe-llms 'Use idempotency keys for POST'"
 
   zpc:
-    description: "Structured project memory for AI coding agents"
+    description: "Experience journal — structured lessons, decisions, patterns per project. Complementary to context (knowledge library)."
     capabilities:
-      - capture lessons from error resolution
-      - log architectural decisions with bias detection
-      - consolidate lessons into patterns
+      - capture structured lessons (context/problem/solution/takeaway)
+      - log architectural decisions with options, rationale, confidence
+      - consolidate lessons into patterns via harvest
       - inject memory context into AI agents
       - search and query memory by tag, date, or text
-      - cross-project and team memory promotion
+      - git history review for post-sprint lesson extraction
+      - swarm checkpoints for multi-agent phase boundary compliance
+      - lesson promotion (local → team → global)
+      - per-project storage at .zpc/ (not global)
     commands:
       learn: "Capture a structured lesson"
       decide: "Log a decision with rationale"
