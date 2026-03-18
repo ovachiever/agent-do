@@ -9,10 +9,10 @@ import * as path from 'path';
 import * as os from 'os';
 import { chromium } from 'playwright-core';
 import { parseCommand, successResponse, errorResponse, serializeResponse } from './protocol.js';
-import { CaptureSession } from './capture.js';
-import { filterEntries } from './filter.js';
-import { extractAuth } from './auth.js';
-import { generateSkill } from './generator.js';
+import { CaptureSession } from '../../lib/capture/capture.js';
+import { filterEntries } from '../../lib/capture/filter.js';
+import { extractAuth } from '../../lib/capture/auth.js';
+import { generateSkill } from '../../lib/capture/generator.js';
 
 const SESSION = process.env.AGENT_UNBROWSE_SESSION || 'default';
 const SOCKET_PATH = path.join(os.tmpdir(), `agent-unbrowse-${SESSION}.sock`);
