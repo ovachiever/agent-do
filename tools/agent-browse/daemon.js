@@ -165,10 +165,10 @@ export async function startDaemon(options) {
                         socket.write(serializeResponse(resp) + '\n');
                         continue;
                     }
-                    // Auto-launch browser if not already launched and this isn't a launch command
+                    // Auto-launch browser if not already launched and this isn't a launch/close/login command
+                    const skipAutoLaunch = ['launch', 'close', 'login_start', 'login_done', 'login_status', 'login_cancel'];
                     if (!browser.isLaunched() &&
-                        parseResult.command.action !== 'launch' &&
-                        parseResult.command.action !== 'close') {
+                        !skipAutoLaunch.includes(parseResult.command.action)) {
                         const extensions = process.env.AGENT_BROWSER_EXTENSIONS
                             ? process.env.AGENT_BROWSER_EXTENSIONS.split(',')
                                 .map((p) => p.trim())

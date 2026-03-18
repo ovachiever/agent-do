@@ -35,6 +35,10 @@ export class BrowserManager {
     recordingPage = null;
     recordingOutputPath = '';
     recordingTempDir = '';
+    // Login: headed browser for manual SSO/MFA auth
+    loginBrowser = null;
+    loginContext = null;
+    loginPage = null;
     /**
      * Check if browser is launched
      */
@@ -1073,9 +1077,110 @@ export class BrowserManager {
         return { previousPath, stopped };
     }
     /**
+     * Check if a login session is in progress
+     */
+    isLoginActive() {
+        return this.loginBrowser !== null;
+    }
+    /**
+     * Open a headed browser for manual SSO/MFA login.
+     * User completes auth in the visible window, then calls finishLogin().
+     */
+    async startLogin(url, executablePath) {
+        if (this.loginBrowser) {
+            throw new Error('Login already in progress. Call finishLogin() or cancelLogin() first.');
+        }
+        this.loginBrowser = await chromium.launch({
+            headless: false,
+            executablePath,
+        });
+        this.loginContext = await this.loginBrowser.newContext({
+            viewport: { width: 1280, height: 900 },
+        });
+        this.loginPage = await this.loginContext.newPage();
+        await this.loginPage.goto(url, { waitUntil: 'domcontentloaded' });
+        return { url: this.loginPage.url(), title: await this.loginPage.title() };
+    }
+    /**
+     * Finish login: extract auth state from headed browser, close it,
+     * and reinitialize the main headless context with those credentials.
+     */
+    async finishLogin() {
+        if (!this.loginContext) {
+            throw new Error('No login in progress. Call startLogin() first.');
+        }
+        // Extract auth state from headed browser
+        const storageState = await this.loginContext.storageState();
+        const loginUrl = this.loginPage.url();
+        const loginTitle = await this.loginPage.title().catch(() => '');
+        // Close headed login browser
+        await this.loginPage.close().catch(() => {});
+        await this.loginContext.close().catch(() => {});
+        await this.loginBrowser.close().catch(() => {});
+        this.loginBrowser = null;
+        this.loginContext = null;
+        this.loginPage = null;
+        // Reinitialize main browser with auth state
+        if (!this.browser) {
+            this.browser = await chromium.launch({ headless: true });
+            this.cdpPort = null;
+        } else {
+            // Close existing contexts and pages
+            await this.invalidateCDPSession();
+            for (const page of this.pages) {
+                await page.close().catch(() => {});
+            }
+            for (const context of this.contexts) {
+                await context.close().catch(() => {});
+            }
+        }
+        // Create new context with captured auth
+        const viewport = { width: 2560, height: 1440 };
+        const context = await this.browser.newContext({
+            viewport,
+            storageState,
+        });
+        context.setDefaultTimeout(60000);
+        this.contexts = [context];
+        this.pages = [];
+        this.activePageIndex = 0;
+        this.activeFrame = null;
+        this.refMap = {};
+        this.lastSnapshot = '';
+        const page = await context.newPage();
+        this.pages.push(page);
+        this.setupPageTracking(page);
+        // Navigate to where user ended up after login
+        await page.goto(loginUrl, { waitUntil: 'load' });
+        return {
+            url: page.url(),
+            title: await page.title().catch(() => ''),
+            loginUrl,
+            loginTitle,
+            cookieCount: storageState.cookies?.length || 0,
+            originsCount: storageState.origins?.length || 0,
+            storageState,
+        };
+    }
+    /**
+     * Cancel login without transferring auth state
+     */
+    async cancelLogin() {
+        if (this.loginBrowser) {
+            await this.loginPage?.close().catch(() => {});
+            await this.loginContext?.close().catch(() => {});
+            await this.loginBrowser.close().catch(() => {});
+            this.loginBrowser = null;
+            this.loginContext = null;
+            this.loginPage = null;
+        }
+    }
+    /**
      * Close the browser and clean up
      */
     async close() {
+        // Close login browser if active
+        await this.cancelLogin();
         // Stop recording if active (saves video)
         if (this.recordingContext) {
             await this.stopRecording();

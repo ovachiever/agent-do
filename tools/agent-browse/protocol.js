@@ -763,6 +763,21 @@ const captureStopSchema = baseCommandSchema.extend({
 const captureStatusSchema = baseCommandSchema.extend({
     action: z.literal('capture_status'),
 });
+// Login: headed browser for manual SSO/MFA, then handoff to headless
+const loginStartSchema = baseCommandSchema.extend({
+    action: z.literal('login_start'),
+    url: z.string().min(1),
+});
+const loginDoneSchema = baseCommandSchema.extend({
+    action: z.literal('login_done'),
+    save: z.string().optional(), // optionally save as named session
+});
+const loginStatusSchema = baseCommandSchema.extend({
+    action: z.literal('login_status'),
+});
+const loginCancelSchema = baseCommandSchema.extend({
+    action: z.literal('login_cancel'),
+});
 // Union schema for all commands
 const commandSchema = z.discriminatedUnion('action', [
     launchSchema,
@@ -918,6 +933,11 @@ const commandSchema = z.discriminatedUnion('action', [
     captureStartSchema,
     captureStopSchema,
     captureStatusSchema,
+    // Login: headed auth handoff
+    loginStartSchema,
+    loginDoneSchema,
+    loginStatusSchema,
+    loginCancelSchema,
 ]);
 /**
  * Parse a JSON string into a validated command

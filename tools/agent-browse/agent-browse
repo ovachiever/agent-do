@@ -93,6 +93,12 @@ AUTH:
   auth detect-captcha            Check for CAPTCHA presence
   auth wait-captcha [timeout]    Wait for CAPTCHA to be solved
 
+LOGIN (manual SSO/MFA → headless handoff):
+  login <url>                    Open headed browser for manual auth
+  login done [--save <name>]     Transfer auth to headless, close headed window
+  login status                   Check if login window is open
+  login cancel                   Close login window without transferring
+
 CREDENTIAL MANAGEMENT:
   auth check-creds <domain>      Check if credentials exist for domain
   auth get-creds <domain>        Get stored credentials (exits 2 if missing)
@@ -766,6 +772,41 @@ main() {
             json=$(build_eval_cmd "$1")
             ;;
             
+        # Login: headed browser for manual SSO/MFA, then handoff to headless
+        login)
+            if [[ $# -eq 0 ]]; then
+                echo "Usage: agent-browse login <url> | done [--save <name>] | status | cancel" >&2
+                exit 1
+            fi
+            case "$1" in
+                done)
+                    shift
+                    local save_name=""
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --save) save_name="$2"; shift 2 ;;
+                            *) shift ;;
+                        esac
+                    done
+                    if [[ -n "$save_name" ]]; then
+                        json='{"id":"'$(cmd_id)'","action":"login_done","save":"'"$save_name"'"}'
+                    else
+                        json='{"id":"'$(cmd_id)'","action":"login_done"}'
+                    fi
+                    ;;
+                status)
+                    json='{"id":"'$(cmd_id)'","action":"login_status"}'
+                    ;;
+                cancel)
+                    json='{"id":"'$(cmd_id)'","action":"login_cancel"}'
+                    ;;
+                *)
+                    # Treat as URL
+                    json='{"id":"'$(cmd_id)'","action":"login_start","url":"'"$1"'"}'
+                    ;;
+            esac
+            ;;
+
         # Session/tabs
         session)
             if [[ $# -eq 0 ]]; then
@@ -1418,7 +1459,7 @@ main() {
         *)
             echo "Unknown command: $cmd" >&2
             # Suggest similar commands (prefix match)
-            local commands="open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval session tab network auth vision agent capture api is console errors highlight install close restart status"
+            local commands="open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval login session tab network auth vision agent capture api is console errors highlight install close restart status"
             local suggestions=""
             for c in $commands; do
                 if [[ "$c" == "$cmd"* ]]; then

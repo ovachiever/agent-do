@@ -370,6 +370,15 @@ export async function executeCommand(command, browser) {
                 return await handleCaptureStop(command, browser);
             case 'capture_status':
                 return await handleCaptureStatus(command, browser);
+            // Login: headed auth with automatic handoff
+            case 'login_start':
+                return await handleLoginStart(command, browser);
+            case 'login_done':
+                return await handleLoginDone(command, browser);
+            case 'login_status':
+                return await handleLoginStatus(command, browser);
+            case 'login_cancel':
+                return await handleLoginCancel(command, browser);
             default: {
                 // TypeScript narrows to never here, but we handle it for safety
                 const unknownCommand = command;
@@ -1820,5 +1829,41 @@ async function handleCaptureStatus(command, browser) {
         domains: [...domains],
         elapsed: Math.round((Date.now() - captureSession.startTime) / 1000),
     });
+}
+// ============================================================================
+// Login: headed auth with automatic handoff to headless
+// ============================================================================
+async function handleLoginStart(command, browser) {
+    const result = await browser.startLogin(command.url);
+    return successResponse(command.id, {
+        message: 'Headed browser opened. Complete SSO/MFA login, then run: login done',
+        ...result,
+    });
+}
+async function handleLoginDone(command, browser) {
+    const result = await browser.finishLogin();
+    // Strip storageState from the response (don't leak full cookie data to stdout)
+    const { storageState, ...responseData } = result;
+    // Optionally save as named session for future use
+    if (command.save) {
+        const page = browser.getPage();
+        const context = browser.contexts[0];
+        await saveSession(page, context, command.save, 'Saved from login handoff');
+        responseData.savedAs = command.save;
+    }
+    return successResponse(command.id, responseData);
+}
+async function handleLoginStatus(command, browser) {
+    const active = browser.isLoginActive();
+    const data = { active };
+    if (active && browser.loginPage) {
+        data.url = browser.loginPage.url();
+        data.title = await browser.loginPage.title().catch(() => '');
+    }
+    return successResponse(command.id, data);
+}
+async function handleLoginCancel(command, browser) {
+    await browser.cancelLogin();
+    return successResponse(command.id, { cancelled: true });
 }
 //# sourceMappingURL=actions.js.map
