@@ -563,7 +563,7 @@ export class BrowserManager {
             throw new Error('Extensions are only supported in Chromium');
         }
         const launcher = browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
-        const viewport = options.viewport ?? { width: 2560, height: 1440 };
+        const viewport = options.viewport ?? { width: 1920, height: 1080 };
         let context;
         if (hasExtensions) {
             const extPaths = options.extensions.join(',');
@@ -699,7 +699,7 @@ export class BrowserManager {
             throw new Error('Browser not launched');
         }
         const context = await this.browser.newContext({
-            viewport: viewport ?? { width: 2560, height: 1440 },
+            viewport: viewport ?? { width: 1920, height: 1080 },
         });
         context.setDefaultTimeout(60000);
         this.contexts.push(context);
@@ -835,8 +835,8 @@ export class BrowserManager {
         await cdp.send('Page.startScreencast', {
             format: options?.format ?? 'jpeg',
             quality: options?.quality ?? 80,
-            maxWidth: options?.maxWidth ?? 2560,
-            maxHeight: options?.maxHeight ?? 1440,
+            maxWidth: options?.maxWidth ?? 1920,
+            maxHeight: options?.maxHeight ?? 1080,
             everyNthFrame: options?.everyNthFrame ?? 1,
         });
     }
@@ -967,7 +967,7 @@ export class BrowserManager {
         mkdirSync(this.recordingTempDir, { recursive: true });
         this.recordingOutputPath = outputPath;
         // Create a new context with video recording enabled and restored state
-        const viewport = { width: 2560, height: 1440 };
+        const viewport = { width: 1920, height: 1080 };
         this.recordingContext = await this.browser.newContext({
             viewport,
             recordVideo: {
@@ -1095,7 +1095,7 @@ export class BrowserManager {
                 await context.close().catch(() => {});
             }
         }
-        const viewport = { width: 2560, height: 1440 };
+        const viewport = { width: 1920, height: 1080 };
         const context = await this.browser.newContext({
             viewport,
             storageState,

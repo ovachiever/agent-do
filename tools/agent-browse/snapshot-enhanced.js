@@ -124,7 +124,7 @@ function detectInputType(name) {
  */
 async function getBoundingBoxes(page, refs) {
     const boxes = {};
-    const viewport = page.viewportSize() || { width: 2560, height: 1440 };
+    const viewport = page.viewportSize() || { width: 1920, height: 1080 };
     
     for (const [ref, data] of Object.entries(refs)) {
         try {

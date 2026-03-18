@@ -145,7 +145,7 @@ Return ONLY the JSON object, no other text.`;
         
         // Convert percentage coordinates to pixels if found
         if (result.found && result.location) {
-            const viewport = page.viewportSize() || { width: 2560, height: 1440 };
+            const viewport = page.viewportSize() || { width: 1920, height: 1080 };
             result.pixelLocation = {
                 x: Math.round((result.location.x / 100) * viewport.width),
                 y: Math.round((result.location.y / 100) * viewport.height),

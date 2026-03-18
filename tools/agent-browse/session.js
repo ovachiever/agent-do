@@ -63,7 +63,7 @@ export async function saveSession(page, context, name, description = '') {
     );
     
     // 3. Save page state (URL, scroll, viewport)
-    const viewport = page.viewportSize() || { width: 2560, height: 1440 };
+    const viewport = page.viewportSize() || { width: 1920, height: 1080 };
     const scrollPosition = await page.evaluate(() => ({
         x: window.scrollX,
         y: window.scrollY,
