@@ -1,5 +1,5 @@
 import { successResponse, errorResponse } from './protocol.js';
-import { saveSession, restoreSession, listSessions, deleteSession, exportSession, importSession } from './session.js';
+import { saveSession, restoreSession, loadStorageState, getSessionUrl, restoreSessionStorage, updateSessionLastUsed, listSessions, deleteSession, exportSession, importSession } from './session.js';
 import { RequestTracker, setThrottle, clearThrottle, THROTTLE_PRESETS } from './network.js';
 import { generateTOTPSync, getTOTPTimeRemaining, detectLoginForm, autoFillLogin, detectCaptcha, waitForCaptchaSolved } from './auth.js';
 import { describePage, findByVisual, clickByVisual, analyzePattern, compareScreenshots, explainAction, captureForVision } from './vision.js';
@@ -1201,13 +1201,20 @@ async function handleSessionSave(command, browser) {
     return successResponse(command.id, result);
 }
 async function handleSessionLoad(command, browser) {
-    // Auto-launch browser if not running
-    if (!browser.isLaunched()) {
-        await browser.launch({});
-    }
+    // Load saved storage state (cookies + localStorage) — must be injected at context creation
+    const storageState = loadStorageState(command.name);
+    const targetUrl = getSessionUrl(command.name);
+    // Replace browser context with one initialized from saved cookies/localStorage
+    const result = await browser.replaceContextWithState(storageState, targetUrl);
+    // Restore sessionStorage (not included in Playwright's storageState)
     const page = browser.getPage();
-    const result = await restoreSession(page, command.name);
-    return successResponse(command.id, result);
+    await restoreSessionStorage(page, command.name);
+    updateSessionLastUsed(command.name);
+    return successResponse(command.id, {
+        ...result,
+        restored: true,
+        session: command.name,
+    });
 }
 async function handleSessionList(command) {
     const sessions = listSessions();

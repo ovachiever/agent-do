@@ -1077,6 +1077,50 @@ export class BrowserManager {
         return { previousPath, stopped };
     }
     /**
+     * Replace the current browser context with one initialized from a storage state.
+     * Launches the browser if not already running. Closes existing contexts/pages first.
+     * Navigates to the given URL after context creation.
+     * @returns {{ url: string, title: string, cookieCount: number, originsCount: number }}
+     */
+    async replaceContextWithState(storageState, url) {
+        if (!this.browser) {
+            this.browser = await chromium.launch({ headless: true });
+            this.cdpPort = null;
+        } else {
+            await this.invalidateCDPSession();
+            for (const page of this.pages) {
+                await page.close().catch(() => {});
+            }
+            for (const context of this.contexts) {
+                await context.close().catch(() => {});
+            }
+        }
+        const viewport = { width: 2560, height: 1440 };
+        const context = await this.browser.newContext({
+            viewport,
+            storageState,
+        });
+        context.setDefaultTimeout(60000);
+        this.contexts = [context];
+        this.pages = [];
+        this.activePageIndex = 0;
+        this.activeFrame = null;
+        this.refMap = {};
+        this.lastSnapshot = '';
+        const page = await context.newPage();
+        this.pages.push(page);
+        this.setupPageTracking(page);
+        if (url && url !== 'about:blank') {
+            await page.goto(url, { waitUntil: 'load' });
+        }
+        return {
+            url: page.url(),
+            title: await page.title().catch(() => ''),
+            cookieCount: storageState.cookies?.length || 0,
+            originsCount: storageState.origins?.length || 0,
+        };
+    }
+    /**
      * Check if a login session is in progress
      */
     isLoginActive() {
@@ -1120,45 +1164,12 @@ export class BrowserManager {
         this.loginBrowser = null;
         this.loginContext = null;
         this.loginPage = null;
-        // Reinitialize main browser with auth state
-        if (!this.browser) {
-            this.browser = await chromium.launch({ headless: true });
-            this.cdpPort = null;
-        } else {
-            // Close existing contexts and pages
-            await this.invalidateCDPSession();
-            for (const page of this.pages) {
-                await page.close().catch(() => {});
-            }
-            for (const context of this.contexts) {
-                await context.close().catch(() => {});
-            }
-        }
-        // Create new context with captured auth
-        const viewport = { width: 2560, height: 1440 };
-        const context = await this.browser.newContext({
-            viewport,
-            storageState,
-        });
-        context.setDefaultTimeout(60000);
-        this.contexts = [context];
-        this.pages = [];
-        this.activePageIndex = 0;
-        this.activeFrame = null;
-        this.refMap = {};
-        this.lastSnapshot = '';
-        const page = await context.newPage();
-        this.pages.push(page);
-        this.setupPageTracking(page);
-        // Navigate to where user ended up after login
-        await page.goto(loginUrl, { waitUntil: 'load' });
+        // Replace context with auth state and navigate
+        const result = await this.replaceContextWithState(storageState, loginUrl);
         return {
-            url: page.url(),
-            title: await page.title().catch(() => ''),
+            ...result,
             loginUrl,
             loginTitle,
-            cookieCount: storageState.cookies?.length || 0,
-            originsCount: storageState.origins?.length || 0,
             storageState,
         };
     }

@@ -272,3 +272,48 @@ export function sessionExists(name) {
     const sessionDir = getSessionPath(name);
     return existsSync(path.join(sessionDir, 'storage.json'));
 }
+
+/**
+ * Get the saved URL from a session's state.json
+ */
+export function getSessionUrl(name) {
+    const statePath = path.join(getSessionPath(name), 'state.json');
+    if (existsSync(statePath)) {
+        try {
+            const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+            return state.url || null;
+        } catch { return null; }
+    }
+    return null;
+}
+
+/**
+ * Restore only sessionStorage to a page (without re-navigating)
+ */
+export async function restoreSessionStorage(page, name) {
+    const sessionStoragePath = path.join(getSessionPath(name), 'session-storage.json');
+    if (existsSync(sessionStoragePath)) {
+        const data = JSON.parse(readFileSync(sessionStoragePath, 'utf-8'));
+        if (Object.keys(data).length > 0) {
+            await page.evaluate((items) => {
+                for (const [key, value] of Object.entries(items)) {
+                    sessionStorage.setItem(key, value);
+                }
+            }, data).catch(() => {});
+        }
+    }
+}
+
+/**
+ * Update lastUsed timestamp in session metadata
+ */
+export function updateSessionLastUsed(name) {
+    const metaPath = path.join(getSessionPath(name), 'meta.json');
+    if (existsSync(metaPath)) {
+        try {
+            const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+            meta.lastUsed = new Date().toISOString();
+            writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        } catch {}
+    }
+}
