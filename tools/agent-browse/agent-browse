@@ -20,6 +20,9 @@ show_help() {
     cat << 'EOF'
 agent-browse - AI-first browser automation CLI
 
+BROWSER LIFECYCLE:
+  launch                         Start daemon + browser (no navigation)
+
 NAVIGATION:
   open <url>                     Navigate to URL
   back                           Go back
@@ -643,6 +646,10 @@ main() {
     local json response
     
     case "$cmd" in
+        # Browser lifecycle
+        launch)
+            json=$(build_launch_cmd)
+            ;;
         # Navigation
         open)
             [[ $# -lt 1 ]] && { echo "Usage: agent-browse open <url>" >&2; exit 1; }
@@ -1459,7 +1466,7 @@ main() {
         *)
             echo "Unknown command: $cmd" >&2
             # Suggest similar commands (prefix match)
-            local commands="open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval login session tab network auth vision agent capture api is console errors highlight install close restart status"
+            local commands="launch open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval login session tab network auth vision agent capture api is console errors highlight install close restart status"
             local suggestions=""
             for c in $commands; do
                 if [[ "$c" == "$cmd"* ]]; then

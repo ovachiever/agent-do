@@ -118,7 +118,7 @@ export class BrowserManager {
      */
     getPage() {
         if (this.pages.length === 0) {
-            throw new Error('Browser not launched. Call launch first.');
+            throw new Error('No browser page available. Run: agent-do browse open <url>');
         }
         return this.pages[this.activePageIndex];
     }
@@ -932,7 +932,7 @@ export class BrowserManager {
             throw new Error("Recording already in progress. Run 'record stop' first, or use 'record restart' to stop and start a new recording.");
         }
         if (!this.browser) {
-            throw new Error('Browser not launched. Call launch first.');
+            throw new Error('No browser page available. Run: agent-do browse open <url>');
         }
         // Check if output file already exists
         if (existsSync(outputPath)) {
