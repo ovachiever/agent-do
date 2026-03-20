@@ -4,9 +4,9 @@
 
 agent-do is a harness on top of the harness. Claude Code (or Cursor, or any AI coding agent) is the inner harness — it reads code, writes code, runs commands. agent-do is the outer layer that gives the inner harness structured control over everything else: browsers, simulators, databases, cloud platforms, design quality, project memory, issue tracking, media processing, hardware devices.
 
-The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 76 tools. The agent learns the pattern once, then it works everywhere.
+The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 77 tools. The agent learns the pattern once, then it works everywhere.
 
-One interface for Claude to control the world. 76 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
+One interface for Claude to control the world. 77 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
 
 ```bash
 agent-do <tool> <command> [args...]
@@ -30,7 +30,7 @@ agent-do db sample orders 5       # Verify
 agent-do db disconnect            # Clean up
 ```
 
-This pattern holds across all 76 tools — browsers, simulators, spreadsheets, containers, Slack channels, Kubernetes clusters, MIDI devices. Same five verbs. Same JSON responses. One interface to learn, then it works everywhere.
+This pattern holds across all 77 tools — browsers, simulators, spreadsheets, containers, Slack channels, Kubernetes clusters, MIDI devices. Same five verbs. Same JSON responses. One interface to learn, then it works everywhere.
 
 ## Standout Tools
 
@@ -169,7 +169,7 @@ agent-do manna done mn-a1b2c3        # → mn-d4e5f6 auto-unblocks
 | **Data** | db, excel, sheets, pdf, pdf2md | Database queries, spreadsheets, PDF conversion |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, gcp, ci, vm, network, dns, ssh, render, vercel, supabase | Containers, clusters, cloud, PaaS |
+| **Infrastructure** | docker, k8s, cloud, gcp, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare | Containers, clusters, cloud, PaaS, CDN |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |

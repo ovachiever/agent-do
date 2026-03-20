@@ -85,7 +85,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 76 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 77 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -116,6 +116,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-vercel` | Bash + curl | Vercel project/deployment management via REST API. Requires `VERCEL_ACCESS_TOKEN`. Optional `--team <id>`. |
 | `agent-supabase` | Bash + curl | Supabase project management + data access. REST API queries (no password) and SQL via agent-db bridge. Requires `SUPABASE_ACCESS_TOKEN`. |
 | `agent-gcp` | Bash + curl | Google Cloud Platform management via REST API + Console automation. Projects, APIs, secrets, service accounts, OAuth credential creation. |
+| `agent-cloudflare` | Bash + curl | Cloudflare management — zones, analytics (GraphQL), DNS records, Workers, Pages, R2, firewall events. 23 commands. Requires `CLOUDFLARE_API_TOKEN`. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor — visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring. 22 commands. Storage: `~/.agent-do/context/` (global, per-user). |
 | `agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons (context/problem/solution/takeaway), architectural decisions (options/chosen/rationale/confidence), pattern consolidation via harvest. Git history review, swarm checkpoints, lesson promotion (local → team → global). Storage: `.zpc/` (per-project). Sources `lib/json-output.sh` + `lib/snapshot.sh`. |
@@ -163,3 +164,5 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `GCP_SERVICE_ACCOUNT`: Path to service account JSON key for agent-gcp
 - `GCP_ACCESS_TOKEN`: Bearer token for agent-gcp (alternative to service account)
 - `GCP_PROJECT`: Default GCP project ID for agent-gcp
+- `CLOUDFLARE_API_TOKEN`: API token for agent-cloudflare (recommended, scoped)
+- `CLOUDFLARE_ACCOUNT_ID`: Account ID for agent-cloudflare (Workers, Pages, R2)

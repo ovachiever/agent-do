@@ -14,11 +14,12 @@
 | **Data** | db, excel, sheets, pdf, pdf2md, ocr, vision | Data access and extraction |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase | Container/cluster/server/PaaS management |
+| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare | Container/cluster/server/PaaS/CDN management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
 | **AI/Meta** | prompt, eval, memory, learn, swarm, agent, repl | Agent orchestration |
+| **Knowledge** | context | Reference doc library (fetch, index, search, token budgets) |
 | **Memory** | zpc | Structured project memory (lessons, decisions, patterns) |
 | **Tracking** | manna | Git-backed issue tracking |
 | **Dev Tools** | git, api, tail, logs | Git, HTTP testing, log capture |
@@ -218,6 +219,46 @@ agent-do unbrowse delete <name>        # Remove skill
 | Quick one-shot API capture | `unbrowse capture <url>` | Own headed browser, browse manually |
 | Capture APIs during existing automation | `browse capture start/stop` | Piggybacks on current browse session |
 | Restore previous auth session | `browse session load <name>` | Cookies injected at context creation |
+
+---
+
+## agent-do cloudflare (Zones, Analytics, DNS, Workers, Pages, R2)
+
+Cloudflare account management and analytics via REST + GraphQL API. Use instead of `wrangler` or `curl` to `api.cloudflare.com`.
+
+### Analytics (GraphQL)
+```bash
+agent-do cloudflare visitors <zone> [--since 7d]       # Uniques, page views, countries
+agent-do cloudflare top-pages <zone> [--since 24h]     # Top pages by request count
+agent-do cloudflare top-countries <zone> [--since 7d]   # Top countries by visitor count
+agent-do cloudflare requests <zone> [--since 24h]      # Total, cached, threats blocked
+agent-do cloudflare bandwidth <zone> [--since 24h]     # Total, cached, uncached
+agent-do cloudflare threats <zone> [--since 7d]        # Threat types, source countries
+agent-do cloudflare analytics <zone> '<graphql>'       # Raw GraphQL query
+```
+
+### DNS
+```bash
+agent-do cloudflare dns <zone>                          # List all DNS records
+agent-do cloudflare dns-add <zone> A www 1.2.3.4        # Add record
+agent-do cloudflare dns-update <zone> <id> <content>    # Update record
+agent-do cloudflare dns-del <zone> <id>                 # Delete record
+```
+
+### Zones, Workers, Pages, R2
+```bash
+agent-do cloudflare zones                  # List all zones (domains)
+agent-do cloudflare zone <domain>          # Zone details
+agent-do cloudflare workers                # List Workers scripts
+agent-do cloudflare pages                  # List Pages projects
+agent-do cloudflare r2-buckets             # List R2 buckets
+agent-do cloudflare firewall-events <zone> # Recent WAF/bot/rate-limit events
+agent-do cloudflare snapshot               # Full account state as JSON
+```
+
+Zones resolve by domain name or ID. `--since` accepts `24h`, `7d`, `30d`, or ISO date.
+
+Environment: `CLOUDFLARE_API_TOKEN` (recommended), or `CLOUDFLARE_EMAIL` + `CLOUDFLARE_API_KEY`. `CLOUDFLARE_ACCOUNT_ID` for Workers/Pages/R2.
 
 ---
 
