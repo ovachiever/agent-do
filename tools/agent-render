@@ -352,8 +352,9 @@ cmd_env() {
     local sid
     sid=$(resolve_service "$name_or_id") || return 1
 
+    # Fetch all env vars (limit=100 covers virtually all services)
     local result
-    result=$(render_request GET "/services/$sid/env-vars")
+    result=$(render_request GET "/services/$sid/env-vars?limit=100")
 
     echo "$result" | python3 -c "
 import sys, json
@@ -391,9 +392,12 @@ cmd_env_set() {
     local escaped_val
     escaped_val=$(json_escape "$val")
 
-    local body="[{\"key\": \"$key\", \"value\": $escaped_val}]"
+    # CRITICAL: Use per-key PUT endpoint to upsert a single env var.
+    # The collection PUT (PUT /services/:id/env-vars) REPLACES ALL vars — destructive.
+    # The per-key PUT (PUT /services/:id/env-vars/:key) upserts safely.
+    local body="{\"value\": $escaped_val}"
 
-    render_request PUT "/services/$sid/env-vars" "$body" > /dev/null
+    render_request PUT "/services/$sid/env-vars/$key" "$body" > /dev/null
     echo "Set $key on $name_or_id ($sid)"
 }
 
