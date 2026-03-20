@@ -741,6 +741,54 @@ tools:
       - intent: "get GCP account snapshot"
         command: "agent-gcp snapshot"
 
+  cloudflare:
+    description: "Cloudflare account management — zones, analytics (GraphQL), DNS, Workers, Pages, R2, security events"
+    capabilities:
+      - list and inspect zones (domains)
+      - visitor analytics via GraphQL (uniques, page views, countries, top pages)
+      - request and bandwidth analytics with cache ratios
+      - threat and security event analysis
+      - DNS record management (list, add, update, delete)
+      - Workers script listing and inspection
+      - Pages project listing and deployment details
+      - R2 bucket and object listing
+      - firewall event queries (WAF, rate limit, bot)
+      - full account snapshot as JSON
+    commands:
+      zones: "List all zones (domains)"
+      zone: "Zone details: zone <domain>"
+      visitors: "Visitor summary: visitors <zone> [--since 24h|7d]"
+      top-pages: "Top pages by requests: top-pages <zone> [--since 24h]"
+      top-countries: "Top countries: top-countries <zone> [--since 7d]"
+      requests: "Request summary (total, cached, threats): requests <zone>"
+      bandwidth: "Bandwidth summary: bandwidth <zone>"
+      threats: "Security threats: threats <zone> [--since 24h]"
+      analytics: "Raw GraphQL: analytics <zone> '<query>'"
+      dns: "List DNS records: dns <zone>"
+      dns-add: "Add record: dns-add <zone> <type> <name> <content>"
+      dns-del: "Delete record: dns-del <zone> <record-id>"
+      dns-update: "Update record: dns-update <zone> <record-id> <content>"
+      workers: "List Workers scripts"
+      pages: "List Pages projects"
+      r2-buckets: "List R2 buckets"
+      firewall-events: "Firewall events: firewall-events <zone> [--since 24h]"
+      snapshot: "Full account state as JSON"
+    examples:
+      - intent: "who visited my site today"
+        command: "agent-cloudflare visitors recognitionoracle.com"
+      - intent: "what pages get the most traffic"
+        command: "agent-cloudflare top-pages recognitionoracle.com --since 7d"
+      - intent: "show DNS records"
+        command: "agent-cloudflare dns recognitionoracle.com"
+      - intent: "list my cloudflare zones"
+        command: "agent-cloudflare zones"
+      - intent: "any security threats"
+        command: "agent-cloudflare threats recognitionoracle.com --since 7d"
+      - intent: "add a DNS record"
+        command: "agent-cloudflare dns-add recognitionoracle.com CNAME www target.example.com"
+      - intent: "cloudflare account overview"
+        command: "agent-cloudflare snapshot"
+
   ci:
     description: "Control CI/CD pipelines"
     capabilities:

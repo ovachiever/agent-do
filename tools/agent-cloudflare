@@ -1,0 +1,1014 @@
+#!/usr/bin/env bash
+# agent-cloudflare - Cloudflare account management and analytics
+# Covers zones, analytics (GraphQL), DNS, Workers, Pages, R2, security events
+
+set -euo pipefail
+
+CF_API="https://api.cloudflare.com/client/v4"
+
+show_help() {
+    cat << 'EOF'
+agent-cloudflare - Cloudflare account management and analytics
+
+ZONES:
+  zones / ls                   List all zones (domains)
+  zone <zone>                  Zone details (plan, status, nameservers)
+
+ANALYTICS (GraphQL):
+  visitors <zone> [--since N]  Visitor summary: uniques, page views, countries (default: 24h)
+  top-pages <zone> [--since N] Top pages by request count
+  top-countries <zone> [--since N]  Top countries by visitor count
+  requests <zone> [--since N]  Request summary: total, cached, threats blocked
+  bandwidth <zone> [--since N] Bandwidth summary: total, cached, uncached
+  threats <zone> [--since N]   Security threats: blocked, types, top source countries
+  analytics <zone> <graphql>   Raw GraphQL query against Cloudflare Analytics
+
+DNS:
+  dns <zone>                   List DNS records
+  dns-add <zone> <type> <name> <content>  Add DNS record (A, AAAA, CNAME, TXT, MX)
+  dns-del <zone> <record-id>   Delete DNS record
+  dns-update <zone> <record-id> <content>  Update record content
+
+WORKERS:
+  workers                      List Workers scripts
+  worker <name>                Worker details (routes, bindings)
+  worker-logs <name>           Recent Worker invocation logs
+
+PAGES:
+  pages                        List Pages projects
+  page <name>                  Project details + recent deployments
+
+R2:
+  r2-buckets                   List R2 buckets
+  r2-objects <bucket> [--prefix P]  List objects in bucket
+
+SECURITY:
+  firewall-events <zone> [--since N]  Recent firewall events (WAF, rate limit, bot)
+  waf-rules <zone>             List active WAF rules
+
+ACCOUNT:
+  account                      Account details
+  snapshot                     Full account state as JSON (zones + DNS + workers + pages)
+
+Zones can be referenced by domain name or zone ID.
+Time ranges: --since accepts hours (24h), days (7d), or ISO date (2024-01-01).
+
+Environment:
+  CLOUDFLARE_API_TOKEN         API token (recommended, scoped permissions)
+  CLOUDFLARE_EMAIL + CLOUDFLARE_API_KEY  Legacy auth (global key)
+  CLOUDFLARE_ACCOUNT_ID        Account ID (required for Workers, Pages, R2)
+
+Examples:
+  agent-cloudflare zones
+  agent-cloudflare visitors recognitionoracle.com --since 7d
+  agent-cloudflare top-pages recognitionoracle.com
+  agent-cloudflare dns recognitionoracle.com
+  agent-cloudflare analytics recognitionoracle.com '{ viewer { zones(filter:{zoneTag:"ZONE_ID"}) { httpRequests1dGroups(limit:7) { sum { requests } } } } }'
+  agent-cloudflare snapshot
+EOF
+}
+
+# --- Helpers ---
+
+cf_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+
+    local args=(-s -X "$method" "${CF_API}${endpoint}" \
+        -H "Content-Type: application/json")
+
+    # Auth: prefer API token, fall back to email+key
+    if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+        args+=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+    elif [[ -n "${CLOUDFLARE_EMAIL:-}" && -n "${CLOUDFLARE_API_KEY:-}" ]]; then
+        args+=(-H "X-Auth-Email: $CLOUDFLARE_EMAIL" -H "X-Auth-Key: $CLOUDFLARE_API_KEY")
+    else
+        echo '{"success":false,"error":"No Cloudflare credentials. Set CLOUDFLARE_API_TOKEN or CLOUDFLARE_EMAIL + CLOUDFLARE_API_KEY"}' >&2
+        return 1
+    fi
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    curl "${args[@]}"
+}
+
+cf_graphql() {
+    local query="$1"
+    local args=(-s -X POST "https://api.cloudflare.com/client/v4/graphql" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+        args+=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+    elif [[ -n "${CLOUDFLARE_EMAIL:-}" && -n "${CLOUDFLARE_API_KEY:-}" ]]; then
+        args+=(-H "X-Auth-Email: $CLOUDFLARE_EMAIL" -H "X-Auth-Key: $CLOUDFLARE_API_KEY")
+    else
+        echo '{"success":false,"error":"No Cloudflare credentials"}' >&2
+        return 1
+    fi
+
+    args+=(-d "$query")
+    curl "${args[@]}"
+}
+
+resolve_zone() {
+    local name_or_id="$1"
+
+    # Already a 32-char hex ID
+    if [[ "$name_or_id" =~ ^[a-f0-9]{32}$ ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Resolve by domain name
+    local result
+    result=$(cf_request GET "/zones?name=${name_or_id}&status=active")
+
+    local zone_id
+    zone_id=$(echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('result', [])
+if zones:
+    print(zones[0].get('id', ''))
+" 2>/dev/null)
+
+    if [[ -z "$zone_id" ]]; then
+        echo "Error: Zone '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$zone_id"
+}
+
+get_account_id() {
+    if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+        echo "$CLOUDFLARE_ACCOUNT_ID"
+        return 0
+    fi
+    # Auto-detect from first zone or accounts endpoint
+    local result
+    result=$(cf_request GET "/accounts?page=1&per_page=1")
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+accounts = data.get('result', [])
+if accounts:
+    print(accounts[0].get('id', ''))
+" 2>/dev/null
+}
+
+parse_since() {
+    local since="${1:-24h}"
+    python3 -c "
+import sys, re
+from datetime import datetime, timedelta, timezone
+s = '$since'
+now = datetime.now(timezone.utc)
+m = re.match(r'^(\d+)([hdm])$', s)
+if m:
+    n, unit = int(m.group(1)), m.group(2)
+    if unit == 'h': delta = timedelta(hours=n)
+    elif unit == 'd': delta = timedelta(days=n)
+    elif unit == 'm': delta = timedelta(minutes=n)
+    start = now - delta
+elif re.match(r'^\d{4}-\d{2}-\d{2}', s):
+    start = datetime.fromisoformat(s.replace('Z', '+00:00'))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+else:
+    start = now - timedelta(hours=24)
+print(start.strftime('%Y-%m-%dT%H:%M:%SZ'))
+"
+}
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+# --- Zone Commands ---
+
+cmd_zones() {
+    local result
+    result=$(cf_request GET "/zones?per_page=50")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('result', [])
+if not zones:
+    print('No zones found')
+    sys.exit(0)
+for z in zones:
+    plan = z.get('plan', {}).get('name', '?')
+    status = z.get('status', '?')
+    print(f\"{z['id']}  {z['name']}  [{plan}]  {status}\")
+"
+}
+
+cmd_zone() {
+    local zone_name="${1:-}"
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare zone <domain>" >&2; return 1; }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    local result
+    result=$(cf_request GET "/zones/$zone_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+z = data.get('result', {})
+print(f\"Zone:         {z.get('name', '')}\")
+print(f\"ID:           {z.get('id', '')}\")
+print(f\"Status:       {z.get('status', '')}\")
+print(f\"Plan:         {z.get('plan', {}).get('name', '')}\")
+ns = z.get('name_servers', [])
+print(f\"Nameservers:  {', '.join(ns)}\")
+print(f\"Paused:       {z.get('paused', False)}\")
+print(f\"Created:      {z.get('created_on', '')}\")
+"
+}
+
+# --- Analytics Commands (GraphQL) ---
+
+cmd_visitors() {
+    local zone_name="${1:-}"
+    local since="24h"
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare visitors <zone> [--since 24h]" >&2; return 1; }
+
+    local zone_id start_time
+    zone_id=$(resolve_zone "$zone_name") || return 1
+    start_time=$(parse_since "$since")
+
+    local query
+    query=$(cat <<GRAPHQL
+{"query":"{ viewer { zones(filter: {zoneTag: \"$zone_id\"}) { httpRequests1hGroups(filter: {datetime_gt: \"$start_time\"}, limit: 1000, orderBy: [datetime_ASC]) { sum { requests pageViews threats countryMap { clientCountryName requests } } uniq { uniques } dimensions { datetime } } } } }"}
+GRAPHQL
+)
+
+    local result
+    result=$(cf_graphql "$query")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('data', {}).get('viewer', {}).get('zones', [])
+if not zones or not zones[0].get('httpRequests1hGroups'):
+    print('No data for this period')
+    sys.exit(0)
+groups = zones[0]['httpRequests1hGroups']
+total_requests = sum(g['sum']['requests'] for g in groups)
+total_pageviews = sum(g['sum']['pageViews'] for g in groups)
+total_uniques = sum(g['uniq']['uniques'] for g in groups)
+total_threats = sum(g['sum']['threats'] for g in groups)
+
+# Aggregate countries
+countries = {}
+for g in groups:
+    for c in g['sum'].get('countryMap', []):
+        name = c['clientCountryName']
+        countries[name] = countries.get(name, 0) + c['requests']
+
+print(f'Unique visitors:  {total_uniques:,}')
+print(f'Page views:       {total_pageviews:,}')
+print(f'Total requests:   {total_requests:,}')
+print(f'Threats blocked:  {total_threats:,}')
+print()
+if countries:
+    print('Top countries:')
+    for name, count in sorted(countries.items(), key=lambda x: -x[1])[:15]:
+        print(f'  {name}: {count:,}')
+"
+}
+
+cmd_top_pages() {
+    local zone_name="${1:-}"
+    local since="24h"
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare top-pages <zone> [--since 24h]" >&2; return 1; }
+
+    local zone_id start_time
+    zone_id=$(resolve_zone "$zone_name") || return 1
+    start_time=$(parse_since "$since")
+
+    # Use httpRequestsAdaptiveGroups for path-level data
+    local query
+    query=$(cat <<GRAPHQL
+{"query":"{ viewer { zones(filter: {zoneTag: \"$zone_id\"}) { httpRequestsAdaptiveGroups(filter: {datetime_gt: \"$start_time\", requestSource: \"eyeball\"}, limit: 50, orderBy: [count_DESC]) { count dimensions { clientRequestPath } } } } }"}
+GRAPHQL
+)
+
+    local result
+    result=$(cf_graphql "$query")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('data', {}).get('viewer', {}).get('zones', [])
+if not zones:
+    print('No data')
+    sys.exit(0)
+groups = zones[0].get('httpRequestsAdaptiveGroups', [])
+if not groups:
+    print('No page data for this period')
+    sys.exit(0)
+print(f'{\"Requests\":>10}  Path')
+print(f'{\"--------\":>10}  ----')
+for g in groups[:30]:
+    path = g.get('dimensions', {}).get('clientRequestPath', '?')
+    count = g.get('count', 0)
+    print(f'{count:>10,}  {path}')
+"
+}
+
+cmd_top_countries() {
+    # Reuse visitors but focus on country output
+    cmd_visitors "$@"
+}
+
+cmd_requests() {
+    local zone_name="${1:-}"
+    local since="24h"
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare requests <zone> [--since 24h]" >&2; return 1; }
+
+    local zone_id start_time
+    zone_id=$(resolve_zone "$zone_name") || return 1
+    start_time=$(parse_since "$since")
+
+    local query
+    query=$(cat <<GRAPHQL
+{"query":"{ viewer { zones(filter: {zoneTag: \"$zone_id\"}) { httpRequests1hGroups(filter: {datetime_gt: \"$start_time\"}, limit: 1000, orderBy: [datetime_ASC]) { sum { requests cachedRequests threats bytes cachedBytes } dimensions { datetime } } } } }"}
+GRAPHQL
+)
+
+    local result
+    result=$(cf_graphql "$query")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('data', {}).get('viewer', {}).get('zones', [])
+if not zones or not zones[0].get('httpRequests1hGroups'):
+    print('No data for this period')
+    sys.exit(0)
+groups = zones[0]['httpRequests1hGroups']
+total = sum(g['sum']['requests'] for g in groups)
+cached = sum(g['sum']['cachedRequests'] for g in groups)
+threats = sum(g['sum']['threats'] for g in groups)
+cache_pct = (cached / total * 100) if total > 0 else 0
+print(f'Total requests:   {total:,}')
+print(f'Cached:           {cached:,} ({cache_pct:.1f}%)')
+print(f'Uncached:         {total - cached:,}')
+print(f'Threats blocked:  {threats:,}')
+"
+}
+
+cmd_bandwidth() {
+    local zone_name="${1:-}"
+    local since="24h"
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare bandwidth <zone> [--since 24h]" >&2; return 1; }
+
+    local zone_id start_time
+    zone_id=$(resolve_zone "$zone_name") || return 1
+    start_time=$(parse_since "$since")
+
+    local query
+    query=$(cat <<GRAPHQL
+{"query":"{ viewer { zones(filter: {zoneTag: \"$zone_id\"}) { httpRequests1hGroups(filter: {datetime_gt: \"$start_time\"}, limit: 1000) { sum { bytes cachedBytes } } } } }"}
+GRAPHQL
+)
+
+    local result
+    result=$(cf_graphql "$query")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('data', {}).get('viewer', {}).get('zones', [])
+if not zones or not zones[0].get('httpRequests1hGroups'):
+    print('No data for this period')
+    sys.exit(0)
+groups = zones[0]['httpRequests1hGroups']
+total_bytes = sum(g['sum']['bytes'] for g in groups)
+cached_bytes = sum(g['sum']['cachedBytes'] for g in groups)
+
+def fmt(b):
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if b < 1024: return f'{b:.1f} {unit}'
+        b /= 1024
+    return f'{b:.1f} PB'
+
+cache_pct = (cached_bytes / total_bytes * 100) if total_bytes > 0 else 0
+print(f'Total:    {fmt(total_bytes)}')
+print(f'Cached:   {fmt(cached_bytes)} ({cache_pct:.1f}%)')
+print(f'Uncached: {fmt(total_bytes - cached_bytes)}')
+"
+}
+
+cmd_threats() {
+    local zone_name="${1:-}"
+    local since="24h"
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare threats <zone> [--since 24h]" >&2; return 1; }
+
+    local zone_id start_time
+    zone_id=$(resolve_zone "$zone_name") || return 1
+    start_time=$(parse_since "$since")
+
+    local query
+    query=$(cat <<GRAPHQL
+{"query":"{ viewer { zones(filter: {zoneTag: \"$zone_id\"}) { httpRequests1hGroups(filter: {datetime_gt: \"$start_time\"}, limit: 1000) { sum { threats threatPathingMap { threatPathingName requests } countryMap { clientCountryName threats } } } } } }"}
+GRAPHQL
+)
+
+    local result
+    result=$(cf_graphql "$query")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('data', {}).get('viewer', {}).get('zones', [])
+if not zones or not zones[0].get('httpRequests1hGroups'):
+    print('No threat data for this period')
+    sys.exit(0)
+groups = zones[0]['httpRequests1hGroups']
+total_threats = sum(g['sum']['threats'] for g in groups)
+print(f'Threats blocked: {total_threats:,}')
+
+# Threat types
+types = {}
+for g in groups:
+    for t in g['sum'].get('threatPathingMap', []):
+        name = t['threatPathingName']
+        types[name] = types.get(name, 0) + t['requests']
+if types:
+    print()
+    print('Threat types:')
+    for name, count in sorted(types.items(), key=lambda x: -x[1]):
+        print(f'  {name}: {count:,}')
+
+# Source countries
+countries = {}
+for g in groups:
+    for c in g['sum'].get('countryMap', []):
+        if c.get('threats', 0) > 0:
+            name = c['clientCountryName']
+            countries[name] = countries.get(name, 0) + c['threats']
+if countries:
+    print()
+    print('Threat source countries:')
+    for name, count in sorted(countries.items(), key=lambda x: -x[1])[:10]:
+        print(f'  {name}: {count:,}')
+"
+}
+
+cmd_analytics_raw() {
+    local zone_name="${1:-}"
+    local graphql="${2:-}"
+
+    [[ -z "$zone_name" || -z "$graphql" ]] && { echo "Usage: agent-cloudflare analytics <zone> '<graphql-query>'" >&2; return 1; }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    # Replace ZONE_ID placeholder if present
+    graphql="${graphql//ZONE_ID/$zone_id}"
+
+    local query
+    query="{\"query\":$(json_escape "$graphql")}"
+
+    cf_graphql "$query" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(json.dumps(data, indent=2))
+"
+}
+
+# --- DNS Commands ---
+
+cmd_dns() {
+    local zone_name="${1:-}"
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare dns <zone>" >&2; return 1; }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    local result
+    result=$(cf_request GET "/zones/$zone_id/dns_records?per_page=100")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+records = data.get('result', [])
+if not records:
+    print('No DNS records')
+    sys.exit(0)
+print(f'{\"ID\":>36}  {\"Type\":<6}  {\"Name\":<40}  {\"Content\":<50}  {\"Proxied\":<7}  TTL')
+print('-' * 160)
+for r in records:
+    rid = r.get('id', '')
+    rtype = r.get('type', '')
+    name = r.get('name', '')
+    content = r.get('content', '')[:50]
+    proxied = 'yes' if r.get('proxied') else 'no'
+    ttl = r.get('ttl', '')
+    ttl_str = 'Auto' if ttl == 1 else str(ttl)
+    print(f'{rid}  {rtype:<6}  {name:<40}  {content:<50}  {proxied:<7}  {ttl_str}')
+"
+}
+
+cmd_dns_add() {
+    local zone_name="${1:-}"
+    local rtype="${2:-}"
+    local name="${3:-}"
+    local content="${4:-}"
+
+    [[ -z "$zone_name" || -z "$rtype" || -z "$name" || -z "$content" ]] && {
+        echo "Usage: agent-cloudflare dns-add <zone> <type> <name> <content>" >&2
+        echo "  Types: A, AAAA, CNAME, TXT, MX" >&2
+        return 1
+    }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    local proxied="true"
+    [[ "$rtype" == "TXT" || "$rtype" == "MX" ]] && proxied="false"
+
+    local data="{\"type\":\"$rtype\",\"name\":\"$name\",\"content\":$(json_escape "$content"),\"proxied\":$proxied,\"ttl\":1}"
+
+    local result
+    result=$(cf_request POST "/zones/$zone_id/dns_records" "$data")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if data.get('success'):
+    r = data.get('result', {})
+    print(f\"Created: {r.get('id', '')}  {r.get('type', '')}  {r.get('name', '')}  {r.get('content', '')}\")
+else:
+    errors = data.get('errors', [])
+    for e in errors:
+        print(f\"Error: {e.get('message', '')}\")
+"
+}
+
+cmd_dns_del() {
+    local zone_name="${1:-}"
+    local record_id="${2:-}"
+
+    [[ -z "$zone_name" || -z "$record_id" ]] && {
+        echo "Usage: agent-cloudflare dns-del <zone> <record-id>" >&2
+        return 1
+    }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    local result
+    result=$(cf_request DELETE "/zones/$zone_id/dns_records/$record_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if data.get('success'):
+    print(f\"Deleted: {data.get('result', {}).get('id', '')}\")
+else:
+    for e in data.get('errors', []):
+        print(f\"Error: {e.get('message', '')}\")
+"
+}
+
+cmd_dns_update() {
+    local zone_name="${1:-}"
+    local record_id="${2:-}"
+    local content="${3:-}"
+
+    [[ -z "$zone_name" || -z "$record_id" || -z "$content" ]] && {
+        echo "Usage: agent-cloudflare dns-update <zone> <record-id> <content>" >&2
+        return 1
+    }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    # Get current record to preserve type/name
+    local current
+    current=$(cf_request GET "/zones/$zone_id/dns_records/$record_id")
+
+    local data
+    data=$(echo "$current" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+r = data.get('result', {})
+patch = {'content': $(json_escape "$content"), 'type': r.get('type', ''), 'name': r.get('name', '')}
+print(json.dumps(patch))
+")
+
+    local result
+    result=$(cf_request PUT "/zones/$zone_id/dns_records/$record_id" "$data")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if data.get('success'):
+    r = data.get('result', {})
+    print(f\"Updated: {r.get('id', '')}  {r.get('type', '')}  {r.get('name', '')}  {r.get('content', '')}\")
+else:
+    for e in data.get('errors', []):
+        print(f\"Error: {e.get('message', '')}\")
+"
+}
+
+# --- Workers Commands ---
+
+cmd_workers() {
+    local acct_id
+    acct_id=$(get_account_id)
+    [[ -z "$acct_id" ]] && { echo "Error: Could not determine account ID. Set CLOUDFLARE_ACCOUNT_ID" >&2; return 1; }
+
+    local result
+    result=$(cf_request GET "/accounts/$acct_id/workers/scripts")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+scripts = data.get('result', [])
+if not scripts:
+    print('No Workers found')
+    sys.exit(0)
+for s in scripts:
+    name = s.get('id', '')
+    modified = s.get('modified_on', '')[:10]
+    print(f'{name}  modified: {modified}')
+"
+}
+
+cmd_worker() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && { echo "Usage: agent-cloudflare worker <name>" >&2; return 1; }
+
+    local acct_id
+    acct_id=$(get_account_id)
+    [[ -z "$acct_id" ]] && { echo "Error: Set CLOUDFLARE_ACCOUNT_ID" >&2; return 1; }
+
+    local result
+    result=$(cf_request GET "/accounts/$acct_id/workers/scripts/$name")
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+# --- Pages Commands ---
+
+cmd_pages() {
+    local acct_id
+    acct_id=$(get_account_id)
+    [[ -z "$acct_id" ]] && { echo "Error: Set CLOUDFLARE_ACCOUNT_ID" >&2; return 1; }
+
+    local result
+    result=$(cf_request GET "/accounts/$acct_id/pages/projects")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+projects = data.get('result', [])
+if not projects:
+    print('No Pages projects found')
+    sys.exit(0)
+for p in projects:
+    name = p.get('name', '')
+    domain = p.get('subdomain', '') + '.pages.dev'
+    prod = p.get('canonical_deployment', {})
+    url = prod.get('url', domain)
+    modified = prod.get('created_on', '')[:10] if prod else ''
+    print(f'{name}  {url}  {modified}')
+"
+}
+
+cmd_page() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && { echo "Usage: agent-cloudflare page <name>" >&2; return 1; }
+
+    local acct_id
+    acct_id=$(get_account_id)
+    [[ -z "$acct_id" ]] && { echo "Error: Set CLOUDFLARE_ACCOUNT_ID" >&2; return 1; }
+
+    local result
+    result=$(cf_request GET "/accounts/$acct_id/pages/projects/$name")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+p = data.get('result', {})
+print(f\"Name:       {p.get('name', '')}\")
+print(f\"Subdomain:  {p.get('subdomain', '')}.pages.dev\")
+domains = p.get('domains', [])
+if domains:
+    print(f\"Domains:    {', '.join(domains)}\")
+prod = p.get('canonical_deployment', {})
+if prod:
+    print(f\"Latest:     {prod.get('url', '')}\")
+    print(f\"Deployed:   {prod.get('created_on', '')}\")
+    print(f\"Branch:     {prod.get('deployment_trigger', {}).get('metadata', {}).get('branch', '')}\")
+"
+}
+
+# --- R2 Commands ---
+
+cmd_r2_buckets() {
+    local acct_id
+    acct_id=$(get_account_id)
+    [[ -z "$acct_id" ]] && { echo "Error: Set CLOUDFLARE_ACCOUNT_ID" >&2; return 1; }
+
+    local result
+    result=$(cf_request GET "/accounts/$acct_id/r2/buckets")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+buckets = data.get('result', {}).get('buckets', data.get('result', []))
+if not buckets:
+    print('No R2 buckets')
+    sys.exit(0)
+for b in (buckets if isinstance(buckets, list) else []):
+    name = b.get('name', '')
+    created = b.get('creation_date', '')[:10]
+    location = b.get('location', '?')
+    print(f'{name}  location: {location}  created: {created}')
+"
+}
+
+cmd_r2_objects() {
+    local bucket="${1:-}"
+    local prefix=""
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prefix) prefix="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$bucket" ]] && { echo "Usage: agent-cloudflare r2-objects <bucket> [--prefix path/]" >&2; return 1; }
+
+    local acct_id
+    acct_id=$(get_account_id)
+    [[ -z "$acct_id" ]] && { echo "Error: Set CLOUDFLARE_ACCOUNT_ID" >&2; return 1; }
+
+    local endpoint="/accounts/$acct_id/r2/buckets/$bucket/objects"
+    [[ -n "$prefix" ]] && endpoint="${endpoint}?prefix=$prefix"
+
+    local result
+    result=$(cf_request GET "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+objects = data.get('result', {}).get('objects', [])
+if not objects:
+    print('No objects (or empty prefix)')
+    sys.exit(0)
+for o in objects[:50]:
+    key = o.get('key', '')
+    size = o.get('size', 0)
+    modified = o.get('last_modified', '')[:19]
+    if size > 1048576:
+        size_str = f'{size/1048576:.1f} MB'
+    elif size > 1024:
+        size_str = f'{size/1024:.1f} KB'
+    else:
+        size_str = f'{size} B'
+    print(f'{key:<60}  {size_str:>10}  {modified}')
+"
+}
+
+# --- Security Commands ---
+
+cmd_firewall_events() {
+    local zone_name="${1:-}"
+    local since="24h"
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare firewall-events <zone> [--since 24h]" >&2; return 1; }
+
+    local zone_id start_time
+    zone_id=$(resolve_zone "$zone_name") || return 1
+    start_time=$(parse_since "$since")
+
+    local query
+    query=$(cat <<GRAPHQL
+{"query":"{ viewer { zones(filter: {zoneTag: \"$zone_id\"}) { firewallEventsAdaptiveGroups(filter: {datetime_gt: \"$start_time\"}, limit: 50, orderBy: [count_DESC]) { count dimensions { action source clientIP clientCountryName clientRequestHTTPHost clientRequestPath ruleId } } } } }"}
+GRAPHQL
+)
+
+    local result
+    result=$(cf_graphql "$query")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('data', {}).get('viewer', {}).get('zones', [])
+if not zones:
+    print('No firewall data')
+    sys.exit(0)
+groups = zones[0].get('firewallEventsAdaptiveGroups', [])
+if not groups:
+    print('No firewall events in this period')
+    sys.exit(0)
+print(f'{\"Count\":>7}  {\"Action\":<12}  {\"Source\":<12}  {\"IP\":<16}  {\"Country\":<8}  Path')
+print('-' * 100)
+for g in groups[:30]:
+    d = g.get('dimensions', {})
+    print(f\"{g['count']:>7}  {d.get('action', '?'):<12}  {d.get('source', '?'):<12}  {d.get('clientIP', '?'):<16}  {d.get('clientCountryName', '?'):<8}  {d.get('clientRequestPath', '?')}\")
+"
+}
+
+cmd_waf_rules() {
+    local zone_name="${1:-}"
+    [[ -z "$zone_name" ]] && { echo "Usage: agent-cloudflare waf-rules <zone>" >&2; return 1; }
+
+    local zone_id
+    zone_id=$(resolve_zone "$zone_name") || return 1
+
+    local result
+    result=$(cf_request GET "/zones/$zone_id/firewall/rules")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+rules = data.get('result', [])
+if not rules:
+    print('No custom WAF rules')
+    sys.exit(0)
+for r in rules:
+    action = r.get('action', '?')
+    desc = r.get('description', r.get('filter', {}).get('expression', ''))[:80]
+    paused = ' (paused)' if r.get('paused') else ''
+    print(f'[{action}]{paused}  {desc}')
+"
+}
+
+# --- Account / Snapshot ---
+
+cmd_account() {
+    local result
+    result=$(cf_request GET "/accounts?page=1&per_page=5")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+accounts = data.get('result', [])
+for a in accounts:
+    print(f\"ID:     {a.get('id', '')}\")
+    print(f\"Name:   {a.get('name', '')}\")
+    print(f\"Type:   {a.get('type', '')}\")
+    settings = a.get('settings', {})
+    if settings:
+        print(f\"2FA:    {settings.get('enforce_twofactor', False)}\")
+"
+}
+
+cmd_snapshot() {
+    local acct_id
+    acct_id=$(get_account_id)
+
+    echo "{"
+    echo '  "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",'
+
+    # Zones
+    local zones
+    zones=$(cf_request GET "/zones?per_page=50")
+    echo '  "zones": '
+    echo "$zones" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+zones = data.get('result', [])
+out = []
+for z in zones:
+    out.append({'id': z['id'], 'name': z['name'], 'status': z.get('status', ''), 'plan': z.get('plan', {}).get('name', '')})
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # Workers
+    if [[ -n "$acct_id" ]]; then
+        local workers
+        workers=$(cf_request GET "/accounts/$acct_id/workers/scripts" 2>/dev/null)
+        echo '  "workers": '
+        echo "$workers" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+scripts = data.get('result', [])
+out = [{'name': s.get('id', ''), 'modified': s.get('modified_on', '')} for s in scripts]
+print(json.dumps(out, indent=4))
+" 2>/dev/null || echo "[]"
+        echo ","
+
+        # Pages
+        local pages
+        pages=$(cf_request GET "/accounts/$acct_id/pages/projects" 2>/dev/null)
+        echo '  "pages": '
+        echo "$pages" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+projects = data.get('result', [])
+out = [{'name': p.get('name', ''), 'subdomain': p.get('subdomain', '')} for p in projects]
+print(json.dumps(out, indent=4))
+" 2>/dev/null || echo "[]"
+    fi
+
+    echo "}"
+}
+
+# --- Dispatch ---
+
+main() {
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        show_help
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        zones|ls)           cmd_zones "$@" ;;
+        zone)               cmd_zone "$@" ;;
+        visitors)           cmd_visitors "$@" ;;
+        top-pages)          cmd_top_pages "$@" ;;
+        top-countries)      cmd_top_countries "$@" ;;
+        requests)           cmd_requests "$@" ;;
+        bandwidth)          cmd_bandwidth "$@" ;;
+        threats)            cmd_threats "$@" ;;
+        analytics)          cmd_analytics_raw "$@" ;;
+        dns)                cmd_dns "$@" ;;
+        dns-add)            cmd_dns_add "$@" ;;
+        dns-del)            cmd_dns_del "$@" ;;
+        dns-update)         cmd_dns_update "$@" ;;
+        workers)            cmd_workers "$@" ;;
+        worker)             cmd_worker "$@" ;;
+        worker-logs)        echo "Worker logs require Logpush or Tail. Use: wrangler tail $1" ;;
+        pages)              cmd_pages "$@" ;;
+        page)               cmd_page "$@" ;;
+        r2-buckets)         cmd_r2_buckets "$@" ;;
+        r2-objects)         cmd_r2_objects "$@" ;;
+        firewall-events)    cmd_firewall_events "$@" ;;
+        waf-rules)          cmd_waf_rules "$@" ;;
+        account)            cmd_account "$@" ;;
+        snapshot)           cmd_snapshot "$@" ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'agent-cloudflare --help' for usage" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

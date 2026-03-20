@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 76 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 77 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
