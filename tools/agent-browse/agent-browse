@@ -238,12 +238,13 @@ start_daemon() {
     # Clean up stale socket
     rm -f "$SOCKET_PATH" "$PID_FILE"
     
-    # Start daemon in background
+    # Start daemon in background (disown so parent bash can exit cleanly)
     AGENT_BROWSER_SESSION="$SESSION" \
     AGENT_BROWSER_HEADED="${AGENT_BROWSER_HEADED:-0}" \
     node "$DAEMON_DIR/daemon.js" &
-    
+
     local daemon_pid=$!
+    disown "$daemon_pid" 2>/dev/null
     echo "$daemon_pid" > "$PID_FILE"
     
     # Wait for socket to appear
@@ -1468,7 +1469,7 @@ main() {
                 daemon_running=true
                 pid=$(cat "$PID_FILE")
                 # Check if browser is responsive by getting URL
-                if url_result=$(send_command '{"id":"status-check","action":"get","target":"url"}' 2>/dev/null); then
+                if url_result=$(send_command '{"id":"status-check","action":"url"}' 2>/dev/null); then
                     if echo "$url_result" | grep -q '"success":true'; then
                         browser_ok=true
                     fi
