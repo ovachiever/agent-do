@@ -405,10 +405,10 @@ async function handleNavigate(command, browser) {
     await page.goto(command.url, {
         waitUntil: command.waitUntil ?? 'load',
     });
-    return successResponse(command.id, {
-        url: page.url(),
-        title: await page.title(),
-    });
+    // Title fetch can fail if a client-side redirect fires after load
+    const title = await page.title().catch(() => '');
+    const url = page.url();
+    return successResponse(command.id, { url, title });
 }
 async function handleClick(command, browser) {
     // Support both refs (@e1) and regular selectors

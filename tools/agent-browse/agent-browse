@@ -1442,9 +1442,24 @@ main() {
                 "$0" open "$1"
                 exit $?
             fi
-            # Start daemon + browser so next command doesn't hit a cold start
+            # Start daemon + browser, wait until responsive
             "$0" launch > /dev/null 2>&1 || true
-            echo '{"restarted": true}'
+            # Poll until browser is responsive (up to 10 seconds)
+            local ready=false
+            for i in $(seq 1 20); do
+                if url_result=$(send_command '{"id":"restart-check","action":"url"}' 2>/dev/null); then
+                    if echo "$url_result" | grep -q '"success":true'; then
+                        ready=true
+                        break
+                    fi
+                fi
+                sleep 0.5
+            done
+            if [[ "$ready" == "true" ]]; then
+                echo '{"restarted": true, "browser": "responsive"}'
+            else
+                echo '{"restarted": true, "browser": "starting", "hint": "Browser still warming up. Run open <url> to navigate."}'
+            fi
             exit 0
             ;;
         status)
