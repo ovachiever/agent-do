@@ -648,6 +648,11 @@ main() {
     case "$cmd" in
         # Browser lifecycle
         launch)
+            # Accept --headed as positional flag too (global --headed also works)
+            if [[ "${1:-}" == "--headed" ]]; then
+                export AGENT_BROWSER_HEADED=1
+                shift
+            fi
             json=$(build_launch_cmd)
             ;;
         # Navigation
@@ -1424,17 +1429,22 @@ main() {
             exit 0
             ;;
         restart)
-            # Kill browser and daemon, then relaunch with optional URL
+            # Kill browser and daemon completely, then relaunch
             json=$(build_close_cmd)
             send_command "$json" 2>/dev/null || true
             stop_daemon
+            # Kill any orphaned daemon processes
+            pkill -f "node.*agent-browse.*daemon.js" 2>/dev/null || true
+            rm -f "$SOCKET_PATH" "$PID_FILE"
             sleep 1
-            # If URL provided, open it (which auto-starts daemon)
+            # Always relaunch: if URL provided, open it; otherwise just launch the browser
             if [[ $# -gt 0 ]]; then
                 "$0" open "$1"
                 exit $?
             fi
-            echo '{"restarted": true, "hint": "Run open <url> to navigate"}'
+            # Start daemon + browser so next command doesn't hit a cold start
+            "$0" launch > /dev/null 2>&1 || true
+            echo '{"restarted": true}'
             exit 0
             ;;
         status)
