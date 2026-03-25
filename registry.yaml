@@ -1456,6 +1456,47 @@ tools:
       - intent: "remove a captured skill"
         command: "agent-unbrowse delete myservice"
 
+  okta:
+    description: "Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, authorization servers, system logs"
+    capabilities:
+      - create and manage OIDC applications (web, SPA, native, service)
+      - create and manage SAML 2.0 applications
+      - manage application credentials (client ID, secret, rotation)
+      - assign and unassign users and groups to applications
+      - search users and groups
+      - manage group memberships
+      - list and inspect authorization servers, scopes, claims, policies
+      - query system logs for auth events and errors
+      - manage trusted origins (CORS, redirect)
+    commands:
+      apps: "List applications: apps [--status active]"
+      app: "Application details: app <name-or-id>"
+      app-create-oidc: "Create OIDC app: app-create-oidc <label> --type web|spa|native|service --redirect-uris <uris>"
+      app-create-saml: "Create SAML app: app-create-saml <label> --sso-url <url> --audience <uri>"
+      app-update: "Update app: app-update <app> --redirect-uris <uris> --grant-types <types>"
+      app-creds: "Get credentials: app-creds <app> [--reveal]"
+      app-creds-rotate: "Rotate client secret: app-creds-rotate <app>"
+      app-assign-group: "Assign group: app-assign-group <app> <group>"
+      users: "List/search users: users [--search <query>]"
+      groups: "List/search groups: groups [--search <query>]"
+      auth-servers: "List authorization servers"
+      logs: "System logs: logs [--since 24h] [--filter <expression>]"
+      trusted-origins: "List trusted origins"
+      snapshot: "Full tenant state as JSON"
+    examples:
+      - intent: "list Okta applications"
+        command: "agent-okta apps"
+      - intent: "create an OIDC web app"
+        command: "agent-okta app-create-oidc \"My App\" --type web --redirect-uris \"http://localhost:3000/callback\""
+      - intent: "get app credentials"
+        command: "agent-okta app-creds \"Versova Align\""
+      - intent: "assign group to app"
+        command: "agent-okta app-assign-group \"Versova Align\" Everyone"
+      - intent: "check auth events"
+        command: "agent-okta logs --since 1h"
+      - intent: "Okta tenant overview"
+        command: "agent-okta snapshot"
+
   render:
     description: "Control Render.com services, deploys, databases, and env vars"
     capabilities:

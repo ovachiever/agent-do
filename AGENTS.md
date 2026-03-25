@@ -14,7 +14,7 @@
 | **Data** | db, excel, sheets, pdf, pdf2md, ocr, vision | Data access and extraction |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare | Container/cluster/server/PaaS/CDN management |
+| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare, okta | Container/cluster/server/PaaS/CDN/SSO management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |

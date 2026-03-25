@@ -1,0 +1,1353 @@
+#!/usr/bin/env bash
+# agent-okta - Okta tenant management with SSO application focus
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+OKTA_API="https://${OKTA_DOMAIN:-}/api/v1"
+
+show_help() {
+    cat << 'EOF'
+agent-okta - Okta tenant management (SSO applications, users, groups)
+
+APPLICATIONS:
+  apps [--status active]         List applications
+  app <app>                      Application details
+  app-create-oidc <label>        Create OIDC app
+    --type web|spa|native|service  Application type (default: web)
+    --redirect-uris "u1,u2"       Redirect URIs (required for web/spa/native)
+    --login-uri <uri>              Initiate login URI
+    --post-logout-uris "u1,u2"    Post-logout redirect URIs
+  app-create-saml <label>        Create SAML 2.0 app
+    --sso-url <url>                SSO ACS URL (required)
+    --audience <uri>               Audience URI / Entity ID (required)
+  app-update <app>               Update application settings
+    --redirect-uris "u1,u2"       Replace redirect URIs
+    --grant-types "g1,g2"          Replace grant types
+    --login-uri <uri>              Set initiate login URI
+    --post-logout-uris "u1,u2"    Replace post-logout URIs
+  app-creds <app> [--reveal]     Get client ID and secret
+  app-creds-rotate <app>         Rotate client secret
+  app-activate <app>             Activate application
+  app-deactivate <app>           Deactivate application
+  app-delete <app>               Delete application (must be deactivated)
+  app-users <app>                List users assigned to app
+  app-assign-user <app> <user>   Assign user to app
+  app-unassign-user <app> <user> Remove user from app
+  app-groups <app>               List groups assigned to app
+  app-assign-group <app> <grp>   Assign group to app
+  app-unassign-group <app> <grp> Remove group from app
+  app-metadata <app>             SAML metadata XML
+
+USERS & GROUPS:
+  users [--search "query"]       List/search users
+  user <login-or-id>             User details
+  groups [--search "query"]      List/search groups
+  group <name-or-id>             Group details
+  group-members <group>          List group members
+  group-add-user <grp> <user>    Add user to group
+  group-remove-user <grp> <user> Remove user from group
+
+AUTHORIZATION SERVERS:
+  auth-servers                   List authorization servers
+  auth-server <server>           Auth server details
+  auth-server-scopes <server>    List custom scopes
+  auth-server-claims <server>    List custom claims
+  auth-server-policies <server>  List access policies
+
+ADMIN:
+  logs [--since 24h] [--filter "expr"]  System log events
+  trusted-origins                List trusted origins
+  trusted-origin-add <name> <origin> --scopes "cors,redirect"
+  trusted-origin-del <id>        Delete trusted origin
+  whoami                         Current API token info
+  snapshot                       Full tenant state as JSON
+
+Applications resolve by name or ID (0oa...).
+Users resolve by email/login or ID (00u...).
+Groups resolve by name or ID (00g...).
+Auth servers resolve by name, ID (aus...), or "default".
+
+Environment:
+  OKTA_DOMAIN                    Okta domain (e.g., versova.okta.com)
+  OKTA_API_TOKEN                 SSWS API token
+
+Examples:
+  agent-okta apps
+  agent-okta app "Versova Align"
+  agent-okta app-create-oidc "My App" --type web --redirect-uris "http://localhost:3000/callback"
+  agent-okta app-creds "Versova Align"
+  agent-okta app-update "Versova Align" --redirect-uris "http://localhost:3000/cb,https://app.example.com/cb"
+  agent-okta app-assign-group "Versova Align" "Everyone"
+  agent-okta users --search "erik"
+  agent-okta auth-server default
+  agent-okta logs --since 1h
+  agent-okta snapshot
+EOF
+}
+
+# --- Helpers ---
+
+okta_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+
+    if [[ -z "${OKTA_DOMAIN:-}" ]]; then
+        echo '{"error":"OKTA_DOMAIN not set"}' >&2
+        return 1
+    fi
+    if [[ -z "${OKTA_API_TOKEN:-}" ]]; then
+        echo '{"error":"OKTA_API_TOKEN not set"}' >&2
+        return 1
+    fi
+
+    local url
+    if [[ "$endpoint" == http* ]]; then
+        url="$endpoint"
+    else
+        url="${OKTA_API}${endpoint}"
+    fi
+
+    local args=(-s -X "$method" "$url" \
+        -H "Authorization: SSWS $OKTA_API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    local http_code body
+    body=$(curl -w '\n%{http_code}' "${args[@]}")
+    http_code=$(echo "$body" | tail -1)
+    body=$(echo "$body" | sed '$d')
+
+    # Handle rate limiting (429)
+    if [[ "$http_code" == "429" ]]; then
+        local reset_epoch
+        reset_epoch=$(curl -s -o /dev/null -D- -X "$method" "$url" \
+            -H "Authorization: SSWS $OKTA_API_TOKEN" \
+            -H "Accept: application/json" 2>/dev/null | grep -i 'x-rate-limit-reset' | tr -d '\r' | awk '{print $2}')
+        if [[ -n "$reset_epoch" ]]; then
+            local now wait_secs
+            now=$(date +%s)
+            wait_secs=$((reset_epoch - now + 1))
+            [[ $wait_secs -gt 0 && $wait_secs -lt 60 ]] && sleep "$wait_secs"
+        else
+            sleep 2
+        fi
+        # Retry once
+        body=$(curl -w '\n%{http_code}' "${args[@]}")
+        http_code=$(echo "$body" | tail -1)
+        body=$(echo "$body" | sed '$d')
+    fi
+
+    echo "$body"
+}
+
+# Paginated GET — follows Link: <url>; rel="next" headers
+okta_list() {
+    local endpoint="$1"
+    local limit="${2:-200}"
+
+    if [[ -z "${OKTA_DOMAIN:-}" || -z "${OKTA_API_TOKEN:-}" ]]; then
+        echo '[]'
+        return 1
+    fi
+
+    local url="${OKTA_API}${endpoint}"
+    [[ "$url" == *"?"* ]] && url="${url}&limit=${limit}" || url="${url}?limit=${limit}"
+
+    python3 -c "
+import urllib.request, json, re, os, ssl
+
+domain = os.environ.get('OKTA_DOMAIN', '')
+token = os.environ.get('OKTA_API_TOKEN', '')
+url = '$url'
+all_items = []
+ctx = ssl.create_default_context()
+
+while url:
+    req = urllib.request.Request(url, headers={
+        'Authorization': f'SSWS {token}',
+        'Accept': 'application/json',
+    })
+    try:
+        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        body = resp.read().decode()
+        items = json.loads(body)
+        if isinstance(items, list):
+            all_items.extend(items)
+        else:
+            all_items.append(items)
+        # Parse Link header for next page
+        link = resp.getheader('Link', '')
+        m = re.search(r'<([^>]+)>;\s*rel=\"next\"', link)
+        url = m.group(1) if m else None
+    except Exception as e:
+        break
+
+print(json.dumps(all_items))
+"
+}
+
+resolve_app() {
+    local name_or_id="$1"
+
+    # Already an ID
+    if [[ "$name_or_id" == 0oa* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    local result
+    result=$(okta_request GET "/apps?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$name_or_id'))")&limit=1")
+
+    local app_id
+    app_id=$(echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if isinstance(items, list) and items:
+    print(items[0].get('id', ''))
+" 2>/dev/null)
+
+    if [[ -z "$app_id" ]]; then
+        echo "Error: Application '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$app_id"
+}
+
+resolve_user() {
+    local name_or_id="$1"
+
+    if [[ "$name_or_id" == 00u* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Okta accepts login (email) directly in the URL path
+    local result
+    result=$(okta_request GET "/users/$(python3 -c "import urllib.parse; print(urllib.parse.quote('$name_or_id'))")")
+
+    local user_id
+    user_id=$(echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data.get('id', ''))
+" 2>/dev/null)
+
+    if [[ -z "$user_id" ]]; then
+        echo "Error: User '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$user_id"
+}
+
+resolve_group() {
+    local name_or_id="$1"
+
+    if [[ "$name_or_id" == 00g* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    local result
+    result=$(okta_request GET "/groups?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$name_or_id'))")&limit=1")
+
+    local group_id
+    group_id=$(echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if isinstance(items, list) and items:
+    print(items[0].get('id', ''))
+" 2>/dev/null)
+
+    if [[ -z "$group_id" ]]; then
+        echo "Error: Group '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$group_id"
+}
+
+resolve_authserver() {
+    local name_or_id="$1"
+
+    # Literal "default"
+    if [[ "$name_or_id" == "default" ]]; then
+        echo "default"
+        return 0
+    fi
+
+    # Already an ID
+    if [[ "$name_or_id" == aus* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Resolve by name
+    local result
+    result=$(okta_list "/authorizationServers")
+
+    local server_id
+    server_id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for s in items:
+    if s.get('name', '').lower() == name.lower():
+        print(s.get('id', ''))
+        break
+" 2>/dev/null)
+
+    if [[ -z "$server_id" ]]; then
+        echo "Error: Authorization server '$name_or_id' not found" >&2
+        return 1
+    fi
+
+    echo "$server_id"
+}
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+parse_since() {
+    local since="${1:-24h}"
+    python3 -c "
+import re
+from datetime import datetime, timedelta, timezone
+s = '$since'
+now = datetime.now(timezone.utc)
+m = re.match(r'^(\d+)([hdm])$', s)
+if m:
+    n, unit = int(m.group(1)), m.group(2)
+    if unit == 'h': delta = timedelta(hours=n)
+    elif unit == 'd': delta = timedelta(days=n)
+    elif unit == 'm': delta = timedelta(minutes=n)
+    start = now - delta
+elif re.match(r'^\d{4}-\d{2}-\d{2}', s):
+    start = datetime.fromisoformat(s.replace('Z', '+00:00'))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+else:
+    start = now - timedelta(hours=24)
+print(start.strftime('%Y-%m-%dT%H:%M:%SZ'))
+"
+}
+
+split_csv() {
+    echo "$1" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | python3 -c "
+import sys, json
+print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
+"
+}
+
+# --- Application Commands ---
+
+cmd_apps() {
+    local status_filter=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --status) status_filter="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local endpoint="/apps"
+    [[ -n "$status_filter" ]] && endpoint="/apps?filter=status+eq+%22${status_filter^^}%22"
+
+    local result
+    result=$(okta_list "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+apps = json.load(sys.stdin)
+if not apps:
+    print('No applications found')
+    sys.exit(0)
+for a in apps:
+    aid = a.get('id', '')
+    label = a.get('label', '')
+    mode = a.get('signOnMode', '?')
+    status = a.get('status', '?')
+    print(f'{aid}  {label}  [{mode}]  {status}')
+"
+}
+
+cmd_app() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app <app>" >&2; return 1; }
+
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    local result
+    result=$(okta_request GET "/apps/$app_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+print(f\"ID:          {a.get('id', '')}\")
+print(f\"Label:       {a.get('label', '')}\")
+print(f\"SignOnMode:  {a.get('signOnMode', '')}\")
+print(f\"Status:      {a.get('status', '')}\")
+print(f\"Created:     {a.get('created', '')}\")
+
+creds = a.get('credentials', {}).get('oauthClient', {})
+if creds:
+    print(f\"Client ID:   {creds.get('client_id', '')}\")
+    auth_method = creds.get('token_endpoint_auth_method', '')
+    print(f\"Auth Method: {auth_method}\")
+
+settings = a.get('settings', {}).get('oauthClient', {})
+if settings:
+    uris = settings.get('redirect_uris', [])
+    if uris:
+        print(f\"Redirects:   {', '.join(uris)}\")
+    grants = settings.get('grant_types', [])
+    if grants:
+        print(f\"Grants:      {', '.join(grants)}\")
+    logout = settings.get('post_logout_redirect_uris', [])
+    if logout:
+        print(f\"Post-logout: {', '.join(logout)}\")
+    login = settings.get('initiate_login_uri', '')
+    if login:
+        print(f\"Login URI:   {login}\")
+
+saml = a.get('settings', {}).get('signOn', {})
+if saml and a.get('signOnMode') == 'SAML_2_0':
+    print(f\"SSO URL:     {saml.get('ssoAcsUrl', '')}\")
+    print(f\"Audience:    {saml.get('audience', '')}\")
+"
+}
+
+cmd_app_create_oidc() {
+    local label="${1:-}"
+    [[ -z "$label" ]] && { echo "Usage: agent-okta app-create-oidc <label> --type web|spa|native|service --redirect-uris \"u1,u2\"" >&2; return 1; }
+    shift
+
+    local app_type="web" redirect_uris="" login_uri="" post_logout_uris="" grant_types=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --type) app_type="$2"; shift 2 ;;
+            --redirect-uris) redirect_uris="$2"; shift 2 ;;
+            --login-uri) login_uri="$2"; shift 2 ;;
+            --post-logout-uris) post_logout_uris="$2"; shift 2 ;;
+            --grant-types) grant_types="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body
+    body=$(python3 -c "
+import json, sys
+
+label = $(json_escape "$label")
+app_type = '$app_type'
+redirect_uris = [u.strip() for u in '$redirect_uris'.split(',') if u.strip()] if '$redirect_uris' else []
+login_uri = '$login_uri'
+post_logout = [u.strip() for u in '$post_logout_uris'.split(',') if u.strip()] if '$post_logout_uris' else []
+custom_grants = [g.strip() for g in '$grant_types'.split(',') if g.strip()] if '$grant_types' else []
+
+# Map app_type to Okta fields
+type_map = {
+    'web': {'application_type': 'web', 'grant_types': ['authorization_code', 'client_credentials'], 'response_types': ['code'], 'token_endpoint_auth_method': 'client_secret_basic'},
+    'spa': {'application_type': 'browser', 'grant_types': ['authorization_code'], 'response_types': ['code'], 'token_endpoint_auth_method': 'none'},
+    'native': {'application_type': 'native', 'grant_types': ['authorization_code'], 'response_types': ['code'], 'token_endpoint_auth_method': 'none'},
+    'service': {'application_type': 'service', 'grant_types': ['client_credentials'], 'response_types': ['token'], 'token_endpoint_auth_method': 'client_secret_basic'},
+}
+
+config = type_map.get(app_type, type_map['web'])
+grants = custom_grants if custom_grants else config['grant_types']
+
+app = {
+    'name': 'oidc_client',
+    'label': label,
+    'signOnMode': 'OPENID_CONNECT',
+    'credentials': {
+        'oauthClient': {
+            'token_endpoint_auth_method': config['token_endpoint_auth_method'],
+        }
+    },
+    'settings': {
+        'oauthClient': {
+            'client_uri': None,
+            'application_type': config['application_type'],
+            'grant_types': grants,
+            'response_types': config['response_types'],
+            'redirect_uris': redirect_uris if redirect_uris else ['http://localhost:8080'],
+        }
+    }
+}
+
+if login_uri:
+    app['settings']['oauthClient']['initiate_login_uri'] = login_uri
+if post_logout:
+    app['settings']['oauthClient']['post_logout_redirect_uris'] = post_logout
+
+print(json.dumps(app))
+")
+
+    local result
+    result=$(okta_request POST "/apps" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+if 'errorCode' in a:
+    print(f\"Error: {a.get('errorSummary', a.get('errorCode', 'Unknown'))}\")
+    sys.exit(1)
+print(f\"Created: {a.get('id', '')}  {a.get('label', '')}  [{a.get('signOnMode', '')}]\")
+creds = a.get('credentials', {}).get('oauthClient', {})
+if creds:
+    print(f\"Client ID:     {creds.get('client_id', '')}\")
+    secret = creds.get('client_secret', '')
+    if secret:
+        print(f\"Client Secret: {secret}\")
+    else:
+        print(f\"Client Secret: (none — PKCE app)\")
+"
+}
+
+cmd_app_create_saml() {
+    local label="${1:-}"
+    [[ -z "$label" ]] && { echo "Usage: agent-okta app-create-saml <label> --sso-url <url> --audience <uri>" >&2; return 1; }
+    shift
+
+    local sso_url="" audience=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --sso-url) sso_url="$2"; shift 2 ;;
+            --audience) audience="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    [[ -z "$sso_url" || -z "$audience" ]] && { echo "Error: --sso-url and --audience are required" >&2; return 1; }
+
+    local body
+    body=$(python3 -c "
+import json
+app = {
+    'name': 'Custom SAML 2.0',
+    'label': $(json_escape "$label"),
+    'signOnMode': 'SAML_2_0',
+    'settings': {
+        'signOn': {
+            'ssoAcsUrl': '$sso_url',
+            'audience': '$audience',
+            'recipient': '$sso_url',
+            'destination': '$sso_url',
+            'subjectNameIdFormat': 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+        }
+    }
+}
+print(json.dumps(app))
+")
+
+    local result
+    result=$(okta_request POST "/apps" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+if 'errorCode' in a:
+    print(f\"Error: {a.get('errorSummary', a.get('errorCode', 'Unknown'))}\")
+    sys.exit(1)
+print(f\"Created: {a.get('id', '')}  {a.get('label', '')}  [SAML_2_0]\")
+"
+}
+
+cmd_app_update() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-update <app> [--redirect-uris ...] [--grant-types ...] [--login-uri ...] [--post-logout-uris ...]" >&2; return 1; }
+    shift
+
+    local redirect_uris="" grant_types="" login_uri="" post_logout_uris=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --redirect-uris) redirect_uris="$2"; shift 2 ;;
+            --grant-types) grant_types="$2"; shift 2 ;;
+            --login-uri) login_uri="$2"; shift 2 ;;
+            --post-logout-uris) post_logout_uris="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    # GET current state, merge, PUT back (Okta app update is full replace)
+    local current
+    current=$(okta_request GET "/apps/$app_id")
+
+    local updated
+    updated=$(echo "$current" | python3 -c "
+import sys, json
+
+app = json.load(sys.stdin)
+oauth = app.get('settings', {}).get('oauthClient', {})
+
+redirect = '$redirect_uris'
+grants = '$grant_types'
+login = '$login_uri'
+post_logout = '$post_logout_uris'
+
+if redirect:
+    oauth['redirect_uris'] = [u.strip() for u in redirect.split(',') if u.strip()]
+if grants:
+    oauth['grant_types'] = [g.strip() for g in grants.split(',') if g.strip()]
+if login:
+    oauth['initiate_login_uri'] = login
+if post_logout:
+    oauth['post_logout_redirect_uris'] = [u.strip() for u in post_logout.split(',') if u.strip()]
+
+# Remove read-only fields that Okta rejects on PUT
+for key in ['_links', '_embedded', 'created', 'lastUpdated', 'id']:
+    app.pop(key, None)
+
+print(json.dumps(app))
+")
+
+    local result
+    result=$(okta_request PUT "/apps/$app_id" "$updated")
+
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+if 'errorCode' in a:
+    print(f\"Error: {a.get('errorSummary', a.get('errorCode', 'Unknown'))}\")
+    sys.exit(1)
+print(f\"Updated: {a.get('id', '')}  {a.get('label', '')}\")
+oauth = a.get('settings', {}).get('oauthClient', {})
+uris = oauth.get('redirect_uris', [])
+if uris:
+    print(f\"Redirects: {', '.join(uris)}\")
+grants = oauth.get('grant_types', [])
+if grants:
+    print(f\"Grants:    {', '.join(grants)}\")
+"
+}
+
+cmd_app_creds() {
+    local name_or_id="${1:-}"
+    local reveal=false
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-creds <app> [--reveal]" >&2; return 1; }
+    shift || true
+    [[ "${1:-}" == "--reveal" ]] && reveal=true
+
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    local result
+    result=$(okta_request GET "/apps/$app_id")
+
+    local reveal_flag="$reveal"
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+creds = a.get('credentials', {}).get('oauthClient', {})
+reveal = '$reveal_flag' == 'true'
+if not creds:
+    print('No OAuth credentials (not an OIDC app)')
+    sys.exit(0)
+client_id = creds.get('client_id', '')
+secret = creds.get('client_secret', '')
+auth_method = creds.get('token_endpoint_auth_method', '')
+print(f'Client ID:     {client_id}')
+if secret:
+    if reveal:
+        print(f'Client Secret: {secret}')
+    else:
+        print(f'Client Secret: {secret[:8]}****')
+elif auth_method == 'none':
+    print(f'Client Secret: (none — PKCE app)')
+else:
+    print(f'Client Secret: (not available)')
+print(f'Auth Method:   {auth_method}')
+"
+}
+
+cmd_app_creds_rotate() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-creds-rotate <app>" >&2; return 1; }
+
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    local result
+    result=$(okta_request POST "/apps/$app_id/credentials/clientSecret/lifecycle/newSecret")
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if 'errorCode' in data:
+    print(f\"Error: {data.get('errorSummary', data.get('errorCode', 'Unknown'))}\")
+    sys.exit(1)
+secret = data.get('client_secret', '')
+print(f'New Client Secret: {secret}')
+"
+}
+
+cmd_app_activate() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-activate <app>" >&2; return 1; }
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+    okta_request POST "/apps/$app_id/lifecycle/activate" > /dev/null
+    echo "Activated: $app_id"
+}
+
+cmd_app_deactivate() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-deactivate <app>" >&2; return 1; }
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+    okta_request POST "/apps/$app_id/lifecycle/deactivate" > /dev/null
+    echo "Deactivated: $app_id"
+}
+
+cmd_app_delete() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-delete <app>" >&2; return 1; }
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    # Check if active — must deactivate first
+    local status
+    status=$(okta_request GET "/apps/$app_id" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+    if [[ "$status" == "ACTIVE" ]]; then
+        echo "Error: Application is ACTIVE. Deactivate first: agent-okta app-deactivate $name_or_id" >&2
+        return 1
+    fi
+
+    okta_request DELETE "/apps/$app_id" > /dev/null
+    echo "Deleted: $app_id"
+}
+
+cmd_app_users() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-users <app>" >&2; return 1; }
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    local result
+    result=$(okta_list "/apps/$app_id/users")
+
+    echo "$result" | python3 -c "
+import sys, json
+users = json.load(sys.stdin)
+if not users:
+    print('No users assigned')
+    sys.exit(0)
+for u in users:
+    uid = u.get('id', '')
+    profile = u.get('profile', u.get('credentials', {}))
+    email = profile.get('email', profile.get('userName', ''))
+    name = profile.get('displayName', f\"{profile.get('firstName', '')} {profile.get('lastName', '')}\".strip())
+    print(f'{uid}  {email}  {name}')
+"
+}
+
+cmd_app_assign_user() {
+    local app_name="${1:-}" user_name="${2:-}"
+    [[ -z "$app_name" || -z "$user_name" ]] && { echo "Usage: agent-okta app-assign-user <app> <user>" >&2; return 1; }
+    local app_id user_id
+    app_id=$(resolve_app "$app_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+    okta_request POST "/apps/$app_id/users" "{\"id\":\"$user_id\",\"scope\":\"USER\"}" > /dev/null
+    echo "Assigned user $user_id to app $app_id"
+}
+
+cmd_app_unassign_user() {
+    local app_name="${1:-}" user_name="${2:-}"
+    [[ -z "$app_name" || -z "$user_name" ]] && { echo "Usage: agent-okta app-unassign-user <app> <user>" >&2; return 1; }
+    local app_id user_id
+    app_id=$(resolve_app "$app_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+    okta_request DELETE "/apps/$app_id/users/$user_id" > /dev/null
+    echo "Unassigned user $user_id from app $app_id"
+}
+
+cmd_app_groups() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-groups <app>" >&2; return 1; }
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    local result
+    result=$(okta_list "/apps/$app_id/groups")
+
+    echo "$result" | python3 -c "
+import sys, json
+groups = json.load(sys.stdin)
+if not groups:
+    print('No groups assigned')
+    sys.exit(0)
+for g in groups:
+    gid = g.get('id', '')
+    profile = g.get('profile', {})
+    name = profile.get('name', '')
+    print(f'{gid}  {name}')
+"
+}
+
+cmd_app_assign_group() {
+    local app_name="${1:-}" group_name="${2:-}"
+    [[ -z "$app_name" || -z "$group_name" ]] && { echo "Usage: agent-okta app-assign-group <app> <group>" >&2; return 1; }
+    local app_id group_id
+    app_id=$(resolve_app "$app_name") || return 1
+    group_id=$(resolve_group "$group_name") || return 1
+    okta_request PUT "/apps/$app_id/groups/$group_id" "{}" > /dev/null
+    echo "Assigned group $group_id to app $app_id"
+}
+
+cmd_app_unassign_group() {
+    local app_name="${1:-}" group_name="${2:-}"
+    [[ -z "$app_name" || -z "$group_name" ]] && { echo "Usage: agent-okta app-unassign-group <app> <group>" >&2; return 1; }
+    local app_id group_id
+    app_id=$(resolve_app "$app_name") || return 1
+    group_id=$(resolve_group "$group_name") || return 1
+    okta_request DELETE "/apps/$app_id/groups/$group_id" > /dev/null
+    echo "Unassigned group $group_id from app $app_id"
+}
+
+cmd_app_metadata() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta app-metadata <app>" >&2; return 1; }
+    local app_id
+    app_id=$(resolve_app "$name_or_id") || return 1
+
+    # SAML metadata returns XML, not JSON
+    curl -s "https://${OKTA_DOMAIN}/api/v1/apps/$app_id/sso/saml/metadata" \
+        -H "Authorization: SSWS $OKTA_API_TOKEN" \
+        -H "Accept: application/xml"
+}
+
+# --- User & Group Commands ---
+
+cmd_users() {
+    local search=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --search) search="$2"; shift 2 ;;
+            *) search="$1"; shift ;;
+        esac
+    done
+
+    local endpoint="/users"
+    if [[ -n "$search" ]]; then
+        local encoded
+        encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$search'))")
+        # Use q= for simple searches, search= for expressions with operators
+        if [[ "$search" == *" eq "* || "$search" == *" sw "* || "$search" == *" co "* ]]; then
+            endpoint="/users?search=$encoded"
+        else
+            endpoint="/users?q=$encoded"
+        fi
+    fi
+
+    local result
+    result=$(okta_list "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+users = json.load(sys.stdin)
+if not users:
+    print('No users found')
+    sys.exit(0)
+for u in users:
+    uid = u.get('id', '')
+    p = u.get('profile', {})
+    email = p.get('email', p.get('login', ''))
+    name = f\"{p.get('firstName', '')} {p.get('lastName', '')}\".strip()
+    status = u.get('status', '?')
+    print(f'{uid}  {email}  {name}  [{status}]')
+"
+}
+
+cmd_user() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta user <login-or-id>" >&2; return 1; }
+
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+
+    local result
+    result=$(okta_request GET "/users/$user_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+u = json.load(sys.stdin)
+p = u.get('profile', {})
+print(f\"ID:        {u.get('id', '')}\")
+print(f\"Login:     {p.get('login', '')}\")
+print(f\"Email:     {p.get('email', '')}\")
+print(f\"Name:      {p.get('firstName', '')} {p.get('lastName', '')}\")
+print(f\"Status:    {u.get('status', '')}\")
+print(f\"Created:   {u.get('created', '')}\")
+print(f\"Last Login: {u.get('lastLogin', 'never')}\")
+"
+}
+
+cmd_groups() {
+    local search=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --search) search="$2"; shift 2 ;;
+            *) search="$1"; shift ;;
+        esac
+    done
+
+    local endpoint="/groups"
+    if [[ -n "$search" ]]; then
+        local encoded
+        encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$search'))")
+        endpoint="/groups?q=$encoded"
+    fi
+
+    local result
+    result=$(okta_list "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+groups = json.load(sys.stdin)
+if not groups:
+    print('No groups found')
+    sys.exit(0)
+for g in groups:
+    gid = g.get('id', '')
+    p = g.get('profile', {})
+    name = p.get('name', '')
+    gtype = g.get('type', '?')
+    print(f'{gid}  {name}  [{gtype}]')
+"
+}
+
+cmd_group() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta group <name-or-id>" >&2; return 1; }
+
+    local group_id
+    group_id=$(resolve_group "$name_or_id") || return 1
+
+    local result
+    result=$(okta_request GET "/groups/$group_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+g = json.load(sys.stdin)
+p = g.get('profile', {})
+print(f\"ID:          {g.get('id', '')}\")
+print(f\"Name:        {p.get('name', '')}\")
+print(f\"Description: {p.get('description', '')}\")
+print(f\"Type:        {g.get('type', '')}\")
+print(f\"Created:     {g.get('created', '')}\")
+"
+}
+
+cmd_group_members() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta group-members <group>" >&2; return 1; }
+
+    local group_id
+    group_id=$(resolve_group "$name_or_id") || return 1
+
+    local result
+    result=$(okta_list "/groups/$group_id/users")
+
+    echo "$result" | python3 -c "
+import sys, json
+users = json.load(sys.stdin)
+if not users:
+    print('No members')
+    sys.exit(0)
+for u in users:
+    uid = u.get('id', '')
+    p = u.get('profile', {})
+    email = p.get('email', p.get('login', ''))
+    name = f\"{p.get('firstName', '')} {p.get('lastName', '')}\".strip()
+    print(f'{uid}  {email}  {name}')
+"
+}
+
+cmd_group_add_user() {
+    local group_name="${1:-}" user_name="${2:-}"
+    [[ -z "$group_name" || -z "$user_name" ]] && { echo "Usage: agent-okta group-add-user <group> <user>" >&2; return 1; }
+    local group_id user_id
+    group_id=$(resolve_group "$group_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+    okta_request PUT "/groups/$group_id/users/$user_id" > /dev/null
+    echo "Added user $user_id to group $group_id"
+}
+
+cmd_group_remove_user() {
+    local group_name="${1:-}" user_name="${2:-}"
+    [[ -z "$group_name" || -z "$user_name" ]] && { echo "Usage: agent-okta group-remove-user <group> <user>" >&2; return 1; }
+    local group_id user_id
+    group_id=$(resolve_group "$group_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+    okta_request DELETE "/groups/$group_id/users/$user_id" > /dev/null
+    echo "Removed user $user_id from group $group_id"
+}
+
+# --- Authorization Server Commands ---
+
+cmd_auth_servers() {
+    local result
+    result=$(okta_list "/authorizationServers")
+
+    echo "$result" | python3 -c "
+import sys, json
+servers = json.load(sys.stdin)
+if not servers:
+    print('No authorization servers')
+    sys.exit(0)
+for s in servers:
+    sid = s.get('id', '')
+    name = s.get('name', '')
+    issuer = s.get('issuer', '')
+    status = s.get('status', '?')
+    print(f'{sid}  {name}  {issuer}  [{status}]')
+"
+}
+
+cmd_auth_server() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta auth-server <name-or-id>" >&2; return 1; }
+
+    local server_id
+    server_id=$(resolve_authserver "$name_or_id") || return 1
+
+    local result
+    result=$(okta_request GET "/authorizationServers/$server_id")
+
+    echo "$result" | python3 -c "
+import sys, json
+s = json.load(sys.stdin)
+print(f\"ID:       {s.get('id', '')}\")
+print(f\"Name:     {s.get('name', '')}\")
+print(f\"Issuer:   {s.get('issuer', '')}\")
+print(f\"Status:   {s.get('status', '')}\")
+print(f\"Audiences: {', '.join(s.get('audiences', []))}\")
+print(f\"Created:  {s.get('created', '')}\")
+"
+}
+
+cmd_auth_server_scopes() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta auth-server-scopes <server>" >&2; return 1; }
+    local server_id
+    server_id=$(resolve_authserver "$name_or_id") || return 1
+
+    local result
+    result=$(okta_list "/authorizationServers/$server_id/scopes")
+
+    echo "$result" | python3 -c "
+import sys, json
+scopes = json.load(sys.stdin)
+if not scopes:
+    print('No scopes')
+    sys.exit(0)
+for s in scopes:
+    name = s.get('name', '')
+    desc = s.get('description', '')[:60]
+    default = ' (default)' if s.get('default') else ''
+    system = ' [system]' if s.get('system') else ''
+    print(f'  {name}{default}{system}  {desc}')
+"
+}
+
+cmd_auth_server_claims() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta auth-server-claims <server>" >&2; return 1; }
+    local server_id
+    server_id=$(resolve_authserver "$name_or_id") || return 1
+
+    local result
+    result=$(okta_list "/authorizationServers/$server_id/claims")
+
+    echo "$result" | python3 -c "
+import sys, json
+claims = json.load(sys.stdin)
+if not claims:
+    print('No claims')
+    sys.exit(0)
+for c in claims:
+    name = c.get('name', '')
+    value = c.get('value', '')
+    claim_type = c.get('claimType', '?')
+    status = c.get('status', '')
+    system = ' [system]' if c.get('system') else ''
+    print(f'  {name} = {value}  [{claim_type}]{system}  {status}')
+"
+}
+
+cmd_auth_server_policies() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-okta auth-server-policies <server>" >&2; return 1; }
+    local server_id
+    server_id=$(resolve_authserver "$name_or_id") || return 1
+
+    local result
+    result=$(okta_list "/authorizationServers/$server_id/policies")
+
+    echo "$result" | python3 -c "
+import sys, json
+policies = json.load(sys.stdin)
+if not policies:
+    print('No policies')
+    sys.exit(0)
+for p in policies:
+    pid = p.get('id', '')
+    name = p.get('name', '')
+    status = p.get('status', '?')
+    desc = p.get('description', '')[:60]
+    print(f'{pid}  {name}  [{status}]  {desc}')
+"
+}
+
+# --- Admin Commands ---
+
+cmd_logs() {
+    local since="24h" filter=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="$2"; shift 2 ;;
+            --filter) filter="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local start_time
+    start_time=$(parse_since "$since")
+
+    local endpoint="/logs?since=$start_time&limit=50&sortOrder=DESCENDING"
+    if [[ -n "$filter" ]]; then
+        local encoded_filter
+        encoded_filter=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$filter'))")
+        endpoint="${endpoint}&filter=$encoded_filter"
+    fi
+
+    local result
+    result=$(okta_request GET "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+events = json.load(sys.stdin)
+if not isinstance(events, list) or not events:
+    print('No log events')
+    sys.exit(0)
+for e in events:
+    ts = e.get('published', '')[:19]
+    event_type = e.get('eventType', '?')
+    severity = e.get('severity', '?')
+    display = e.get('displayMessage', '')[:80]
+    actor = e.get('actor', {}).get('displayName', e.get('actor', {}).get('alternateId', '?'))
+    outcome = e.get('outcome', {}).get('result', '?')
+    print(f'{ts}  [{severity}]  {event_type}  {outcome}  actor={actor}')
+    if display:
+        print(f'             {display}')
+"
+}
+
+cmd_trusted_origins() {
+    local result
+    result=$(okta_list "/trustedOrigins")
+
+    echo "$result" | python3 -c "
+import sys, json
+origins = json.load(sys.stdin)
+if not origins:
+    print('No trusted origins')
+    sys.exit(0)
+for o in origins:
+    oid = o.get('id', '')
+    name = o.get('name', '')
+    origin = o.get('origin', '')
+    scopes = ', '.join(s.get('type', '') for s in o.get('scopes', []))
+    status = o.get('status', '?')
+    print(f'{oid}  {name}  {origin}  [{scopes}]  {status}')
+"
+}
+
+cmd_trusted_origin_add() {
+    local name="${1:-}" origin="${2:-}" scopes="cors,redirect"
+    [[ -z "$name" || -z "$origin" ]] && { echo "Usage: agent-okta trusted-origin-add <name> <origin> [--scopes cors,redirect]" >&2; return 1; }
+    shift 2
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --scopes) scopes="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local scope_array
+    scope_array=$(python3 -c "
+import json
+scopes = '$scopes'.split(',')
+print(json.dumps([{'type': s.strip().upper()} for s in scopes if s.strip()]))
+")
+
+    local body="{\"name\":$(json_escape "$name"),\"origin\":$(json_escape "$origin"),\"scopes\":$scope_array}"
+
+    local result
+    result=$(okta_request POST "/trustedOrigins" "$body")
+
+    echo "$result" | python3 -c "
+import sys, json
+o = json.load(sys.stdin)
+if 'errorCode' in o:
+    print(f\"Error: {o.get('errorSummary', o.get('errorCode', 'Unknown'))}\")
+    sys.exit(1)
+print(f\"Created: {o.get('id', '')}  {o.get('name', '')}  {o.get('origin', '')}\")
+"
+}
+
+cmd_trusted_origin_del() {
+    local origin_id="${1:-}"
+    [[ -z "$origin_id" ]] && { echo "Usage: agent-okta trusted-origin-del <id>" >&2; return 1; }
+    okta_request DELETE "/trustedOrigins/$origin_id" > /dev/null
+    echo "Deleted: $origin_id"
+}
+
+cmd_whoami() {
+    local result
+    result=$(okta_request GET "/users/me")
+
+    echo "$result" | python3 -c "
+import sys, json
+u = json.load(sys.stdin)
+if 'errorCode' in u:
+    print(f\"Error: {u.get('errorSummary', 'Unknown')}\")
+    sys.exit(1)
+p = u.get('profile', {})
+print(f\"ID:     {u.get('id', '')}\")
+print(f\"Login:  {p.get('login', '')}\")
+print(f\"Email:  {p.get('email', '')}\")
+print(f\"Name:   {p.get('firstName', '')} {p.get('lastName', '')}\")
+print(f\"Status: {u.get('status', '')}\")
+"
+}
+
+cmd_snapshot() {
+    echo "{"
+    echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+    echo "  \"domain\": \"${OKTA_DOMAIN}\","
+
+    # Apps
+    local apps
+    apps=$(okta_list "/apps")
+    echo '  "apps": '
+    echo "$apps" | python3 -c "
+import sys, json
+apps = json.load(sys.stdin)
+out = [{'id': a['id'], 'label': a.get('label', ''), 'signOnMode': a.get('signOnMode', ''), 'status': a.get('status', '')} for a in apps]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # Users count
+    local users
+    users=$(okta_request GET "/users?limit=1")
+    echo "  \"userSample\": $users,"
+
+    # Groups
+    local groups
+    groups=$(okta_list "/groups")
+    echo '  "groups": '
+    echo "$groups" | python3 -c "
+import sys, json
+groups = json.load(sys.stdin)
+out = [{'id': g['id'], 'name': g.get('profile', {}).get('name', ''), 'type': g.get('type', '')} for g in groups]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # Auth servers
+    local auth_servers
+    auth_servers=$(okta_list "/authorizationServers")
+    echo '  "authorizationServers": '
+    echo "$auth_servers" | python3 -c "
+import sys, json
+servers = json.load(sys.stdin)
+out = [{'id': s['id'], 'name': s.get('name', ''), 'issuer': s.get('issuer', '')} for s in servers]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # Trusted origins
+    local origins
+    origins=$(okta_list "/trustedOrigins")
+    echo '  "trustedOrigins": '
+    echo "$origins" | python3 -c "
+import sys, json
+origins = json.load(sys.stdin)
+out = [{'id': o['id'], 'name': o.get('name', ''), 'origin': o.get('origin', ''), 'scopes': [s.get('type', '') for s in o.get('scopes', [])]} for o in origins]
+print(json.dumps(out, indent=4))
+"
+
+    echo "}"
+}
+
+# --- Dispatch ---
+
+main() {
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        show_help
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        apps|ls)               cmd_apps "$@" ;;
+        app)                   cmd_app "$@" ;;
+        app-create-oidc)       cmd_app_create_oidc "$@" ;;
+        app-create-saml)       cmd_app_create_saml "$@" ;;
+        app-update)            cmd_app_update "$@" ;;
+        app-creds)             cmd_app_creds "$@" ;;
+        app-creds-rotate)      cmd_app_creds_rotate "$@" ;;
+        app-activate)          cmd_app_activate "$@" ;;
+        app-deactivate)        cmd_app_deactivate "$@" ;;
+        app-delete)            cmd_app_delete "$@" ;;
+        app-users)             cmd_app_users "$@" ;;
+        app-assign-user)       cmd_app_assign_user "$@" ;;
+        app-unassign-user)     cmd_app_unassign_user "$@" ;;
+        app-groups)            cmd_app_groups "$@" ;;
+        app-assign-group)      cmd_app_assign_group "$@" ;;
+        app-unassign-group)    cmd_app_unassign_group "$@" ;;
+        app-metadata)          cmd_app_metadata "$@" ;;
+        users)                 cmd_users "$@" ;;
+        user)                  cmd_user "$@" ;;
+        groups)                cmd_groups "$@" ;;
+        group)                 cmd_group "$@" ;;
+        group-members)         cmd_group_members "$@" ;;
+        group-add-user)        cmd_group_add_user "$@" ;;
+        group-remove-user)     cmd_group_remove_user "$@" ;;
+        auth-servers)          cmd_auth_servers "$@" ;;
+        auth-server)           cmd_auth_server "$@" ;;
+        auth-server-scopes)    cmd_auth_server_scopes "$@" ;;
+        auth-server-claims)    cmd_auth_server_claims "$@" ;;
+        auth-server-policies)  cmd_auth_server_policies "$@" ;;
+        logs)                  cmd_logs "$@" ;;
+        trusted-origins)       cmd_trusted_origins "$@" ;;
+        trusted-origin-add)    cmd_trusted_origin_add "$@" ;;
+        trusted-origin-del)    cmd_trusted_origin_del "$@" ;;
+        whoami)                cmd_whoami "$@" ;;
+        snapshot)              cmd_snapshot "$@" ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'agent-okta --help' for usage" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
