@@ -262,6 +262,45 @@ Environment: `CLOUDFLARE_API_TOKEN` (recommended), or `CLOUDFLARE_EMAIL` + `CLOU
 
 ---
 
+## agent-do okta (SSO Application Management)
+
+Okta tenant management via Admin API. Use instead of `curl` to `api/v1/` or the Okta dashboard.
+
+### Applications
+```bash
+agent-do okta apps                                     # List all applications
+agent-do okta app "Versova Align"                      # Application details
+agent-do okta app-create-oidc "My App" --type web --redirect-uris "http://localhost:3000/cb"
+agent-do okta app-create-saml "My App" --sso-url "https://app.example.com/sso" --audience "https://app.example.com"
+agent-do okta app-update "My App" --redirect-uris "http://localhost:3000/cb,https://app.example.com/cb"
+agent-do okta app-creds "Versova Align"                # Client ID + secret
+agent-do okta app-creds-rotate "Versova Align"         # Rotate secret
+agent-do okta app-assign-group "Versova Align" Everyone
+agent-do okta app-metadata "My SAML App"               # SAML metadata XML
+```
+
+### Users, Groups, Auth Servers
+```bash
+agent-do okta users --search "erik"
+agent-do okta groups
+agent-do okta group-members "Engineering"
+agent-do okta auth-servers
+agent-do okta auth-server default
+agent-do okta auth-server-scopes default
+```
+
+### Admin
+```bash
+agent-do okta logs --since 1h                          # Recent auth events
+agent-do okta trusted-origins                          # CORS + redirect origins
+agent-do okta whoami                                   # API token info
+agent-do okta snapshot                                 # Full tenant state
+```
+
+Applications resolve by name or ID (0oa...). Environment: `OKTA_DOMAIN`, `OKTA_API_TOKEN` (SSWS token).
+
+---
+
 ## agent-do ios (iOS Simulator)
 
 Complete iOS Simulator control. Use instead of `xcrun simctl`.
