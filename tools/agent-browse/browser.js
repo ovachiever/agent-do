@@ -1095,11 +1095,49 @@ export class BrowserManager {
                 await context.close().catch(() => {});
             }
         }
+        // Sanitize cookies for Playwright compatibility
+        if (storageState?.cookies) {
+            storageState.cookies = storageState.cookies.filter(c => {
+                if (!c.name || !c.value) return false;
+                // Ensure sameSite is valid
+                if (!c.sameSite || !['Strict', 'Lax', 'None'].includes(c.sameSite)) {
+                    c.sameSite = c.secure ? 'None' : 'Lax';
+                }
+                // sameSite=None requires secure
+                if (c.sameSite === 'None' && !c.secure) {
+                    c.sameSite = 'Lax';
+                }
+                // Ensure expires is valid or remove it
+                if (c.expires !== undefined && (typeof c.expires !== 'number' || c.expires <= 0)) {
+                    delete c.expires;
+                }
+                return true;
+            });
+        }
         const viewport = { width: 1920, height: 1080 };
-        const context = await this.browser.newContext({
-            viewport,
-            storageState,
-        });
+        // Try storageState at creation first; if it fails (invalid cookie fields),
+        // fall back to creating a clean context then injecting cookies via addCookies
+        let context;
+        try {
+            context = await this.browser.newContext({
+                viewport,
+                storageState,
+            });
+        } catch (err) {
+            // Fallback: create clean context, add cookies individually
+            context = await this.browser.newContext({ viewport });
+            if (storageState?.cookies?.length) {
+                await context.addCookies(storageState.cookies).catch(() => {
+                    // Some cookies may be invalid — add one-by-one, skip bad ones
+                    const addOne = async (cookies) => {
+                        for (const c of cookies) {
+                            await context.addCookies([c]).catch(() => {});
+                        }
+                    };
+                    return addOne(storageState.cookies);
+                });
+            }
+        }
         context.setDefaultTimeout(60000);
         this.contexts = [context];
         this.pages = [];
@@ -1111,7 +1149,15 @@ export class BrowserManager {
         this.pages.push(page);
         this.setupPageTracking(page);
         if (url && url !== 'about:blank') {
-            await page.goto(url, { waitUntil: 'load' });
+            // For cookie-based sessions, prime the domain first so cookies attach
+            // before the target page's auth redirects fire
+            try {
+                const targetDomain = new URL(url).origin;
+                await page.goto(targetDomain, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+                await page.goto(url, { waitUntil: 'load' });
+            } catch {
+                await page.goto(url, { waitUntil: 'load' });
+            }
         }
         return {
             url: page.url(),

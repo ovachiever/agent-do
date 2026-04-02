@@ -143,6 +143,9 @@ SESSIONS:
   session delete <name>          Delete a saved session
   session export <name> <file>   Export session to portable file
   session import <file> [name]   Import session from file
+  session import-browser <name>  Import cookies from a real browser
+    --browser chrome|arc|edge|brave  Browser to import from (default: arc)
+    --domain ".google.com"           Filter cookies by domain
   session active                 List active daemon sessions
 
 TABS:
@@ -863,6 +866,155 @@ main() {
                         json='{"id":"'$(cmd_id)'","action":"session_import","path":"'"$file"'"}'
                     fi
                     ;;
+                import-browser)
+                    # Extract cookies from a real Chromium browser and create a browse session
+                    # Usage: session import-browser <name> [--browser chrome|arc|edge|brave] [--domain ".google.com"]
+                    local sess_name="${2:-}"
+                    [[ -z "$sess_name" ]] && { echo "Usage: agent-browse session import-browser <name> [--browser chrome|arc|edge|brave] [--domain .example.com]" >&2; exit 1; }
+                    shift 2
+                    local browser_type="arc" domain_filter=""
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --browser) browser_type="$2"; shift 2 ;;
+                            --domain) domain_filter="$2"; shift 2 ;;
+                            *) shift ;;
+                        esac
+                    done
+
+                    # Resolve browser paths and keychain entries
+                    python3 << PYEOF
+import subprocess, sqlite3, shutil, tempfile, json, os, sys
+from pathlib import Path
+from datetime import datetime
+
+# Browser configurations
+BROWSERS = {
+    "chrome": {
+        "cookie_file": str(Path.home() / "Library/Application Support/Google/Chrome/Default/Cookies"),
+        "keychain_service": "Chrome Safe Storage",
+        "keychain_account": "Chrome",
+    },
+    "arc": {
+        "cookie_file": str(Path.home() / "Library/Application Support/Arc/User Data/Default/Cookies"),
+        "keychain_service": "Arc Safe Storage",
+        "keychain_account": "Arc",
+    },
+    "edge": {
+        "cookie_file": str(Path.home() / "Library/Application Support/Microsoft Edge/Default/Cookies"),
+        "keychain_service": "Microsoft Edge Safe Storage",
+        "keychain_account": "Microsoft Edge",
+    },
+    "brave": {
+        "cookie_file": str(Path.home() / "Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"),
+        "keychain_service": "Brave Safe Storage",
+        "keychain_account": "Brave",
+    },
+}
+
+browser_type = "$browser_type"
+domain_filter = "$domain_filter"
+sess_name = "$sess_name"
+
+if browser_type not in BROWSERS:
+    print(f"Error: Unknown browser '{browser_type}'. Use: chrome, arc, edge, brave", file=sys.stderr)
+    sys.exit(1)
+
+config = BROWSERS[browser_type]
+
+if not os.path.exists(config["cookie_file"]):
+    print(f"Error: {browser_type} cookie file not found at {config['cookie_file']}", file=sys.stderr)
+    sys.exit(1)
+
+# Get decryption key from Keychain
+try:
+    proc = subprocess.Popen(
+        ['/usr/bin/security', '-q', 'find-generic-password', '-w',
+         '-a', config["keychain_account"], '-s', config["keychain_service"]],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    key_password, _ = proc.communicate()
+    if proc.returncode != 0:
+        print(f"Error: Could not get {browser_type} encryption key from Keychain. Allow access when prompted.", file=sys.stderr)
+        sys.exit(1)
+    key_password = key_password.strip()
+except Exception as e:
+    print(f"Error: Keychain access failed: {e}", file=sys.stderr)
+    sys.exit(1)
+
+# Try browser_cookie3 first (handles decryption correctly)
+try:
+    import browser_cookie3
+    original_fn = browser_cookie3._get_osx_keychain_password
+    def patched_fn(service, user):
+        if service == "Chrome Safe Storage":
+            return key_password
+        return original_fn(service, user)
+    browser_cookie3._get_osx_keychain_password = patched_fn
+
+    cj = browser_cookie3.chrome(
+        domain_name=domain_filter if domain_filter else None,
+        cookie_file=config["cookie_file"]
+    )
+    raw_cookies = list(cj)
+except Exception as e:
+    print(f"Error: Cookie extraction failed: {e}", file=sys.stderr)
+    sys.exit(1)
+
+if not raw_cookies:
+    filter_msg = f" matching '{domain_filter}'" if domain_filter else ""
+    print(f"No cookies found in {browser_type}{filter_msg}", file=sys.stderr)
+    sys.exit(1)
+
+# Convert to Playwright storageState format
+cookies = []
+for c in raw_cookies:
+    cookie = {
+        "name": c.name,
+        "value": c.value,
+        "domain": c.domain,
+        "path": c.path,
+    }
+    if c.secure: cookie["secure"] = True
+    if c.expires and c.expires > 0: cookie["expires"] = c.expires
+    cookies.append(cookie)
+
+# Determine the primary URL from cookies
+primary_domain = domain_filter.lstrip('.') if domain_filter else ""
+if not primary_domain and cookies:
+    primary_domain = cookies[0]["domain"].lstrip('.')
+url = f"https://{primary_domain}" if primary_domain else "about:blank"
+
+# Write session files
+session_dir = Path.home() / ".agent-browse/sessions" / sess_name
+session_dir.mkdir(parents=True, exist_ok=True)
+
+storage_state = {"cookies": cookies, "origins": []}
+(session_dir / "storage.json").write_text(json.dumps(storage_state, indent=2))
+(session_dir / "state.json").write_text(json.dumps({
+    "url": url, "viewport": {"width": 1920, "height": 1080}, "scroll": {"x": 0, "y": 0}
+}))
+(session_dir / "meta.json").write_text(json.dumps({
+    "name": sess_name,
+    "description": f"Imported from {browser_type}" + (f" ({domain_filter})" if domain_filter else ""),
+    "created": datetime.utcnow().isoformat() + "Z",
+    "lastUsed": datetime.utcnow().isoformat() + "Z",
+    "url": url,
+    "cookieCount": len(cookies),
+    "originsCount": 0,
+}))
+(session_dir / "session-storage.json").write_text("{}")
+
+print(json.dumps({
+    "imported": True,
+    "session": sess_name,
+    "browser": browser_type,
+    "domain": domain_filter or "(all)",
+    "cookieCount": len(cookies),
+    "url": url,
+}))
+PYEOF
+                    exit $?
+                    ;;
                 active)
                     # List active daemon sessions
                     ls "${TMPDIR_ACTUAL}"/agent-browser-*.sock 2>/dev/null | sed "s|${TMPDIR_ACTUAL}/agent-browser-||;s|\.sock||" || echo "(none)"
@@ -870,7 +1022,7 @@ main() {
                     ;;
                 *)
                     echo "Unknown session command: $1" >&2
-                    echo "Usage: session list|save|load|delete|export|import|active" >&2
+                    echo "Usage: session list|save|load|delete|export|import|import-browser|active" >&2
                     exit 1
                     ;;
             esac
