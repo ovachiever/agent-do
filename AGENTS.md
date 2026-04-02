@@ -14,7 +14,7 @@
 | **Data** | db, excel, sheets, pdf, pdf2md, ocr, vision | Data access and extraction |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare, okta, namecheap | Container/cluster/server/PaaS/CDN/SSO/domain management |
+| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, clerk, cloudflare, okta, namecheap | Container/cluster/server/PaaS/CDN/auth/SSO/domain management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
@@ -219,6 +219,51 @@ agent-do unbrowse delete <name>        # Remove skill
 | Quick one-shot API capture | `unbrowse capture <url>` | Own headed browser, browse manually |
 | Capture APIs during existing automation | `browse capture start/stop` | Piggybacks on current browse session |
 | Restore previous auth session | `browse session load <name>` | Cookies injected at context creation |
+
+---
+
+## agent-do clerk (Auth Platform Management)
+
+Clerk authentication management via Backend API. Users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates.
+
+### Users
+```bash
+agent-do clerk users --query "erik"
+agent-do clerk user user_2abc123
+agent-do clerk user-create --email "user@example.com" --first "John" --last "Doe"
+agent-do clerk user-ban user_2abc123
+agent-do clerk user-count
+agent-do clerk user-orgs user_2abc123
+```
+
+### Organizations
+```bash
+agent-do clerk orgs
+agent-do clerk org my-org-slug
+agent-do clerk org-members my-org-slug
+agent-do clerk org-add-member my-org user_2abc123 --role admin
+agent-do clerk org-invite my-org "user@example.com" --role member
+```
+
+### OAuth Apps & Enterprise SSO
+```bash
+agent-do clerk oauth-apps
+agent-do clerk oauth-app-create "My App" --callback "http://localhost:3000/callback"
+agent-do clerk oauth-app-rotate-secret oaapp_123
+agent-do clerk enterprise-connections
+agent-do clerk enterprise-connection-create --name "Corp SSO" --domain "corp.com" --protocol saml
+```
+
+### Admin
+```bash
+agent-do clerk roles
+agent-do clerk sessions --status active
+agent-do clerk jwt-templates
+agent-do clerk whoami
+agent-do clerk snapshot
+```
+
+Users resolve by ID (user_...) or email. Organizations resolve by ID (org_...) or slug. Environment: `CLERK_SECRET_KEY`.
 
 ---
 
