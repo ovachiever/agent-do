@@ -6,7 +6,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
 2. **Natural Language Mode** — LLM-routed for human users
-3. **79 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+3. **80 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -87,7 +87,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
 │       ├── auth.js         # Auth extraction from captured headers/cookies
 │       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
-├── tools/agent-*           # 79 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 80 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -160,6 +160,7 @@ Directory-based tools with complex backends:
 | `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. |
 | `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
 | `tools/agent-cloudflare` | Bash + curl | Cloudflare management — zones, analytics (GraphQL), DNS, Workers, Pages, R2, firewall events. 23 commands. |
+| `tools/agent-clerk` | Bash + curl | Clerk auth platform — users, orgs, sessions, OAuth apps, enterprise SSO, JWT templates, roles. 55 commands. |
 | `tools/agent-okta` | Bash + curl | Okta tenant management — OIDC/SAML apps, SSO config, users, groups, auth servers, system logs. 34 commands. |
 | `tools/agent-namecheap` | Bash + curl | Namecheap domain and DNS management. XML API with safe GET→merge→SET for DNS writes. 16 commands. |
 | `tools/agent-context/` | Bash + Python | **Knowledge library.** Fetches external docs (URLs, llms.txt, GitHub repos). SQLite FTS5 index, BM25 + trust-tier ranking, token-budgeted retrieval. Storage: `~/.agent-do/context/` (global). 22 commands. |

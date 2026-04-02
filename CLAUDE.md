@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 79 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 80 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
@@ -85,7 +85,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 79 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 80 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -117,6 +117,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-supabase` | Bash + curl | Supabase project management + data access. REST API queries (no password) and SQL via agent-db bridge. Requires `SUPABASE_ACCESS_TOKEN`. |
 | `agent-gcp` | Bash + curl | Google Cloud Platform management via REST API + Console automation. Projects, APIs, secrets, service accounts, OAuth credential creation. |
 | `agent-cloudflare` | Bash + curl | Cloudflare management — zones, analytics (GraphQL), DNS records, Workers, Pages, R2, firewall events. 23 commands. Requires `CLOUDFLARE_API_TOKEN`. |
+| `agent-clerk` | Bash + curl | Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO (SAML/OIDC), JWT templates, roles/permissions. 55 commands. Requires `CLERK_SECRET_KEY`. |
 | `agent-okta` | Bash + curl | Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, auth servers, system logs. 34 commands. Requires `OKTA_API_TOKEN` + `OKTA_DOMAIN`. |
 | `agent-namecheap` | Bash + curl | Namecheap domain and DNS management. Safe GET→merge→SET for DNS writes. 16 commands. Requires `NAMECHEAP_API_USER` + `NAMECHEAP_API_KEY`. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor — visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
@@ -168,6 +169,7 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `GCP_PROJECT`: Default GCP project ID for agent-gcp
 - `CLOUDFLARE_API_TOKEN`: API token for agent-cloudflare (recommended, scoped)
 - `CLOUDFLARE_ACCOUNT_ID`: Account ID for agent-cloudflare (Workers, Pages, R2)
+- `CLERK_SECRET_KEY`: Secret key for agent-clerk (Clerk, sk_test_... or sk_live_...)
 - `OKTA_API_TOKEN`: SSWS API token for agent-okta (Okta)
 - `OKTA_DOMAIN`: Okta domain for agent-okta (e.g., versova.okta.com)
 - `NAMECHEAP_API_USER`: API username for agent-namecheap

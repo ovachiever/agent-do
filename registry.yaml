@@ -789,6 +789,46 @@ tools:
       - intent: "cloudflare account overview"
         command: "agent-cloudflare snapshot"
 
+  clerk:
+    description: "Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates, roles"
+    capabilities:
+      - user CRUD with ban/lock/unlock lifecycle
+      - organization CRUD with memberships, invitations, and roles
+      - session management (list, revoke)
+      - OAuth application management with secret rotation
+      - enterprise SSO connections (SAML, OIDC)
+      - JWT template management
+      - invitation and allowlist/blocklist management
+      - JWKS retrieval
+    commands:
+      users: "List/search users: users [--query q]"
+      user: "User details: user <id-or-email>"
+      user-create: "Create user: user-create --email <e> --first <f> --last <l>"
+      orgs: "List organizations: orgs [--query q]"
+      org: "Organization details: org <id-or-slug>"
+      org-members: "List org members: org-members <org>"
+      org-add-member: "Add member: org-add-member <org> <user> [--role admin]"
+      roles: "List organization roles"
+      sessions: "List sessions: sessions [--user-id u] [--status s]"
+      oauth-apps: "List OAuth applications"
+      oauth-app-create: "Create OAuth app: oauth-app-create <name> --callback <url>"
+      enterprise-connections: "List enterprise SSO connections"
+      jwt-templates: "List JWT templates"
+      snapshot: "Full instance state as JSON"
+    examples:
+      - intent: "list Clerk users"
+        command: "agent-clerk users"
+      - intent: "search for a user"
+        command: "agent-clerk users --query \"erik\""
+      - intent: "list organizations"
+        command: "agent-clerk orgs"
+      - intent: "add member to organization"
+        command: "agent-clerk org-add-member my-org user_abc --role admin"
+      - intent: "create an OAuth app in Clerk"
+        command: "agent-clerk oauth-app-create \"My App\" --callback \"http://localhost:3000/callback\""
+      - intent: "Clerk instance overview"
+        command: "agent-clerk snapshot"
+
   ci:
     description: "Control CI/CD pipelines"
     capabilities:
