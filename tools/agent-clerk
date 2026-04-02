@@ -1,0 +1,1506 @@
+#!/usr/bin/env bash
+# agent-clerk - Clerk authentication platform management
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+CLERK_API="https://api.clerk.com/v1"
+
+show_help() {
+    cat << 'EOF'
+agent-clerk - Clerk authentication platform management
+
+USERS:
+  users [--query "q"]            List/search users
+  user <id-or-email>             User details
+  user-create --email <e> --first <f> --last <l> [--password <p>]
+  user-update <user> [--first f] [--last l]
+  user-delete <user>             Delete user
+  user-ban <user>                Ban user
+  user-unban <user>              Unban user
+  user-lock <user>               Lock user
+  user-unlock <user>             Unlock user
+  user-count [--query "q"]       Count users
+  user-orgs <user>               List user's organizations
+  user-metadata <user> --public '{}' [--private '{}']
+
+ORGANIZATIONS:
+  orgs [--query "q"]             List organizations
+  org <id-or-slug>               Organization details
+  org-create <name> [--slug s]   Create organization
+  org-update <org> [--name n] [--slug s]
+  org-delete <org>               Delete organization
+  org-members <org>              List members
+  org-add-member <org> <user> [--role admin|member]
+  org-remove-member <org> <user>
+  org-update-member <org> <user> --role <role>
+  org-invitations <org>          List invitations
+  org-invite <org> <email> [--role admin|member]
+  org-revoke-invite <org> <inv-id>
+
+ROLES & PERMISSIONS:
+  roles                          List organization roles
+  role <id>                      Role details
+  role-create <name> --key <key> [--description d] [--permissions p1,p2]
+  permissions                    List permissions
+  permission-create <name> --key <key> [--description d]
+
+SESSIONS:
+  sessions [--user-id u] [--status active|ended|removed|revoked]
+  session <id>                   Session details
+  session-revoke <id>            Revoke session
+
+OAUTH APPLICATIONS:
+  oauth-apps                     List OAuth applications
+  oauth-app <id>                 OAuth app details
+  oauth-app-create <name> --callback <url> [--scopes "s1,s2"] [--public]
+  oauth-app-update <id> [--name n] [--callback url] [--scopes "s1,s2"]
+  oauth-app-delete <id>          Delete OAuth app
+  oauth-app-rotate-secret <id>   Rotate client secret
+
+ENTERPRISE SSO:
+  enterprise-connections         List enterprise connections (SAML/OIDC)
+  enterprise-connection <id>     Connection details
+  enterprise-connection-create --name <n> --domain <d> --protocol saml|oidc
+  enterprise-connection-update <id> [--name n] [--domain d]
+  enterprise-connection-delete <id>
+
+JWT TEMPLATES:
+  jwt-templates                  List JWT templates
+  jwt-template <id>              Template details
+  jwt-template-create --name <n> --claims '{}'
+  jwt-template-delete <id>       Delete template
+
+INVITATIONS:
+  invitations                    List invitations
+  invite <email> [--redirect-url url]
+  invite-revoke <id>             Revoke invitation
+
+ALLOWLIST / BLOCKLIST:
+  allowlist                      List allowlist identifiers
+  allowlist-add <identifier>     Add to allowlist
+  allowlist-remove <id>          Remove from allowlist
+  blocklist                      List blocklist identifiers
+  blocklist-add <identifier>     Add to blocklist
+  blocklist-remove <id>          Remove from blocklist
+
+ADMIN:
+  whoami                         Instance info + key validation
+  jwks                           Retrieve JWKS
+  snapshot                       Full instance state as JSON
+
+Users resolve by ID (user_...) or email address.
+Organizations resolve by ID (org_...) or slug.
+
+Environment:
+  CLERK_SECRET_KEY               Secret key (sk_test_... or sk_live_...)
+
+Examples:
+  agent-clerk users --query "erik"
+  agent-clerk user user_2abc123
+  agent-clerk user-create --email "user@example.com" --first "John" --last "Doe"
+  agent-clerk orgs
+  agent-clerk org-members my-org-slug
+  agent-clerk org-add-member my-org user_2abc123 --role admin
+  agent-clerk oauth-apps
+  agent-clerk oauth-app-create "My App" --callback "http://localhost:3000/callback"
+  agent-clerk enterprise-connections
+  agent-clerk sessions --status active
+  agent-clerk snapshot
+EOF
+}
+
+# --- Helpers ---
+
+clerk_request() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+
+    if [[ -z "${CLERK_SECRET_KEY:-}" ]]; then
+        echo '{"error":"CLERK_SECRET_KEY not set"}' >&2
+        return 1
+    fi
+
+    local url="${CLERK_API}${endpoint}"
+
+    local args=(-s -X "$method" "$url" \
+        -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    local http_code body
+    body=$(curl -w '\n%{http_code}' "${args[@]}")
+    http_code=$(echo "$body" | tail -1)
+    body=$(echo "$body" | sed '$d')
+
+    # Handle rate limiting (429)
+    if [[ "$http_code" == "429" ]]; then
+        local retry_after
+        retry_after=$(curl -s -o /dev/null -D- -X "$method" "$url" \
+            -H "Authorization: Bearer $CLERK_SECRET_KEY" 2>/dev/null | grep -i 'retry-after' | tr -d '\r' | awk '{print $2}')
+        if [[ -n "$retry_after" && "$retry_after" =~ ^[0-9]+$ ]]; then
+            sleep "$retry_after"
+        else
+            sleep 2
+        fi
+        body=$(curl -w '\n%{http_code}' "${args[@]}")
+        http_code=$(echo "$body" | tail -1)
+        body=$(echo "$body" | sed '$d')
+    fi
+
+    # Check for API errors
+    if [[ "$http_code" -ge 400 ]]; then
+        echo "$body" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    errors = data.get('errors', [])
+    if errors:
+        for e in errors:
+            msg = e.get('long_message', e.get('message', e.get('code', 'Unknown error')))
+            print(f'Error: {msg}', file=sys.stderr)
+    else:
+        print(f'Error: HTTP {$http_code}', file=sys.stderr)
+except:
+    print(f'Error: HTTP {$http_code}', file=sys.stderr)
+" 2>&1 >&2
+        return 1
+    fi
+
+    echo "$body"
+}
+
+# Paginated list — handles both bare arrays and wrapped {data, total_count} responses
+clerk_list() {
+    local endpoint="$1"
+    local limit="${2:-200}"
+
+    if [[ -z "${CLERK_SECRET_KEY:-}" ]]; then
+        echo '[]'
+        return 1
+    fi
+
+    python3 -c "
+import urllib.request, json, ssl, os
+
+key = os.environ.get('CLERK_SECRET_KEY', '')
+base = '$CLERK_API'
+endpoint = '$endpoint'
+limit = int('$limit')
+ctx = ssl.create_default_context()
+
+sep = '&' if '?' in endpoint else '?'
+all_items = []
+offset = 0
+
+while True:
+    url = f'{base}{endpoint}{sep}limit={limit}&offset={offset}'
+    req = urllib.request.Request(url, headers={
+        'Authorization': f'Bearer {key}',
+        'Accept': 'application/json',
+    })
+    try:
+        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        body = json.loads(resp.read().decode())
+    except Exception as e:
+        break
+
+    # Handle wrapped response {data: [...], total_count: N}
+    if isinstance(body, dict) and 'data' in body:
+        items = body['data']
+        all_items.extend(items)
+        total = body.get('total_count', len(all_items))
+        if len(all_items) >= total or not items:
+            break
+    # Handle bare array response
+    elif isinstance(body, list):
+        all_items.extend(body)
+        if len(body) < limit:
+            break
+    else:
+        break
+
+    offset += limit
+
+print(json.dumps(all_items))
+"
+}
+
+resolve_org() {
+    local name_or_id="$1"
+
+    if [[ "$name_or_id" == org_* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Try by slug directly (Clerk accepts slug in the path)
+    local result
+    result=$(clerk_request GET "/organizations/$name_or_id" 2>/dev/null)
+    local org_id
+    org_id=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+
+    if [[ -n "$org_id" ]]; then
+        echo "$org_id"
+        return 0
+    fi
+
+    echo "Error: Organization '$name_or_id' not found" >&2
+    return 1
+}
+
+resolve_user() {
+    local name_or_id="$1"
+
+    if [[ "$name_or_id" == user_* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # Search by email
+    local encoded
+    encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$name_or_id'))")
+    local result
+    result=$(clerk_request GET "/users?email_address[]=$encoded&limit=1" 2>/dev/null)
+
+    local user_id
+    user_id=$(echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, list) and data:
+    print(data[0].get('id', ''))
+" 2>/dev/null)
+
+    if [[ -n "$user_id" ]]; then
+        echo "$user_id"
+        return 0
+    fi
+
+    echo "Error: User '$name_or_id' not found" >&2
+    return 1
+}
+
+json_escape() {
+    python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+# --- User Commands ---
+
+cmd_users() {
+    local query=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --query) query="$2"; shift 2 ;;
+            *) query="$1"; shift ;;
+        esac
+    done
+
+    local endpoint="/users"
+    if [[ -n "$query" ]]; then
+        local encoded
+        encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")
+        endpoint="/users?query=$encoded"
+    fi
+
+    local result
+    result=$(clerk_list "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+users = json.load(sys.stdin)
+if not users:
+    print('No users found')
+    sys.exit(0)
+for u in users:
+    uid = u.get('id', '')
+    emails = u.get('email_addresses', [])
+    email = emails[0].get('email_address', '') if emails else ''
+    first = u.get('first_name', '') or ''
+    last = u.get('last_name', '') or ''
+    name = f'{first} {last}'.strip()
+    banned = ' [BANNED]' if u.get('banned') else ''
+    locked = ' [LOCKED]' if u.get('locked') else ''
+    print(f'{uid}  {email:<40}  {name}{banned}{locked}')
+"
+}
+
+cmd_user() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user <id-or-email>" >&2; return 1; }
+
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+
+    local result
+    result=$(clerk_request GET "/users/$user_id") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+u = json.load(sys.stdin)
+emails = u.get('email_addresses', [])
+email = emails[0].get('email_address', '') if emails else ''
+print(f\"ID:          {u.get('id', '')}\")
+print(f\"Email:       {email}\")
+print(f\"First:       {u.get('first_name', '')}\")
+print(f\"Last:        {u.get('last_name', '')}\")
+print(f\"Username:    {u.get('username', '') or ''}\")
+print(f\"Banned:      {u.get('banned', False)}\")
+print(f\"Locked:      {u.get('locked', False)}\")
+print(f\"Created:     {u.get('created_at', '')}\")
+print(f\"Last Sign-in: {u.get('last_sign_in_at', 'never')}\")
+pub = u.get('public_metadata', {})
+priv = u.get('private_metadata', {})
+if pub: print(f'Public Meta: {json.dumps(pub)}')
+if priv: print(f'Private Meta: {json.dumps(priv)}')
+"
+}
+
+cmd_user_create() {
+    local email="" first="" last="" password=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --email) email="$2"; shift 2 ;;
+            --first) first="$2"; shift 2 ;;
+            --last) last="$2"; shift 2 ;;
+            --password) password="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ -z "$email" ]] && { echo "Usage: agent-clerk user-create --email <e> --first <f> --last <l>" >&2; return 1; }
+
+    local body
+    body=$(python3 -c "
+import json
+data = {'email_address': ['$email']}
+if '$first': data['first_name'] = '$first'
+if '$last': data['last_name'] = '$last'
+if '$password': data['password'] = '$password'
+print(json.dumps(data))
+")
+
+    local result
+    result=$(clerk_request POST "/users" "$body") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+u = json.load(sys.stdin)
+print(f\"Created: {u.get('id', '')}  {u.get('first_name', '')} {u.get('last_name', '')}\")
+emails = u.get('email_addresses', [])
+if emails: print(f'Email:   {emails[0].get(\"email_address\", \"\")}')
+"
+}
+
+cmd_user_update() {
+    local name_or_id="${1:-}" first="" last="" metadata=""
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-update <user> [--first f] [--last l]" >&2; return 1; }
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --first) first="$2"; shift 2 ;;
+            --last) last="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+
+    local body
+    body=$(python3 -c "
+import json
+data = {}
+if '$first': data['first_name'] = '$first'
+if '$last': data['last_name'] = '$last'
+print(json.dumps(data))
+")
+
+    local result
+    result=$(clerk_request PATCH "/users/$user_id" "$body") || return 1
+    echo "Updated: $user_id"
+}
+
+cmd_user_delete() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-delete <user>" >&2; return 1; }
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+    clerk_request DELETE "/users/$user_id" > /dev/null || return 1
+    echo "Deleted: $user_id"
+}
+
+cmd_user_ban() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-ban <user>" >&2; return 1; }
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+    clerk_request POST "/users/$user_id/ban" > /dev/null || return 1
+    echo "Banned: $user_id"
+}
+
+cmd_user_unban() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-unban <user>" >&2; return 1; }
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+    clerk_request POST "/users/$user_id/unban" > /dev/null || return 1
+    echo "Unbanned: $user_id"
+}
+
+cmd_user_lock() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-lock <user>" >&2; return 1; }
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+    clerk_request POST "/users/$user_id/lock" > /dev/null || return 1
+    echo "Locked: $user_id"
+}
+
+cmd_user_unlock() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-unlock <user>" >&2; return 1; }
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+    clerk_request POST "/users/$user_id/unlock" > /dev/null || return 1
+    echo "Unlocked: $user_id"
+}
+
+cmd_user_count() {
+    local query=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --query) query="$2"; shift 2 ;;
+            *) query="$1"; shift ;;
+        esac
+    done
+
+    local endpoint="/users/count"
+    if [[ -n "$query" ]]; then
+        local encoded
+        encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")
+        endpoint="/users/count?query=$encoded"
+    fi
+
+    local result
+    result=$(clerk_request GET "$endpoint") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(f\"Total users: {data.get('total_count', data.get('object', '?'))}\")
+"
+}
+
+cmd_user_orgs() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-orgs <user>" >&2; return 1; }
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+
+    local result
+    result=$(clerk_list "/users/$user_id/organization_memberships")
+
+    echo "$result" | python3 -c "
+import sys, json
+memberships = json.load(sys.stdin)
+if not memberships:
+    print('No organizations')
+    sys.exit(0)
+for m in memberships:
+    org = m.get('organization', {})
+    role = m.get('role', '?')
+    print(f\"{org.get('id', '')}  {org.get('name', '')}  [{role}]\")
+"
+}
+
+cmd_user_metadata() {
+    local name_or_id="${1:-}" pub="" priv=""
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk user-metadata <user> --public '{}' [--private '{}']" >&2; return 1; }
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --public) pub="$2"; shift 2 ;;
+            --private) priv="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local user_id
+    user_id=$(resolve_user "$name_or_id") || return 1
+
+    local body
+    body=$(python3 -c "
+import json
+data = {}
+pub = '$pub'
+priv = '$priv'
+if pub: data['public_metadata'] = json.loads(pub)
+if priv: data['private_metadata'] = json.loads(priv)
+print(json.dumps(data))
+")
+
+    clerk_request PATCH "/users/$user_id/metadata" "$body" > /dev/null || return 1
+    echo "Metadata updated: $user_id"
+}
+
+# --- Organization Commands ---
+
+cmd_orgs() {
+    local query=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --query) query="$2"; shift 2 ;;
+            *) query="$1"; shift ;;
+        esac
+    done
+
+    local endpoint="/organizations"
+    if [[ -n "$query" ]]; then
+        local encoded
+        encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")
+        endpoint="/organizations?query=$encoded"
+    fi
+
+    local result
+    result=$(clerk_list "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+orgs = json.load(sys.stdin)
+if not orgs:
+    print('No organizations found')
+    sys.exit(0)
+for o in orgs:
+    oid = o.get('id', '')
+    name = o.get('name', '')
+    slug = o.get('slug', '')
+    members = o.get('members_count', '?')
+    print(f'{oid}  {name:<30}  slug:{slug}  members:{members}')
+"
+}
+
+cmd_org() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk org <id-or-slug>" >&2; return 1; }
+
+    local org_id
+    org_id=$(resolve_org "$name_or_id") || return 1
+
+    local result
+    result=$(clerk_request GET "/organizations/$org_id") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+o = json.load(sys.stdin)
+print(f\"ID:           {o.get('id', '')}\")
+print(f\"Name:         {o.get('name', '')}\")
+print(f\"Slug:         {o.get('slug', '')}\")
+print(f\"Members:      {o.get('members_count', '?')}\")
+print(f\"Max Members:  {o.get('max_allowed_memberships', 'unlimited')}\")
+print(f\"Created:      {o.get('created_at', '')}\")
+pub = o.get('public_metadata', {})
+priv = o.get('private_metadata', {})
+if pub: print(f'Public Meta:  {json.dumps(pub)}')
+if priv: print(f'Private Meta: {json.dumps(priv)}')
+"
+}
+
+cmd_org_create() {
+    local name="${1:-}" slug=""
+    [[ -z "$name" ]] && { echo "Usage: agent-clerk org-create <name> [--slug s]" >&2; return 1; }
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --slug) slug="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body
+    body=$(python3 -c "
+import json
+data = {'name': $(json_escape "$name")}
+if '$slug': data['slug'] = '$slug'
+print(json.dumps(data))
+")
+
+    local result
+    result=$(clerk_request POST "/organizations" "$body") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+o = json.load(sys.stdin)
+print(f\"Created: {o.get('id', '')}  {o.get('name', '')}  slug:{o.get('slug', '')}\")
+"
+}
+
+cmd_org_update() {
+    local name_or_id="${1:-}" name="" slug=""
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk org-update <org> [--name n] [--slug s]" >&2; return 1; }
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --slug) slug="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local org_id
+    org_id=$(resolve_org "$name_or_id") || return 1
+
+    local body
+    body=$(python3 -c "
+import json
+data = {}
+if '$name': data['name'] = '$name'
+if '$slug': data['slug'] = '$slug'
+print(json.dumps(data))
+")
+
+    clerk_request PATCH "/organizations/$org_id" "$body" > /dev/null || return 1
+    echo "Updated: $org_id"
+}
+
+cmd_org_delete() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk org-delete <org>" >&2; return 1; }
+    local org_id
+    org_id=$(resolve_org "$name_or_id") || return 1
+    clerk_request DELETE "/organizations/$org_id" > /dev/null || return 1
+    echo "Deleted: $org_id"
+}
+
+cmd_org_members() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk org-members <org>" >&2; return 1; }
+    local org_id
+    org_id=$(resolve_org "$name_or_id") || return 1
+
+    local result
+    result=$(clerk_list "/organizations/$org_id/memberships")
+
+    echo "$result" | python3 -c "
+import sys, json
+members = json.load(sys.stdin)
+if not members:
+    print('No members')
+    sys.exit(0)
+for m in members:
+    uid = m.get('public_user_data', {}).get('user_id', m.get('user_id', ''))
+    email = m.get('public_user_data', {}).get('identifier', '')
+    first = m.get('public_user_data', {}).get('first_name', '') or ''
+    last = m.get('public_user_data', {}).get('last_name', '') or ''
+    role = m.get('role', '?')
+    name = f'{first} {last}'.strip()
+    print(f'{uid}  {email:<35}  {name:<20}  [{role}]')
+"
+}
+
+cmd_org_add_member() {
+    local org_name="${1:-}" user_name="${2:-}" role="member"
+    [[ -z "$org_name" || -z "$user_name" ]] && { echo "Usage: agent-clerk org-add-member <org> <user> [--role admin|member]" >&2; return 1; }
+    shift 2
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --role) role="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local org_id user_id
+    org_id=$(resolve_org "$org_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+
+    clerk_request POST "/organizations/$org_id/memberships" "{\"user_id\":\"$user_id\",\"role\":\"org:$role\"}" > /dev/null || return 1
+    echo "Added $user_id to $org_id as $role"
+}
+
+cmd_org_remove_member() {
+    local org_name="${1:-}" user_name="${2:-}"
+    [[ -z "$org_name" || -z "$user_name" ]] && { echo "Usage: agent-clerk org-remove-member <org> <user>" >&2; return 1; }
+    local org_id user_id
+    org_id=$(resolve_org "$org_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+    clerk_request DELETE "/organizations/$org_id/memberships/$user_id" > /dev/null || return 1
+    echo "Removed $user_id from $org_id"
+}
+
+cmd_org_update_member() {
+    local org_name="${1:-}" user_name="${2:-}" role=""
+    [[ -z "$org_name" || -z "$user_name" ]] && { echo "Usage: agent-clerk org-update-member <org> <user> --role <role>" >&2; return 1; }
+    shift 2
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --role) role="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ -z "$role" ]] && { echo "Error: --role is required" >&2; return 1; }
+
+    local org_id user_id
+    org_id=$(resolve_org "$org_name") || return 1
+    user_id=$(resolve_user "$user_name") || return 1
+    clerk_request PATCH "/organizations/$org_id/memberships/$user_id" "{\"role\":\"org:$role\"}" > /dev/null || return 1
+    echo "Updated $user_id role to $role in $org_id"
+}
+
+cmd_org_invitations() {
+    local name_or_id="${1:-}"
+    [[ -z "$name_or_id" ]] && { echo "Usage: agent-clerk org-invitations <org>" >&2; return 1; }
+    local org_id
+    org_id=$(resolve_org "$name_or_id") || return 1
+
+    local result
+    result=$(clerk_list "/organizations/$org_id/invitations")
+
+    echo "$result" | python3 -c "
+import sys, json
+invs = json.load(sys.stdin)
+if not invs:
+    print('No invitations')
+    sys.exit(0)
+for i in invs:
+    iid = i.get('id', '')
+    email = i.get('email_address', '')
+    role = i.get('role', '?')
+    status = i.get('status', '?')
+    print(f'{iid}  {email:<35}  [{role}]  {status}')
+"
+}
+
+cmd_org_invite() {
+    local org_name="${1:-}" email="${2:-}" role="member"
+    [[ -z "$org_name" || -z "$email" ]] && { echo "Usage: agent-clerk org-invite <org> <email> [--role admin|member]" >&2; return 1; }
+    shift 2
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --role) role="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local org_id
+    org_id=$(resolve_org "$org_name") || return 1
+    local result
+    result=$(clerk_request POST "/organizations/$org_id/invitations" "{\"email_address\":\"$email\",\"role\":\"org:$role\"}") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+i = json.load(sys.stdin)
+print(f\"Invited: {i.get('email_address', '')}  [{i.get('role', '')}]  id:{i.get('id', '')}\")
+"
+}
+
+cmd_org_revoke_invite() {
+    local org_name="${1:-}" inv_id="${2:-}"
+    [[ -z "$org_name" || -z "$inv_id" ]] && { echo "Usage: agent-clerk org-revoke-invite <org> <invitation-id>" >&2; return 1; }
+    local org_id
+    org_id=$(resolve_org "$org_name") || return 1
+    clerk_request POST "/organizations/$org_id/invitations/$inv_id/revoke" > /dev/null || return 1
+    echo "Revoked: $inv_id"
+}
+
+# --- Roles & Permissions ---
+
+cmd_roles() {
+    local result
+    result=$(clerk_list "/organization_roles")
+    echo "$result" | python3 -c "
+import sys, json
+roles = json.load(sys.stdin)
+if not roles:
+    print('No roles')
+    sys.exit(0)
+for r in roles:
+    rid = r.get('id', '')
+    name = r.get('name', '')
+    key = r.get('key', '')
+    perms = [p.get('key', '') for p in r.get('permissions', [])]
+    perm_str = ', '.join(perms) if perms else '(none)'
+    print(f'{rid}  {name:<20}  key:{key}  permissions: {perm_str}')
+"
+}
+
+cmd_role() {
+    local role_id="${1:-}"
+    [[ -z "$role_id" ]] && { echo "Usage: agent-clerk role <id>" >&2; return 1; }
+    local result
+    result=$(clerk_request GET "/organization_roles/$role_id") || return 1
+    echo "$result" | python3 -m json.tool
+}
+
+cmd_role_create() {
+    local name="" key="" desc="" perms=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --key) key="$2"; shift 2 ;;
+            --description) desc="$2"; shift 2 ;;
+            --permissions) perms="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+    [[ -z "$name" || -z "$key" ]] && { echo "Usage: agent-clerk role-create <name> --key <key> [--description d] [--permissions p1,p2]" >&2; return 1; }
+
+    local body
+    body=$(python3 -c "
+import json
+data = {'name': '$name', 'key': '$key'}
+if '$desc': data['description'] = '$desc'
+if '$perms': data['permissions'] = ['$p'.strip() for p in '$perms'.split(',') if p.strip()]
+print(json.dumps(data))
+")
+
+    local result
+    result=$(clerk_request POST "/organization_roles" "$body") || return 1
+    echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(f\"Created: {r.get('id','')}  {r.get('name','')}  key:{r.get('key','')}\")"
+}
+
+cmd_permissions() {
+    local result
+    result=$(clerk_list "/organization_permissions")
+    echo "$result" | python3 -c "
+import sys, json
+perms = json.load(sys.stdin)
+if not perms:
+    print('No permissions')
+    sys.exit(0)
+for p in perms:
+    print(f\"{p.get('id', '')}  {p.get('name', ''):<30}  key:{p.get('key', '')}\")
+"
+}
+
+cmd_permission_create() {
+    local name="" key="" desc=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --key) key="$2"; shift 2 ;;
+            --description) desc="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+    [[ -z "$name" || -z "$key" ]] && { echo "Usage: agent-clerk permission-create <name> --key <key>" >&2; return 1; }
+
+    local body="{\"name\":$(json_escape "$name"),\"key\":$(json_escape "$key")}"
+    [[ -n "$desc" ]] && body="{\"name\":$(json_escape "$name"),\"key\":$(json_escape "$key"),\"description\":$(json_escape "$desc")}"
+
+    local result
+    result=$(clerk_request POST "/organization_permissions" "$body") || return 1
+    echo "$result" | python3 -c "import sys,json; p=json.load(sys.stdin); print(f\"Created: {p.get('id','')}  {p.get('name','')}  key:{p.get('key','')}\")"
+}
+
+# --- Session Commands ---
+
+cmd_sessions() {
+    local user_id="" status=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --user-id) user_id="$2"; shift 2 ;;
+            --status) status="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local endpoint="/sessions"
+    local params=()
+    [[ -n "$user_id" ]] && params+=("user_id=$user_id")
+    [[ -n "$status" ]] && params+=("status=$status")
+    if [[ ${#params[@]} -gt 0 ]]; then
+        endpoint="/sessions?$(IFS='&'; echo "${params[*]}")"
+    fi
+
+    local result
+    result=$(clerk_list "$endpoint")
+
+    echo "$result" | python3 -c "
+import sys, json
+sessions = json.load(sys.stdin)
+if not sessions:
+    print('No sessions')
+    sys.exit(0)
+for s in sessions:
+    sid = s.get('id', '')
+    uid = s.get('user_id', '')
+    status = s.get('status', '?')
+    created = str(s.get('created_at', ''))[:10]
+    expire = str(s.get('expire_at', ''))[:10]
+    print(f'{sid}  user:{uid}  [{status}]  created:{created}  expires:{expire}')
+"
+}
+
+cmd_session() {
+    local session_id="${1:-}"
+    [[ -z "$session_id" ]] && { echo "Usage: agent-clerk session <id>" >&2; return 1; }
+    local result
+    result=$(clerk_request GET "/sessions/$session_id") || return 1
+    echo "$result" | python3 -m json.tool
+}
+
+cmd_session_revoke() {
+    local session_id="${1:-}"
+    [[ -z "$session_id" ]] && { echo "Usage: agent-clerk session-revoke <id>" >&2; return 1; }
+    clerk_request POST "/sessions/$session_id/revoke" > /dev/null || return 1
+    echo "Revoked: $session_id"
+}
+
+# --- OAuth Application Commands ---
+
+cmd_oauth_apps() {
+    local result
+    result=$(clerk_list "/oauth_applications")
+    echo "$result" | python3 -c "
+import sys, json
+apps = json.load(sys.stdin)
+if not apps:
+    print('No OAuth applications')
+    sys.exit(0)
+for a in apps:
+    aid = a.get('id', '')
+    name = a.get('name', '')
+    client_id = a.get('client_id', '')
+    public = ' [public]' if not a.get('client_secret') else ''
+    print(f'{aid}  {name:<30}  client_id:{client_id}{public}')
+"
+}
+
+cmd_oauth_app() {
+    local app_id="${1:-}"
+    [[ -z "$app_id" ]] && { echo "Usage: agent-clerk oauth-app <id>" >&2; return 1; }
+    local result
+    result=$(clerk_request GET "/oauth_applications/$app_id") || return 1
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+print(f\"ID:            {a.get('id', '')}\")
+print(f\"Name:          {a.get('name', '')}\")
+print(f\"Client ID:     {a.get('client_id', '')}\")
+secret = a.get('client_secret', '')
+if secret:
+    print(f\"Client Secret: {secret[:8]}****\")
+else:
+    print(f\"Client Secret: (public app)\")
+print(f\"Callback URL:  {a.get('callback_url', '')}\")
+print(f\"Scopes:        {a.get('scopes', '')}\")
+"
+}
+
+cmd_oauth_app_create() {
+    local name="${1:-}" callback="" scopes="" public=false
+    [[ -z "$name" ]] && { echo "Usage: agent-clerk oauth-app-create <name> --callback <url> [--scopes s1,s2] [--public]" >&2; return 1; }
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --callback) callback="$2"; shift 2 ;;
+            --scopes) scopes="$2"; shift 2 ;;
+            --public) public=true; shift ;;
+            *) shift ;;
+        esac
+    done
+    [[ -z "$callback" ]] && { echo "Error: --callback is required" >&2; return 1; }
+
+    local body
+    body=$(python3 -c "
+import json
+data = {
+    'name': $(json_escape "$name"),
+    'callback_url': '$callback',
+    'public': $([[ "$public" == "true" ]] && echo "True" || echo "False"),
+}
+if '$scopes': data['scopes'] = '$scopes'
+print(json.dumps(data))
+")
+
+    local result
+    result=$(clerk_request POST "/oauth_applications" "$body") || return 1
+
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+print(f\"Created: {a.get('id', '')}  {a.get('name', '')}\")
+print(f\"Client ID:     {a.get('client_id', '')}\")
+secret = a.get('client_secret', '')
+if secret: print(f'Client Secret: {secret}')
+print(f\"Callback:      {a.get('callback_url', '')}\")
+"
+}
+
+cmd_oauth_app_update() {
+    local app_id="${1:-}" name="" callback="" scopes=""
+    [[ -z "$app_id" ]] && { echo "Usage: agent-clerk oauth-app-update <id> [--name n] [--callback url] [--scopes s1,s2]" >&2; return 1; }
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --callback) callback="$2"; shift 2 ;;
+            --scopes) scopes="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body
+    body=$(python3 -c "
+import json
+data = {}
+if '$name': data['name'] = '$name'
+if '$callback': data['callback_url'] = '$callback'
+if '$scopes': data['scopes'] = '$scopes'
+print(json.dumps(data))
+")
+
+    clerk_request PATCH "/oauth_applications/$app_id" "$body" > /dev/null || return 1
+    echo "Updated: $app_id"
+}
+
+cmd_oauth_app_delete() {
+    local app_id="${1:-}"
+    [[ -z "$app_id" ]] && { echo "Usage: agent-clerk oauth-app-delete <id>" >&2; return 1; }
+    clerk_request DELETE "/oauth_applications/$app_id" > /dev/null || return 1
+    echo "Deleted: $app_id"
+}
+
+cmd_oauth_app_rotate_secret() {
+    local app_id="${1:-}"
+    [[ -z "$app_id" ]] && { echo "Usage: agent-clerk oauth-app-rotate-secret <id>" >&2; return 1; }
+    local result
+    result=$(clerk_request POST "/oauth_applications/$app_id/rotate_secret") || return 1
+    echo "$result" | python3 -c "
+import sys, json
+a = json.load(sys.stdin)
+print(f\"New Client Secret: {a.get('client_secret', '?')}\")
+"
+}
+
+# --- Enterprise SSO ---
+
+cmd_enterprise_connections() {
+    local result
+    result=$(clerk_list "/enterprise_connections")
+    echo "$result" | python3 -c "
+import sys, json
+conns = json.load(sys.stdin)
+if not conns:
+    print('No enterprise connections')
+    sys.exit(0)
+for c in conns:
+    cid = c.get('id', '')
+    name = c.get('name', '')
+    protocol = c.get('protocol', '?')
+    domain = c.get('domain', '')
+    active = c.get('active', False)
+    status = 'active' if active else 'inactive'
+    print(f'{cid}  {name:<30}  [{protocol}]  domain:{domain}  {status}')
+"
+}
+
+cmd_enterprise_connection() {
+    local conn_id="${1:-}"
+    [[ -z "$conn_id" ]] && { echo "Usage: agent-clerk enterprise-connection <id>" >&2; return 1; }
+    local result
+    result=$(clerk_request GET "/enterprise_connections/$conn_id") || return 1
+    echo "$result" | python3 -m json.tool
+}
+
+cmd_enterprise_connection_create() {
+    local name="" domain="" protocol=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --domain) domain="$2"; shift 2 ;;
+            --protocol) protocol="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ -z "$name" || -z "$domain" || -z "$protocol" ]] && { echo "Usage: agent-clerk enterprise-connection-create --name <n> --domain <d> --protocol saml|oidc" >&2; return 1; }
+
+    local body="{\"name\":$(json_escape "$name"),\"domain\":$(json_escape "$domain"),\"protocol\":$(json_escape "$protocol")}"
+    local result
+    result=$(clerk_request POST "/enterprise_connections" "$body") || return 1
+    echo "$result" | python3 -c "import sys,json; c=json.load(sys.stdin); print(f\"Created: {c.get('id','')}  {c.get('name','')}  [{c.get('protocol','')}]\")"
+}
+
+cmd_enterprise_connection_update() {
+    local conn_id="${1:-}" name="" domain=""
+    [[ -z "$conn_id" ]] && { echo "Usage: agent-clerk enterprise-connection-update <id> [--name n] [--domain d]" >&2; return 1; }
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --domain) domain="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body
+    body=$(python3 -c "
+import json
+data = {}
+if '$name': data['name'] = '$name'
+if '$domain': data['domain'] = '$domain'
+print(json.dumps(data))
+")
+    clerk_request PATCH "/enterprise_connections/$conn_id" "$body" > /dev/null || return 1
+    echo "Updated: $conn_id"
+}
+
+cmd_enterprise_connection_delete() {
+    local conn_id="${1:-}"
+    [[ -z "$conn_id" ]] && { echo "Usage: agent-clerk enterprise-connection-delete <id>" >&2; return 1; }
+    clerk_request DELETE "/enterprise_connections/$conn_id" > /dev/null || return 1
+    echo "Deleted: $conn_id"
+}
+
+# --- JWT Templates ---
+
+cmd_jwt_templates() {
+    local result
+    result=$(clerk_request GET "/jwt_templates") || return 1
+    echo "$result" | python3 -c "
+import sys, json
+templates = json.load(sys.stdin)
+if not templates:
+    print('No JWT templates')
+    sys.exit(0)
+for t in templates:
+    tid = t.get('id', '')
+    name = t.get('name', '')
+    print(f'{tid}  {name}')
+"
+}
+
+cmd_jwt_template() {
+    local template_id="${1:-}"
+    [[ -z "$template_id" ]] && { echo "Usage: agent-clerk jwt-template <id>" >&2; return 1; }
+    local result
+    result=$(clerk_request GET "/jwt_templates/$template_id") || return 1
+    echo "$result" | python3 -m json.tool
+}
+
+cmd_jwt_template_create() {
+    local name="" claims=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --claims) claims="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ -z "$name" ]] && { echo "Usage: agent-clerk jwt-template-create --name <n> --claims '{}'" >&2; return 1; }
+
+    local body
+    body=$(python3 -c "
+import json
+data = {'name': '$name'}
+claims = '$claims'
+if claims: data['claims'] = json.loads(claims)
+print(json.dumps(data))
+")
+
+    local result
+    result=$(clerk_request POST "/jwt_templates" "$body") || return 1
+    echo "$result" | python3 -c "import sys,json; t=json.load(sys.stdin); print(f\"Created: {t.get('id','')}  {t.get('name','')}\")"
+}
+
+cmd_jwt_template_delete() {
+    local template_id="${1:-}"
+    [[ -z "$template_id" ]] && { echo "Usage: agent-clerk jwt-template-delete <id>" >&2; return 1; }
+    clerk_request DELETE "/jwt_templates/$template_id" > /dev/null || return 1
+    echo "Deleted: $template_id"
+}
+
+# --- Invitations ---
+
+cmd_invitations() {
+    local result
+    result=$(clerk_list "/invitations")
+    echo "$result" | python3 -c "
+import sys, json
+invs = json.load(sys.stdin)
+if not invs:
+    print('No invitations')
+    sys.exit(0)
+for i in invs:
+    iid = i.get('id', '')
+    email = i.get('email_address', '')
+    status = i.get('status', '?')
+    print(f'{iid}  {email:<40}  [{status}]')
+"
+}
+
+cmd_invite() {
+    local email="${1:-}" redirect_url=""
+    [[ -z "$email" ]] && { echo "Usage: agent-clerk invite <email> [--redirect-url url]" >&2; return 1; }
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --redirect-url) redirect_url="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body="{\"email_address\":\"$email\"}"
+    [[ -n "$redirect_url" ]] && body="{\"email_address\":\"$email\",\"redirect_url\":\"$redirect_url\"}"
+
+    local result
+    result=$(clerk_request POST "/invitations" "$body") || return 1
+    echo "$result" | python3 -c "import sys,json; i=json.load(sys.stdin); print(f\"Invited: {i.get('email_address','')}  id:{i.get('id','')}\")"
+}
+
+cmd_invite_revoke() {
+    local inv_id="${1:-}"
+    [[ -z "$inv_id" ]] && { echo "Usage: agent-clerk invite-revoke <id>" >&2; return 1; }
+    clerk_request POST "/invitations/$inv_id/revoke" > /dev/null || return 1
+    echo "Revoked: $inv_id"
+}
+
+# --- Allowlist / Blocklist ---
+
+cmd_allowlist() {
+    local result
+    result=$(clerk_list "/allowlist_identifiers")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('Allowlist is empty')
+    sys.exit(0)
+for i in items:
+    print(f\"{i.get('id', '')}  {i.get('identifier', '')}  [{i.get('identifier_type', '')}]\")
+"
+}
+
+cmd_allowlist_add() {
+    local identifier="${1:-}"
+    [[ -z "$identifier" ]] && { echo "Usage: agent-clerk allowlist-add <email-or-domain>" >&2; return 1; }
+    local result
+    result=$(clerk_request POST "/allowlist_identifiers" "{\"identifier\":\"$identifier\",\"notify\":false}") || return 1
+    echo "$result" | python3 -c "import sys,json; i=json.load(sys.stdin); print(f\"Added: {i.get('identifier','')}  id:{i.get('id','')}\")"
+}
+
+cmd_allowlist_remove() {
+    local identifier_id="${1:-}"
+    [[ -z "$identifier_id" ]] && { echo "Usage: agent-clerk allowlist-remove <id>" >&2; return 1; }
+    clerk_request DELETE "/allowlist_identifiers/$identifier_id" > /dev/null || return 1
+    echo "Removed: $identifier_id"
+}
+
+cmd_blocklist() {
+    local result
+    result=$(clerk_list "/blocklist_identifiers")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('Blocklist is empty')
+    sys.exit(0)
+for i in items:
+    print(f\"{i.get('id', '')}  {i.get('identifier', '')}  [{i.get('identifier_type', '')}]\")
+"
+}
+
+cmd_blocklist_add() {
+    local identifier="${1:-}"
+    [[ -z "$identifier" ]] && { echo "Usage: agent-clerk blocklist-add <email-or-domain>" >&2; return 1; }
+    local result
+    result=$(clerk_request POST "/blocklist_identifiers" "{\"identifier\":\"$identifier\"}") || return 1
+    echo "$result" | python3 -c "import sys,json; i=json.load(sys.stdin); print(f\"Blocked: {i.get('identifier','')}  id:{i.get('id','')}\")"
+}
+
+cmd_blocklist_remove() {
+    local identifier_id="${1:-}"
+    [[ -z "$identifier_id" ]] && { echo "Usage: agent-clerk blocklist-remove <id>" >&2; return 1; }
+    clerk_request DELETE "/blocklist_identifiers/$identifier_id" > /dev/null || return 1
+    echo "Removed: $identifier_id"
+}
+
+# --- Admin Commands ---
+
+cmd_whoami() {
+    # Validate key by fetching user count
+    local count_result
+    count_result=$(clerk_request GET "/users/count") || return 1
+
+    local user_sample
+    user_sample=$(clerk_request GET "/users?limit=1") || return 1
+
+    echo "$count_result" | python3 -c "
+import sys, json, os
+data = json.load(sys.stdin)
+key = os.environ.get('CLERK_SECRET_KEY', '')
+env = 'production' if key.startswith('sk_live_') else 'development' if key.startswith('sk_test_') else 'unknown'
+print(f'Environment: {env}')
+print(f'Key prefix:  {key[:12]}...')
+print(f'Total users: {data.get(\"total_count\", \"?\")}')
+"
+}
+
+cmd_jwks() {
+    local result
+    result=$(clerk_request GET "/jwks") || return 1
+    echo "$result" | python3 -m json.tool
+}
+
+cmd_snapshot() {
+    echo "{"
+    echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+
+    # Users count
+    local users_count
+    users_count=$(clerk_request GET "/users/count" 2>/dev/null)
+    echo "  \"users_count\": $(echo "$users_count" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_count',0))" 2>/dev/null || echo 0),"
+
+    # Organizations
+    local orgs
+    orgs=$(clerk_list "/organizations")
+    echo '  "organizations": '
+    echo "$orgs" | python3 -c "
+import sys, json
+orgs = json.load(sys.stdin)
+out = [{'id': o['id'], 'name': o.get('name',''), 'slug': o.get('slug',''), 'members': o.get('members_count',0)} for o in orgs]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # Roles
+    local roles
+    roles=$(clerk_list "/organization_roles")
+    echo '  "roles": '
+    echo "$roles" | python3 -c "
+import sys, json
+roles = json.load(sys.stdin)
+out = [{'id': r['id'], 'name': r.get('name',''), 'key': r.get('key','')} for r in roles]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # OAuth apps
+    local oauth
+    oauth=$(clerk_list "/oauth_applications")
+    echo '  "oauth_applications": '
+    echo "$oauth" | python3 -c "
+import sys, json
+apps = json.load(sys.stdin)
+out = [{'id': a['id'], 'name': a.get('name',''), 'client_id': a.get('client_id','')} for a in apps]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # Enterprise connections
+    local enterprise
+    enterprise=$(clerk_list "/enterprise_connections")
+    echo '  "enterprise_connections": '
+    echo "$enterprise" | python3 -c "
+import sys, json
+conns = json.load(sys.stdin)
+out = [{'id': c['id'], 'name': c.get('name',''), 'protocol': c.get('protocol',''), 'domain': c.get('domain','')} for c in conns]
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # JWT templates
+    local jwt
+    jwt=$(clerk_request GET "/jwt_templates" 2>/dev/null || echo "[]")
+    echo '  "jwt_templates": '
+    echo "$jwt" | python3 -c "
+import sys, json
+templates = json.load(sys.stdin)
+out = [{'id': t['id'], 'name': t.get('name','')} for t in (templates if isinstance(templates, list) else [])]
+print(json.dumps(out, indent=4))
+"
+
+    echo "}"
+}
+
+# --- Dispatch ---
+
+main() {
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        show_help
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        # Users
+        users|ls)                    cmd_users "$@" ;;
+        user)                        cmd_user "$@" ;;
+        user-create)                 cmd_user_create "$@" ;;
+        user-update)                 cmd_user_update "$@" ;;
+        user-delete)                 cmd_user_delete "$@" ;;
+        user-ban)                    cmd_user_ban "$@" ;;
+        user-unban)                  cmd_user_unban "$@" ;;
+        user-lock)                   cmd_user_lock "$@" ;;
+        user-unlock)                 cmd_user_unlock "$@" ;;
+        user-count)                  cmd_user_count "$@" ;;
+        user-orgs)                   cmd_user_orgs "$@" ;;
+        user-metadata)               cmd_user_metadata "$@" ;;
+        # Organizations
+        orgs)                        cmd_orgs "$@" ;;
+        org)                         cmd_org "$@" ;;
+        org-create)                  cmd_org_create "$@" ;;
+        org-update)                  cmd_org_update "$@" ;;
+        org-delete)                  cmd_org_delete "$@" ;;
+        org-members)                 cmd_org_members "$@" ;;
+        org-add-member)              cmd_org_add_member "$@" ;;
+        org-remove-member)           cmd_org_remove_member "$@" ;;
+        org-update-member)           cmd_org_update_member "$@" ;;
+        org-invitations)             cmd_org_invitations "$@" ;;
+        org-invite)                  cmd_org_invite "$@" ;;
+        org-revoke-invite)           cmd_org_revoke_invite "$@" ;;
+        # Roles & Permissions
+        roles)                       cmd_roles "$@" ;;
+        role)                        cmd_role "$@" ;;
+        role-create)                 cmd_role_create "$@" ;;
+        permissions)                 cmd_permissions "$@" ;;
+        permission-create)           cmd_permission_create "$@" ;;
+        # Sessions
+        sessions)                    cmd_sessions "$@" ;;
+        session)                     cmd_session "$@" ;;
+        session-revoke)              cmd_session_revoke "$@" ;;
+        # OAuth
+        oauth-apps)                  cmd_oauth_apps "$@" ;;
+        oauth-app)                   cmd_oauth_app "$@" ;;
+        oauth-app-create)            cmd_oauth_app_create "$@" ;;
+        oauth-app-update)            cmd_oauth_app_update "$@" ;;
+        oauth-app-delete)            cmd_oauth_app_delete "$@" ;;
+        oauth-app-rotate-secret)     cmd_oauth_app_rotate_secret "$@" ;;
+        # Enterprise SSO
+        enterprise-connections)      cmd_enterprise_connections "$@" ;;
+        enterprise-connection)       cmd_enterprise_connection "$@" ;;
+        enterprise-connection-create) cmd_enterprise_connection_create "$@" ;;
+        enterprise-connection-update) cmd_enterprise_connection_update "$@" ;;
+        enterprise-connection-delete) cmd_enterprise_connection_delete "$@" ;;
+        # JWT Templates
+        jwt-templates)               cmd_jwt_templates "$@" ;;
+        jwt-template)                cmd_jwt_template "$@" ;;
+        jwt-template-create)         cmd_jwt_template_create "$@" ;;
+        jwt-template-delete)         cmd_jwt_template_delete "$@" ;;
+        # Invitations
+        invitations)                 cmd_invitations "$@" ;;
+        invite)                      cmd_invite "$@" ;;
+        invite-revoke)               cmd_invite_revoke "$@" ;;
+        # Allowlist / Blocklist
+        allowlist)                   cmd_allowlist "$@" ;;
+        allowlist-add)               cmd_allowlist_add "$@" ;;
+        allowlist-remove)            cmd_allowlist_remove "$@" ;;
+        blocklist)                   cmd_blocklist "$@" ;;
+        blocklist-add)               cmd_blocklist_add "$@" ;;
+        blocklist-remove)            cmd_blocklist_remove "$@" ;;
+        # Admin
+        whoami)                      cmd_whoami "$@" ;;
+        jwks)                        cmd_jwks "$@" ;;
+        snapshot)                    cmd_snapshot "$@" ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'agent-clerk --help' for usage" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
