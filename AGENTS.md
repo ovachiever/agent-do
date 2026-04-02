@@ -14,7 +14,7 @@
 | **Data** | db, excel, sheets, pdf, pdf2md, ocr, vision | Data access and extraction |
 | **Communication** | slack, discord, email, sms, teams, zoom, meet, voice | Messaging and meetings |
 | **Productivity** | calendar, notion, linear, figma, jupyter, lab, colab | App integrations |
-| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare, okta | Container/cluster/server/PaaS/CDN/SSO management |
+| **Infrastructure** | docker, k8s, cloud, ci, vm, network, dns, ssh, render, vercel, supabase, cloudflare, okta, namecheap | Container/cluster/server/PaaS/CDN/SSO/domain management |
 | **Creative** | image, video, audio, 3d, cad, latex | Media processing |
 | **Security** | burp, wireshark, ghidra | Security analysis |
 | **Hardware** | serial, midi, homekit, bluetooth, usb, printer | Device control |
@@ -298,6 +298,42 @@ agent-do okta snapshot                                 # Full tenant state
 ```
 
 Applications resolve by name or ID (0oa...). Environment: `OKTA_DOMAIN`, `OKTA_API_TOKEN` (SSWS token).
+
+---
+
+## agent-do namecheap (Domain & DNS Management)
+
+Namecheap domain and DNS management via XML API. DNS writes use safe GET→merge→SET pattern internally.
+
+### Domains
+```bash
+agent-do namecheap domains                          # List all domains with expiry
+agent-do namecheap domains --expiring               # Domains expiring within 30 days
+agent-do namecheap domain recognitionoracle.com     # Domain details
+agent-do namecheap domain-check coolstartup.com coolstartup.io  # Availability
+agent-do namecheap domain-renew example.com --years 2
+```
+
+### DNS (safe upsert — GET→merge→SET internally)
+```bash
+agent-do namecheap dns example.com                  # List records
+agent-do namecheap dns-add example.com A www 1.2.3.4
+agent-do namecheap dns-add example.com TXT @ "v=spf1 include:_spf.google.com ~all"
+agent-do namecheap dns-update example.com www A 5.6.7.8
+agent-do namecheap dns-del example.com www A
+```
+
+### Nameservers & SSL
+```bash
+agent-do namecheap nameservers example.com
+agent-do namecheap nameservers-set example.com ns1.cloudflare.com,ns2.cloudflare.com
+agent-do namecheap ssl-list
+agent-do namecheap snapshot
+```
+
+DNS commands only work on domains using Namecheap nameservers. For domains on Cloudflare, use `agent-do cloudflare dns` instead.
+
+Environment: `NAMECHEAP_API_USER`, `NAMECHEAP_API_KEY`. IP must be whitelisted in Namecheap dashboard.
 
 ---
 

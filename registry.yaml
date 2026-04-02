@@ -1456,6 +1456,41 @@ tools:
       - intent: "remove a captured skill"
         command: "agent-unbrowse delete myservice"
 
+  namecheap:
+    description: "Namecheap domain and DNS management — domains, DNS records (safe upsert), nameservers, SSL, availability"
+    capabilities:
+      - list domains with expiry dates and auto-renew status
+      - domain details (whois, nameservers, lock status)
+      - check domain availability
+      - renew domains
+      - list and manage DNS records (safe GET-merge-SET pattern)
+      - manage nameservers (custom or default)
+      - list SSL certificates
+    commands:
+      domains: "List all domains: domains [--expiring]"
+      domain: "Domain details: domain <name>"
+      domain-check: "Check availability: domain-check <name> [name2...]"
+      domain-renew: "Renew domain: domain-renew <name> [--years N]"
+      dns: "List DNS records: dns <domain>"
+      dns-add: "Add record (safe): dns-add <domain> <type> <host> <addr>"
+      dns-update: "Update record (safe): dns-update <domain> <host> <type> <addr>"
+      dns-del: "Delete record (safe): dns-del <domain> <host> [type]"
+      nameservers: "Show nameservers: nameservers <domain>"
+      nameservers-set: "Set custom NS: nameservers-set <domain> <ns1,ns2>"
+      ssl-list: "List SSL certificates"
+      snapshot: "Full account state as JSON"
+    examples:
+      - intent: "list my domains"
+        command: "agent-namecheap domains"
+      - intent: "check if a domain is available"
+        command: "agent-namecheap domain-check coolstartup.com"
+      - intent: "show DNS records"
+        command: "agent-namecheap dns example.com"
+      - intent: "add a DNS record"
+        command: "agent-namecheap dns-add example.com A www 1.2.3.4"
+      - intent: "domain expiry dates"
+        command: "agent-namecheap domains --expiring"
+
   okta:
     description: "Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, authorization servers, system logs"
     capabilities:
