@@ -1180,14 +1180,31 @@ export class BrowserManager {
         if (this.loginBrowser) {
             throw new Error('Login already in progress. Call finishLogin() or cancelLogin() first.');
         }
-        this.loginBrowser = await chromium.launch({
+        // When using a real browser binary, suppress automation flags that
+        // trigger bot detection (Google, Cloudflare, etc.)
+        const launchOpts = {
             headless: false,
             executablePath,
-        });
+        };
+        if (executablePath) {
+            // Remove flags that expose automation to the page:
+            // --enable-automation: sets navigator.webdriver=true, shows "controlled by automation" bar
+            // --enable-blink-features=IdleDetection: leaks automation context
+            launchOpts.ignoreDefaultArgs = ['--enable-automation'];
+            // Channel tells Playwright to use the system Chrome install directly
+            launchOpts.args = ['--disable-blink-features=AutomationControlled'];
+        }
+        this.loginBrowser = await chromium.launch(launchOpts);
         this.loginContext = await this.loginBrowser.newContext({
             viewport: { width: 1280, height: 900 },
         });
         this.loginPage = await this.loginContext.newPage();
+        // Remove navigator.webdriver fingerprint
+        if (executablePath) {
+            await this.loginPage.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            });
+        }
         await this.loginPage.goto(url, { waitUntil: 'domcontentloaded' });
         return { url: this.loginPage.url(), title: await this.loginPage.title() };
     }
