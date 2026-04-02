@@ -1776,7 +1776,8 @@ async function handleCaptureStatus(command, browser) {
 // Login: headed auth with automatic handoff to headless
 // ============================================================================
 async function handleLoginStart(command, browser) {
-    const result = await browser.startLogin(command.url);
+    const executablePath = process.env.AGENT_BROWSER_EXECUTABLE_PATH || undefined;
+    const result = await browser.startLogin(command.url, executablePath);
     return successResponse(command.id, {
         message: 'Headed browser opened. Complete SSO/MFA login, then run: login done',
         ...result,
