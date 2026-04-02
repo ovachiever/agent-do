@@ -1,0 +1,951 @@
+#!/usr/bin/env bash
+# agent-namecheap - Namecheap domain and DNS management
+# Part of the agent-do ecosystem
+
+set -euo pipefail
+
+NC_API="${NAMECHEAP_API_URL:-https://api.namecheap.com/xml.response}"
+
+show_help() {
+    cat << 'EOF'
+agent-namecheap - Namecheap domain and DNS management
+
+DOMAINS:
+  domains / ls                   List all domains
+  domains --expiring             Domains expiring within 30 days
+  domain <name>                  Domain details (whois, expiry, nameservers)
+  domain-check <name> [name2...] Check domain availability
+  domain-renew <name> [--years N] Renew domain (default: 1 year)
+
+DNS:
+  dns <domain>                   List DNS records
+  dns-add <domain> <type> <host> <addr> [--ttl N] [--mx-pref N]
+                                 Add a DNS record (safe: GET → merge → SET)
+  dns-update <domain> <host> <type> <addr> [--ttl N] [--mx-pref N]
+                                 Update a DNS record (matches by host+type)
+  dns-del <domain> <host> [type] Delete DNS record(s) (matches by host, optionally type)
+  dns-set-all <domain> <json>    Replace ALL records from JSON array (dangerous)
+
+NAMESERVERS:
+  nameservers <domain>           Show current nameservers
+  nameservers-set <domain> <ns1,ns2,...>  Set custom nameservers
+  nameservers-reset <domain>     Reset to Namecheap default nameservers
+
+SSL:
+  ssl-list                       List SSL certificates
+  ssl-info <cert-id>             Certificate details
+
+ACCOUNT:
+  whoami                         Account balance and info
+  snapshot                       Full account state as JSON
+
+Domains are specified as full names (e.g., example.com).
+DNS record types: A, AAAA, CNAME, MX, MXE, TXT, URL, URL301, FRAME
+
+Environment:
+  NAMECHEAP_API_USER             API username
+  NAMECHEAP_API_KEY              API key
+  NAMECHEAP_USERNAME             Account username (default: same as API_USER)
+  NAMECHEAP_CLIENT_IP            Whitelisted IP (auto-detected if not set)
+  NAMECHEAP_API_URL              API URL (default: production)
+  NAMECHEAP_SANDBOX              Set to 1 for sandbox mode
+
+Examples:
+  agent-namecheap domains
+  agent-namecheap domain recognitionoracle.com
+  agent-namecheap domain-check coolstartup.com coolstartup.io
+  agent-namecheap dns recognitionoracle.com
+  agent-namecheap dns-add recognitionoracle.com A www 1.2.3.4
+  agent-namecheap dns-add recognitionoracle.com TXT @ "v=spf1 include:_spf.google.com ~all"
+  agent-namecheap dns-del recognitionoracle.com www A
+  agent-namecheap nameservers recognitionoracle.com
+  agent-namecheap snapshot
+EOF
+}
+
+# --- Helpers ---
+
+get_client_ip() {
+    if [[ -n "${NAMECHEAP_CLIENT_IP:-}" ]]; then
+        echo "$NAMECHEAP_CLIENT_IP"
+        return
+    fi
+    # Auto-detect public IP
+    curl -s https://api.ipify.org 2>/dev/null || curl -s https://ifconfig.me 2>/dev/null || echo "127.0.0.1"
+}
+
+nc_request() {
+    local command="$1"
+    shift
+    local extra_params="$*"
+
+    local api_user="${NAMECHEAP_API_USER:-}"
+    local api_key="${NAMECHEAP_API_KEY:-}"
+    local username="${NAMECHEAP_USERNAME:-$api_user}"
+
+    if [[ -z "$api_user" || -z "$api_key" ]]; then
+        echo '<ApiResponse Status="ERROR"><Errors><Error>NAMECHEAP_API_USER and NAMECHEAP_API_KEY not set</Error></Errors></ApiResponse>' >&2
+        return 1
+    fi
+
+    # Use sandbox URL if requested
+    local url="$NC_API"
+    if [[ "${NAMECHEAP_SANDBOX:-0}" == "1" ]]; then
+        url="https://api.sandbox.namecheap.com/xml.response"
+    fi
+
+    local client_ip
+    client_ip=$(get_client_ip)
+
+    local base_params="ApiUser=${api_user}&ApiKey=${api_key}&UserName=${username}&ClientIp=${client_ip}&Command=${command}"
+
+    local full_url="${url}?${base_params}"
+    if [[ -n "$extra_params" ]]; then
+        full_url="${full_url}&${extra_params}"
+    fi
+
+    curl -s "$full_url"
+}
+
+# POST version for large payloads (setHosts with many records)
+nc_post() {
+    local command="$1"
+    shift
+    local post_data="$*"
+
+    local api_user="${NAMECHEAP_API_USER:-}"
+    local api_key="${NAMECHEAP_API_KEY:-}"
+    local username="${NAMECHEAP_USERNAME:-$api_user}"
+    local client_ip
+    client_ip=$(get_client_ip)
+
+    local url="$NC_API"
+    if [[ "${NAMECHEAP_SANDBOX:-0}" == "1" ]]; then
+        url="https://api.sandbox.namecheap.com/xml.response"
+    fi
+
+    local base_data="ApiUser=${api_user}&ApiKey=${api_key}&UserName=${username}&ClientIp=${client_ip}&Command=${command}"
+
+    if [[ -n "$post_data" ]]; then
+        base_data="${base_data}&${post_data}"
+    fi
+
+    curl -s -X POST "$url" -d "$base_data"
+}
+
+# Parse XML response, check for errors, extract data
+# Usage: echo "$xml" | nc_parse "xpath_expression"
+nc_check_error() {
+    local xml
+    xml=$(cat)
+
+    local error_msg
+    error_msg=$(echo "$xml" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+
+raw = sys.stdin.read()
+if not raw.strip():
+    print('Empty response from Namecheap API')
+    sys.exit(0)
+
+if raw.strip().startswith('<html') or raw.strip().startswith('<!DOCTYPE'):
+    print('Rate limited or blocked by Namecheap (HTML response)')
+    sys.exit(0)
+
+try:
+    root = ET.fromstring(raw)
+except ET.ParseError as e:
+    print(f'Invalid XML response: {e}')
+    sys.exit(0)
+
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+if root.get('Status', '') == 'ERROR':
+    errors = root.findall('.//nc:Error', ns) or root.findall('.//Error')
+    msgs = [e.text for e in errors if e.text]
+    print('; '.join(msgs) if msgs else 'Unknown error')
+    sys.exit(0)
+" 2>/dev/null)
+
+    if [[ -n "$error_msg" ]]; then
+        echo "Error: $error_msg" >&2
+        return 1
+    fi
+
+    # Pass through the XML
+    echo "$xml"
+}
+
+split_domain() {
+    # Split domain.com into SLD=domain TLD=com
+    # Split sub.domain.co.uk into SLD=sub.domain TLD=co.uk
+    python3 -c "
+domain = '$1'
+# Known multi-part TLDs
+multi_tlds = ['co.uk', 'co.nz', 'co.za', 'com.au', 'com.br', 'org.uk', 'net.au', 'co.in', 'co.jp']
+for mt in multi_tlds:
+    if domain.endswith('.' + mt):
+        sld = domain[:-(len(mt) + 1)]
+        print(f'{sld} {mt}')
+        exit()
+parts = domain.rsplit('.', 1)
+if len(parts) == 2:
+    print(f'{parts[0]} {parts[1]}')
+else:
+    print(f'{domain} com')
+"
+}
+
+urlencode() {
+    python3 -c "import urllib.parse; print(urllib.parse.quote('$1', safe=''))"
+}
+
+# --- Domain Commands ---
+
+cmd_domains() {
+    local list_type="ALL"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --expiring) list_type="EXPIRING"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local result
+    result=$(nc_request "namecheap.domains.getList" "ListType=$list_type&PageSize=100&SortBy=NAME")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+domains = root.findall('.//nc:DomainGetListResult/nc:Domain', ns)
+if not domains:
+    # Try without namespace
+    domains = root.findall('.//Domain')
+if not domains:
+    print('No domains found')
+    sys.exit(0)
+for d in domains:
+    name = d.get('Name', '')
+    expires = d.get('Expires', '')[:10]
+    auto = 'auto-renew' if d.get('AutoRenew', '').lower() == 'true' else ''
+    locked = 'locked' if d.get('IsLocked', '').lower() == 'true' else ''
+    our_dns = 'NC-DNS' if d.get('IsOurDNS', '').lower() == 'true' else 'custom-NS'
+    expired = ' [EXPIRED]' if d.get('IsExpired', '').lower() == 'true' else ''
+    flags = ' '.join(f for f in [auto, locked, our_dns] if f)
+    print(f'{name:<40} expires:{expires}  {flags}{expired}')
+"
+}
+
+cmd_domain() {
+    local domain="${1:-}"
+    [[ -z "$domain" ]] && { echo "Usage: agent-namecheap domain <domain.com>" >&2; return 1; }
+
+    local result
+    result=$(nc_request "namecheap.domains.getInfo" "DomainName=$domain")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+
+info = root.find('.//nc:DomainGetInfoResult', ns)
+if info is None:
+    info = root.find('.//DomainGetInfoResult')
+if info is None:
+    print('Domain info not found')
+    sys.exit(1)
+
+print(f\"Domain:      {info.get('DomainName', '')}\")
+print(f\"Status:      {info.get('Status', '')}\")
+print(f\"ID:          {info.get('ID', '')}\")
+print(f\"Created:     {info.find('.//nc:CreatedDate', ns).text if info.find('.//nc:CreatedDate', ns) is not None else info.findtext('.//CreatedDate', '')}\")
+print(f\"Expires:     {info.find('.//nc:ExpiredDate', ns).text if info.find('.//nc:ExpiredDate', ns) is not None else info.findtext('.//ExpiredDate', '')}\")
+
+# Nameservers
+dns_details = info.find('.//nc:DnsDetails', ns) or info.find('.//DnsDetails')
+if dns_details is not None:
+    provider = dns_details.get('ProviderType', '')
+    ns_list = [n.text for n in (dns_details.findall('nc:Nameserver', ns) or dns_details.findall('Nameserver')) if n.text]
+    print(f\"DNS:         {provider}\")
+    if ns_list:
+        print(f\"Nameservers: {', '.join(ns_list)}\")
+
+# Lock status
+lock = info.find('.//nc:Modificationrights', ns) or info.find('.//Modificationrights')
+if lock is not None:
+    print(f\"Locked:      {lock.get('All', '?')}\")
+
+# WhoisGuard
+wg = info.find('.//nc:Whoisguard', ns) or info.find('.//Whoisguard')
+if wg is not None:
+    print(f\"WhoisGuard:  {wg.get('Enabled', '?')}\")
+"
+}
+
+cmd_domain_check() {
+    [[ $# -eq 0 ]] && { echo "Usage: agent-namecheap domain-check <domain> [domain2...]" >&2; return 1; }
+
+    local domains
+    domains=$(IFS=,; echo "$*")
+
+    local result
+    result=$(nc_request "namecheap.domains.check" "DomainList=$domains")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+checks = root.findall('.//nc:DomainCheckResult', ns)
+if not checks:
+    checks = root.findall('.//DomainCheckResult')
+for c in checks:
+    domain = c.get('Domain', '')
+    available = c.get('Available', 'false').lower() == 'true'
+    premium = c.get('IsPremiumName', 'false').lower() == 'true'
+    price = c.get('PremiumRegistrationPrice', '')
+    status = 'AVAILABLE' if available else 'TAKEN'
+    extra = f'  (premium: \${price})' if premium and price else ''
+    print(f'{domain:<40} {status}{extra}')
+"
+}
+
+cmd_domain_renew() {
+    local domain="${1:-}" years="1"
+    [[ -z "$domain" ]] && { echo "Usage: agent-namecheap domain-renew <domain> [--years N]" >&2; return 1; }
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --years) years="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local result
+    result=$(nc_request "namecheap.domains.renew" "DomainName=$domain&Years=$years")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+renew = root.find('.//nc:DomainRenewResult', ns) or root.find('.//DomainRenewResult')
+if renew is None:
+    print('Renewal response not found')
+    sys.exit(1)
+name = renew.get('DomainName', '')
+success = renew.get('Renew', '').lower() == 'true'
+charged = renew.get('ChargedAmount', '?')
+order = renew.get('OrderID', '')
+if success:
+    print(f'Renewed: {name}  Charged: \${charged}  Order: {order}')
+else:
+    print(f'Renewal failed for {name}')
+"
+}
+
+# --- DNS Commands ---
+
+cmd_dns() {
+    local domain="${1:-}"
+    [[ -z "$domain" ]] && { echo "Usage: agent-namecheap dns <domain.com>" >&2; return 1; }
+
+    local sld_tld
+    sld_tld=$(split_domain "$domain")
+    local sld="${sld_tld%% *}"
+    local tld="${sld_tld##* }"
+
+    local result
+    result=$(nc_request "namecheap.domains.dns.getHosts" "SLD=$sld&TLD=$tld")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+hosts = root.findall('.//nc:DomainDNSGetHostsResult/nc:host', ns)
+if not hosts:
+    hosts = root.findall('.//host')
+if not hosts:
+    print('No DNS records found')
+    sys.exit(0)
+print(f'{\"Type\":<8} {\"Host\":<30} {\"Address\":<50} {\"TTL\":>6} {\"MX\":>4}')
+print('-' * 105)
+for h in hosts:
+    rtype = h.get('Type', '')
+    name = h.get('Name', '')
+    addr = h.get('Address', '')[:50]
+    ttl = h.get('TTL', '')
+    mx = h.get('MXPref', '')
+    print(f'{rtype:<8} {name:<30} {addr:<50} {ttl:>6} {mx:>4}')
+"
+}
+
+# Internal: fetch current records as JSON array
+_get_hosts_json() {
+    local domain="$1"
+    local sld_tld
+    sld_tld=$(split_domain "$domain")
+    local sld="${sld_tld%% *}"
+    local tld="${sld_tld##* }"
+
+    local result
+    result=$(nc_request "namecheap.domains.dns.getHosts" "SLD=$sld&TLD=$tld")
+
+    echo "$result" | python3 -c "
+import sys, json, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+
+# Check for errors
+if root.get('Status') == 'ERROR':
+    errors = root.findall('.//nc:Error', ns) or root.findall('.//Error')
+    for e in errors:
+        print(json.dumps({'error': e.text}))
+    sys.exit(1)
+
+hosts = root.findall('.//nc:DomainDNSGetHostsResult/nc:host', ns)
+if not hosts:
+    hosts = root.findall('.//host')
+
+# Also get EmailType
+result_elem = root.find('.//nc:DomainDNSGetHostsResult', ns) or root.find('.//DomainDNSGetHostsResult')
+email_type = result_elem.get('EmailType', 'NONE') if result_elem is not None else 'NONE'
+
+records = []
+for h in hosts:
+    records.append({
+        'HostName': h.get('Name', ''),
+        'RecordType': h.get('Type', ''),
+        'Address': h.get('Address', ''),
+        'MXPref': h.get('MXPref', '10'),
+        'TTL': h.get('TTL', '1800'),
+    })
+
+print(json.dumps({'records': records, 'emailType': email_type}))
+"
+}
+
+# Internal: set all hosts from JSON (the full-replace call)
+_set_hosts() {
+    local domain="$1"
+    local json_data="$2"
+
+    local sld_tld
+    sld_tld=$(split_domain "$domain")
+    local sld="${sld_tld%% *}"
+    local tld="${sld_tld##* }"
+
+    # Build the indexed POST data from JSON
+    local post_data
+    post_data=$(echo "$json_data" | python3 -c "
+import sys, json, urllib.parse
+
+data = json.load(sys.stdin)
+records = data.get('records', [])
+email_type = data.get('emailType', 'NONE')
+
+params = [f'SLD=$sld', f'TLD=$tld', f'EmailType={email_type}']
+
+for i, r in enumerate(records, 1):
+    params.append(f'HostName{i}={urllib.parse.quote(r[\"HostName\"])}')
+    params.append(f'RecordType{i}={urllib.parse.quote(r[\"RecordType\"])}')
+    params.append(f'Address{i}={urllib.parse.quote(r[\"Address\"])}')
+    params.append(f'MXPref{i}={r.get(\"MXPref\", \"10\")}')
+    params.append(f'TTL{i}={r.get(\"TTL\", \"1800\")}')
+
+print('&'.join(params))
+")
+
+    nc_post "namecheap.domains.dns.setHosts" "$post_data"
+}
+
+cmd_dns_add() {
+    local domain="${1:-}" rtype="${2:-}" host="${3:-}" addr="${4:-}"
+    local ttl="1800" mx_pref="10"
+
+    if [[ -z "$domain" || -z "$rtype" || -z "$host" || -z "$addr" ]]; then
+        echo "Usage: agent-namecheap dns-add <domain> <type> <host> <address> [--ttl N] [--mx-pref N]" >&2
+        echo "  Types: A, AAAA, CNAME, MX, MXE, TXT, URL, URL301, FRAME" >&2
+        return 1
+    fi
+    shift 4
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ttl) ttl="$2"; shift 2 ;;
+            --mx-pref) mx_pref="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    # GET current records, add new one, SET all
+    local current
+    current=$(_get_hosts_json "$domain")
+
+    if echo "$current" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'error' not in d else 1)" 2>/dev/null; then
+        :
+    else
+        echo "Error: Failed to fetch current DNS records" >&2
+        echo "$current" >&2
+        return 1
+    fi
+
+    local updated
+    updated=$(echo "$current" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+data['records'].append({
+    'HostName': '$host',
+    'RecordType': '${rtype^^}',
+    'Address': '$addr',
+    'MXPref': '$mx_pref',
+    'TTL': '$ttl',
+})
+print(json.dumps(data))
+")
+
+    local result
+    result=$(_set_hosts "$domain" "$updated")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+if res is not None and res.get('IsSuccess', '').lower() == 'true':
+    print(f'Added: ${rtype^^} {host} → ${addr}  (TTL: ${ttl})')
+else:
+    print('Failed to set DNS records', file=sys.stderr)
+    sys.exit(1)
+" || return 1
+}
+
+cmd_dns_update() {
+    local domain="${1:-}" host="${2:-}" rtype="${3:-}" addr="${4:-}"
+    local ttl="" mx_pref=""
+
+    if [[ -z "$domain" || -z "$host" || -z "$rtype" || -z "$addr" ]]; then
+        echo "Usage: agent-namecheap dns-update <domain> <host> <type> <address> [--ttl N] [--mx-pref N]" >&2
+        return 1
+    fi
+    shift 4
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ttl) ttl="$2"; shift 2 ;;
+            --mx-pref) mx_pref="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local current
+    current=$(_get_hosts_json "$domain")
+
+    local updated
+    updated=$(echo "$current" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+host = '$host'
+rtype = '${rtype^^}'
+addr = '$addr'
+ttl = '$ttl'
+mx = '$mx_pref'
+found = False
+for r in data['records']:
+    if r['HostName'] == host and r['RecordType'] == rtype:
+        r['Address'] = addr
+        if ttl: r['TTL'] = ttl
+        if mx: r['MXPref'] = mx
+        found = True
+        break
+if not found:
+    print(json.dumps({'error': f'No {rtype} record found for host {host}'}))
+    sys.exit(1)
+print(json.dumps(data))
+")
+
+    if echo "$updated" | grep -q '"error"'; then
+        echo "$updated" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','Update failed'))" >&2
+        return 1
+    fi
+
+    local result
+    result=$(_set_hosts "$domain" "$updated")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+if res is not None and res.get('IsSuccess', '').lower() == 'true':
+    print(f'Updated: ${rtype^^} ${host} → ${addr}')
+else:
+    print('Failed to update DNS record', file=sys.stderr)
+    sys.exit(1)
+" || return 1
+}
+
+cmd_dns_del() {
+    local domain="${1:-}" host="${2:-}" rtype="${3:-}"
+
+    if [[ -z "$domain" || -z "$host" ]]; then
+        echo "Usage: agent-namecheap dns-del <domain> <host> [type]" >&2
+        echo "  Without type: deletes ALL records for that host" >&2
+        return 1
+    fi
+
+    local current
+    current=$(_get_hosts_json "$domain")
+
+    local updated removed_count
+    read -r updated removed_count < <(echo "$current" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+host = '$host'
+rtype = '${rtype^^}' if '$rtype' else ''
+original = len(data['records'])
+if rtype:
+    data['records'] = [r for r in data['records'] if not (r['HostName'] == host and r['RecordType'] == rtype)]
+else:
+    data['records'] = [r for r in data['records'] if r['HostName'] != host]
+removed = original - len(data['records'])
+import os
+os.write(1, f'{json.dumps(data)} {removed}'.encode())
+")
+
+    if [[ "$removed_count" == "0" ]]; then
+        echo "No matching records found for host '$host'" >&2
+        return 1
+    fi
+
+    local result
+    result=$(_set_hosts "$domain" "$updated")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+if res is not None and res.get('IsSuccess', '').lower() == 'true':
+    print(f'Deleted $removed_count record(s) for host ${host}')
+else:
+    print('Failed to update DNS records', file=sys.stderr)
+    sys.exit(1)
+" || return 1
+}
+
+cmd_dns_set_all() {
+    local domain="${1:-}" json_file="${2:-}"
+
+    if [[ -z "$domain" || -z "$json_file" ]]; then
+        echo "Usage: agent-namecheap dns-set-all <domain> <json>" >&2
+        echo "  JSON: [{\"HostName\":\"@\",\"RecordType\":\"A\",\"Address\":\"1.2.3.4\",\"TTL\":\"1800\"}]" >&2
+        echo "  WARNING: This replaces ALL DNS records!" >&2
+        return 1
+    fi
+
+    local data="{\"records\":$json_file,\"emailType\":\"NONE\"}"
+
+    local result
+    result=$(_set_hosts "$domain" "$data")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+if res is not None and res.get('IsSuccess', '').lower() == 'true':
+    print(f'All DNS records replaced for $domain')
+else:
+    print('Failed to set DNS records', file=sys.stderr)
+    sys.exit(1)
+"
+}
+
+# --- Nameserver Commands ---
+
+cmd_nameservers() {
+    local domain="${1:-}"
+    [[ -z "$domain" ]] && { echo "Usage: agent-namecheap nameservers <domain>" >&2; return 1; }
+
+    local sld_tld
+    sld_tld=$(split_domain "$domain")
+    local sld="${sld_tld%% *}"
+    local tld="${sld_tld##* }"
+
+    local result
+    result=$(nc_request "namecheap.domains.dns.getList" "SLD=$sld&TLD=$tld")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSGetListResult', ns) or root.find('.//DomainDNSGetListResult')
+if res is None:
+    print('No nameserver info')
+    sys.exit(1)
+is_nc = res.get('IsUsingOurDNS', '?')
+print(f\"Using Namecheap DNS: {is_nc}\")
+nameservers = res.findall('nc:Nameserver', ns)
+if not nameservers:
+    nameservers = res.findall('Nameserver')
+for n in nameservers:
+    print(f'  {n.text}')
+"
+}
+
+cmd_nameservers_set() {
+    local domain="${1:-}" ns_list="${2:-}"
+    [[ -z "$domain" || -z "$ns_list" ]] && { echo "Usage: agent-namecheap nameservers-set <domain> <ns1,ns2,...>" >&2; return 1; }
+
+    local sld_tld
+    sld_tld=$(split_domain "$domain")
+    local sld="${sld_tld%% *}"
+    local tld="${sld_tld##* }"
+
+    local result
+    result=$(nc_request "namecheap.domains.dns.setCustom" "SLD=$sld&TLD=$tld&Nameservers=$ns_list")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSSetCustomResult', ns) or root.find('.//DomainDNSSetCustomResult')
+if res is not None and res.get('Update', '').lower() == 'true':
+    print(f'Nameservers updated for $domain: $ns_list')
+else:
+    print('Failed to update nameservers', file=sys.stderr)
+    sys.exit(1)
+"
+}
+
+cmd_nameservers_reset() {
+    local domain="${1:-}"
+    [[ -z "$domain" ]] && { echo "Usage: agent-namecheap nameservers-reset <domain>" >&2; return 1; }
+
+    local sld_tld
+    sld_tld=$(split_domain "$domain")
+    local sld="${sld_tld%% *}"
+    local tld="${sld_tld##* }"
+
+    local result
+    result=$(nc_request "namecheap.domains.dns.setDefault" "SLD=$sld&TLD=$tld")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+res = root.find('.//nc:DomainDNSSetDefaultResult', ns) or root.find('.//DomainDNSSetDefaultResult')
+if res is not None and res.get('Updated', '').lower() == 'true':
+    print(f'Nameservers reset to Namecheap defaults for $domain')
+else:
+    print('Failed to reset nameservers', file=sys.stderr)
+    sys.exit(1)
+"
+}
+
+# --- SSL Commands ---
+
+cmd_ssl_list() {
+    local result
+    result=$(nc_request "namecheap.ssl.getList" "PageSize=100")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+certs = root.findall('.//nc:SSLListResult/nc:SSL', ns)
+if not certs:
+    certs = root.findall('.//SSL')
+if not certs:
+    print('No SSL certificates')
+    sys.exit(0)
+for c in certs:
+    cid = c.get('CertificateID', '')
+    host = c.get('HostName', '')
+    status = c.get('Status', '')
+    ctype = c.get('SSLType', '')
+    expires = c.get('ExpireDate', '')
+    print(f'{cid}  {host:<40}  [{ctype}]  {status}  {expires}')
+"
+}
+
+cmd_ssl_info() {
+    local cert_id="${1:-}"
+    [[ -z "$cert_id" ]] && { echo "Usage: agent-namecheap ssl-info <certificate-id>" >&2; return 1; }
+
+    local result
+    result=$(nc_request "namecheap.ssl.getInfo" "CertificateID=$cert_id")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+info = root.find('.//nc:SSLGetInfoResult', ns) or root.find('.//SSLGetInfoResult')
+if info is None:
+    print('Certificate not found')
+    sys.exit(1)
+print(f\"ID:       {info.get('CertificateID', '')}\")
+print(f\"Status:   {info.get('Status', '')}\")
+print(f\"Type:     {info.get('SSLType', '')}\")
+print(f\"Domain:   {info.get('HostName', '')}\")
+print(f\"Expires:  {info.get('ExpireDate', '')}\")
+print(f\"Provider: {info.get('Provider', '')}\")
+"
+}
+
+# --- Account Commands ---
+
+cmd_whoami() {
+    # Use domains.getList with PageSize=1 to check auth and see account info
+    local result
+    result=$(nc_request "namecheap.users.getBalances")
+
+    local checked
+    checked=$(echo "$result" | nc_check_error) || return 1
+    echo "$checked" | python3 -c "
+import sys, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+bal = root.find('.//nc:UserGetBalancesResult', ns) or root.find('.//UserGetBalancesResult')
+if bal is not None:
+    print(f\"Account:         ${NAMECHEAP_API_USER:-}\")
+    print(f\"Balance:         \${bal.get('AvailableBalance', '?')}\")
+    print(f\"Account Balance: \${bal.get('AccountBalance', '?')}\")
+    print(f\"Earned:          \${bal.get('EarnedAmount', '?')}\")
+    print(f\"Funds Required:  \${bal.get('FundsRequiredForAutoRenew', '?')}\")
+else:
+    print('Could not retrieve account info')
+"
+}
+
+cmd_snapshot() {
+    echo "{"
+    echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+    echo "  \"account\": \"${NAMECHEAP_API_USER:-}\","
+
+    # Domains
+    local domains
+    domains=$(nc_request "namecheap.domains.getList" "ListType=ALL&PageSize=100&SortBy=NAME")
+    echo '  "domains": '
+    echo "$domains" | python3 -c "
+import sys, json, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+domains = root.findall('.//nc:DomainGetListResult/nc:Domain', ns) or root.findall('.//Domain')
+out = []
+for d in domains:
+    out.append({
+        'name': d.get('Name', ''),
+        'expires': d.get('Expires', ''),
+        'autoRenew': d.get('AutoRenew', ''),
+        'isOurDNS': d.get('IsOurDNS', ''),
+        'isExpired': d.get('IsExpired', ''),
+    })
+print(json.dumps(out, indent=4))
+"
+    echo ","
+
+    # SSL
+    local ssl
+    ssl=$(nc_request "namecheap.ssl.getList" "PageSize=100")
+    echo '  "ssl": '
+    echo "$ssl" | python3 -c "
+import sys, json, xml.etree.ElementTree as ET
+raw = sys.stdin.read()
+root = ET.fromstring(raw)
+ns = {'nc': 'http://api.namecheap.com/xml.response'}
+certs = root.findall('.//nc:SSLListResult/nc:SSL', ns) or root.findall('.//SSL')
+out = []
+for c in certs:
+    out.append({
+        'id': c.get('CertificateID', ''),
+        'host': c.get('HostName', ''),
+        'type': c.get('SSLType', ''),
+        'status': c.get('Status', ''),
+        'expires': c.get('ExpireDate', ''),
+    })
+print(json.dumps(out, indent=4))
+"
+
+    echo "}"
+}
+
+# --- Dispatch ---
+
+main() {
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        show_help
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        domains|ls)           cmd_domains "$@" ;;
+        domain)               cmd_domain "$@" ;;
+        domain-check)         cmd_domain_check "$@" ;;
+        domain-renew)         cmd_domain_renew "$@" ;;
+        dns)                  cmd_dns "$@" ;;
+        dns-add)              cmd_dns_add "$@" ;;
+        dns-update)           cmd_dns_update "$@" ;;
+        dns-del)              cmd_dns_del "$@" ;;
+        dns-set-all)          cmd_dns_set_all "$@" ;;
+        nameservers)          cmd_nameservers "$@" ;;
+        nameservers-set)      cmd_nameservers_set "$@" ;;
+        nameservers-reset)    cmd_nameservers_reset "$@" ;;
+        ssl-list)             cmd_ssl_list "$@" ;;
+        ssl-info)             cmd_ssl_info "$@" ;;
+        whoami)               cmd_whoami "$@" ;;
+        snapshot)             cmd_snapshot "$@" ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'agent-namecheap --help' for usage" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
