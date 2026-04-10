@@ -135,8 +135,21 @@ Other tools are standalone bash scripts.
 |---------|---------|
 | `lib/snapshot.sh` | JSON snapshot helpers: `snapshot_begin`, `snapshot_field`, `snapshot_end` |
 | `lib/json-output.sh` | `--json` flag support: `json_success`, `json_error`, `json_result`, `json_list` |
+| `lib/retry.sh` | Shared error recovery: `api_request()` with per-error-class retry (429→backoff, 401→refresh, 5xx→backoff), `with_retry()` for generic commands, `stall_detect()` for streaming. Persistent mode for CI/CD. |
 | `lib/capture/` | Shared capture pipeline: `CaptureSession` (request/response correlation), `filterEntries` (noise removal), `extractAuth` (auth detection), `generateSkill` (skill package writer). Used by both `agent-browse` and `agent-unbrowse`. |
 | `bin/health` | Per-tool dependency checking with status levels (OK, WARN, CONF, MISS) |
+
+### Tool Concurrency Classification
+
+Every tool in `registry.yaml` declares a `concurrency` field:
+
+| Value | Meaning | Parallelism |
+|-------|---------|-------------|
+| `read` | All commands are read-only queries | Safe to run in parallel with any tool |
+| `write` | Has state-mutating commands | Must run serially |
+| `mixed` | Some commands read, some write | Orchestrator checks per-command |
+
+22 read-only tools (context, ocr, vision, metrics, etc.) can run concurrently. 16 write tools (render, vercel, namecheap, manna, etc.) must run serially. 42 mixed tools require per-command classification. When spawning parallel agents, assign read-only tools freely; gate write tools behind sequential execution.
 
 ### Universal Tool Pattern
 

@@ -140,10 +140,28 @@ json_error "message"        # {"success": false, "error": "..."}
 json_result '{"key": "val"}' # Pass-through raw JSON
 ```
 
+**`lib/retry.sh`** — Shared error recovery for API tools:
+```bash
+source lib/retry.sh
+result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
+# Automatic retry: 429→respect Retry-After, 5xx→exponential backoff, network→immediate retry
+# with_retry 3 some_command   # Generic command retry
+# AGENT_DO_PERSISTENT=1       # CI/CD mode: retry 429/5xx indefinitely
+```
+
 **`bin/health`** — Per-tool dependency checking:
 - Verifies tool exists and `--help` works
 - Checks tool-specific dependencies (node for browse, docker daemon, env vars for Slack/Notion)
 - Reports: OK, WARN (missing dependency), CONF (needs env var), MISS (tool not found)
+
+### Tool Concurrency Classification
+
+Every tool in `registry.yaml` declares `concurrency: read|write|mixed`:
+- **read** (22 tools): safe to run in parallel — context, ocr, vision, metrics, dpt, etc.
+- **write** (16 tools): must run serially — render, vercel, namecheap, manna, docker, etc.
+- **mixed** (42 tools): per-command — browse snapshot is read, browse click is write
+
+Orchestrators use this to batch parallel tool calls safely: read-only tools run concurrently, write tools run serially, mixed tools require per-command inspection.
 
 ## Bundled Tools
 

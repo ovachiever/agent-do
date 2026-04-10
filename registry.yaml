@@ -1,1836 +1,1843 @@
 tools:
   context:
-    description: "Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal)."
+    description: Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal).
     capabilities:
-      - fetch documentation from any URL, llms.txt, or GitHub repo
-      - search across all indexed content with FTS5 BM25 + trust-tier ranking
-      - index local project files and Claude skills
-      - token-aware context budgeting for agents (knapsack packing)
-      - persistent annotations and feedback-influenced search ranking
-      - build and validate private content packages
-      - multi-source registry with trust-tier resolution
-      - global storage at ~/.agent-do/context/ (per-user, not per-project)
+    - fetch documentation from any URL, llms.txt, or GitHub repo
+    - search across all indexed content with FTS5 BM25 + trust-tier ranking
+    - index local project files and Claude skills
+    - token-aware context budgeting for agents (knapsack packing)
+    - persistent annotations and feedback-influenced search ranking
+    - build and validate private content packages
+    - multi-source registry with trust-tier resolution
+    - global storage at ~/.agent-do/context/ (per-user, not per-project)
     commands:
-      search: "Search across all indexed content"
-      get: "Fetch doc/skill by ID: get <id> [--file F] [--full]"
-      list: "List available packages: list [--source S] [--tags T]"
-      fetch: "Fetch markdown from URL: fetch <url>"
-      fetch-llms: "Fetch llms.txt from domain: fetch-llms <domain>"
-      fetch-repo: "Fetch docs from GitHub: fetch-repo <owner/repo> [path]"
-      scan-local: "Index project files: scan-local [path]"
-      scan-skills: "Index ~/.claude/skills/"
-      sources: "List configured content sources"
-      add-source: "Register a source: add-source <name> <url|path>"
-      remove-source: "Unregister a source: remove-source <name>"
-      cache: "Cache management: cache [list|clear|pin|stats]"
-      annotate: "Attach note: annotate <id> <note>"
-      feedback: "Rate a package: feedback <id> up|down"
-      budget: "Best content within token limit: budget <tokens> <query>"
-      inject: "Context blob for agents: inject [--max-tokens N]"
-      build: "Package content directory: build <dir> [-o output]"
-      validate: "Check frontmatter + structure: validate <dir>"
-      status: "Sources, cache stats, index freshness"
-      init: "Initialize ~/.agent-do/context/"
+      search: Search across all indexed content
+      get: 'Fetch doc/skill by ID: get <id> [--file F] [--full]'
+      list: 'List available packages: list [--source S] [--tags T]'
+      fetch: 'Fetch markdown from URL: fetch <url>'
+      fetch-llms: 'Fetch llms.txt from domain: fetch-llms <domain>'
+      fetch-repo: 'Fetch docs from GitHub: fetch-repo <owner/repo> [path]'
+      scan-local: 'Index project files: scan-local [path]'
+      scan-skills: Index ~/.claude/skills/
+      sources: List configured content sources
+      add-source: 'Register a source: add-source <name> <url|path>'
+      remove-source: 'Unregister a source: remove-source <name>'
+      cache: 'Cache management: cache [list|clear|pin|stats]'
+      annotate: 'Attach note: annotate <id> <note>'
+      feedback: 'Rate a package: feedback <id> up|down'
+      budget: 'Best content within token limit: budget <tokens> <query>'
+      inject: 'Context blob for agents: inject [--max-tokens N]'
+      build: 'Package content directory: build <dir> [-o output]'
+      validate: 'Check frontmatter + structure: validate <dir>'
+      status: Sources, cache stats, index freshness
+      init: Initialize ~/.agent-do/context/
     examples:
-      - intent: "fetch stripe documentation"
-        command: "agent-context fetch-llms stripe.com"
-      - intent: "search for authentication docs"
-        command: "agent-context search authentication"
-      - intent: "get the supabase docs"
-        command: "agent-context get supabase-llms"
-      - intent: "what docs do I have"
-        command: "agent-context list"
-      - intent: "give me 4000 tokens of react context"
-        command: "agent-context budget 4000 react"
-      - intent: "index my claude skills"
-        command: "agent-context scan-skills"
-      - intent: "fetch docs from a github repo"
-        command: "agent-context fetch-repo vercel/next.js docs/README.md"
-      - intent: "add a note to a doc"
-        command: "agent-context annotate stripe-llms 'Use idempotency keys for POST'"
-
+    - intent: fetch stripe documentation
+      command: agent-context fetch-llms stripe.com
+    - intent: search for authentication docs
+      command: agent-context search authentication
+    - intent: get the supabase docs
+      command: agent-context get supabase-llms
+    - intent: what docs do I have
+      command: agent-context list
+    - intent: give me 4000 tokens of react context
+      command: agent-context budget 4000 react
+    - intent: index my claude skills
+      command: agent-context scan-skills
+    - intent: fetch docs from a github repo
+      command: agent-context fetch-repo vercel/next.js docs/README.md
+    - intent: add a note to a doc
+      command: agent-context annotate stripe-llms 'Use idempotency keys for POST'
+    concurrency: read
   zpc:
-    description: "Experience journal — structured lessons, decisions, patterns per project. Complementary to context (knowledge library)."
+    description: Experience journal — structured lessons, decisions, patterns per project. Complementary to context (knowledge
+      library).
     capabilities:
-      - capture structured lessons (context/problem/solution/takeaway)
-      - log architectural decisions with options, rationale, confidence
-      - consolidate lessons into patterns via harvest
-      - inject memory context into AI agents
-      - search and query memory by tag, date, or text
-      - git history review for post-sprint lesson extraction
-      - swarm checkpoints for multi-agent phase boundary compliance
-      - lesson promotion (local → team → global)
-      - per-project storage at .zpc/ (not global)
+    - capture structured lessons (context/problem/solution/takeaway)
+    - log architectural decisions with options, rationale, confidence
+    - consolidate lessons into patterns via harvest
+    - inject memory context into AI agents
+    - search and query memory by tag, date, or text
+    - git history review for post-sprint lesson extraction
+    - swarm checkpoints for multi-agent phase boundary compliance
+    - lesson promotion (local → team → global)
+    - per-project storage at .zpc/ (not global)
     commands:
-      learn: "Capture a structured lesson"
-      decide: "Log a decision with rationale"
-      decide-batch: "Batch-log decisions from planning phase"
-      harvest: "Post-build consolidation scan"
-      query: "Search lessons, decisions, patterns"
-      patterns: "View and score patterns"
-      review: "Post-sprint lesson extraction from git history"
-      promote: "Promote lessons to team or global"
-      inject: "Emit agent context blob"
-      init: "Initialize .zpc/ in a project"
-      status: "Memory snapshot with health check"
-      checkpoint: "Swarm phase boundary check"
-      profile: "View/update project profile"
+      learn: Capture a structured lesson
+      decide: Log a decision with rationale
+      decide-batch: Batch-log decisions from planning phase
+      harvest: Post-build consolidation scan
+      query: Search lessons, decisions, patterns
+      patterns: View and score patterns
+      review: Post-sprint lesson extraction from git history
+      promote: Promote lessons to team or global
+      inject: Emit agent context blob
+      init: Initialize .zpc/ in a project
+      status: Memory snapshot with health check
+      checkpoint: Swarm phase boundary check
+      profile: View/update project profile
     examples:
-      - intent: "log a lesson about mypy"
-        command: "agent-zpc learn 'type checking' 'mypy missed Optional' 'added strict mode' 'always use --strict' --tags mypy,typing"
-      - intent: "what decisions have we made"
-        command: "agent-zpc query --type decisions"
-      - intent: "batch log planning decisions"
-        command: "echo 'Color | oklch dark | perceptual' | agent-zpc decide-batch --tags design"
-      - intent: "check swarm phase boundary"
-        command: "agent-zpc checkpoint --phase 'Phase 2' --agents 'agent-a,agent-b'"
-      - intent: "review sprint and extract lessons from git"
-        command: "agent-zpc review --since HEAD~20 --dry-run"
-      - intent: "auto-extract lessons from recent work"
-        command: "agent-zpc review --auto --phase 'Sprint 3'"
-      - intent: "consolidate after swarm build"
-        command: "agent-zpc harvest"
-      - intent: "check memory status"
-        command: "agent-zpc status"
-      - intent: "search for docker lessons"
-        command: "agent-zpc query --tag docker"
-      - intent: "set up zpc in this project"
-        command: "agent-zpc init"
-
+    - intent: log a lesson about mypy
+      command: agent-zpc learn 'type checking' 'mypy missed Optional' 'added strict mode' 'always use --strict' --tags mypy,typing
+    - intent: what decisions have we made
+      command: agent-zpc query --type decisions
+    - intent: batch log planning decisions
+      command: echo 'Color | oklch dark | perceptual' | agent-zpc decide-batch --tags design
+    - intent: check swarm phase boundary
+      command: agent-zpc checkpoint --phase 'Phase 2' --agents 'agent-a,agent-b'
+    - intent: review sprint and extract lessons from git
+      command: agent-zpc review --since HEAD~20 --dry-run
+    - intent: auto-extract lessons from recent work
+      command: agent-zpc review --auto --phase 'Sprint 3'
+    - intent: consolidate after swarm build
+      command: agent-zpc harvest
+    - intent: check memory status
+      command: agent-zpc status
+    - intent: search for docker lessons
+      command: agent-zpc query --tag docker
+    - intent: set up zpc in this project
+      command: agent-zpc init
+    concurrency: mixed
   tui:
-    description: "Control any terminal/TUI application via tmux"
+    description: Control any terminal/TUI application via tmux
     capabilities:
-      - spawn terminal applications
-      - send keystrokes
-      - capture screen state
-      - wait for text/patterns
+    - spawn terminal applications
+    - send keystrokes
+    - capture screen state
+    - wait for text/patterns
     commands:
-      spawn: "Start a new TUI session"
-      snapshot: "Capture current screen"
-      send: "Send keys to session"
-      type: "Type text into session"
-      wait: "Wait for condition"
-      kill: "Kill a session"
-      list: "List active sessions"
+      spawn: Start a new TUI session
+      snapshot: Capture current screen
+      send: Send keys to session
+      type: Type text into session
+      wait: Wait for condition
+      kill: Kill a session
+      list: List active sessions
     examples:
-      - intent: "start htop"
-        command: "agent-tui spawn htop"
-      - intent: "take a screenshot of session 1"
-        command: "agent-tui snapshot 1"
-      - intent: "send q to htop"
-        command: "agent-tui send 1 q"
-
+    - intent: start htop
+      command: agent-tui spawn htop
+    - intent: take a screenshot of session 1
+      command: agent-tui snapshot 1
+    - intent: send q to htop
+      command: agent-tui send 1 q
+    concurrency: mixed
   ios:
-    description: "Control iOS Simulator"
+    description: Control iOS Simulator
     capabilities:
-      - tap/swipe gestures
-      - take screenshots
-      - install/launch apps
-      - get UI hierarchy
+    - tap/swipe gestures
+    - take screenshots
+    - install/launch apps
+    - get UI hierarchy
     commands:
-      tap: "Tap at coordinates: tap <x> <y>"
-      screenshot: "Capture simulator screen: screenshot [path] (saves to path or /tmp/ios-screenshot.png)"
-      launch: "Launch an app: launch <bundle-id>"
-      tree: "Get UI element tree"
-      swipe: "Swipe gesture: swipe <x1> <y1> <x2> <y2>"
-      type: "Type text: type <text>"
-      boot: "Boot simulator: boot [device-name]"
-      shutdown: "Shutdown simulator: shutdown [device-name]"
-      list: "List available simulators"
-      status: "Show booted simulator status"
+      tap: 'Tap at coordinates: tap <x> <y>'
+      screenshot: 'Capture simulator screen: screenshot [path] (saves to path or /tmp/ios-screenshot.png)'
+      launch: 'Launch an app: launch <bundle-id>'
+      tree: Get UI element tree
+      swipe: 'Swipe gesture: swipe <x1> <y1> <x2> <y2>'
+      type: 'Type text: type <text>'
+      boot: 'Boot simulator: boot [device-name]'
+      shutdown: 'Shutdown simulator: shutdown [device-name]'
+      list: List available simulators
+      status: Show booted simulator status
     examples:
-      - intent: "screenshot the iPhone simulator"
-        command: "agent-ios screenshot"
-      - intent: "take a screenshot and save to Downloads"
-        command: "agent-ios screenshot ~/Downloads/screenshot.png"
-      - intent: "save iOS screenshot to /tmp/test.png"
-        command: "agent-ios screenshot /tmp/test.png"
-      - intent: "tap at 100, 200"
-        command: "agent-ios tap 100 200"
-      - intent: "launch Safari"
-        command: "agent-ios launch com.apple.mobilesafari"
-      - intent: "boot the simulator"
-        command: "agent-ios boot"
-      - intent: "boot iPhone 15 Pro"
-        command: "agent-ios boot 'iPhone 15 Pro'"
-      - intent: "shutdown the simulator"
-        command: "agent-ios shutdown"
-
+    - intent: screenshot the iPhone simulator
+      command: agent-ios screenshot
+    - intent: take a screenshot and save to Downloads
+      command: agent-ios screenshot ~/Downloads/screenshot.png
+    - intent: save iOS screenshot to /tmp/test.png
+      command: agent-ios screenshot /tmp/test.png
+    - intent: tap at 100, 200
+      command: agent-ios tap 100 200
+    - intent: launch Safari
+      command: agent-ios launch com.apple.mobilesafari
+    - intent: boot the simulator
+      command: agent-ios boot
+    - intent: boot iPhone 15 Pro
+      command: agent-ios boot 'iPhone 15 Pro'
+    - intent: shutdown the simulator
+      command: agent-ios shutdown
+    concurrency: mixed
   macos:
-    description: "Control native macOS desktop applications via accessibility APIs"
+    description: Control native macOS desktop applications via accessibility APIs
     capabilities:
-      - click buttons and UI elements
-      - type text into fields
-      - read UI element tree
-      - navigate menus
+    - click buttons and UI elements
+    - type text into fields
+    - read UI element tree
+    - navigate menus
     commands:
-      click: "Click an element"
-      type: "Type text"
-      tree: "Get UI hierarchy"
-      find: "Find elements"
-      focus: "Focus an application"
-      menu: "Navigate menus"
+      click: Click an element
+      type: Type text
+      tree: Get UI hierarchy
+      find: Find elements
+      focus: Focus an application
+      menu: Navigate menus
     examples:
-      - intent: "click the Save button in Photoshop"
-        command: "agent-macos click Photoshop --title Save"
-      - intent: "type hello into the search field"
-        command: "agent-macos type --role textfield hello"
-      - intent: "get the UI tree of Finder"
-        command: "agent-macos tree Finder"
-
+    - intent: click the Save button in Photoshop
+      command: agent-macos click Photoshop --title Save
+    - intent: type hello into the search field
+      command: agent-macos type --role textfield hello
+    - intent: get the UI tree of Finder
+      command: agent-macos tree Finder
+    concurrency: mixed
   repl:
-    description: "Control interactive REPLs (Python, Node, psql, etc.)"
+    description: Control interactive REPLs (Python, Node, psql, etc.)
     capabilities:
-      - spawn REPL sessions
-      - send commands
-      - read output
-      - detect prompts
+    - spawn REPL sessions
+    - send commands
+    - read output
+    - detect prompts
     commands:
-      spawn: "Start a REPL"
-      send: "Send command to REPL"
-      read: "Read REPL output"
-      list: "List active REPLs"
-      kill: "Kill a REPL session"
+      spawn: Start a REPL
+      send: Send command to REPL
+      read: Read REPL output
+      list: List active REPLs
+      kill: Kill a REPL session
     examples:
-      - intent: "start a python REPL"
-        command: "agent-repl spawn python"
-      - intent: "send x = 42 to my python session"
-        command: "agent-repl send 1 'x = 42'"
-      - intent: "read output from python"
-        command: "agent-repl read 1"
-
+    - intent: start a python REPL
+      command: agent-repl spawn python
+    - intent: send x = 42 to my python session
+      command: agent-repl send 1 'x = 42'
+    - intent: read output from python
+      command: agent-repl read 1
+    concurrency: mixed
   docker:
-    description: "Control Docker containers"
+    description: Control Docker containers
     capabilities:
-      - list/start/stop containers
-      - view logs
-      - execute commands
-      - manage compose stacks
+    - list/start/stop containers
+    - view logs
+    - execute commands
+    - manage compose stacks
     commands:
-      ps: "List containers"
-      logs: "View container logs"
-      exec: "Run command in container"
-      shell: "Interactive shell"
-      start: "Start container"
-      stop: "Stop container"
-      compose: "Docker compose operations"
+      ps: List containers
+      logs: View container logs
+      exec: Run command in container
+      shell: Interactive shell
+      start: Start container
+      stop: Stop container
+      compose: Docker compose operations
     examples:
-      - intent: "show running containers"
-        command: "agent-docker ps"
-      - intent: "view logs for postgres container"
-        command: "agent-docker logs postgres"
-      - intent: "run bash in my-container"
-        command: "agent-docker shell my-container"
-
+    - intent: show running containers
+      command: agent-docker ps
+    - intent: view logs for postgres container
+      command: agent-docker logs postgres
+    - intent: run bash in my-container
+      command: agent-docker shell my-container
+    concurrency: write
   ide:
-    description: "Control VS Code/Cursor editor"
+    description: Control VS Code/Cursor editor
     capabilities:
-      - open files and folders
-      - run commands
-      - navigate code
-      - manage extensions
+    - open files and folders
+    - run commands
+    - navigate code
+    - manage extensions
     commands:
-      open: "Open file or folder"
-      run: "Run editor command"
-      goto: "Go to line/symbol"
-      search: "Search in files"
-      terminal: "Run in integrated terminal"
+      open: Open file or folder
+      run: Run editor command
+      goto: Go to line/symbol
+      search: Search in files
+      terminal: Run in integrated terminal
     examples:
-      - intent: "open src/main.py in VS Code"
-        command: "agent-ide open src/main.py"
-      - intent: "go to line 42"
-        command: "agent-ide goto 42"
-      - intent: "search for TODO"
-        command: "agent-ide search TODO"
-
+    - intent: open src/main.py in VS Code
+      command: agent-ide open src/main.py
+    - intent: go to line 42
+      command: agent-ide goto 42
+    - intent: search for TODO
+      command: agent-ide search TODO
+    concurrency: read
   ssh:
-    description: "Control remote server sessions"
+    description: Control remote server sessions
     capabilities:
-      - connect to remote servers
-      - execute commands
-      - transfer files
-      - manage sessions
+    - connect to remote servers
+    - execute commands
+    - transfer files
+    - manage sessions
     commands:
-      connect: "Connect to server"
-      exec: "Execute remote command"
-      upload: "Upload file"
-      download: "Download file"
-      list: "List active sessions"
+      connect: Connect to server
+      exec: Execute remote command
+      upload: Upload file
+      download: Download file
+      list: List active sessions
     examples:
-      - intent: "connect to production server"
-        command: "agent-ssh connect prod"
-      - intent: "run df -h on server1"
-        command: "agent-ssh exec server1 'df -h'"
-
+    - intent: connect to production server
+      command: agent-ssh connect prod
+    - intent: run df -h on server1
+      command: agent-ssh exec server1 'df -h'
+    concurrency: write
   android:
-    description: "Control Android Emulator"
+    description: Control Android Emulator
     capabilities:
-      - tap/swipe gestures
-      - take screenshots
-      - install/launch apps
-      - send intents
+    - tap/swipe gestures
+    - take screenshots
+    - install/launch apps
+    - send intents
     commands:
-      tap: "Tap at coordinates"
-      screenshot: "Capture emulator screen"
-      launch: "Launch an app"
-      install: "Install APK"
-      shell: "Run adb shell command"
+      tap: Tap at coordinates
+      screenshot: Capture emulator screen
+      launch: Launch an app
+      install: Install APK
+      shell: Run adb shell command
     examples:
-      - intent: "screenshot the Android emulator"
-        command: "agent-android screenshot"
-      - intent: "launch Chrome on Android"
-        command: "agent-android launch com.android.chrome"
-
+    - intent: screenshot the Android emulator
+      command: agent-android screenshot
+    - intent: launch Chrome on Android
+      command: agent-android launch com.android.chrome
+    concurrency: mixed
   db:
-    description: "Control database clients"
+    description: Control database clients
     capabilities:
-      - connect to databases
-      - run queries
-      - export data
-      - manage schemas
+    - connect to databases
+    - run queries
+    - export data
+    - manage schemas
     commands:
-      connect: "Connect to database"
-      query: "Run SQL query"
-      export: "Export query results"
-      tables: "List tables"
-      describe: "Describe table schema"
+      connect: Connect to database
+      query: Run SQL query
+      export: Export query results
+      tables: List tables
+      describe: Describe table schema
     examples:
-      - intent: "show all tables in postgres"
-        command: "agent-db tables --db postgres"
-      - intent: "run SELECT * FROM users"
-        command: "agent-db query 'SELECT * FROM users'"
-
+    - intent: show all tables in postgres
+      command: agent-db tables --db postgres
+    - intent: run SELECT * FROM users
+      command: agent-db query 'SELECT * FROM users'
+    concurrency: mixed
   k8s:
-    description: "Control Kubernetes clusters"
+    description: Control Kubernetes clusters
     capabilities:
-      - manage pods and deployments
-      - view logs
-      - port forwarding
-      - apply manifests
+    - manage pods and deployments
+    - view logs
+    - port forwarding
+    - apply manifests
     commands:
-      pods: "List pods"
-      logs: "View pod logs"
-      exec: "Execute in pod"
-      apply: "Apply manifest"
-      port-forward: "Forward port"
+      pods: List pods
+      logs: View pod logs
+      exec: Execute in pod
+      apply: Apply manifest
+      port-forward: Forward port
     examples:
-      - intent: "show all pods"
-        command: "agent-k8s pods"
-      - intent: "view logs for api pod"
-        command: "agent-k8s logs api"
-
+    - intent: show all pods
+      command: agent-k8s pods
+    - intent: view logs for api pod
+      command: agent-k8s logs api
+    concurrency: write
   git:
-    description: "Enhanced git operations"
+    description: Enhanced git operations
     capabilities:
-      - commit with AI messages
-      - manage branches
-      - resolve conflicts
-      - interactive rebase
+    - commit with AI messages
+    - manage branches
+    - resolve conflicts
+    - interactive rebase
     commands:
-      commit: "Commit with message"
-      branch: "Branch operations"
-      diff: "Show diff"
-      log: "Show log"
-      stash: "Stash changes"
+      commit: Commit with message
+      branch: Branch operations
+      diff: Show diff
+      log: Show log
+      stash: Stash changes
     examples:
-      - intent: "commit all changes"
-        command: "agent-git commit"
-      - intent: "show recent commits"
-        command: "agent-git log"
-
+    - intent: commit all changes
+      command: agent-git commit
+    - intent: show recent commits
+      command: agent-git log
+    concurrency: mixed
   debug:
-    description: "Control debuggers"
+    description: Control debuggers
     capabilities:
-      - set breakpoints
-      - step through code
-      - inspect variables
-      - manage sessions
+    - set breakpoints
+    - step through code
+    - inspect variables
+    - manage sessions
     commands:
-      break: "Set breakpoint"
-      continue: "Continue execution"
-      step: "Step over/into/out"
-      print: "Print variable"
-      backtrace: "Show call stack"
+      break: Set breakpoint
+      continue: Continue execution
+      step: Step over/into/out
+      print: Print variable
+      backtrace: Show call stack
     examples:
-      - intent: "set breakpoint at line 42"
-        command: "agent-debug break 42"
-      - intent: "print the value of x"
-        command: "agent-debug print x"
-
+    - intent: set breakpoint at line 42
+      command: agent-debug break 42
+    - intent: print the value of x
+      command: agent-debug print x
+    concurrency: read
   jupyter:
-    description: "Control Jupyter notebooks"
+    description: Control Jupyter notebooks
     capabilities:
-      - run cells
-      - create notebooks
-      - manage kernels
-      - export notebooks
+    - run cells
+    - create notebooks
+    - manage kernels
+    - export notebooks
     commands:
-      run: "Run cell"
-      create: "Create notebook"
-      export: "Export notebook"
-      kernel: "Manage kernel"
+      run: Run cell
+      create: Create notebook
+      export: Export notebook
+      kernel: Manage kernel
     examples:
-      - intent: "run all cells"
-        command: "agent-jupyter run --all"
-      - intent: "restart kernel"
-        command: "agent-jupyter kernel restart"
-
+    - intent: run all cells
+      command: agent-jupyter run --all
+    - intent: restart kernel
+      command: agent-jupyter kernel restart
+    concurrency: mixed
   api:
-    description: "API testing and interaction"
+    description: API testing and interaction
     capabilities:
-      - make HTTP requests
-      - test endpoints
-      - mock responses
-      - manage collections
+    - make HTTP requests
+    - test endpoints
+    - mock responses
+    - manage collections
     commands:
-      get: "HTTP GET request"
-      post: "HTTP POST request"
-      put: "HTTP PUT request"
-      delete: "HTTP DELETE request"
-      test: "Run API test"
+      get: HTTP GET request
+      post: HTTP POST request
+      put: HTTP PUT request
+      delete: HTTP DELETE request
+      test: Run API test
     examples:
-      - intent: "GET /api/users"
-        command: "agent-api get /api/users"
-      - intent: "POST to /api/login"
-        command: "agent-api post /api/login"
-
+    - intent: GET /api/users
+      command: agent-api get /api/users
+    - intent: POST to /api/login
+      command: agent-api post /api/login
+    concurrency: read
   clipboard:
-    description: "Cross-app clipboard management"
+    description: Cross-app clipboard management
     capabilities:
-      - copy/paste text
-      - copy images
-      - clipboard history
+    - copy/paste text
+    - copy images
+    - clipboard history
     commands:
-      copy: "Copy to clipboard"
-      paste: "Paste from clipboard"
-      history: "Show clipboard history"
-      clear: "Clear clipboard"
+      copy: Copy to clipboard
+      paste: Paste from clipboard
+      history: Show clipboard history
+      clear: Clear clipboard
     examples:
-      - intent: "copy hello to clipboard"
-        command: "agent-clipboard copy 'hello'"
-      - intent: "show clipboard history"
-        command: "agent-clipboard history"
-
+    - intent: copy hello to clipboard
+      command: agent-clipboard copy 'hello'
+    - intent: show clipboard history
+      command: agent-clipboard history
+    concurrency: read
   ocr:
-    description: "Screen text extraction"
+    description: Screen text extraction
     capabilities:
-      - extract text from screen
-      - extract from images
-      - find text location
+    - extract text from screen
+    - extract from images
+    - find text location
     commands:
-      screen: "OCR entire screen"
-      region: "OCR screen region"
-      file: "OCR image file"
-      find: "Find text on screen"
+      screen: OCR entire screen
+      region: OCR screen region
+      file: OCR image file
+      find: Find text on screen
     examples:
-      - intent: "extract text from screen"
-        command: "agent-ocr screen"
-      - intent: "find where 'Submit' button is"
-        command: "agent-ocr find 'Submit'"
-
+    - intent: extract text from screen
+      command: agent-ocr screen
+    - intent: find where 'Submit' button is
+      command: agent-ocr find 'Submit'
+    concurrency: read
   screen:
-    description: "Vision-based screen perception and control (macOS)"
+    description: Vision-based screen perception and control (macOS)
     capabilities:
-      - capture screenshots across multiple displays
-      - OCR text extraction from screen
-      - detect and locate UI elements
-      - mouse click, move, and keyboard control
-      - find text on screen with fuzzy matching
+    - capture screenshots across multiple displays
+    - OCR text extraction from screen
+    - detect and locate UI elements
+    - mouse click, move, and keyboard control
+    - find text on screen with fuzzy matching
     commands:
-      snapshot: "Capture screen with OCR: snapshot [display] [--no-ocr] [--output path]"
-      displays: "List connected displays"
-      elements: "List detected text elements from last snapshot"
-      find: "Find text on screen: find <text> [--exact]"
-      click: "Click at coordinates or text: click <x> <y> | click --text <text>"
-      type: "Type text: type <text>"
-      press: "Press key: press <key>"
-      cursor: "Get/move cursor: cursor | move <x> <y>"
-      scroll: "Scroll: scroll <direction>"
+      snapshot: 'Capture screen with OCR: snapshot [display] [--no-ocr] [--output path]'
+      displays: List connected displays
+      elements: List detected text elements from last snapshot
+      find: 'Find text on screen: find <text> [--exact]'
+      click: 'Click at coordinates or text: click <x> <y> | click --text <text>'
+      type: 'Type text: type <text>'
+      press: 'Press key: press <key>'
+      cursor: 'Get/move cursor: cursor | move <x> <y>'
+      scroll: 'Scroll: scroll <direction>'
     examples:
-      - intent: "capture the screen"
-        command: "agent-screen snapshot"
-      - intent: "find text on screen"
-        command: "agent-screen find 'Submit'"
-      - intent: "click on text"
-        command: "agent-screen click --text 'OK'"
-      - intent: "type text"
-        command: "agent-screen type 'hello world'"
-
+    - intent: capture the screen
+      command: agent-screen snapshot
+    - intent: find text on screen
+      command: agent-screen find 'Submit'
+    - intent: click on text
+      command: agent-screen click --text 'OK'
+    - intent: type text
+      command: agent-screen type 'hello world'
+    concurrency: read
   vision:
-    description: "AI-first visual perception with object detection, OCR, and face detection"
+    description: AI-first visual perception with object detection, OCR, and face detection
     capabilities:
-      - capture from webcam, screen, window, video file, or iOS simulator
-      - YOLO object detection and counting
-      - OCR text extraction from frames
-      - face detection and identification
-      - motion detection
-      - vision LLM analysis
+    - capture from webcam, screen, window, video file, or iOS simulator
+    - YOLO object detection and counting
+    - OCR text extraction from frames
+    - face detection and identification
+    - motion detection
+    - vision LLM analysis
     commands:
-      source: "Set capture source: source webcam|screen|window|file|image|ios|rtsp"
-      snapshot: "Capture frame with analysis: snapshot [--yolo] [--ocr] [--faces] [--all]"
-      detect: "Run YOLO detection: detect [--classes person] [--annotate]"
-      count: "Count objects: count [class]"
-      ocr: "Extract text: ocr [--region x,y,w,h] [--find text]"
-      faces: "Detect faces: faces [--identify]"
-      status: "Show current source"
+      source: 'Set capture source: source webcam|screen|window|file|image|ios|rtsp'
+      snapshot: 'Capture frame with analysis: snapshot [--yolo] [--ocr] [--faces] [--all]'
+      detect: 'Run YOLO detection: detect [--classes person] [--annotate]'
+      count: 'Count objects: count [class]'
+      ocr: 'Extract text: ocr [--region x,y,w,h] [--find text]'
+      faces: 'Detect faces: faces [--identify]'
+      status: Show current source
     examples:
-      - intent: "detect objects on screen"
-        command: "agent-vision source screen && agent-vision snapshot --yolo"
-      - intent: "extract text from an image"
-        command: "agent-vision source image photo.png && agent-vision ocr"
-      - intent: "count people in webcam"
-        command: "agent-vision source webcam && agent-vision count person"
-      - intent: "detect faces"
-        command: "agent-vision snapshot --faces"
-
+    - intent: detect objects on screen
+      command: agent-vision source screen && agent-vision snapshot --yolo
+    - intent: extract text from an image
+      command: agent-vision source image photo.png && agent-vision ocr
+    - intent: count people in webcam
+      command: agent-vision source webcam && agent-vision count person
+    - intent: detect faces
+      command: agent-vision snapshot --faces
+    concurrency: read
   slack:
-    description: "Control Slack"
+    description: Control Slack
     capabilities:
-      - send messages
-      - read channels
-      - manage reactions
-      - upload files
+    - send messages
+    - read channels
+    - manage reactions
+    - upload files
     commands:
-      send: "Send message"
-      read: "Read channel"
-      react: "Add reaction"
-      upload: "Upload file"
+      send: Send message
+      read: Read channel
+      react: Add reaction
+      upload: Upload file
     examples:
-      - intent: "post 'deploy complete' to #engineering"
-        command: "agent-slack send '#engineering' 'deploy complete'"
-      - intent: "read #general"
-        command: "agent-slack read '#general'"
-
+    - intent: 'post ''deploy complete'' to #engineering'
+      command: agent-slack send '#engineering' 'deploy complete'
+    - intent: 'read #general'
+      command: agent-slack read '#general'
+    concurrency: mixed
   discord:
-    description: "Control Discord"
+    description: Control Discord
     capabilities:
-      - send messages
-      - read channels
-      - manage servers
+    - send messages
+    - read channels
+    - manage servers
     commands:
-      send: "Send message"
-      read: "Read channel"
-      join: "Join voice channel"
+      send: Send message
+      read: Read channel
+      join: Join voice channel
     examples:
-      - intent: "send hello to #general"
-        command: "agent-discord send '#general' 'hello'"
-
+    - intent: 'send hello to #general'
+      command: agent-discord send '#general' 'hello'
+    concurrency: mixed
   email:
-    description: "Control email"
+    description: Control email
     capabilities:
-      - send emails
-      - read inbox
-      - search messages
-      - manage folders
+    - send emails
+    - read inbox
+    - search messages
+    - manage folders
     commands:
-      send: "Send email"
-      read: "Read inbox"
-      search: "Search emails"
+      send: Send email
+      read: Read inbox
+      search: Search emails
     examples:
-      - intent: "send email to john@example.com"
-        command: "agent-email send john@example.com"
-      - intent: "read my inbox"
-        command: "agent-email read"
-
+    - intent: send email to john@example.com
+      command: agent-email send john@example.com
+    - intent: read my inbox
+      command: agent-email read
+    concurrency: mixed
   calendar:
-    description: "Control calendar"
+    description: Control calendar
     capabilities:
-      - create events
-      - list events
-      - manage invites
+    - create events
+    - list events
+    - manage invites
     commands:
-      create: "Create event"
-      list: "List events"
-      delete: "Delete event"
+      create: Create event
+      list: List events
+      delete: Delete event
     examples:
-      - intent: "show today's events"
-        command: "agent-calendar list --today"
-      - intent: "create meeting at 3pm"
-        command: "agent-calendar create 'Meeting' --time 15:00"
-
+    - intent: show today's events
+      command: agent-calendar list --today
+    - intent: create meeting at 3pm
+      command: agent-calendar create 'Meeting' --time 15:00
+    concurrency: mixed
   notion:
-    description: "Control Notion"
+    description: Control Notion
     capabilities:
-      - create pages
-      - update content
-      - query databases
+    - create pages
+    - update content
+    - query databases
     commands:
-      create: "Create page"
-      update: "Update page"
-      query: "Query database"
+      create: Create page
+      update: Update page
+      query: Query database
     examples:
-      - intent: "create a new page"
-        command: "agent-notion create 'New Page'"
-
+    - intent: create a new page
+      command: agent-notion create 'New Page'
+    concurrency: mixed
   linear:
-    description: "Control Linear"
+    description: Control Linear
     capabilities:
-      - create issues
-      - update status
-      - manage projects
+    - create issues
+    - update status
+    - manage projects
     commands:
-      create: "Create issue"
-      update: "Update issue"
-      list: "List issues"
+      create: Create issue
+      update: Update issue
+      list: List issues
     examples:
-      - intent: "create a bug report"
-        command: "agent-linear create --type bug"
-      - intent: "list my issues"
-        command: "agent-linear list --mine"
-
+    - intent: create a bug report
+      command: agent-linear create --type bug
+    - intent: list my issues
+      command: agent-linear list --mine
+    concurrency: mixed
   figma:
-    description: "Control Figma"
+    description: Control Figma
     capabilities:
-      - export assets
-      - read design specs
-      - manage components
+    - export assets
+    - read design specs
+    - manage components
     commands:
-      export: "Export assets"
-      inspect: "Inspect element"
-      list: "List components"
+      export: Export assets
+      inspect: Inspect element
+      list: List components
     examples:
-      - intent: "export icons from design"
-        command: "agent-figma export --icons"
-
+    - intent: export icons from design
+      command: agent-figma export --icons
+    concurrency: read
   sheets:
-    description: "Control Google Sheets"
+    description: Control Google Sheets
     capabilities:
-      - read/write cells
-      - create sheets
-      - run formulas
+    - read/write cells
+    - create sheets
+    - run formulas
     commands:
-      read: "Read cells"
-      write: "Write cells"
-      create: "Create sheet"
+      read: Read cells
+      write: Write cells
+      create: Create sheet
     examples:
-      - intent: "read A1:B10 from my sheet"
-        command: "agent-sheets read A1:B10"
-
+    - intent: read A1:B10 from my sheet
+      command: agent-sheets read A1:B10
+    concurrency: mixed
   excel:
-    description: "AI-first Excel CLI for workbook automation"
+    description: AI-first Excel CLI for workbook automation
     capabilities:
-      - open and create Excel workbooks
-      - read/write cells and ranges
-      - manage sheets (create, rename, delete, copy)
-      - set formulas and formatting
-      - export to CSV and PDF
-      - insert/delete rows and columns
+    - open and create Excel workbooks
+    - read/write cells and ranges
+    - manage sheets (create, rename, delete, copy)
+    - set formulas and formatting
+    - export to CSV and PDF
+    - insert/delete rows and columns
     commands:
-      open: "Open workbook: open <path>"
-      new: "Create workbook: new [path]"
-      save: "Save workbook: save [path]"
-      snapshot: "Sheet overview: snapshot [--range A1:Z50] [--used] [--headers]"
-      get: "Read cell/range: get <cell|range>"
-      set: "Write cell/range: set <cell> <value>"
-      fill: "Fill range: fill <range> <value>"
-      formula: "Set formula: formula <cell> <expr>"
-      sheets: "List sheets"
-      sheet: "Switch/manage sheets: sheet <name|new|rename|delete>"
-      export: "Export: export csv|pdf <path>"
+      open: 'Open workbook: open <path>'
+      new: 'Create workbook: new [path]'
+      save: 'Save workbook: save [path]'
+      snapshot: 'Sheet overview: snapshot [--range A1:Z50] [--used] [--headers]'
+      get: 'Read cell/range: get <cell|range>'
+      set: 'Write cell/range: set <cell> <value>'
+      fill: 'Fill range: fill <range> <value>'
+      formula: 'Set formula: formula <cell> <expr>'
+      sheets: List sheets
+      sheet: 'Switch/manage sheets: sheet <name|new|rename|delete>'
+      export: 'Export: export csv|pdf <path>'
     examples:
-      - intent: "open a spreadsheet"
-        command: "agent-excel open data.xlsx"
-      - intent: "read cell A1"
-        command: "agent-excel get A1"
-      - intent: "set cell B2 to 100"
-        command: "agent-excel set B2 100"
-      - intent: "export sheet to CSV"
-        command: "agent-excel export csv output.csv"
-      - intent: "get sheet overview"
-        command: "agent-excel snapshot --headers"
-
+    - intent: open a spreadsheet
+      command: agent-excel open data.xlsx
+    - intent: read cell A1
+      command: agent-excel get A1
+    - intent: set cell B2 to 100
+      command: agent-excel set B2 100
+    - intent: export sheet to CSV
+      command: agent-excel export csv output.csv
+    - intent: get sheet overview
+      command: agent-excel snapshot --headers
+    concurrency: mixed
   pdf:
-    description: "Control PDF operations"
+    description: Control PDF operations
     capabilities:
-      - read PDF content
-      - merge/split PDFs
-      - extract text
+    - read PDF content
+    - merge/split PDFs
+    - extract text
     commands:
-      read: "Read PDF"
-      merge: "Merge PDFs"
-      split: "Split PDF"
-      extract: "Extract text"
+      read: Read PDF
+      merge: Merge PDFs
+      split: Split PDF
+      extract: Extract text
     examples:
-      - intent: "extract text from document.pdf"
-        command: "agent-pdf extract document.pdf"
-
+    - intent: extract text from document.pdf
+      command: agent-pdf extract document.pdf
+    concurrency: mixed
   pdf2md:
-    description: "Convert PDF files to Markdown"
+    description: Convert PDF files to Markdown
     capabilities:
-      - convert PDF to markdown
-      - auto-detect tabular vs prose PDFs
-      - batch convert directories
-      - preserve table layout for AI consumption
+    - convert PDF to markdown
+    - auto-detect tabular vs prose PDFs
+    - batch convert directories
+    - preserve table layout for AI consumption
     commands:
-      convert: "Convert PDF to markdown"
-      batch: "Batch convert directory of PDFs"
-      snapshot: "Show available tools and PDFs"
+      convert: Convert PDF to markdown
+      batch: Batch convert directory of PDFs
+      snapshot: Show available tools and PDFs
     examples:
-      - intent: "convert report.pdf to markdown"
-        command: "agent-pdf2md convert report.pdf"
-      - intent: "convert all PDFs in current directory"
-        command: "agent-pdf2md batch ."
-      - intent: "convert spreadsheet PDF preserving table layout"
-        command: "agent-pdf2md convert data.pdf --mode table"
-
+    - intent: convert report.pdf to markdown
+      command: agent-pdf2md convert report.pdf
+    - intent: convert all PDFs in current directory
+      command: agent-pdf2md batch .
+    - intent: convert spreadsheet PDF preserving table layout
+      command: agent-pdf2md convert data.pdf --mode table
+    concurrency: read
   cloud:
-    description: "Control cloud providers (AWS, GCP, Azure)"
+    description: Control cloud providers (AWS, GCP, Azure)
     capabilities:
-      - manage resources
-      - deploy services
-      - view metrics
+    - manage resources
+    - deploy services
+    - view metrics
     commands:
-      list: "List resources"
-      deploy: "Deploy service"
-      logs: "View logs"
+      list: List resources
+      deploy: Deploy service
+      logs: View logs
     examples:
-      - intent: "list EC2 instances"
-        command: "agent-cloud list ec2"
-
+    - intent: list EC2 instances
+      command: agent-cloud list ec2
+    concurrency: mixed
   gcp:
-    description: "Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials"
+    description: Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation
+      for OAuth credentials
     capabilities:
-      - authenticate via service account key, access token, or gcloud CLI
-      - list and inspect GCP projects
-      - enable and disable APIs on a project
-      - manage service accounts and keys
-      - create, read, and delete secrets via Secret Manager
-      - create OAuth consent screen and web app credentials via Console automation
-      - full account snapshot as JSON
+    - authenticate via service account key, access token, or gcloud CLI
+    - list and inspect GCP projects
+    - enable and disable APIs on a project
+    - manage service accounts and keys
+    - create, read, and delete secrets via Secret Manager
+    - create OAuth consent screen and web app credentials via Console automation
+    - full account snapshot as JSON
     commands:
-      auth status: "Current auth state and token validity"
-      auth token: "Print access token for piping"
-      projects: "List accessible projects"
-      project show: "Project details (number, state, labels)"
-      apis: "List enabled APIs"
-      api-enable: "Enable an API on a project"
-      api-disable: "Disable an API on a project"
-      service-accounts: "List service accounts"
-      sa-create: "Create service account"
-      sa-key-create: "Create and download service account key"
-      sa-key-list: "List keys for a service account"
-      secrets: "List secrets in Secret Manager"
-      secret-get: "Read latest secret version"
-      secret-set: "Create or update a secret"
-      secret-del: "Delete a secret"
-      oauth-setup: "Full OAuth workflow: consent screen + client creation (Console automation)"
-      oauth-create: "Create OAuth web app client (Console automation)"
-      oauth-list: "List OAuth credentials (Console automation)"
-      snapshot: "Full account state as JSON"
+      auth status: Current auth state and token validity
+      auth token: Print access token for piping
+      projects: List accessible projects
+      project show: Project details (number, state, labels)
+      apis: List enabled APIs
+      api-enable: Enable an API on a project
+      api-disable: Disable an API on a project
+      service-accounts: List service accounts
+      sa-create: Create service account
+      sa-key-create: Create and download service account key
+      sa-key-list: List keys for a service account
+      secrets: List secrets in Secret Manager
+      secret-get: Read latest secret version
+      secret-set: Create or update a secret
+      secret-del: Delete a secret
+      oauth-setup: 'Full OAuth workflow: consent screen + client creation (Console automation)'
+      oauth-create: Create OAuth web app client (Console automation)
+      oauth-list: List OAuth credentials (Console automation)
+      snapshot: Full account state as JSON
     examples:
-      - intent: "list my GCP projects"
-        command: "agent-gcp projects"
-      - intent: "show GCP project details"
-        command: "agent-gcp project show my-project"
-      - intent: "check GCP auth status"
-        command: "agent-gcp auth status"
-      - intent: "enable secret manager API"
-        command: "agent-gcp api-enable my-project secretmanager.googleapis.com"
-      - intent: "list enabled GCP APIs"
-        command: "agent-gcp apis my-project"
-      - intent: "list GCP secrets"
-        command: "agent-gcp secrets my-project"
-      - intent: "set a GCP secret"
-        command: "agent-gcp secret-set my-project GOOGLE_CLIENT_ID my-client-id"
-      - intent: "get a GCP secret value"
-        command: "agent-gcp secret-get my-project GOOGLE_CLIENT_ID"
-      - intent: "create GCP service account"
-        command: "agent-gcp sa-create my-project my-service --display \"My Service\""
-      - intent: "create Google OAuth credentials"
-        command: "agent-gcp oauth-setup my-project --name \"My App\" --redirect \"http://localhost:3333/api/auth/callback/google\""
-      - intent: "get GCP account snapshot"
-        command: "agent-gcp snapshot"
-
+    - intent: list my GCP projects
+      command: agent-gcp projects
+    - intent: show GCP project details
+      command: agent-gcp project show my-project
+    - intent: check GCP auth status
+      command: agent-gcp auth status
+    - intent: enable secret manager API
+      command: agent-gcp api-enable my-project secretmanager.googleapis.com
+    - intent: list enabled GCP APIs
+      command: agent-gcp apis my-project
+    - intent: list GCP secrets
+      command: agent-gcp secrets my-project
+    - intent: set a GCP secret
+      command: agent-gcp secret-set my-project GOOGLE_CLIENT_ID my-client-id
+    - intent: get a GCP secret value
+      command: agent-gcp secret-get my-project GOOGLE_CLIENT_ID
+    - intent: create GCP service account
+      command: agent-gcp sa-create my-project my-service --display "My Service"
+    - intent: create Google OAuth credentials
+      command: agent-gcp oauth-setup my-project --name "My App" --redirect "http://localhost:3333/api/auth/callback/google"
+    - intent: get GCP account snapshot
+      command: agent-gcp snapshot
+    concurrency: mixed
   cloudflare:
-    description: "Cloudflare account management — zones, analytics (GraphQL), DNS, Workers, Pages, R2, security events"
+    description: Cloudflare account management — zones, analytics (GraphQL), DNS, Workers, Pages, R2, security events
     capabilities:
-      - list and inspect zones (domains)
-      - visitor analytics via GraphQL (uniques, page views, countries, top pages)
-      - request and bandwidth analytics with cache ratios
-      - threat and security event analysis
-      - DNS record management (list, add, update, delete)
-      - Workers script listing and inspection
-      - Pages project listing and deployment details
-      - R2 bucket and object listing
-      - firewall event queries (WAF, rate limit, bot)
-      - full account snapshot as JSON
+    - list and inspect zones (domains)
+    - visitor analytics via GraphQL (uniques, page views, countries, top pages)
+    - request and bandwidth analytics with cache ratios
+    - threat and security event analysis
+    - DNS record management (list, add, update, delete)
+    - Workers script listing and inspection
+    - Pages project listing and deployment details
+    - R2 bucket and object listing
+    - firewall event queries (WAF, rate limit, bot)
+    - full account snapshot as JSON
     commands:
-      zones: "List all zones (domains)"
-      zone: "Zone details: zone <domain>"
-      visitors: "Visitor summary: visitors <zone> [--since 24h|7d]"
-      top-pages: "Top pages by requests: top-pages <zone> [--since 24h]"
-      top-countries: "Top countries: top-countries <zone> [--since 7d]"
-      requests: "Request summary (total, cached, threats): requests <zone>"
-      bandwidth: "Bandwidth summary: bandwidth <zone>"
-      threats: "Security threats: threats <zone> [--since 24h]"
-      analytics: "Raw GraphQL: analytics <zone> '<query>'"
-      dns: "List DNS records: dns <zone>"
-      dns-add: "Add record: dns-add <zone> <type> <name> <content>"
-      dns-del: "Delete record: dns-del <zone> <record-id>"
-      dns-update: "Update record: dns-update <zone> <record-id> <content>"
-      workers: "List Workers scripts"
-      pages: "List Pages projects"
-      r2-buckets: "List R2 buckets"
-      firewall-events: "Firewall events: firewall-events <zone> [--since 24h]"
-      snapshot: "Full account state as JSON"
+      zones: List all zones (domains)
+      zone: 'Zone details: zone <domain>'
+      visitors: 'Visitor summary: visitors <zone> [--since 24h|7d]'
+      top-pages: 'Top pages by requests: top-pages <zone> [--since 24h]'
+      top-countries: 'Top countries: top-countries <zone> [--since 7d]'
+      requests: 'Request summary (total, cached, threats): requests <zone>'
+      bandwidth: 'Bandwidth summary: bandwidth <zone>'
+      threats: 'Security threats: threats <zone> [--since 24h]'
+      analytics: 'Raw GraphQL: analytics <zone> ''<query>'''
+      dns: 'List DNS records: dns <zone>'
+      dns-add: 'Add record: dns-add <zone> <type> <name> <content>'
+      dns-del: 'Delete record: dns-del <zone> <record-id>'
+      dns-update: 'Update record: dns-update <zone> <record-id> <content>'
+      workers: List Workers scripts
+      pages: List Pages projects
+      r2-buckets: List R2 buckets
+      firewall-events: 'Firewall events: firewall-events <zone> [--since 24h]'
+      snapshot: Full account state as JSON
     examples:
-      - intent: "who visited my site today"
-        command: "agent-cloudflare visitors recognitionoracle.com"
-      - intent: "what pages get the most traffic"
-        command: "agent-cloudflare top-pages recognitionoracle.com --since 7d"
-      - intent: "show DNS records"
-        command: "agent-cloudflare dns recognitionoracle.com"
-      - intent: "list my cloudflare zones"
-        command: "agent-cloudflare zones"
-      - intent: "any security threats"
-        command: "agent-cloudflare threats recognitionoracle.com --since 7d"
-      - intent: "add a DNS record"
-        command: "agent-cloudflare dns-add recognitionoracle.com CNAME www target.example.com"
-      - intent: "cloudflare account overview"
-        command: "agent-cloudflare snapshot"
-
+    - intent: who visited my site today
+      command: agent-cloudflare visitors recognitionoracle.com
+    - intent: what pages get the most traffic
+      command: agent-cloudflare top-pages recognitionoracle.com --since 7d
+    - intent: show DNS records
+      command: agent-cloudflare dns recognitionoracle.com
+    - intent: list my cloudflare zones
+      command: agent-cloudflare zones
+    - intent: any security threats
+      command: agent-cloudflare threats recognitionoracle.com --since 7d
+    - intent: add a DNS record
+      command: agent-cloudflare dns-add recognitionoracle.com CNAME www target.example.com
+    - intent: cloudflare account overview
+      command: agent-cloudflare snapshot
+    concurrency: mixed
   clerk:
-    description: "Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates, roles"
+    description: Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates,
+      roles
     capabilities:
-      - user CRUD with ban/lock/unlock lifecycle
-      - organization CRUD with memberships, invitations, and roles
-      - session management (list, revoke)
-      - OAuth application management with secret rotation
-      - enterprise SSO connections (SAML, OIDC)
-      - JWT template management
-      - invitation and allowlist/blocklist management
-      - JWKS retrieval
+    - user CRUD with ban/lock/unlock lifecycle
+    - organization CRUD with memberships, invitations, and roles
+    - session management (list, revoke)
+    - OAuth application management with secret rotation
+    - enterprise SSO connections (SAML, OIDC)
+    - JWT template management
+    - invitation and allowlist/blocklist management
+    - JWKS retrieval
     commands:
-      users: "List/search users: users [--query q]"
-      user: "User details: user <id-or-email>"
-      user-create: "Create user: user-create --email <e> --first <f> --last <l>"
-      orgs: "List organizations: orgs [--query q]"
-      org: "Organization details: org <id-or-slug>"
-      org-members: "List org members: org-members <org>"
-      org-add-member: "Add member: org-add-member <org> <user> [--role admin]"
-      roles: "List organization roles"
-      sessions: "List sessions: sessions [--user-id u] [--status s]"
-      oauth-apps: "List OAuth applications"
-      oauth-app-create: "Create OAuth app: oauth-app-create <name> --callback <url>"
-      enterprise-connections: "List enterprise SSO connections"
-      jwt-templates: "List JWT templates"
-      snapshot: "Full instance state as JSON"
+      users: 'List/search users: users [--query q]'
+      user: 'User details: user <id-or-email>'
+      user-create: 'Create user: user-create --email <e> --first <f> --last <l>'
+      orgs: 'List organizations: orgs [--query q]'
+      org: 'Organization details: org <id-or-slug>'
+      org-members: 'List org members: org-members <org>'
+      org-add-member: 'Add member: org-add-member <org> <user> [--role admin]'
+      roles: List organization roles
+      sessions: 'List sessions: sessions [--user-id u] [--status s]'
+      oauth-apps: List OAuth applications
+      oauth-app-create: 'Create OAuth app: oauth-app-create <name> --callback <url>'
+      enterprise-connections: List enterprise SSO connections
+      jwt-templates: List JWT templates
+      snapshot: Full instance state as JSON
     examples:
-      - intent: "list Clerk users"
-        command: "agent-clerk users"
-      - intent: "search for a user"
-        command: "agent-clerk users --query \"erik\""
-      - intent: "list organizations"
-        command: "agent-clerk orgs"
-      - intent: "add member to organization"
-        command: "agent-clerk org-add-member my-org user_abc --role admin"
-      - intent: "create an OAuth app in Clerk"
-        command: "agent-clerk oauth-app-create \"My App\" --callback \"http://localhost:3000/callback\""
-      - intent: "Clerk instance overview"
-        command: "agent-clerk snapshot"
-
+    - intent: list Clerk users
+      command: agent-clerk users
+    - intent: search for a user
+      command: agent-clerk users --query "erik"
+    - intent: list organizations
+      command: agent-clerk orgs
+    - intent: add member to organization
+      command: agent-clerk org-add-member my-org user_abc --role admin
+    - intent: create an OAuth app in Clerk
+      command: agent-clerk oauth-app-create "My App" --callback "http://localhost:3000/callback"
+    - intent: Clerk instance overview
+      command: agent-clerk snapshot
+    concurrency: mixed
   ci:
-    description: "Control CI/CD pipelines"
+    description: Control CI/CD pipelines
     capabilities:
-      - trigger builds
-      - view status
-      - manage pipelines
+    - trigger builds
+    - view status
+    - manage pipelines
     commands:
-      trigger: "Trigger build"
-      status: "View status"
-      logs: "View build logs"
+      trigger: Trigger build
+      status: View status
+      logs: View build logs
     examples:
-      - intent: "trigger deploy pipeline"
-        command: "agent-ci trigger deploy"
-
+    - intent: trigger deploy pipeline
+      command: agent-ci trigger deploy
+    concurrency: write
   logs:
-    description: "Control log aggregation"
+    description: Control log aggregation
     capabilities:
-      - search logs
-      - tail logs
-      - filter by service
+    - search logs
+    - tail logs
+    - filter by service
     commands:
-      search: "Search logs"
-      tail: "Tail logs"
-      filter: "Filter logs"
+      search: Search logs
+      tail: Tail logs
+      filter: Filter logs
     examples:
-      - intent: "search logs for errors"
-        command: "agent-logs search 'error'"
-
+    - intent: search logs for errors
+      command: agent-logs search 'error'
+    concurrency: read
   metrics:
-    description: "Control metrics/monitoring"
+    description: Control metrics/monitoring
     capabilities:
-      - view dashboards
-      - query metrics
-      - set alerts
+    - view dashboards
+    - query metrics
+    - set alerts
     commands:
-      query: "Query metrics"
-      dashboard: "View dashboard"
-      alert: "Manage alerts"
+      query: Query metrics
+      dashboard: View dashboard
+      alert: Manage alerts
     examples:
-      - intent: "show CPU usage"
-        command: "agent-metrics query cpu_usage"
-
+    - intent: show CPU usage
+      command: agent-metrics query cpu_usage
+    concurrency: read
   vm:
-    description: "Control virtual machines"
+    description: Control virtual machines
     capabilities:
-      - start/stop VMs
-      - snapshot
-      - manage images
+    - start/stop VMs
+    - snapshot
+    - manage images
     commands:
-      start: "Start VM"
-      stop: "Stop VM"
-      snapshot: "Create snapshot"
-      list: "List VMs"
+      start: Start VM
+      stop: Stop VM
+      snapshot: Create snapshot
+      list: List VMs
     examples:
-      - intent: "start dev VM"
-        command: "agent-vm start dev"
-
+    - intent: start dev VM
+      command: agent-vm start dev
+    concurrency: write
   network:
-    description: "Network diagnostics"
+    description: Network diagnostics
     capabilities:
-      - check connectivity
-      - trace routes
-      - scan ports
+    - check connectivity
+    - trace routes
+    - scan ports
     commands:
-      ping: "Ping host"
-      trace: "Trace route"
-      scan: "Scan ports"
-      whois: "WHOIS lookup"
+      ping: Ping host
+      trace: Trace route
+      scan: Scan ports
+      whois: WHOIS lookup
     examples:
-      - intent: "what's using port 3000"
-        command: "agent-network scan --port 3000"
-      - intent: "ping google.com"
-        command: "agent-network ping google.com"
-
+    - intent: what's using port 3000
+      command: agent-network scan --port 3000
+    - intent: ping google.com
+      command: agent-network ping google.com
+    concurrency: read
   dns:
-    description: "DNS management"
+    description: DNS management
     capabilities:
-      - lookup records
-      - manage zones
-      - update entries
+    - lookup records
+    - manage zones
+    - update entries
     commands:
-      lookup: "DNS lookup"
-      update: "Update record"
-      list: "List records"
+      lookup: DNS lookup
+      update: Update record
+      list: List records
     examples:
-      - intent: "lookup DNS for example.com"
-        command: "agent-dns lookup example.com"
-
+    - intent: lookup DNS for example.com
+      command: agent-dns lookup example.com
+    concurrency: read
   image:
-    description: "Image processing"
+    description: Image processing
     capabilities:
-      - resize/crop images
-      - convert formats
-      - apply filters
+    - resize/crop images
+    - convert formats
+    - apply filters
     commands:
-      resize: "Resize image"
-      crop: "Crop image"
-      convert: "Convert format"
+      resize: Resize image
+      crop: Crop image
+      convert: Convert format
     examples:
-      - intent: "resize image to 800x600"
-        command: "agent-image resize input.png --size 800x600"
-
+    - intent: resize image to 800x600
+      command: agent-image resize input.png --size 800x600
+    concurrency: mixed
   video:
-    description: "Video processing"
+    description: Video processing
     capabilities:
-      - trim/merge videos
-      - extract frames
-      - convert formats
+    - trim/merge videos
+    - extract frames
+    - convert formats
     commands:
-      trim: "Trim video"
-      merge: "Merge videos"
-      extract: "Extract frames"
+      trim: Trim video
+      merge: Merge videos
+      extract: Extract frames
     examples:
-      - intent: "extract frames from video"
-        command: "agent-video extract video.mp4"
-
+    - intent: extract frames from video
+      command: agent-video extract video.mp4
+    concurrency: mixed
   audio:
-    description: "Audio processing"
+    description: Audio processing
     capabilities:
-      - convert formats
-      - trim/merge
-      - transcribe
+    - convert formats
+    - trim/merge
+    - transcribe
     commands:
-      convert: "Convert format"
-      trim: "Trim audio"
-      transcribe: "Transcribe audio"
+      convert: Convert format
+      trim: Trim audio
+      transcribe: Transcribe audio
     examples:
-      - intent: "transcribe recording.mp3"
-        command: "agent-audio transcribe recording.mp3"
-
+    - intent: transcribe recording.mp3
+      command: agent-audio transcribe recording.mp3
+    concurrency: mixed
   serial:
-    description: "Serial port communication"
+    description: Serial port communication
     capabilities:
-      - list ports
-      - send/receive data
-      - monitor traffic
+    - list ports
+    - send/receive data
+    - monitor traffic
     commands:
-      list: "List ports"
-      send: "Send data"
-      monitor: "Monitor port"
+      list: List ports
+      send: Send data
+      monitor: Monitor port
     examples:
-      - intent: "list serial ports"
-        command: "agent-serial list"
-
+    - intent: list serial ports
+      command: agent-serial list
+    concurrency: mixed
   midi:
-    description: "MIDI control"
+    description: MIDI control
     capabilities:
-      - send MIDI messages
-      - list devices
-      - record/playback
+    - send MIDI messages
+    - list devices
+    - record/playback
     commands:
-      list: "List devices"
-      send: "Send message"
-      play: "Play file"
+      list: List devices
+      send: Send message
+      play: Play file
     examples:
-      - intent: "list MIDI devices"
-        command: "agent-midi list"
-
+    - intent: list MIDI devices
+      command: agent-midi list
+    concurrency: mixed
   homekit:
-    description: "HomeKit/smart home control"
+    description: HomeKit/smart home control
     capabilities:
-      - control devices
-      - run scenes
-      - check status
+    - control devices
+    - run scenes
+    - check status
     commands:
-      list: "List devices"
-      set: "Set device state"
-      scene: "Run scene"
+      list: List devices
+      set: Set device state
+      scene: Run scene
     examples:
-      - intent: "turn on living room lights"
-        command: "agent-homekit set 'Living Room' on"
-
+    - intent: turn on living room lights
+      command: agent-homekit set 'Living Room' on
+    concurrency: mixed
   bluetooth:
-    description: "Bluetooth control"
+    description: Bluetooth control
     capabilities:
-      - scan devices
-      - connect/disconnect
-      - send data
+    - scan devices
+    - connect/disconnect
+    - send data
     commands:
-      scan: "Scan devices"
-      connect: "Connect device"
-      disconnect: "Disconnect device"
+      scan: Scan devices
+      connect: Connect device
+      disconnect: Disconnect device
     examples:
-      - intent: "scan for bluetooth devices"
-        command: "agent-bluetooth scan"
-
+    - intent: scan for bluetooth devices
+      command: agent-bluetooth scan
+    concurrency: mixed
   usb:
-    description: "USB device management"
+    description: USB device management
     capabilities:
-      - list devices
-      - mount/unmount
-      - eject
+    - list devices
+    - mount/unmount
+    - eject
     commands:
-      list: "List devices"
-      mount: "Mount device"
-      eject: "Eject device"
+      list: List devices
+      mount: Mount device
+      eject: Eject device
     examples:
-      - intent: "list USB devices"
-        command: "agent-usb list"
-
+    - intent: list USB devices
+      command: agent-usb list
+    concurrency: read
   printer:
-    description: "Printer control"
+    description: Printer control
     capabilities:
-      - list printers
-      - print documents
-      - check status
+    - list printers
+    - print documents
+    - check status
     commands:
-      list: "List printers"
-      print: "Print document"
-      status: "Check status"
+      list: List printers
+      print: Print document
+      status: Check status
     examples:
-      - intent: "print document.pdf"
-        command: "agent-printer print document.pdf"
-
+    - intent: print document.pdf
+      command: agent-printer print document.pdf
+    concurrency: write
   agent:
-    description: "Control AI coding agent sessions (Claude, OpenCode, Droid, Amp)"
+    description: Control AI coding agent sessions (Claude, OpenCode, Droid, Amp)
     capabilities:
-      - spawn agent sessions in tmux
-      - send prompts to agents
-      - monitor agent status (ready/busy)
-      - accept/reject changes
-      - capture screen output
+    - spawn agent sessions in tmux
+    - send prompts to agents
+    - monitor agent status (ready/busy)
+    - accept/reject changes
+    - capture screen output
     commands:
-      spawn: "Start agent: spawn <type> [--session <name>] [--dir <path>]"
-      list: "List active agent sessions"
-      send: "Send prompt: send <prompt> [--session <name>] [--nowait]"
-      snapshot: "Capture screen: snapshot [--session <name>] [--json]"
-      status: "Check status: status [--session <name>]"
-      accept: "Accept changes (press y)"
-      reject: "Reject changes (press n)"
-      cancel: "Cancel operation (Ctrl+C)"
-      kill: "Kill session: kill [--session <name>]"
-      attach: "Get tmux attach command"
+      spawn: 'Start agent: spawn <type> [--session <name>] [--dir <path>]'
+      list: List active agent sessions
+      send: 'Send prompt: send <prompt> [--session <name>] [--nowait]'
+      snapshot: 'Capture screen: snapshot [--session <name>] [--json]'
+      status: 'Check status: status [--session <name>]'
+      accept: Accept changes (press y)
+      reject: Reject changes (press n)
+      cancel: Cancel operation (Ctrl+C)
+      kill: 'Kill session: kill [--session <name>]'
+      attach: Get tmux attach command
     examples:
-      - intent: "start Claude in my project"
-        command: "agent-agent spawn claude --dir ~/myproject"
-      - intent: "send a task to the agent"
-        command: "agent-agent send 'fix the login bug'"
-      - intent: "check if the agent is done"
-        command: "agent-agent status"
-      - intent: "accept the agent's changes"
-        command: "agent-agent accept"
-      - intent: "list running agents"
-        command: "agent-agent list"
-
+    - intent: start Claude in my project
+      command: agent-agent spawn claude --dir ~/myproject
+    - intent: send a task to the agent
+      command: agent-agent send 'fix the login bug'
+    - intent: check if the agent is done
+      command: agent-agent status
+    - intent: accept the agent's changes
+      command: agent-agent accept
+    - intent: list running agents
+      command: agent-agent list
+    concurrency: mixed
   3d:
-    description: "3D modeling and rendering control"
+    description: 3D modeling and rendering control
     capabilities:
-      - view 3D files
-      - convert between formats
-      - render to image
-      - get model info
+    - view 3D files
+    - convert between formats
+    - render to image
+    - get model info
     commands:
-      view: "Open 3D file in viewer"
-      convert: "Convert between formats"
-      render: "Render to image"
-      info: "Show model information"
+      view: Open 3D file in viewer
+      convert: Convert between formats
+      render: Render to image
+      info: Show model information
     examples:
-      - intent: "view model.obj"
-        command: "agent-3d view model.obj"
-      - intent: "convert model.stl to obj"
-        command: "agent-3d convert model.stl model.obj"
-
+    - intent: view model.obj
+      command: agent-3d view model.obj
+    - intent: convert model.stl to obj
+      command: agent-3d convert model.stl model.obj
+    concurrency: mixed
   cad:
-    description: "CAD file operations"
+    description: CAD file operations
     capabilities:
-      - view CAD files
-      - convert formats
-      - measure dimensions
+    - view CAD files
+    - convert formats
+    - measure dimensions
     commands:
-      view: "Open CAD file"
-      convert: "Convert between formats"
-      measure: "Get measurements"
-      info: "Show file information"
+      view: Open CAD file
+      convert: Convert between formats
+      measure: Get measurements
+      info: Show file information
     examples:
-      - intent: "view drawing.dxf"
-        command: "agent-cad view drawing.dxf"
-      - intent: "convert part.step to stl"
-        command: "agent-cad convert part.step part.stl"
-
+    - intent: view drawing.dxf
+      command: agent-cad view drawing.dxf
+    - intent: convert part.step to stl
+      command: agent-cad convert part.step part.stl
+    concurrency: mixed
   browse:
-    description: "AI-first headless browser automation with @ref element selection, SSO/MFA login handoff, persistent sessions"
+    description: AI-first headless browser automation with @ref element selection, SSO/MFA login handoff, persistent sessions
     capabilities:
-      - navigate web pages
-      - interact with elements via @ref snapshots
-      - fill forms, click buttons, upload files
-      - SSO/MFA login via headed browser with automatic handoff to headless
-      - persistent session save/load with cookies injected at context creation
-      - capture API traffic and generate reusable curl skills
-      - extract text, HTML, attributes from elements
-      - credential management via OS keychain
-      - tab management (new, switch, close, list)
-      - vision-powered element finding and page description
-      - autonomous goal execution and page exploration
+    - navigate web pages
+    - interact with elements via @ref snapshots
+    - fill forms, click buttons, upload files
+    - SSO/MFA login via headed browser with automatic handoff to headless
+    - persistent session save/load with cookies injected at context creation
+    - capture API traffic and generate reusable curl skills
+    - extract text, HTML, attributes from elements
+    - credential management via OS keychain
+    - tab management (new, switch, close, list)
+    - vision-powered element finding and page description
+    - autonomous goal execution and page exploration
     commands:
-      open: "Navigate to URL: open <url>"
-      snapshot: "Get page structure with @refs: snapshot [-i] [-c] [--csv] [--md]"
-      click: "Click element: click <@ref>"
-      fill: "Clear and fill input: fill <@ref> <text>"
-      type: "Append text: type <@ref> <text>"
-      press: "Press key: press <key>"
-      get: "Read data: get text|value|attr|title|url <@ref>"
-      wait: "Wait for condition: wait <ms|selector|--text|--stable>"
-      login: "SSO/MFA auth: login <url> opens headed browser; login done [--save <name>] transfers auth to headless; login status; login cancel"
-      session: "Persistent auth: session save|load|list|delete|export|import <name>"
-      capture: "API traffic capture: capture start|stop <name>|status"
-      api: "Replay captured API: api <name> <function>|list|show|test|delete"
-      auth: "Credentials: auth check-creds|store-creds|login|get-creds <domain>"
-      tab: "Tab management: tab list|new|close|<n>"
-      viewport: "Set viewport size: viewport <width> <height>"
-      screenshot: "Capture screenshot: screenshot [path] [--full]"
-      vision: "AI vision: vision describe|find|click|analyze|explain|compare"
-      agent: "Autonomous: agent goal|explore|explain|recover"
+      open: 'Navigate to URL: open <url>'
+      snapshot: 'Get page structure with @refs: snapshot [-i] [-c] [--csv] [--md]'
+      click: 'Click element: click <@ref>'
+      fill: 'Clear and fill input: fill <@ref> <text>'
+      type: 'Append text: type <@ref> <text>'
+      press: 'Press key: press <key>'
+      get: 'Read data: get text|value|attr|title|url <@ref>'
+      wait: 'Wait for condition: wait <ms|selector|--text|--stable>'
+      login: 'SSO/MFA auth: login <url> opens headed browser; login done [--save <name>] transfers auth to headless; login
+        status; login cancel'
+      session: 'Persistent auth: session save|load|list|delete|export|import <name>'
+      capture: 'API traffic capture: capture start|stop <name>|status'
+      api: 'Replay captured API: api <name> <function>|list|show|test|delete'
+      auth: 'Credentials: auth check-creds|store-creds|login|get-creds <domain>'
+      tab: 'Tab management: tab list|new|close|<n>'
+      viewport: 'Set viewport size: viewport <width> <height>'
+      screenshot: 'Capture screenshot: screenshot [path] [--full]'
+      vision: 'AI vision: vision describe|find|click|analyze|explain|compare'
+      agent: 'Autonomous: agent goal|explore|explain|recover'
     examples:
-      - intent: "open a website"
-        command: "agent-browse open https://example.com"
-      - intent: "get interactive elements"
-        command: "agent-browse snapshot -i"
-      - intent: "click a button"
-        command: "agent-browse click @e3"
-      - intent: "fill in a form field"
-        command: "agent-browse fill @e5 'hello world'"
-      - intent: "login with SSO"
-        command: "agent-browse login https://app.example.com"
-      - intent: "finish SSO login and save session"
-        command: "agent-browse login done --save mysite"
-      - intent: "restore a saved session"
-        command: "agent-browse session load mysite"
-      - intent: "capture API traffic"
-        command: "agent-browse capture start"
-      - intent: "wait for page to load"
-        command: "agent-browse wait --stable"
-
+    - intent: open a website
+      command: agent-browse open https://example.com
+    - intent: get interactive elements
+      command: agent-browse snapshot -i
+    - intent: click a button
+      command: agent-browse click @e3
+    - intent: fill in a form field
+      command: agent-browse fill @e5 'hello world'
+    - intent: login with SSO
+      command: agent-browse login https://app.example.com
+    - intent: finish SSO login and save session
+      command: agent-browse login done --save mysite
+    - intent: restore a saved session
+      command: agent-browse session load mysite
+    - intent: capture API traffic
+      command: agent-browse capture start
+    - intent: wait for page to load
+      command: agent-browse wait --stable
+    concurrency: mixed
   burp:
-    description: "Burp Suite automation"
+    description: Burp Suite automation
     capabilities:
-      - control proxy
-      - scan targets
-      - view issues
+    - control proxy
+    - scan targets
+    - view issues
     commands:
-      launch: "Launch Burp Suite"
-      proxy: "Control system proxy"
-      scan: "Scan target URL"
-      issues: "List found issues"
+      launch: Launch Burp Suite
+      proxy: Control system proxy
+      scan: Scan target URL
+      issues: List found issues
     examples:
-      - intent: "enable burp proxy"
-        command: "agent-burp proxy on"
-      - intent: "scan example.com"
-        command: "agent-burp scan https://example.com"
-
+    - intent: enable burp proxy
+      command: agent-burp proxy on
+    - intent: scan example.com
+      command: agent-burp scan https://example.com
+    concurrency: mixed
   wireshark:
-    description: "Network packet capture and analysis"
+    description: Network packet capture and analysis
     capabilities:
-      - capture packets
-      - analyze pcap files
-      - filter traffic
+    - capture packets
+    - analyze pcap files
+    - filter traffic
     commands:
-      capture: "Start packet capture"
-      read: "Read pcap file"
-      filter: "Filter packets"
-      stats: "Show statistics"
+      capture: Start packet capture
+      read: Read pcap file
+      filter: Filter packets
+      stats: Show statistics
     examples:
-      - intent: "capture on en0"
-        command: "agent-wireshark capture en0"
-      - intent: "read capture.pcap"
-        command: "agent-wireshark read capture.pcap"
-
+    - intent: capture on en0
+      command: agent-wireshark capture en0
+    - intent: read capture.pcap
+      command: agent-wireshark read capture.pcap
+    concurrency: read
   ghidra:
-    description: "Ghidra reverse engineering automation"
+    description: Ghidra reverse engineering automation
     capabilities:
-      - analyze binaries
-      - decompile functions
-      - list functions/imports
+    - analyze binaries
+    - decompile functions
+    - list functions/imports
     commands:
-      analyze: "Analyze binary"
-      decompile: "Decompile function"
-      functions: "List functions"
-      strings: "Extract strings"
+      analyze: Analyze binary
+      decompile: Decompile function
+      functions: List functions
+      strings: Extract strings
     examples:
-      - intent: "decompile main from myapp"
-        command: "agent-ghidra decompile myapp main"
-      - intent: "list functions in binary"
-        command: "agent-ghidra functions program.exe"
-
+    - intent: decompile main from myapp
+      command: agent-ghidra decompile myapp main
+    - intent: list functions in binary
+      command: agent-ghidra functions program.exe
+    concurrency: read
   latex:
-    description: "LaTeX document compilation"
+    description: LaTeX document compilation
     capabilities:
-      - compile documents
-      - watch for changes
-      - manage templates
+    - compile documents
+    - watch for changes
+    - manage templates
     commands:
-      compile: "Compile LaTeX to PDF"
-      watch: "Watch and auto-compile"
-      preview: "Compile and open"
-      template: "Create from template"
+      compile: Compile LaTeX to PDF
+      watch: Watch and auto-compile
+      preview: Compile and open
+      template: Create from template
     examples:
-      - intent: "compile paper.tex"
-        command: "agent-latex compile paper.tex"
-      - intent: "create article template"
-        command: "agent-latex template article"
-
+    - intent: compile paper.tex
+      command: agent-latex compile paper.tex
+    - intent: create article template
+      command: agent-latex template article
+    concurrency: write
   colab:
-    description: "Google Colab notebook management"
+    description: Google Colab notebook management
     capabilities:
-      - open notebooks in Colab
-      - convert notebooks
-      - run locally
+    - open notebooks in Colab
+    - convert notebooks
+    - run locally
     commands:
-      open: "Open notebook in Colab"
-      convert: "Convert to/from ipynb"
-      run: "Execute notebook"
-      new: "Create new notebook"
+      open: Open notebook in Colab
+      convert: Convert to/from ipynb
+      run: Execute notebook
+      new: Create new notebook
     examples:
-      - intent: "open notebook in colab"
-        command: "agent-colab open analysis.ipynb"
-      - intent: "convert script.py to notebook"
-        command: "agent-colab convert script.py"
-
+    - intent: open notebook in colab
+      command: agent-colab open analysis.ipynb
+    - intent: convert script.py to notebook
+      command: agent-colab convert script.py
+    concurrency: mixed
   lab:
-    description: "JupyterLab management"
+    description: JupyterLab management
     capabilities:
-      - start/stop server
-      - manage extensions
-      - open notebooks
+    - start/stop server
+    - manage extensions
+    - open notebooks
     commands:
-      start: "Start JupyterLab server"
-      stop: "Stop server"
-      open: "Open in browser"
-      extensions: "List extensions"
+      start: Start JupyterLab server
+      stop: Stop server
+      open: Open in browser
+      extensions: List extensions
     examples:
-      - intent: "start jupyterlab"
-        command: "agent-lab start"
-      - intent: "open notebook in jupyterlab"
-        command: "agent-lab open analysis.ipynb"
-
+    - intent: start jupyterlab
+      command: agent-lab start
+    - intent: open notebook in jupyterlab
+      command: agent-lab open analysis.ipynb
+    concurrency: mixed
   zoom:
-    description: "Zoom meeting control"
+    description: Zoom meeting control
     capabilities:
-      - join/start meetings
-      - control audio/video
-      - screen sharing
+    - join/start meetings
+    - control audio/video
+    - screen sharing
     commands:
-      join: "Join meeting"
-      start: "Start instant meeting"
-      mute: "Toggle mute"
-      video: "Toggle video"
-      share: "Start screen share"
+      join: Join meeting
+      start: Start instant meeting
+      mute: Toggle mute
+      video: Toggle video
+      share: Start screen share
     examples:
-      - intent: "join zoom meeting 123-456-789"
-        command: "agent-zoom join 123-456-789"
-      - intent: "start a zoom meeting"
-        command: "agent-zoom start"
-
+    - intent: join zoom meeting 123-456-789
+      command: agent-zoom join 123-456-789
+    - intent: start a zoom meeting
+      command: agent-zoom start
+    concurrency: mixed
   meet:
-    description: "Google Meet control"
+    description: Google Meet control
     capabilities:
-      - create/join meetings
-      - control audio/video
-      - chat
+    - create/join meetings
+    - control audio/video
+    - chat
     commands:
-      new: "Create new meeting"
-      join: "Join meeting"
-      mute: "Toggle microphone"
-      video: "Toggle camera"
+      new: Create new meeting
+      join: Join meeting
+      mute: Toggle microphone
+      video: Toggle camera
     examples:
-      - intent: "create new google meet"
-        command: "agent-meet new"
-      - intent: "join meet abc-defg-hij"
-        command: "agent-meet join abc-defg-hij"
-
+    - intent: create new google meet
+      command: agent-meet new
+    - intent: join meet abc-defg-hij
+      command: agent-meet join abc-defg-hij
+    concurrency: mixed
   teams:
-    description: "Microsoft Teams control"
+    description: Microsoft Teams control
     capabilities:
-      - join meetings
-      - send messages
-      - control calls
+    - join meetings
+    - send messages
+    - control calls
     commands:
-      join: "Join meeting"
-      new: "Start new meeting"
-      chat: "Send message"
-      mute: "Toggle mute"
+      join: Join meeting
+      new: Start new meeting
+      chat: Send message
+      mute: Toggle mute
     examples:
-      - intent: "start teams meeting"
-        command: "agent-teams new"
-      - intent: "chat with john in teams"
-        command: "agent-teams chat john"
-
+    - intent: start teams meeting
+      command: agent-teams new
+    - intent: chat with john in teams
+      command: agent-teams chat john
+    concurrency: mixed
   voice:
-    description: "Voice synthesis and recognition"
+    description: Voice synthesis and recognition
     capabilities:
-      - text-to-speech
-      - speech-to-text
-      - record audio
+    - text-to-speech
+    - speech-to-text
+    - record audio
     commands:
-      speak: "Text-to-speech"
-      listen: "Speech-to-text"
-      record: "Record audio"
-      transcribe: "Transcribe audio file"
+      speak: Text-to-speech
+      listen: Speech-to-text
+      record: Record audio
+      transcribe: Transcribe audio file
     examples:
-      - intent: "speak hello world"
-        command: "agent-voice speak 'Hello, world'"
-      - intent: "transcribe recording.wav"
-        command: "agent-voice transcribe recording.wav"
-
+    - intent: speak hello world
+      command: agent-voice speak 'Hello, world'
+    - intent: transcribe recording.wav
+      command: agent-voice transcribe recording.wav
+    concurrency: write
   sms:
-    description: "SMS messaging"
+    description: SMS messaging
     capabilities:
-      - send SMS
-      - read messages
-      - search conversations
+    - send SMS
+    - read messages
+    - search conversations
     commands:
-      send: "Send SMS"
-      list: "List recent messages"
-      search: "Search messages"
+      send: Send SMS
+      list: List recent messages
+      search: Search messages
     examples:
-      - intent: "send sms to +1234567890"
-        command: "agent-sms send '+1234567890' 'Hello!'"
-      - intent: "list recent sms"
-        command: "agent-sms list"
-
+    - intent: send sms to +1234567890
+      command: agent-sms send '+1234567890' 'Hello!'
+    - intent: list recent sms
+      command: agent-sms list
+    concurrency: write
   prompt:
-    description: "Prompt management and templating"
+    description: Prompt management and templating
     capabilities:
-      - save/load prompts
-      - template variables
-      - prompt library
+    - save/load prompts
+    - template variables
+    - prompt library
     commands:
-      save: "Save prompt"
-      load: "Load prompt"
-      run: "Run with variables"
-      list: "List saved prompts"
+      save: Save prompt
+      load: Load prompt
+      run: Run with variables
+      list: List saved prompts
     examples:
-      - intent: "save this prompt as explain"
-        command: "agent-prompt save explain"
-      - intent: "run explain prompt with topic=AI"
-        command: "agent-prompt run explain topic=AI"
-
+    - intent: save this prompt as explain
+      command: agent-prompt save explain
+    - intent: run explain prompt with topic=AI
+      command: agent-prompt run explain topic=AI
+    concurrency: read
   eval:
-    description: "LLM output evaluation and testing"
+    description: LLM output evaluation and testing
     capabilities:
-      - run evaluation suites
-      - compare results
-      - track metrics
+    - run evaluation suites
+    - compare results
+    - track metrics
     commands:
-      run: "Run evaluation"
-      create: "Create evaluation"
-      results: "Show results"
-      compare: "Compare runs"
+      run: Run evaluation
+      create: Create evaluation
+      results: Show results
+      compare: Compare runs
     examples:
-      - intent: "run math evaluation"
-        command: "agent-eval run math-test"
-      - intent: "show evaluation results"
-        command: "agent-eval results"
-
+    - intent: run math evaluation
+      command: agent-eval run math-test
+    - intent: show evaluation results
+      command: agent-eval results
+    concurrency: read
   memory:
-     description: "Persistent memory and context"
-     capabilities:
-       - store/recall facts
-       - manage context
-       - search memories
-     commands:
-       store: "Store memory"
-       recall: "Recall memory"
-       search: "Search memories"
-       list: "List all memories"
-     examples:
-       - intent: "remember that the project uses React"
-         command: "agent-memory store project 'Uses React'"
-       - intent: "what do I know about the project"
-         command: "agent-memory recall project"
-
+    description: Persistent memory and context
+    capabilities:
+    - store/recall facts
+    - manage context
+    - search memories
+    commands:
+      store: Store memory
+      recall: Recall memory
+      search: Search memories
+      list: List all memories
+    examples:
+    - intent: remember that the project uses React
+      command: agent-memory store project 'Uses React'
+    - intent: what do I know about the project
+      command: agent-memory recall project
+    concurrency: mixed
   manna:
-     description: "Git-backed issue tracking and context management for AI agents"
-     capabilities:
-       - track issues and dependencies
-       - manage session state
-       - store context across sessions
-       - query issue history
-     commands:
-       init: "Initialize manna repository"
-       create: "Create new issue"
-       list: "List issues"
-       show: "Show issue details"
-       update: "Update issue status"
-       delete: "Delete issue"
-       context: "Get session context"
-     examples:
-       - intent: "initialize manna"
-         command: "agent-manna init"
-       - intent: "create a new issue"
-         command: "agent-manna create 'Fix login bug'"
-       - intent: "list all issues"
-         command: "agent-manna list"
-       - intent: "show issue details"
-         command: "agent-manna show 1"
-
+    description: Git-backed issue tracking and context management for AI agents
+    capabilities:
+    - track issues and dependencies
+    - manage session state
+    - store context across sessions
+    - query issue history
+    commands:
+      init: Initialize manna repository
+      create: Create new issue
+      list: List issues
+      show: Show issue details
+      update: Update issue status
+      delete: Delete issue
+      context: Get session context
+    examples:
+    - intent: initialize manna
+      command: agent-manna init
+    - intent: create a new issue
+      command: agent-manna create 'Fix login bug'
+    - intent: list all issues
+      command: agent-manna list
+    - intent: show issue details
+      command: agent-manna show 1
+    concurrency: write
   learn:
-     description: "Learning and pattern improvement"
-     capabilities:
-       - correct mistakes
-       - provide feedback
-       - view learned patterns
-     commands:
-       correct: "Correct routing mistake"
-       feedback: "Rate response"
-       patterns: "Show learned patterns"
-       stats: "Show learning stats"
-     examples:
-       - intent: "that should have been agent-ios screenshot"
-         command: "agent-learn correct 'screenshot ios' --should 'agent-ios screenshot'"
-       - intent: "that was a great response"
-         command: "agent-learn feedback 5"
-
+    description: Learning and pattern improvement
+    capabilities:
+    - correct mistakes
+    - provide feedback
+    - view learned patterns
+    commands:
+      correct: Correct routing mistake
+      feedback: Rate response
+      patterns: Show learned patterns
+      stats: Show learning stats
+    examples:
+    - intent: that should have been agent-ios screenshot
+      command: agent-learn correct 'screenshot ios' --should 'agent-ios screenshot'
+    - intent: that was a great response
+      command: agent-learn feedback 5
+    concurrency: write
   swarm:
-    description: "Multi-agent orchestration"
+    description: Multi-agent orchestration
     capabilities:
-      - spawn multiple agents
-      - parallel execution
-      - pipeline coordination
+    - spawn multiple agents
+    - parallel execution
+    - pipeline coordination
     commands:
-      spawn: "Spawn agents"
-      parallel: "Run in parallel"
-      pipeline: "Run in sequence"
-      status: "Show swarm status"
+      spawn: Spawn agents
+      parallel: Run in parallel
+      pipeline: Run in sequence
+      status: Show swarm status
     examples:
-      - intent: "run 3 agents on this task"
-        command: "agent-swarm spawn 3 'search for best practices'"
-      - intent: "run tests and linting in parallel"
-        command: "agent-swarm parallel 'test' 'lint'"
-
+    - intent: run 3 agents on this task
+      command: agent-swarm spawn 3 'search for best practices'
+    - intent: run tests and linting in parallel
+      command: agent-swarm parallel 'test' 'lint'
+    concurrency: write
   unbrowse:
-    description: "Standalone API traffic capture → reusable curl-based skills. For SSO/MFA → headless handoff, use browse login instead."
+    description: Standalone API traffic capture → reusable curl-based skills. For SSO/MFA → headless handoff, use browse login
+      instead.
     capabilities:
-      - capture XHR/fetch network traffic during manual browsing
-      - filter out static assets, CDN, and analytics noise
-      - extract authentication headers, cookies, and tokens
-      - generate source-able bash functions wrapping curl
-      - replay API calls without a browser (~100x faster)
-      - capture pipeline shared with browse via lib/capture/
+    - capture XHR/fetch network traffic during manual browsing
+    - filter out static assets, CDN, and analytics noise
+    - extract authentication headers, cookies, and tokens
+    - generate source-able bash functions wrapping curl
+    - replay API calls without a browser (~100x faster)
+    - capture pipeline shared with browse via lib/capture/
     commands:
-      capture: "Start headed browser and capture traffic: capture <url> [--headless]"
-      stop: "Stop capture and generate skill: stop <name>"
-      status: "Show capture status (requests, domains, elapsed)"
-      close: "Close browser and daemon"
-      list: "List generated skills"
-      show: "Show skill documentation: show <name>"
-      replay: "Call a skill function via curl: replay <name> <function> [args...]"
-      test: "Test GET endpoints: test <name>"
-      delete: "Remove a skill: delete <name>"
+      capture: 'Start headed browser and capture traffic: capture <url> [--headless]'
+      stop: 'Stop capture and generate skill: stop <name>'
+      status: Show capture status (requests, domains, elapsed)
+      close: Close browser and daemon
+      list: List generated skills
+      show: 'Show skill documentation: show <name>'
+      replay: 'Call a skill function via curl: replay <name> <function> [args...]'
+      test: 'Test GET endpoints: test <name>'
+      delete: 'Remove a skill: delete <name>'
     examples:
-      - intent: "capture API traffic from a website"
-        command: "agent-unbrowse capture https://api.example.com"
-      - intent: "stop capturing and save as a skill"
-        command: "agent-unbrowse stop myservice"
-      - intent: "what APIs did I capture"
-        command: "agent-unbrowse status"
-      - intent: "list my captured API skills"
-        command: "agent-unbrowse list"
-      - intent: "show endpoints for a service"
-        command: "agent-unbrowse show myservice"
-      - intent: "call the get_users API directly"
-        command: "agent-unbrowse replay myservice get_users"
-      - intent: "test if my captured APIs still work"
-        command: "agent-unbrowse test myservice"
-      - intent: "remove a captured skill"
-        command: "agent-unbrowse delete myservice"
-
+    - intent: capture API traffic from a website
+      command: agent-unbrowse capture https://api.example.com
+    - intent: stop capturing and save as a skill
+      command: agent-unbrowse stop myservice
+    - intent: what APIs did I capture
+      command: agent-unbrowse status
+    - intent: list my captured API skills
+      command: agent-unbrowse list
+    - intent: show endpoints for a service
+      command: agent-unbrowse show myservice
+    - intent: call the get_users API directly
+      command: agent-unbrowse replay myservice get_users
+    - intent: test if my captured APIs still work
+      command: agent-unbrowse test myservice
+    - intent: remove a captured skill
+      command: agent-unbrowse delete myservice
+    concurrency: mixed
   namecheap:
-    description: "Namecheap domain and DNS management — domains, DNS records (safe upsert), nameservers, SSL, availability"
+    description: Namecheap domain and DNS management — domains, DNS records (safe upsert), nameservers, SSL, availability
     capabilities:
-      - list domains with expiry dates and auto-renew status
-      - domain details (whois, nameservers, lock status)
-      - check domain availability
-      - renew domains
-      - list and manage DNS records (safe GET-merge-SET pattern)
-      - manage nameservers (custom or default)
-      - list SSL certificates
+    - list domains with expiry dates and auto-renew status
+    - domain details (whois, nameservers, lock status)
+    - check domain availability
+    - renew domains
+    - list and manage DNS records (safe GET-merge-SET pattern)
+    - manage nameservers (custom or default)
+    - list SSL certificates
     commands:
-      domains: "List all domains: domains [--expiring]"
-      domain: "Domain details: domain <name>"
-      domain-check: "Check availability: domain-check <name> [name2...]"
-      domain-renew: "Renew domain: domain-renew <name> [--years N]"
-      dns: "List DNS records: dns <domain>"
-      dns-add: "Add record (safe): dns-add <domain> <type> <host> <addr>"
-      dns-update: "Update record (safe): dns-update <domain> <host> <type> <addr>"
-      dns-del: "Delete record (safe): dns-del <domain> <host> [type]"
-      nameservers: "Show nameservers: nameservers <domain>"
-      nameservers-set: "Set custom NS: nameservers-set <domain> <ns1,ns2>"
-      ssl-list: "List SSL certificates"
-      snapshot: "Full account state as JSON"
+      domains: 'List all domains: domains [--expiring]'
+      domain: 'Domain details: domain <name>'
+      domain-check: 'Check availability: domain-check <name> [name2...]'
+      domain-renew: 'Renew domain: domain-renew <name> [--years N]'
+      dns: 'List DNS records: dns <domain>'
+      dns-add: 'Add record (safe): dns-add <domain> <type> <host> <addr>'
+      dns-update: 'Update record (safe): dns-update <domain> <host> <type> <addr>'
+      dns-del: 'Delete record (safe): dns-del <domain> <host> [type]'
+      nameservers: 'Show nameservers: nameservers <domain>'
+      nameservers-set: 'Set custom NS: nameservers-set <domain> <ns1,ns2>'
+      ssl-list: List SSL certificates
+      snapshot: Full account state as JSON
     examples:
-      - intent: "list my domains"
-        command: "agent-namecheap domains"
-      - intent: "check if a domain is available"
-        command: "agent-namecheap domain-check coolstartup.com"
-      - intent: "show DNS records"
-        command: "agent-namecheap dns example.com"
-      - intent: "add a DNS record"
-        command: "agent-namecheap dns-add example.com A www 1.2.3.4"
-      - intent: "domain expiry dates"
-        command: "agent-namecheap domains --expiring"
-
+    - intent: list my domains
+      command: agent-namecheap domains
+    - intent: check if a domain is available
+      command: agent-namecheap domain-check coolstartup.com
+    - intent: show DNS records
+      command: agent-namecheap dns example.com
+    - intent: add a DNS record
+      command: agent-namecheap dns-add example.com A www 1.2.3.4
+    - intent: domain expiry dates
+      command: agent-namecheap domains --expiring
+    concurrency: write
   okta:
-    description: "Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, authorization servers, system logs"
+    description: Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, authorization servers,
+      system logs
     capabilities:
-      - create and manage OIDC applications (web, SPA, native, service)
-      - create and manage SAML 2.0 applications
-      - manage application credentials (client ID, secret, rotation)
-      - assign and unassign users and groups to applications
-      - search users and groups
-      - manage group memberships
-      - list and inspect authorization servers, scopes, claims, policies
-      - query system logs for auth events and errors
-      - manage trusted origins (CORS, redirect)
+    - create and manage OIDC applications (web, SPA, native, service)
+    - create and manage SAML 2.0 applications
+    - manage application credentials (client ID, secret, rotation)
+    - assign and unassign users and groups to applications
+    - search users and groups
+    - manage group memberships
+    - list and inspect authorization servers, scopes, claims, policies
+    - query system logs for auth events and errors
+    - manage trusted origins (CORS, redirect)
     commands:
-      apps: "List applications: apps [--status active]"
-      app: "Application details: app <name-or-id>"
-      app-create-oidc: "Create OIDC app: app-create-oidc <label> --type web|spa|native|service --redirect-uris <uris>"
-      app-create-saml: "Create SAML app: app-create-saml <label> --sso-url <url> --audience <uri>"
-      app-update: "Update app: app-update <app> --redirect-uris <uris> --grant-types <types>"
-      app-creds: "Get credentials: app-creds <app> [--reveal]"
-      app-creds-rotate: "Rotate client secret: app-creds-rotate <app>"
-      app-assign-group: "Assign group: app-assign-group <app> <group>"
-      users: "List/search users: users [--search <query>]"
-      groups: "List/search groups: groups [--search <query>]"
-      auth-servers: "List authorization servers"
-      logs: "System logs: logs [--since 24h] [--filter <expression>]"
-      trusted-origins: "List trusted origins"
-      snapshot: "Full tenant state as JSON"
+      apps: 'List applications: apps [--status active]'
+      app: 'Application details: app <name-or-id>'
+      app-create-oidc: 'Create OIDC app: app-create-oidc <label> --type web|spa|native|service --redirect-uris <uris>'
+      app-create-saml: 'Create SAML app: app-create-saml <label> --sso-url <url> --audience <uri>'
+      app-update: 'Update app: app-update <app> --redirect-uris <uris> --grant-types <types>'
+      app-creds: 'Get credentials: app-creds <app> [--reveal]'
+      app-creds-rotate: 'Rotate client secret: app-creds-rotate <app>'
+      app-assign-group: 'Assign group: app-assign-group <app> <group>'
+      users: 'List/search users: users [--search <query>]'
+      groups: 'List/search groups: groups [--search <query>]'
+      auth-servers: List authorization servers
+      logs: 'System logs: logs [--since 24h] [--filter <expression>]'
+      trusted-origins: List trusted origins
+      snapshot: Full tenant state as JSON
     examples:
-      - intent: "list Okta applications"
-        command: "agent-okta apps"
-      - intent: "create an OIDC web app"
-        command: "agent-okta app-create-oidc \"My App\" --type web --redirect-uris \"http://localhost:3000/callback\""
-      - intent: "get app credentials"
-        command: "agent-okta app-creds \"Versova Align\""
-      - intent: "assign group to app"
-        command: "agent-okta app-assign-group \"Versova Align\" Everyone"
-      - intent: "check auth events"
-        command: "agent-okta logs --since 1h"
-      - intent: "Okta tenant overview"
-        command: "agent-okta snapshot"
-
+    - intent: list Okta applications
+      command: agent-okta apps
+    - intent: create an OIDC web app
+      command: agent-okta app-create-oidc "My App" --type web --redirect-uris "http://localhost:3000/callback"
+    - intent: get app credentials
+      command: agent-okta app-creds "Versova Align"
+    - intent: assign group to app
+      command: agent-okta app-assign-group "Versova Align" Everyone
+    - intent: check auth events
+      command: agent-okta logs --since 1h
+    - intent: Okta tenant overview
+      command: agent-okta snapshot
+    concurrency: mixed
   render:
-    description: "Control Render.com services, deploys, databases, and env vars"
+    description: Control Render.com services, deploys, databases, and env vars
     capabilities:
-      - list and manage services
-      - trigger and view deploys
-      - view logs and metrics
-      - manage environment variables
-      - manage PostgreSQL databases
-      - view custom domains and projects
+    - list and manage services
+    - trigger and view deploys
+    - view logs and metrics
+    - manage environment variables
+    - manage PostgreSQL databases
+    - view custom domains and projects
     commands:
-      services: "List all services"
-      show: "Detailed service info"
-      deploy: "Trigger deploy"
-      deploys: "List recent deploys"
-      logs: "View service logs"
-      restart: "Restart service"
-      suspend: "Suspend service"
-      resume: "Resume service"
-      scale: "Scale instances"
-      env: "List env vars"
-      env-set: "Set env var"
-      env-del: "Delete env var"
-      db: "PostgreSQL management (list, show)"
-      domains: "List custom domains"
-      metrics: "View service metrics"
-      projects: "List projects"
-      snapshot: "Full account state as JSON"
+      services: List all services
+      show: Detailed service info
+      deploy: Trigger deploy
+      deploys: List recent deploys
+      logs: View service logs
+      restart: Restart service
+      suspend: Suspend service
+      resume: Resume service
+      scale: Scale instances
+      env: List env vars
+      env-set: Set env var
+      env-del: Delete env var
+      db: PostgreSQL management (list, show)
+      domains: List custom domains
+      metrics: View service metrics
+      projects: List projects
+      snapshot: Full account state as JSON
     examples:
-      - intent: "list my render services"
-        command: "agent-render services"
-      - intent: "deploy my-api on render"
-        command: "agent-render deploy my-api"
-      - intent: "show render service details"
-        command: "agent-render show my-api"
-      - intent: "view render service logs"
-        command: "agent-render logs my-api"
-      - intent: "set env var on render"
-        command: "agent-render env-set my-api DATABASE_URL postgres://..."
-      - intent: "list render databases"
-        command: "agent-render db list"
-      - intent: "get render account snapshot"
-        command: "agent-render snapshot"
-
+    - intent: list my render services
+      command: agent-render services
+    - intent: deploy my-api on render
+      command: agent-render deploy my-api
+    - intent: show render service details
+      command: agent-render show my-api
+    - intent: view render service logs
+      command: agent-render logs my-api
+    - intent: set env var on render
+      command: agent-render env-set my-api DATABASE_URL postgres://...
+    - intent: list render databases
+      command: agent-render db list
+    - intent: get render account snapshot
+      command: agent-render snapshot
+    concurrency: write
   vercel:
-    description: "Control Vercel projects, deployments, domains, and env vars"
+    description: Control Vercel projects, deployments, domains, and env vars
     capabilities:
-      - list and manage projects
-      - trigger and inspect deployments
-      - view build logs
-      - manage environment variables
-      - view project domains
-      - list teams
+    - list and manage projects
+    - trigger and inspect deployments
+    - view build logs
+    - manage environment variables
+    - view project domains
+    - list teams
     commands:
-      projects: "List all projects"
-      show: "Project details"
-      deployments: "Recent deployments"
-      deploy: "Trigger deployment"
-      inspect: "Deployment details"
-      logs: "Build logs"
-      cancel: "Cancel deployment"
-      promote: "Promote to production"
-      env: "List env vars"
-      env-set: "Set env var"
-      env-del: "Delete env var by ID"
-      domains: "List project domains"
-      teams: "List teams"
-      snapshot: "Full account state as JSON"
+      projects: List all projects
+      show: Project details
+      deployments: Recent deployments
+      deploy: Trigger deployment
+      inspect: Deployment details
+      logs: Build logs
+      cancel: Cancel deployment
+      promote: Promote to production
+      env: List env vars
+      env-set: Set env var
+      env-del: Delete env var by ID
+      domains: List project domains
+      teams: List teams
+      snapshot: Full account state as JSON
     examples:
-      - intent: "list my vercel projects"
-        command: "agent-vercel projects"
-      - intent: "deploy my-app on vercel"
-        command: "agent-vercel deploy my-app"
-      - intent: "show vercel project details"
-        command: "agent-vercel show my-app"
-      - intent: "view vercel deployment logs"
-        command: "agent-vercel logs dpl_abc123"
-      - intent: "set env var on vercel"
-        command: "agent-vercel env-set my-app DATABASE_URL postgres://..."
-      - intent: "list vercel project domains"
-        command: "agent-vercel domains my-app"
-      - intent: "get vercel account snapshot"
-        command: "agent-vercel snapshot"
-
+    - intent: list my vercel projects
+      command: agent-vercel projects
+    - intent: deploy my-app on vercel
+      command: agent-vercel deploy my-app
+    - intent: show vercel project details
+      command: agent-vercel show my-app
+    - intent: view vercel deployment logs
+      command: agent-vercel logs dpl_abc123
+    - intent: set env var on vercel
+      command: agent-vercel env-set my-app DATABASE_URL postgres://...
+    - intent: list vercel project domains
+      command: agent-vercel domains my-app
+    - intent: get vercel account snapshot
+      command: agent-vercel snapshot
+    concurrency: write
   tail:
-    description: "Wrap dev commands, capture output to log files for AI agents"
+    description: Wrap dev commands, capture output to log files for AI agents
     capabilities:
-      - run multiple dev services with output capture
-      - individual and combined log files per session
-      - timestamped sessions with latest symlink
-      - search and filter log content
+    - run multiple dev services with output capture
+    - individual and combined log files per session
+    - timestamped sessions with latest symlink
+    - search and filter log content
     commands:
-      run: "Start services foreground: run 'name: cmd' ..."
-      start: "Start services background: start 'name: cmd' ..."
-      stop: "Stop services: stop [name]"
-      read: "Read log: read [name] [-n lines]"
-      follow: "Follow log: follow [name]"
-      grep: "Search logs: grep <pattern> [name]"
-      errors: "Show error lines: errors [name]"
-      list: "Show running services"
-      sessions: "List all sessions"
-      prune: "Remove old sessions"
-      snapshot: "Full state as JSON"
+      run: 'Start services foreground: run ''name: cmd'' ...'
+      start: 'Start services background: start ''name: cmd'' ...'
+      stop: 'Stop services: stop [name]'
+      read: 'Read log: read [name] [-n lines]'
+      follow: 'Follow log: follow [name]'
+      grep: 'Search logs: grep <pattern> [name]'
+      errors: 'Show error lines: errors [name]'
+      list: Show running services
+      sessions: List all sessions
+      prune: Remove old sessions
+      snapshot: Full state as JSON
     examples:
-      - intent: "run frontend and backend with logging"
-        command: "agent-tail start 'fe: npm run dev' 'api: uvicorn main:app'"
-      - intent: "check dev server output"
-        command: "agent-tail read fe"
-      - intent: "search for errors in logs"
-        command: "agent-tail errors"
-      - intent: "find pattern in api logs"
-        command: "agent-tail grep 'TypeError' api"
-      - intent: "stop all dev services"
-        command: "agent-tail stop"
-
+    - intent: run frontend and backend with logging
+      command: 'agent-tail start ''fe: npm run dev'' ''api: uvicorn main:app'''
+    - intent: check dev server output
+      command: agent-tail read fe
+    - intent: search for errors in logs
+      command: agent-tail errors
+    - intent: find pattern in api logs
+      command: agent-tail grep 'TypeError' api
+    - intent: stop all dev services
+      command: agent-tail stop
+    concurrency: read
   supabase:
-    description: "Supabase project management + data access (REST API, SQL via Management API, and SQL via agent-db)"
+    description: Supabase project management + data access (REST API, SQL via Management API, and SQL via agent-db)
     capabilities:
-      - list and manage projects
-      - pause and restore projects
-      - view service health
-      - manage API keys and secrets
-      - list and inspect edge functions
-      - view custom domains
-      - generate TypeScript types
-      - list organizations and regions
-      - query, update, insert, upsert, delete via PostgREST REST API (no DB password needed)
-      - run SQL via Management API (no DB password needed)
-      - run SQL migrations from .sql files via Management API
-      - run SQL queries via agent-db bridge (full SQL power, requires DB password)
-      - list tables, describe schema, sample data via agent-db
+    - list and manage projects
+    - pause and restore projects
+    - view service health
+    - manage API keys and secrets
+    - list and inspect edge functions
+    - view custom domains
+    - generate TypeScript types
+    - list organizations and regions
+    - query, update, insert, upsert, delete via PostgREST REST API (no DB password needed)
+    - run SQL via Management API (no DB password needed)
+    - run SQL migrations from .sql files via Management API
+    - run SQL queries via agent-db bridge (full SQL power, requires DB password)
+    - list tables, describe schema, sample data via agent-db
     commands:
-      projects: "List all projects"
-      show: "Project details"
-      pause: "Pause project"
-      restore: "Restore paused project"
-      health: "Service health status"
-      api-keys: "List API keys"
-      secrets: "List secrets (env vars)"
-      secret-set: "Create/update secret"
-      secret-del: "Delete secret"
-      functions: "List edge functions"
-      function-show: "Edge function details"
-      domains: "Custom hostname info"
-      types: "Generate TypeScript types"
-      orgs: "List organizations"
-      regions: "List available regions"
-      postgrest: "PostgREST config"
-      snapshot: "Full account state as JSON"
-      rest: "Read/write table via PostgREST REST API (GET, PATCH, POST, DELETE)"
-      sql: "Run SQL via Management API (no DB password needed)"
-      db-connect: "Auto-create agent-db profile and connect"
-      db-status: "Check if agent-db profile exists"
-      query: "Run SQL via agent-db (requires DB password)"
-      tables: "List tables via agent-db"
-      describe: "Describe table schema via agent-db"
-      sample: "Sample rows via agent-db"
+      projects: List all projects
+      show: Project details
+      pause: Pause project
+      restore: Restore paused project
+      health: Service health status
+      api-keys: List API keys
+      secrets: List secrets (env vars)
+      secret-set: Create/update secret
+      secret-del: Delete secret
+      functions: List edge functions
+      function-show: Edge function details
+      domains: Custom hostname info
+      types: Generate TypeScript types
+      orgs: List organizations
+      regions: List available regions
+      postgrest: PostgREST config
+      snapshot: Full account state as JSON
+      rest: Read/write table via PostgREST REST API (GET, PATCH, POST, DELETE)
+      sql: Run SQL via Management API (no DB password needed)
+      db-connect: Auto-create agent-db profile and connect
+      db-status: Check if agent-db profile exists
+      query: Run SQL via agent-db (requires DB password)
+      tables: List tables via agent-db
+      describe: Describe table schema via agent-db
+      sample: Sample rows via agent-db
     examples:
-      - intent: "list my supabase projects"
-        command: "agent-supabase projects"
-      - intent: "show supabase project details"
-        command: "agent-supabase show abcdefghijklmnopqrst"
-      - intent: "check supabase project health"
-        command: "agent-supabase health abcdefghijklmnopqrst"
-      - intent: "query supabase table"
-        command: "agent-supabase rest <ref> users --select id,email --limit 10"
-      - intent: "filter supabase data"
-        command: "agent-supabase rest <ref> orders --filter status=eq.pending"
-      - intent: "update supabase row"
-        command: "agent-supabase rest <ref> reports --update '{\"published\": false}' --filter \"slug=eq.my-report\""
-      - intent: "insert supabase row"
-        command: "agent-supabase rest <ref> users --insert '{\"name\": \"Alice\", \"email\": \"alice@example.com\"}'"
-      - intent: "upsert supabase row"
-        command: "agent-supabase rest <ref> users --upsert '{\"id\": 1, \"name\": \"Alice\"}'"
-      - intent: "delete supabase rows"
-        command: "agent-supabase rest <ref> old_logs --delete --filter \"created_at=lt.2024-01-01\""
-      - intent: "run SQL on supabase"
-        command: "agent-supabase sql <ref> \"SELECT count(*) FROM users\""
-      - intent: "create table on supabase"
-        command: "agent-supabase sql <ref> \"CREATE TABLE items (id serial primary key, name text)\""
-      - intent: "run migration file on supabase"
-        command: "agent-supabase sql <ref> --file migrations/001_init.sql"
-      - intent: "read-only SQL query on supabase"
-        command: "agent-supabase sql <ref> \"SELECT * FROM users\" --read-only"
-      - intent: "connect to supabase database directly"
-        command: "agent-supabase db-connect <ref>"
-      - intent: "list supabase tables"
-        command: "agent-supabase tables <ref>"
-      - intent: "sample supabase table data"
-        command: "agent-supabase sample <ref> orders 5"
-      - intent: "list supabase secrets"
-        command: "agent-supabase secrets abcdefghijklmnopqrst"
-      - intent: "list supabase organizations"
-        command: "agent-supabase orgs"
-      - intent: "get supabase account snapshot"
-        command: "agent-supabase snapshot"
-
+    - intent: list my supabase projects
+      command: agent-supabase projects
+    - intent: show supabase project details
+      command: agent-supabase show abcdefghijklmnopqrst
+    - intent: check supabase project health
+      command: agent-supabase health abcdefghijklmnopqrst
+    - intent: query supabase table
+      command: agent-supabase rest <ref> users --select id,email --limit 10
+    - intent: filter supabase data
+      command: agent-supabase rest <ref> orders --filter status=eq.pending
+    - intent: update supabase row
+      command: 'agent-supabase rest <ref> reports --update ''{"published": false}'' --filter "slug=eq.my-report"'
+    - intent: insert supabase row
+      command: 'agent-supabase rest <ref> users --insert ''{"name": "Alice", "email": "alice@example.com"}'''
+    - intent: upsert supabase row
+      command: 'agent-supabase rest <ref> users --upsert ''{"id": 1, "name": "Alice"}'''
+    - intent: delete supabase rows
+      command: agent-supabase rest <ref> old_logs --delete --filter "created_at=lt.2024-01-01"
+    - intent: run SQL on supabase
+      command: agent-supabase sql <ref> "SELECT count(*) FROM users"
+    - intent: create table on supabase
+      command: agent-supabase sql <ref> "CREATE TABLE items (id serial primary key, name text)"
+    - intent: run migration file on supabase
+      command: agent-supabase sql <ref> --file migrations/001_init.sql
+    - intent: read-only SQL query on supabase
+      command: agent-supabase sql <ref> "SELECT * FROM users" --read-only
+    - intent: connect to supabase database directly
+      command: agent-supabase db-connect <ref>
+    - intent: list supabase tables
+      command: agent-supabase tables <ref>
+    - intent: sample supabase table data
+      command: agent-supabase sample <ref> orders 5
+    - intent: list supabase secrets
+      command: agent-supabase secrets abcdefghijklmnopqrst
+    - intent: list supabase organizations
+      command: agent-supabase orgs
+    - intent: get supabase account snapshot
+      command: agent-supabase snapshot
+    concurrency: write
   sessions:
-    description: "Search and retrieve AI coding session history"
+    description: Search and retrieve AI coding session history
     capabilities:
-      - search past coding sessions by keyword
-      - list recent sessions by project or harness
-      - retrieve session context and summaries
-      - view project activity stats
-      - search within session transcripts by regex
-      - get recent conversation turns from a session
+    - search past coding sessions by keyword
+    - list recent sessions by project or harness
+    - retrieve session context and summaries
+    - view project activity stats
+    - search within session transcripts by regex
+    - get recent conversation turns from a session
     commands:
-      search: "FTS search across session prompts and metadata"
-      list: "List recent sessions with filters"
-      show: "Show session metadata and summary"
-      context: "Get session context (prompt + response + summary)"
-      projects: "List projects by session count"
-      stats: "Database overview statistics"
-      snapshot: "Database state as JSON"
-      grep: "Search within a session transcript by regex"
-      turns: "Get recent turns from a session"
+      search: FTS search across session prompts and metadata
+      list: List recent sessions with filters
+      show: Show session metadata and summary
+      context: Get session context (prompt + response + summary)
+      projects: List projects by session count
+      stats: Database overview statistics
+      snapshot: Database state as JSON
+      grep: Search within a session transcript by regex
+      turns: Get recent turns from a session
     examples:
-      - intent: "find sessions about authentication"
-        command: "agent-sessions search authentication"
-      - intent: "what did I work on in IAMtheSTAR today"
-        command: "agent-sessions list --project IAMtheSTAR --after today"
-      - intent: "show me that broadcast signal session"
-        command: "agent-sessions search 'broadcast signal'"
-      - intent: "show session details"
-        command: "agent-sessions show <session-id>"
-      - intent: "get session context for AI"
-        command: "agent-sessions context <session-id>"
-      - intent: "what was discussed about scoring in that session"
-        command: "agent-sessions grep <session-id> scoring"
-      - intent: "show me the last few messages from that session"
-        command: "agent-sessions turns <session-id> --last 5"
-      - intent: "list all projects"
-        command: "agent-sessions projects"
-      - intent: "session database stats"
-        command: "agent-sessions stats"
-
+    - intent: find sessions about authentication
+      command: agent-sessions search authentication
+    - intent: what did I work on in IAMtheSTAR today
+      command: agent-sessions list --project IAMtheSTAR --after today
+    - intent: show me that broadcast signal session
+      command: agent-sessions search 'broadcast signal'
+    - intent: show session details
+      command: agent-sessions show <session-id>
+    - intent: get session context for AI
+      command: agent-sessions context <session-id>
+    - intent: what was discussed about scoring in that session
+      command: agent-sessions grep <session-id> scoring
+    - intent: show me the last few messages from that session
+      command: agent-sessions turns <session-id> --last 5
+    - intent: list all projects
+      command: agent-sessions projects
+    - intent: session database stats
+      command: agent-sessions stats
+    concurrency: read
   dpt:
-    description: "Design Perception Tensor - automated design quality scoring"
+    description: Design Perception Tensor - automated design quality scoring
     capabilities:
-      - scan any webpage for design quality
-      - score 0-100 across 5 perception layers
-      - detect contrast, typography, spacing, hierarchy, coherence violations
-      - generate prioritized fix lists with CSS selectors
-      - baseline/diff for before/after comparison
+    - scan any webpage for design quality
+    - score 0-100 across 5 perception layers
+    - detect contrast, typography, spacing, hierarchy, coherence violations
+    - generate prioritized fix lists with CSS selectors
+    - baseline/diff for before/after comparison
     commands:
-      scan: "Full scan → JSON with all 72 checks"
-      score: "Quick score + grade + dimension summary"
-      report: "Narrative design critique report"
-      violations: "Violations sorted by impact for AI fix loops"
-      baseline: "Save current scan as baseline"
-      diff: "Compare against baseline, show deltas"
-      build: "Rebuild engine from source"
+      scan: Full scan → JSON with all 72 checks
+      score: Quick score + grade + dimension summary
+      report: Narrative design critique report
+      violations: Violations sorted by impact for AI fix loops
+      baseline: Save current scan as baseline
+      diff: Compare against baseline, show deltas
+      build: Rebuild engine from source
     examples:
-      - intent: "check the design quality of this page"
-        command: "agent-dpt score"
-      - intent: "scan stripe.com for design issues"
-        command: "agent-dpt scan https://stripe.com"
-      - intent: "what design violations are on this page"
-        command: "agent-dpt violations"
-      - intent: "save a design baseline before making changes"
-        command: "agent-dpt baseline"
-      - intent: "did my changes improve the design"
-        command: "agent-dpt diff"
+    - intent: check the design quality of this page
+      command: agent-dpt score
+    - intent: scan stripe.com for design issues
+      command: agent-dpt scan https://stripe.com
+    - intent: what design violations are on this page
+      command: agent-dpt violations
+    - intent: save a design baseline before making changes
+      command: agent-dpt baseline
+    - intent: did my changes improve the design
+      command: agent-dpt diff
+    concurrency: read
