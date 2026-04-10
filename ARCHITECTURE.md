@@ -6,7 +6,8 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
 2. **Natural Language Mode** — LLM-routed for human users
-3. **80 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+3. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
+4. **80 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -38,6 +39,7 @@ The bash entry point checks the first argument:
 | First Arg | Mode | Path |
 |-----------|------|------|
 | Known tool name | Structured API | `exec_tool()` → `tools/agent-<name>` |
+| `bootstrap` | Project setup | `bin/bootstrap` |
 | `-n` / `--natural` | Natural language | `bin/intent-router` (Claude API) |
 | `--offline` | Offline NL | `bin/pattern-matcher` (regex) |
 | `--dry-run` | Dry run | `bin/intent-router --dry-run` |
@@ -74,6 +76,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 ├── bin/
 │   ├── intent-router       # LLM router (Python) — 3-tier fallback
 │   ├── pattern-matcher     # Offline router (Python) — regex + keywords
+│   ├── bootstrap           # Stateful-tool bootstrap recommender/executor
 │   ├── health              # Dependency checker (bash) — per-tool health status
 │   └── status              # Session status display (bash + Python)
 ├── lib/
@@ -153,6 +156,11 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 - Verifies tool exists and `--help` works
 - Checks tool-specific dependencies (node for browse, docker daemon, env vars for Slack/Notion)
 - Reports: OK, WARN (missing dependency), CONF (needs env var), MISS (tool not found)
+
+**`bin/bootstrap`** — Idempotent setup for stateful tools:
+- Detects project-local signals in `CLAUDE.md`, `AGENTS.md`, and the repo root
+- Initializes `context` globally and `zpc` / `manna` locally when the project actually uses them
+- Powers the SessionStart bootstrap prompt injected by the Claude Code hook
 
 ### Tool Concurrency Classification
 

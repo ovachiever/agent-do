@@ -14,17 +14,20 @@ TEST_DIR=$(mktemp -d)
 PASSED=0
 FAILED=0
 
-# Ensure manna binary exists
-if [[ ! -x "$MANNA" ]]; then
-    echo "ERROR: manna binary not found at $MANNA"
-    echo "Run: cd $SCRIPT_DIR/.. && cargo build --release"
+# Build the Rust binary so this test validates the current source tree.
+if ! cargo build --release --quiet --manifest-path "$SCRIPT_DIR/../Cargo.toml"; then
+    echo "ERROR: cargo build --release failed"
     exit 2
 fi
 
-# Check if binary is built
-if [[ ! -f "$SCRIPT_DIR/../target/release/manna-core" ]]; then
-    echo "ERROR: manna-core binary not built"
-    echo "Run: cd $SCRIPT_DIR/.. && cargo build --release"
+MANNA_CORE="$SCRIPT_DIR/../target/release/manna-core"
+if [[ ! -x "$MANNA_CORE" ]]; then
+    echo "ERROR: expected Rust binary not found at $MANNA_CORE"
+    exit 2
+fi
+
+if [[ ! -x "$MANNA" ]]; then
+    echo "ERROR: manna wrapper not executable at $MANNA"
     exit 2
 fi
 

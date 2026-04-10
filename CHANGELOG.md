@@ -1,5 +1,34 @@
 # Changelog
 
+## v1 — 2026-04-10
+
+### Fixed
+- Natural-language routing now resolves directory-backed tools correctly instead of trying to execute tool directories directly.
+- `agent-do --health` is now a real top-level command rather than an installer-only expectation.
+- Offline routing preserves arguments correctly and surfaces clarification questions instead of failing silently.
+- Stale `gui` routing no longer leaks into current `macos` flows.
+- Missing `PyYAML` on common paths now produces actionable errors instead of Python tracebacks.
+- `agent-context` source management now works without `PyYAML`, including the previously failing `sources` fallback path.
+- `agent-dpt` is now repo-local instead of depending on an absolute symlink outside the repository.
+- `agent-manna` health checks and binary resolution now match the actual `manna-core` build output.
+
+### Added
+- `agent-do bootstrap` for idempotent project setup of stateful tools.
+- Session-start bootstrap detection that tells Claude to ask once when a project needs `context`, `zpc`, or `manna` initialization.
+- Runnable browse tests via `vitest` in `tools/agent-browse`.
+- Repo-local DPT source, install script, wrapper binaries, and documentation.
+
+### Changed
+- README, integration docs, architecture docs, and project CLAUDE guidance now document `--health`, bootstrap, and current first-run verification.
+- Root smoke tests now validate bootstrap behavior in addition to direct, offline, and health-check flows.
+- Claude Code hook guidance now reflects the real non-interactive SessionStart model: hooks inject context, Claude asks in conversation.
+
+### Validation
+- `./test.sh`
+- `bash tools/agent-context/test/integration.sh`
+- `cd tools/agent-browse && npm test`
+- `bash tools/agent-manna/test/integration.sh`
+
 ## v0.9 — 2026-03-17
 
 ### Added

@@ -28,6 +28,7 @@ agent-do - Automation CLI
 
 STRUCTURED API (for AI/scripts - no LLM, instant execution):
   agent-do <tool> <command> [args...]
+  agent-do --raw <tool> <command> [args...]
 
   Examples:
     agent-do ios screenshot ~/Downloads/screen.png
@@ -48,23 +49,48 @@ NATURAL LANGUAGE (for humans - uses LLM routing):
 OPTIONS:
   --help, -h     Show this help
   --list, -l     List available tools
+  bootstrap      Initialize stateful tools for the current project
   --status       Show active sessions and state
+  --health       Check tool dependencies and readiness
   --how          Explain how to do something (uses LLM)
   --dry-run      Show what would be executed (uses LLM)
   --offline      Natural language with offline pattern matching only
   -n, --natural  Enable natural language mode (uses LLM)
+  --raw          Explicit direct tool execution (bypasses NL routing)
   --json         Output structured JSON (for orchestrator integration)
   --context      Provide additional context for natural language
 
 EXIT CODES:
   0 = success
   1 = error
-  2 = needs clarification (natural language mode only)
+  2 = needs clarification (natural or offline routing)
 
 ENVIRONMENT:
   AGENT_DO_HOME      Config/state directory (default: ~/.agent-do)
   ANTHROPIC_API_KEY  Required for natural language mode
 EOF
+}
+
+resolve_tool_exec() {
+    local tool="$1"
+    local tool_path="$SCRIPT_DIR/tools/agent-$tool"
+
+    if [[ -d "$tool_path" && -x "$tool_path/agent-$tool" ]]; then
+        echo "$tool_path/agent-$tool"
+        return 0
+    fi
+
+    if [[ -x "$tool_path" && ! -d "$tool_path" ]]; then
+        echo "$tool_path"
+        return 0
+    fi
+
+    if command -v "agent-$tool" &>/dev/null; then
+        command -v "agent-$tool"
+        return 0
+    fi
+
+    return 1
 }
 
 # List available tools
@@ -73,13 +99,7 @@ list_tools() {
     echo ""
     for tool_path in "$SCRIPT_DIR/tools"/agent-*; do
         tool_name=$(basename "$tool_path" | sed 's/^agent-//')
-        tool_exec=""
-        # Check for directory with executable inside (e.g., agent-browse/agent-browse)
-        if [[ -d "$tool_path" && -x "$tool_path/agent-$tool_name" ]]; then
-            tool_exec="$tool_path/agent-$tool_name"
-        elif [[ -x "$tool_path" && ! -d "$tool_path" ]]; then
-            tool_exec="$tool_path"
-        fi
+        tool_exec="$(resolve_tool_exec "$tool_name" 2>/dev/null || true)"
         if [[ -n "$tool_exec" ]]; then
             # Get first line of help if available
             desc=$("$tool_exec" --help 2>/dev/null | head -1 || echo "")
@@ -93,25 +113,21 @@ list_tools() {
 # Check if first arg is a known tool (structured API mode)
 is_tool() {
     local tool="$1"
-    # Check for executable file or directory with executable inside
-    [[ -x "$SCRIPT_DIR/tools/agent-$tool" && ! -d "$SCRIPT_DIR/tools/agent-$tool" ]] ||
-    [[ -x "$SCRIPT_DIR/tools/agent-$tool/agent-$tool" ]] ||
-    command -v "agent-$tool" &>/dev/null
+    resolve_tool_exec "$tool" &>/dev/null
 }
 
 # Execute tool directly (no LLM)
 exec_tool() {
     local tool="$1"
     shift
-    local tool_path="$SCRIPT_DIR/tools/agent-$tool"
-    # Check for directory with executable inside (e.g., agent-browse/agent-browse)
-    if [[ -d "$tool_path" && -x "$tool_path/agent-$tool" ]]; then
-        exec "$tool_path/agent-$tool" "$@"
-    elif [[ -x "$tool_path" ]]; then
-        exec "$tool_path" "$@"
-    else
-        exec "agent-$tool" "$@"
+    local tool_exec
+
+    if ! tool_exec="$(resolve_tool_exec "$tool")"; then
+        echo "Unknown tool: $tool" >&2
+        exit 1
     fi
+
+    exec "$tool_exec" "$@"
 }
 
 # Natural language routing (uses LLM)
@@ -147,8 +163,16 @@ case "${1:-}" in
     --list|-l)
         list_tools
         ;;
+    bootstrap)
+        shift || true
+        exec "$SCRIPT_DIR/bin/bootstrap" "$@"
+        ;;
     --status)
         exec "$SCRIPT_DIR/bin/status"
+        ;;
+    --health)
+        shift || true
+        exec "$SCRIPT_DIR/bin/health" "$@"
         ;;
     --how)
         shift
@@ -172,29 +196,44 @@ case "${1:-}" in
             echo "Usage: agent-do --offline \"what you want to do\""
             exit 1
         fi
-        # Use pattern matcher instead of LLM router
-        result=$("$SCRIPT_DIR/bin/pattern-matcher" --json "$*")
+        # Use pattern matcher instead of LLM router. Pattern matcher may exit 2
+        # for clarification-needed results, so capture output before handling status.
+        pattern_status=0
+        if ! result=$("$SCRIPT_DIR/bin/pattern-matcher" --json "$*" 2>&1); then
+            pattern_status=$?
+        fi
+        if ! echo "$result" | python3 -c "import sys,json; json.load(sys.stdin)" >/dev/null 2>&1; then
+            echo "$result"
+            exit "${pattern_status:-1}"
+        fi
         tool=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('tool') or '')")
+        clarification=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('clarification_needed') or '')")
+        explanation=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('explanation') or '')")
 
         if [[ -z "$tool" ]]; then
             echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('clarification_needed', 'No match found'))"
             exit 1
         fi
 
-        cmd=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('command', ''))")
-        args=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(' '.join(r.get('args', [])))")
-        explanation=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('explanation', ''))")
+        if [[ -n "$clarification" ]]; then
+            echo "$clarification"
+            [[ -n "$explanation" ]] && echo "  ($explanation)"
+            exit 2
+        fi
 
-        echo "→ agent-$tool $cmd $args [offline match]"
+        cmd=$(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('command', ''))")
+        args_display=$(echo "$result" | python3 -c "import sys,json,shlex; r=json.load(sys.stdin); print(' '.join(shlex.quote(arg) for arg in r.get('args', [])))")
+        mapfile -t args_array < <(echo "$result" | python3 -c "import sys,json; r=json.load(sys.stdin); [print(arg) for arg in r.get('args', [])]")
+
+        echo "→ agent-$tool $cmd${args_display:+ $args_display} [offline match]"
         [[ -n "$explanation" ]] && echo "  ($explanation)"
         echo
 
-        tool_path="$SCRIPT_DIR/tools/agent-$tool"
-        if [[ -x "$tool_path" ]]; then
-            exec "$tool_path" $cmd $args
-        else
-            exec "agent-$tool" $cmd $args
+        if [[ -n "$cmd" ]]; then
+            exec_tool "$tool" "$cmd" "${args_array[@]}"
         fi
+
+        exec_tool "$tool" "${args_array[@]}"
         ;;
     -n|--natural)
         # Natural language mode (human-friendly)
@@ -242,6 +281,18 @@ case "${1:-}" in
         done
         intent="${intent# }"  # Trim leading space
         natural_route "true" "$context" "$intent"
+        ;;
+    --raw)
+        shift
+        if [[ -z "${1:-}" ]]; then
+            echo "Usage: agent-do --raw <tool> <command> [args...]"
+            exit 1
+        fi
+        if is_tool "$1"; then
+            exec_tool "$@"
+        fi
+        echo "Unknown tool: $1"
+        exit 1
         ;;
     --context)
         # --context without -n implies natural language mode

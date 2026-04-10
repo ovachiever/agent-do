@@ -16,6 +16,8 @@ agent-do is a universal automation CLI for AI agents with 80 specialized tools. 
 ./agent-do <tool> --help               # Tool-specific help
 ./agent-do --status                    # Active sessions and state
 ./agent-do --health                    # Check tool dependencies
+./agent-do bootstrap --recommend       # Detect pending context/zpc/manna setup
+./agent-do bootstrap                   # Initialize pending project setup
 ./agent-do --offline "intent"          # Offline pattern matching (no API key)
 ./agent-do --dry-run "intent"          # Show what would execute (uses LLM)
 ```
@@ -29,7 +31,8 @@ cd tools/agent-manna && cargo test
 
 # agent-browse (Node.js)
 cd tools/agent-browse && npm install
-cd tools/agent-browse && node browser.test.js
+cd tools/agent-browse && npm test
+cd tools/agent-browse && npm run test:protocol
 
 # agent-unbrowse (Node.js)
 cd tools/agent-unbrowse && npm install

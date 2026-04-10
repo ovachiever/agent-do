@@ -15,7 +15,8 @@ manna-core (Rust binary)
 ### Components
 
 1. **agent-manna** - Bash wrapper script
-   - Discovers `manna-core` binary relative to script location
+   - Discovers the `manna-core` binary relative to script location
+   - Prefers `target/release/manna-core`, then `target/debug/manna-core`, then `manna-core` on `PATH`
    - Passes all arguments through to Rust binary
    - Provides helpful error if binary not found
 

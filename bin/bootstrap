@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# bin/bootstrap - Idempotent bootstrap for stateful agent-do tools
+
+set -euo pipefail
+
+AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
+_source="${BASH_SOURCE[0]}"
+if [ -L "$_source" ]; then
+    _target="$(readlink "$_source")"
+    case "$_target" in
+        /*) _source="$_target" ;;
+        *)  _source="$(dirname "$_source")/$_target" ;;
+    esac
+fi
+BIN_DIR="$(cd "$(dirname "$_source")" && pwd)"
+REPO_DIR="$(cd "$BIN_DIR/.." && pwd)"
+AGENT_DO="$REPO_DIR/agent-do"
+
+json=false
+recommend=false
+force=false
+yes=false
+cwd="$PWD"
+
+show_help() {
+    cat <<'EOF'
+agent-do bootstrap - initialize stateful agent-do tools for the current project
+
+Usage:
+  agent-do bootstrap [--recommend] [--json] [--cwd PATH] [--yes] [--force]
+
+What it bootstraps:
+  - context: shared docs store in ~/.agent-do/context
+  - zpc: project-local .zpc/ when project files indicate ZPC usage
+  - manna: project-local .manna/ when project files indicate Manna usage
+
+Options:
+  --recommend   Detect pending bootstrap work without making changes
+  --json        Output structured JSON
+  --cwd PATH    Detect the target project from PATH instead of the current dir
+  --yes         Non-interactive mode for callers that already have user approval
+  --force       Re-run init commands even if the target already exists
+  --help, -h    Show this help
+
+Examples:
+  agent-do bootstrap
+  agent-do bootstrap --recommend
+  agent-do bootstrap --recommend --json --cwd /path/to/project
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --recommend)
+            recommend=true
+            shift
+            ;;
+        --json)
+            json=true
+            shift
+            ;;
+        --cwd)
+            cwd="$2"
+            shift 2
+            ;;
+        --yes)
+            yes=true
+            shift
+            ;;
+        --force)
+            force=true
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Try: agent-do bootstrap --help" >&2
+            exit 1
+            ;;
+    esac
+done
+
+find_project_root() {
+    local dir="$1"
+
+    while [[ "$dir" != "/" && -n "$dir" ]]; do
+        if [[ -d "$dir/.git" ]] \
+            || [[ -f "$dir/CLAUDE.md" ]] \
+            || [[ -f "$dir/AGENTS.md" ]] \
+            || [[ -f "$dir/package.json" ]] \
+            || [[ -f "$dir/pyproject.toml" ]] \
+            || [[ -f "$dir/Cargo.toml" ]] \
+            || [[ -f "$dir/go.mod" ]] \
+            || [[ -f "$dir/requirements.txt" ]] \
+            || [[ -f "$dir/pnpm-workspace.yaml" ]] \
+            || [[ -f "$dir/turbo.json" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+
+    echo "$1"
+}
+
+doc_contains() {
+    local needle="$1"
+    shift
+    [[ $# -eq 0 ]] && return 1
+    if command -v rg >/dev/null 2>&1; then
+        rg -q -F "$needle" "$@" 2>/dev/null
+    else
+        grep -qF "$needle" "$@" 2>/dev/null
+    fi
+}
+
+join_by() {
+    local sep="$1"
+    shift || true
+    local out=""
+    local item
+    for item in "$@"; do
+        if [[ -z "$out" ]]; then
+            out="$item"
+        else
+            out="${out}${sep}${item}"
+        fi
+    done
+    printf '%s' "$out"
+}
+
+cwd="$(cd "$cwd" 2>/dev/null && pwd || true)"
+if [[ -z "$cwd" ]]; then
+    echo "Error: invalid --cwd path" >&2
+    exit 1
+fi
+
+project_root="$(find_project_root "$cwd")"
+project_name="$(basename "$project_root")"
+
+doc_files=()
+for file in "$project_root/CLAUDE.md" "$project_root/AGENTS.md" "$project_root/README.md"; do
+    [[ -f "$file" ]] && doc_files+=("$file")
+done
+
+wants_context=false
+wants_zpc=false
+wants_manna=false
+wants_browse=false
+wants_dpt=false
+
+if doc_contains "agent-do context" "${doc_files[@]}"; then
+    wants_context=true
+fi
+if [[ -d "$project_root/.zpc" ]] \
+    || doc_contains "agent-do zpc" "${doc_files[@]}" \
+    || doc_contains "Zero Point Coder" "${doc_files[@]}" \
+    || doc_contains ".zpc" "${doc_files[@]}"; then
+    wants_zpc=true
+fi
+if [[ -d "$project_root/.manna" ]] \
+    || doc_contains "agent-do manna" "${doc_files[@]}" \
+    || doc_contains ".manna" "${doc_files[@]}"; then
+    wants_manna=true
+fi
+if doc_contains "agent-do browse" "${doc_files[@]}"; then
+    wants_browse=true
+fi
+if doc_contains "agent-do dpt" "${doc_files[@]}"; then
+    wants_dpt=true
+fi
+
+detected_tools=()
+[[ "$wants_context" == true ]] && detected_tools+=("context")
+[[ "$wants_zpc" == true ]] && detected_tools+=("zpc")
+[[ "$wants_manna" == true ]] && detected_tools+=("manna")
+[[ "$wants_browse" == true ]] && detected_tools+=("browse")
+[[ "$wants_dpt" == true ]] && detected_tools+=("dpt")
+
+pending_actions=()
+pending_labels=()
+pending_commands=()
+
+if [[ "$wants_context" == true ]] && { [[ "$force" == true ]] || [[ ! -d "$AGENT_DO_HOME/context" ]]; }; then
+    pending_actions+=("context_init")
+    pending_labels+=("context")
+    pending_commands+=("agent-do context init")
+fi
+
+if [[ "$wants_zpc" == true ]] && { [[ "$force" == true ]] || [[ ! -d "$project_root/.zpc" ]]; }; then
+    pending_actions+=("zpc_init")
+    pending_labels+=("zpc")
+    pending_commands+=("agent-do zpc init")
+fi
+
+if [[ "$wants_manna" == true ]] && { [[ "$force" == true ]] || [[ ! -d "$project_root/.manna" ]]; }; then
+    pending_actions+=("manna_init")
+    pending_labels+=("manna")
+    pending_commands+=("agent-do manna init")
+fi
+
+needs_bootstrap=false
+[[ ${#pending_actions[@]} -gt 0 ]] && needs_bootstrap=true
+
+ask_prompt=""
+if [[ "$needs_bootstrap" == true ]]; then
+    ask_prompt="Bootstrap agent-do for this project now? It will initialize: $(join_by ', ' "${pending_labels[@]}")."
+fi
+
+if [[ "$recommend" == true ]]; then
+    if [[ "$json" == true ]]; then
+        python3 - "$project_root" "$project_name" "$needs_bootstrap" \
+            "$(printf '%s\n' "${detected_tools[@]:-}")" \
+            "$(printf '%s\n' "${pending_actions[@]:-}")" \
+            "$(printf '%s\n' "${pending_commands[@]:-}")" \
+            "$ask_prompt" <<'PYTHON'
+import json, sys
+
+project_root, project_name, needs_bootstrap, detected_blob, pending_blob, commands_blob, ask_prompt = sys.argv[1:8]
+
+def split_lines(blob):
+    return [line for line in blob.splitlines() if line]
+
+print(json.dumps({
+    "project_root": project_root,
+    "project_name": project_name,
+    "needs_bootstrap": needs_bootstrap == "true",
+    "detected_tools": split_lines(detected_blob),
+    "pending_actions": split_lines(pending_blob),
+    "commands": split_lines(commands_blob),
+    "ask_prompt": ask_prompt,
+}, ensure_ascii=False))
+PYTHON
+    else
+        echo "agent-do bootstrap recommendation"
+        echo "  Project: $project_root"
+        if [[ ${#detected_tools[@]} -gt 0 ]]; then
+            echo "  Detected: $(join_by ', ' "${detected_tools[@]}")"
+        else
+            echo "  Detected: none"
+        fi
+        if [[ "$needs_bootstrap" == true ]]; then
+            echo "  Pending:"
+            local_cmd=""
+            for local_cmd in "${pending_commands[@]}"; do
+                echo "    - $local_cmd"
+            done
+            echo "  Ask: $ask_prompt"
+        else
+            echo "  Pending: none"
+        fi
+    fi
+    exit 0
+fi
+
+executed=()
+
+for action in "${pending_actions[@]}"; do
+    case "$action" in
+        context_init)
+            "$AGENT_DO" context init >/dev/null
+            executed+=("context")
+            ;;
+        zpc_init)
+            (
+                cd "$project_root"
+                "$AGENT_DO" zpc init >/dev/null
+            )
+            executed+=("zpc")
+            ;;
+        manna_init)
+            (
+                cd "$project_root"
+                "$AGENT_DO" manna init >/dev/null
+            )
+            executed+=("manna")
+            ;;
+    esac
+done
+
+verified=()
+
+if [[ -d "$AGENT_DO_HOME/context" ]]; then
+    verified+=("context")
+fi
+if [[ -d "$project_root/.zpc" ]]; then
+    verified+=("zpc")
+fi
+if [[ -d "$project_root/.manna" ]]; then
+    verified+=("manna")
+fi
+
+if [[ "$json" == true ]]; then
+    python3 - "$project_root" "$project_name" \
+        "$(printf '%s\n' "${executed[@]:-}")" \
+        "$(printf '%s\n' "${verified[@]:-}")" \
+        "$(printf '%s\n' "${detected_tools[@]:-}")" <<'PYTHON'
+import json, sys
+
+project_root, project_name, executed_blob, verified_blob, detected_blob = sys.argv[1:6]
+
+def split_lines(blob):
+    return [line for line in blob.splitlines() if line]
+
+print(json.dumps({
+    "success": True,
+    "project_root": project_root,
+    "project_name": project_name,
+    "detected_tools": split_lines(detected_blob),
+    "executed": split_lines(executed_blob),
+    "verified": split_lines(verified_blob),
+}, ensure_ascii=False))
+PYTHON
+else
+    echo "agent-do bootstrap"
+    echo "  Project: $project_root"
+    if [[ ${#detected_tools[@]} -gt 0 ]]; then
+        echo "  Detected: $(join_by ', ' "${detected_tools[@]}")"
+    else
+        echo "  Detected: none"
+    fi
+    if [[ ${#executed[@]} -gt 0 ]]; then
+        echo "  Initialized: $(join_by ', ' "${executed[@]}")"
+    else
+        echo "  Initialized: nothing to do"
+    fi
+    if [[ ${#verified[@]} -gt 0 ]]; then
+        echo "  Verified: $(join_by ', ' "${verified[@]}")"
+    fi
+fi

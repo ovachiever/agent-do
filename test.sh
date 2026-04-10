@@ -1,75 +1,81 @@
 #!/usr/bin/env bash
 # Test script for agent-do
 
-set -e
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DO="$SCRIPT_DIR/agent-do"
+TEST_HOME="$(mktemp -d)"
+PASS=0
+FAIL=0
+
+cleanup() {
+    rm -rf "$TEST_HOME"
+}
+trap cleanup EXIT
+
+export AGENT_DO_HOME="$TEST_HOME"
+
+pass() {
+    echo "  ✓ $1"
+    PASS=$((PASS + 1))
+}
+
+fail() {
+    echo "  ✗ $1"
+    echo "    $2"
+    FAIL=$((FAIL + 1))
+}
+
+check_cmd() {
+    local desc="$1"
+    shift
+    if "$@" >/dev/null 2>&1; then
+        pass "$desc"
+    else
+        fail "$desc" "command failed: $*"
+    fi
+}
+
+check_output() {
+    local desc="$1"
+    local pattern="$2"
+    shift 2
+    local output
+    output=$("$@" 2>&1) || true
+    if echo "$output" | grep -q "$pattern"; then
+        pass "$desc"
+    else
+        fail "$desc" "expected pattern '$pattern', got: $(echo "$output" | head -3)"
+    fi
+}
 
 echo "Testing agent-do..."
 echo
 
-# Test 1: Help
-echo "Test 1: --help"
-$AGENT_DO --help > /dev/null && echo "  ✓ Help works" || echo "  ✗ Help failed"
+check_cmd "--help works" "$AGENT_DO" --help
+check_cmd "--list works" "$AGENT_DO" --list
+check_cmd "bootstrap --help works" "$AGENT_DO" bootstrap --help
+check_output "--status works in isolated home" "No active sessions." "$AGENT_DO" --status
+check_output "--health works" "Summary:" "$AGENT_DO" --health
+check_output "--raw executes a directory-backed tool" "agent-context" "$AGENT_DO" --raw context --help
+check_output "--offline routes iOS screenshot intent" "agent-ios screenshot" "$AGENT_DO" --offline "screenshot the iOS simulator"
+check_output "--offline routes network scan intent" "agent-network scan --port 3000" "$AGENT_DO" --offline "what's using port 3000"
+check_output "pattern matcher JSON uses iOS tool" '"tool": "ios"' "$SCRIPT_DIR/bin/pattern-matcher" --json "screenshot the iOS simulator"
 
-# Test 2: Status
-echo "Test 2: --status"
-$AGENT_DO --status > /dev/null && echo "  ✓ Status works" || echo "  ✗ Status failed"
+BOOTSTRAP_PROJECT="$TEST_HOME/bootstrap-project"
+mkdir -p "$BOOTSTRAP_PROJECT"
+cat > "$BOOTSTRAP_PROJECT/CLAUDE.md" <<'EOF'
+## agent-do Tooling
 
-# Test 3: Offline pattern matching
-echo "Test 3: --offline (pattern matching)"
-result=$($AGENT_DO --offline "screenshot the iOS simulator" 2>&1)
-if echo "$result" | grep -q "agent-ios screenshot"; then
-    echo "  ✓ Offline iOS screenshot works"
-else
-    echo "  ✗ Offline iOS screenshot failed"
-    echo "    Got: $result"
-fi
+Use `agent-do context`
+Use `agent-do zpc`
+EOF
 
-# Test 4: Offline network scan
-echo "Test 4: --offline (network scan)"
-result=$($AGENT_DO --offline "what's using port 3000" 2>&1)
-if echo "$result" | grep -q "agent-network"; then
-    echo "  ✓ Offline network scan works"
-else
-    echo "  ✗ Offline network scan failed"
-    echo "    Got: $result"
-fi
-
-# Test 5: Dry run (requires API key)
-echo "Test 5: --dry-run (requires ANTHROPIC_API_KEY)"
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-    result=$($AGENT_DO --dry-run "take a screenshot of the iOS simulator" 2>&1)
-    if echo "$result" | grep -q "agent-ios"; then
-        echo "  ✓ Dry run works"
-    else
-        echo "  ✗ Dry run failed"
-        echo "    Got: $result"
-    fi
-else
-    echo "  - Skipped (no API key)"
-fi
-
-# Test 6: Raw tool access
-echo "Test 6: --raw (direct tool access)"
-result=$($AGENT_DO --raw tui list 2>&1)
-if echo "$result" | grep -q -E "(No agent-tui sessions|Session)"; then
-    echo "  ✓ Raw tool access works"
-else
-    echo "  ✗ Raw tool access failed"
-    echo "    Got: $result"
-fi
-
-# Test 7: Pattern matcher
-echo "Test 7: Pattern matcher JSON output"
-result=$("$SCRIPT_DIR/bin/pattern-matcher" --json "click Save in Photoshop" 2>&1)
-if echo "$result" | grep -q '"tool": "gui"'; then
-    echo "  ✓ Pattern matcher works"
-else
-    echo "  ✗ Pattern matcher failed"
-    echo "    Got: $result"
-fi
+check_output "bootstrap recommendation detects pending work" '"needs_bootstrap": true' "$AGENT_DO" bootstrap --recommend --json --cwd "$BOOTSTRAP_PROJECT"
+check_output "bootstrap initializes context and zpc" "Initialized: context, zpc" "$AGENT_DO" bootstrap --cwd "$BOOTSTRAP_PROJECT"
+check_cmd "bootstrap created project-local .zpc" test -d "$BOOTSTRAP_PROJECT/.zpc"
 
 echo
-echo "Tests complete!"
+echo "Results: $PASS passed, $FAIL failed"
+[[ $FAIL -eq 0 ]] || exit 1

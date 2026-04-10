@@ -38,7 +38,9 @@ cd /path/to/agent-do/tools/agent-manna
 cargo build --release
 ```
 
-The binary will be at `target/release/manna-core`.
+The Rust binary is `manna-core`. The wrapper resolves `target/release/manna-core`,
+falls back to `target/debug/manna-core`, and can also use a `manna-core` binary on
+`$PATH`.
 
 ### Verify Installation
 

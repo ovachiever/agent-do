@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-agent-gui: Desktop GUI automation with semantic element refs.
+agent-macos: Desktop GUI automation with semantic element refs.
 macOS implementation using Accessibility APIs (AXUIElement).
 """
 
@@ -44,7 +44,9 @@ EXIT_PERMISSION_DENIED = 6
 EXIT_VISION_FAILED = 7
 EXIT_UNKNOWN = 8
 
-SESSION_DIR = Path.home() / ".agent-gui"
+AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
+SESSION_DIR = AGENT_DO_HOME / "macos"
+LEGACY_SESSION_DIR = Path.home() / ".agent-gui"
 SESSION_FILE = SESSION_DIR / "session.json"
 
 
@@ -66,6 +68,11 @@ class GUISession:
     """Manages GUI automation session state."""
     
     def __init__(self):
+        if not SESSION_FILE.exists():
+            legacy_file = LEGACY_SESSION_DIR / "session.json"
+            if legacy_file.exists():
+                SESSION_DIR.mkdir(parents=True, exist_ok=True)
+                SESSION_FILE.write_text(legacy_file.read_text())
         SESSION_DIR.mkdir(parents=True, exist_ok=True)
         self.state = self._load_state()
         self._element_cache = {}  # @ref -> AXUIElement
@@ -950,7 +957,7 @@ end tell
                    ref: str = None, annotate: bool = False) -> dict:
         """Take screenshot of app, window, or element."""
         if output_path is None:
-            output_path = f"/tmp/agent-gui-screenshot-{int(time.time())}.png"
+            output_path = f"/tmp/agent-macos-screenshot-{int(time.time())}.png"
         
         if ref:
             # Screenshot element bounds
@@ -1167,7 +1174,7 @@ def main():
     
     args = sys.argv[1:]
     if not args:
-        output({"error": "No command specified", "usage": "agent-gui <command> [args]"}, EXIT_UNKNOWN)
+        output({"error": "No command specified", "usage": "agent-macos <command> [args]"}, EXIT_UNKNOWN)
     
     cmd = args[0].lower()
     
@@ -1204,7 +1211,7 @@ def main():
     
     elif cmd == "open":
         if len(args) < 2:
-            error("Usage: agent-gui open <app>", EXIT_UNKNOWN)
+            error("Usage: agent-macos open <app>", EXIT_UNKNOWN)
         result = gui.open_app(args[1])
         if result:
             output(result)
@@ -1213,7 +1220,7 @@ def main():
     
     elif cmd == "focus":
         if len(args) < 2:
-            error("Usage: agent-gui focus <app>", EXIT_UNKNOWN)
+            error("Usage: agent-macos focus <app>", EXIT_UNKNOWN)
         result = gui.focus_app(args[1])
         if result:
             output(result)
@@ -1222,7 +1229,7 @@ def main():
     
     elif cmd == "quit":
         if len(args) < 2:
-            error("Usage: agent-gui quit <app> [--force]", EXIT_UNKNOWN)
+            error("Usage: agent-macos quit <app> [--force]", EXIT_UNKNOWN)
         force = "--force" in args
         result = gui.quit_app(args[1], force=force)
         if result:
@@ -1257,7 +1264,7 @@ def main():
     # Click
     elif cmd == "click":
         if len(args) < 2:
-            error("Usage: agent-gui click <@ref>", EXIT_UNKNOWN)
+            error("Usage: agent-macos click <@ref>", EXIT_UNKNOWN)
         ref = args[1]
         action = "press"
         if len(args) > 2:
@@ -1270,7 +1277,7 @@ def main():
     
     elif cmd == "dblclick":
         if len(args) < 2:
-            error("Usage: agent-gui dblclick <@ref>", EXIT_UNKNOWN)
+            error("Usage: agent-macos dblclick <@ref>", EXIT_UNKNOWN)
         ref = args[1]
         # Double click via press twice
         gui.click(ref)
@@ -1283,7 +1290,7 @@ def main():
     
     elif cmd == "rightclick":
         if len(args) < 2:
-            error("Usage: agent-gui rightclick <@ref>", EXIT_UNKNOWN)
+            error("Usage: agent-macos rightclick <@ref>", EXIT_UNKNOWN)
         result = gui.click(args[1], "showmenu")
         if result:
             output(result)
@@ -1293,7 +1300,7 @@ def main():
     # Type
     elif cmd == "type":
         if len(args) < 2:
-            error("Usage: agent-gui type [<@ref>] <text>", EXIT_UNKNOWN)
+            error("Usage: agent-macos type [<@ref>] <text>", EXIT_UNKNOWN)
         
         if args[1].startswith("@"):
             ref = args[1]
@@ -1306,7 +1313,7 @@ def main():
     
     elif cmd == "fill":
         if len(args) < 3:
-            error("Usage: agent-gui fill <@ref> <text>", EXIT_UNKNOWN)
+            error("Usage: agent-macos fill <@ref> <text>", EXIT_UNKNOWN)
         ref = args[1]
         text = " ".join(args[2:])
         result = gui.fill(ref, text)
@@ -1318,7 +1325,7 @@ def main():
     # Press key
     elif cmd == "press":
         if len(args) < 2:
-            error("Usage: agent-gui press <key>", EXIT_UNKNOWN)
+            error("Usage: agent-macos press <key>", EXIT_UNKNOWN)
         key = " ".join(args[1:])
         result = gui.press_key(key)
         output(result)
@@ -1332,7 +1339,7 @@ def main():
     # Get attribute
     elif cmd == "get":
         if len(args) < 3:
-            error("Usage: agent-gui get <@ref> <attribute>", EXIT_UNKNOWN)
+            error("Usage: agent-macos get <@ref> <attribute>", EXIT_UNKNOWN)
         result = gui.get_element_attr(args[1], args[2])
         if result:
             output(result)
@@ -1342,7 +1349,7 @@ def main():
     # Inspect
     elif cmd == "inspect":
         if len(args) < 2:
-            error("Usage: agent-gui inspect <@ref>", EXIT_UNKNOWN)
+            error("Usage: agent-macos inspect <@ref>", EXIT_UNKNOWN)
         result = gui.inspect_element(args[1])
         if result:
             output(result)
@@ -1383,7 +1390,7 @@ def main():
     # Menu
     elif cmd == "menu":
         if len(args) < 2:
-            error("Usage: agent-gui menu <Menu> [<Item>] [<SubItem>]", EXIT_UNKNOWN)
+            error("Usage: agent-macos menu <Menu> [<Item>] [<SubItem>]", EXIT_UNKNOWN)
         menu_path = args[1:]
         result = gui.menu_click(menu_path)
         if result and "error" not in result:
@@ -1404,7 +1411,7 @@ def main():
     # Window
     elif cmd == "window" or cmd == "win":
         if len(args) < 2:
-            error("Usage: agent-gui window <action> <app> [args]", EXIT_UNKNOWN)
+            error("Usage: agent-macos window <action> <app> [args]", EXIT_UNKNOWN)
         
         action = args[1]
         
@@ -1426,7 +1433,7 @@ def main():
         
         elif action in ("minimize", "maximize", "fullscreen", "close", "center"):
             if len(args) < 3:
-                error(f"Usage: agent-gui window {action} <app>", EXIT_UNKNOWN)
+                error(f"Usage: agent-macos window {action} <app>", EXIT_UNKNOWN)
             result = gui.window_action(args[2], action)
             if result and "error" not in result:
                 output(result)
@@ -1435,7 +1442,7 @@ def main():
         
         elif action == "move":
             if len(args) < 5:
-                error("Usage: agent-gui window move <app> <x> <y>", EXIT_UNKNOWN)
+                error("Usage: agent-macos window move <app> <x> <y>", EXIT_UNKNOWN)
             result = gui.window_move(args[2], int(args[3]), int(args[4]))
             if result and "error" not in result:
                 output(result)
@@ -1444,7 +1451,7 @@ def main():
         
         elif action == "resize":
             if len(args) < 5:
-                error("Usage: agent-gui window resize <app> <width> <height>", EXIT_UNKNOWN)
+                error("Usage: agent-macos window resize <app> <width> <height>", EXIT_UNKNOWN)
             result = gui.window_resize(args[2], int(args[3]), int(args[4]))
             if result and "error" not in result:
                 output(result)
@@ -1472,7 +1479,7 @@ def main():
     # Dialog
     elif cmd == "dialog":
         if len(args) < 2:
-            error("Usage: agent-gui dialog <detect|click> [button]", EXIT_UNKNOWN)
+            error("Usage: agent-macos dialog <detect|click> [button]", EXIT_UNKNOWN)
         
         sub = args[1]
         if sub == "detect":
@@ -1480,7 +1487,7 @@ def main():
             output(result)
         elif sub == "click":
             if len(args) < 3:
-                error("Usage: agent-gui dialog click <button>", EXIT_UNKNOWN)
+                error("Usage: agent-macos dialog click <button>", EXIT_UNKNOWN)
             button = args[2]
             if button == "--default":
                 # Click first button (usually default)
@@ -1577,7 +1584,7 @@ def main():
     # Action
     elif cmd == "action":
         if len(args) < 3:
-            error("Usage: agent-gui action <@ref> <action>", EXIT_UNKNOWN)
+            error("Usage: agent-macos action <@ref> <action>", EXIT_UNKNOWN)
         result = gui.click(args[1], args[2])
         if result:
             output(result)

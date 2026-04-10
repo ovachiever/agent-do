@@ -4,7 +4,7 @@
 
 agent-do is a harness on top of the harness. Claude Code (or Cursor, or any AI coding agent) is the inner harness — it reads code, writes code, runs commands. agent-do is the outer layer that gives the inner harness structured control over everything else: browsers, simulators, databases, cloud platforms, design quality, project memory, issue tracking, media processing, hardware devices.
 
-The agent calls `agent-do <tool> <command>`, gets JSON back, and reasons about it. One interface. Same pattern across all 80 tools. The agent learns the pattern once, then it works everywhere.
+The stable contract is `agent-do <tool> <command>`. Mature tools add snapshot-heavy and JSON-friendly workflows on top of that, while lighter wrappers still expose a simpler CLI surface. The agent learns one dispatch pattern, then applies it across 80 tools.
 
 One interface for Claude to control the world. 80 tools. Browsers, simulators, databases, cloud platforms, design scoring, project memory — everything an AI agent needs to act, not just think.
 
@@ -12,9 +12,17 @@ One interface for Claude to control the world. 80 tools. Browsers, simulators, d
 agent-do <tool> <command> [args...]
 ```
 
+Human-facing routing and setup live next to that core API:
+
+```bash
+agent-do -n "what you want to do"
+agent-do --health
+agent-do bootstrap --recommend
+```
+
 ## The Universal Pattern
 
-Every tool follows the same five-step contract:
+The design center for the strongest tools is the same five-step loop:
 
 ```
 Connect → Snapshot → Interact → Verify → Save
@@ -30,7 +38,7 @@ agent-do db sample orders 5       # Verify
 agent-do db disconnect            # Clean up
 ```
 
-This pattern holds across all 80 tools — browsers, simulators, spreadsheets, containers, Slack channels, Kubernetes clusters, MIDI devices. Same five verbs. Same JSON responses. One interface to learn, then it works everywhere.
+This pattern is what the repo is optimizing toward. The most mature tools already work this way; thinner wrappers keep the same `agent-do <tool> <command>` surface even when they do not expose every step explicitly.
 
 ## Standout Tools
 
@@ -205,6 +213,23 @@ cd agent-do
 The installer symlinks `agent-do` into PATH, copies Claude Code hooks, installs Python dependencies, and optionally builds the Node.js and Rust tools.
 
 See [INTEGRATION.md](INTEGRATION.md) for Claude Code hook details (nudge vs block mode, manual setup).
+
+### First Run
+
+The safe first-run path is:
+
+```bash
+agent-do --health
+agent-do bootstrap --recommend
+agent-do bootstrap
+```
+
+`bootstrap` initializes the stateful pieces that actually need setup:
+- `context` in `~/.agent-do/context/`
+- `zpc` in `.zpc/` when the project uses ZPC
+- `manna` in `.manna/` when the project uses Manna
+
+If the Claude Code SessionStart hook is installed, Claude now asks once at session start when bootstrap work is pending.
 
 ### Prerequisites
 

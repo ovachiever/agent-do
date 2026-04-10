@@ -4,37 +4,86 @@ Intent router using Claude API.
 Maps natural language intents to agent-* tool commands.
 """
 
-import anthropic
 import json
 import subprocess
 import sys
-import os
 from pathlib import Path
+
+try:
+    import anthropic
+except ModuleNotFoundError:
+    anthropic = None
 
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
-from state import load_state, build_state_context
-from registry import load_registry, build_registry_context
 from cache import check_cache, cache_result, fuzzy_match
 
 
-def route_intent(intent: str, registry: dict, state: dict, dry_run: bool = False, explain: bool = False) -> dict:
+def resolve_tool_executable(tool_name: str) -> Path | None:
+    """Resolve a tool name to the executable path agent-do would invoke."""
+    script_dir = Path(__file__).parent.parent
+    tool_root = script_dir / "tools" / f"agent-{tool_name}"
+    nested_exec = tool_root / f"agent-{tool_name}"
+
+    if tool_root.is_dir() and nested_exec.exists() and nested_exec.is_file():
+        return nested_exec
+
+    if tool_root.exists() and tool_root.is_file():
+        return tool_root
+
+    binary = f"agent-{tool_name}"
+    which = subprocess.run(
+        ["which", binary],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if which.returncode == 0:
+        return Path(which.stdout.strip())
+
+    return None
+
+
+def route_is_supported(result: dict | None) -> bool:
+    """Return whether a cached/fuzzy route still points at a supported tool."""
+    if not result:
+        return False
+
+    tool_name = result.get("tool")
+    if not tool_name:
+        return True
+
+    return resolve_tool_executable(tool_name) is not None
+
+
+def route_intent(
+    intent: str,
+    registry_context: str,
+    state_context: str,
+    dry_run: bool = False,
+    explain: bool = False,
+) -> dict:
     """Route intent to tool command using Claude."""
 
     # Try cache first
     cached = check_cache(intent)
-    if cached and not explain:
+    if cached and route_is_supported(cached) and not explain:
         cached['from_cache'] = True
         return cached
 
     # Try fuzzy match if cache miss
     fuzzy = fuzzy_match(intent)
-    if fuzzy and not explain:
+    if fuzzy and route_is_supported(fuzzy) and not explain:
         fuzzy['from_fuzzy'] = True
         return fuzzy
 
     # Fall back to LLM
+    if anthropic is None:
+        raise RuntimeError(
+            "The 'anthropic' package is not installed. Install requirements.txt to use natural language routing."
+        )
+
     client = anthropic.Anthropic()
 
     mode = "explain what tool to use" if explain else "determine the exact command"
@@ -42,10 +91,10 @@ def route_intent(intent: str, registry: dict, state: dict, dry_run: bool = False
     prompt = f"""You are an intent router for the agent-do CLI. Given a natural language request, {mode}.
 
 Current state:
-{build_state_context(state)}
+{state_context}
 
 Available tools (each is invoked as `agent-<tool> <command> [args]`):
-{build_registry_context(registry)}
+{registry_context}
 
 User request: "{intent}"
 
@@ -173,14 +222,21 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
             print(f"  ({result['explanation']})")
         print()
 
-    # Find the tool
-    script_dir = Path(__file__).parent.parent
-    tools_dir = script_dir / "tools"
+    tool_path = resolve_tool_executable(result["tool"])
+    if tool_path is None:
+        if json_output:
+            output = {
+                "status": "error",
+                "error": "tool_not_found",
+                "message": f"Tool 'agent-{result['tool']}' not found.",
+                "tool": result.get('tool')
+            }
+            print(json.dumps(output))
+        else:
+            print(f"Error: Tool 'agent-{result['tool']}' not found.")
+        return 1
 
-    tool_path = tools_dir / f"agent-{result['tool']}"
-    if tool_path.exists():
-        cmd[0] = str(tool_path)
-    # Otherwise assume it's in PATH
+    cmd[0] = str(tool_path)
 
     try:
         proc = subprocess.run(cmd, capture_output=json_output, text=True)
@@ -206,7 +262,6 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
             print(json.dumps(output))
         else:
             print(f"Error: Tool 'agent-{result['tool']}' not found.")
-            print(f"Expected at: {tool_path}")
         return 1
 
 
@@ -232,11 +287,32 @@ def main():
     if args.context:
         intent = f"{intent}. Additional context: {args.context}"
 
-    registry = load_registry()
-    state = load_state()
-
     try:
-        result = route_intent(intent, registry, state, args.dry_run, args.explain)
+        try:
+            from state import load_state, build_state_context
+            state_context = build_state_context(load_state())
+        except ModuleNotFoundError as e:
+            if e.name != "yaml":
+                raise
+            state_context = "Session state unavailable (install pyyaml to enable state-aware routing)."
+
+        try:
+            from registry import load_registry, build_registry_context
+            registry_context = build_registry_context(load_registry())
+        except ModuleNotFoundError as e:
+            if e.name != "yaml":
+                raise
+            message = (
+                "PyYAML is required for natural language routing. "
+                "Install dependencies with 'pip3 install -r requirements.txt' or use 'agent-do --offline' for common intents."
+            )
+            if args.json:
+                print(json.dumps({"status": "error", "error": "missing_dependency", "message": message}))
+            else:
+                print(message)
+            return 1
+
+        result = route_intent(intent, registry_context, state_context, args.dry_run, args.explain)
         return execute(result, args.dry_run, args.json)
     except json.JSONDecodeError as e:
         if args.json:
@@ -244,14 +320,18 @@ def main():
         else:
             print(f"Error parsing router response: {e}")
         return 1
-    except anthropic.APIError as e:
+    except Exception as e:
+        is_api_error = anthropic is not None and isinstance(e, anthropic.APIError)
         if args.json:
-            print(json.dumps({"status": "error", "error": "api_error", "message": str(e)}))
+            error_type = "api_error" if is_api_error else "error"
+            print(json.dumps({"status": "error", "error": error_type, "message": str(e)}))
         else:
-            print(f"API error: {e}")
+            prefix = "API error" if is_api_error else "Error"
+            print(f"{prefix}: {e}")
+
         # Try fuzzy match as fallback
         fuzzy = fuzzy_match(intent, threshold=0.4)
-        if fuzzy:
+        if fuzzy and route_is_supported(fuzzy):
             if not args.json:
                 print("Falling back to fuzzy match...")
             return execute(fuzzy, args.dry_run, args.json)

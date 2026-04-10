@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# dpt-scan — Design Perception Tensor scanner
+# Injects the DPT extraction engine into a live browser page and returns structured JSON.
+#
+# Usage:
+#   dpt-scan [url]           Scan a URL (opens it first)
+#   dpt-scan --current       Scan the currently open page
+#   dpt-scan --help          Show this help
+#
+# Requires: agent-do browse (agent-browser daemon)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DPT_DIR="$(dirname "$SCRIPT_DIR")"
+DPT_ENGINE="$DPT_DIR/dist/dpt-engine.js"
+
+# Colors for terminal output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+usage() {
+    echo "dpt-scan — Design Perception Tensor"
+    echo ""
+    echo "Usage:"
+    echo "  dpt-scan <url>        Open URL and scan"
+    echo "  dpt-scan --current    Scan currently open page"
+    echo "  dpt-scan --json       Output raw JSON (default: formatted)"
+    echo "  dpt-scan --help       Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  dpt-scan https://example.com"
+    echo "  dpt-scan --current --json > report.json"
+    exit 0
+}
+
+# Parse arguments
+URL=""
+CURRENT=false
+RAW_JSON=false
+OUTPUT_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help|-h) usage ;;
+        --current|-c) CURRENT=true; shift ;;
+        --json|-j) RAW_JSON=true; shift ;;
+        --output|-o) OUTPUT_FILE="$2"; shift 2 ;;
+        *) URL="$1"; shift ;;
+    esac
+done
+
+# Validate
+if [[ "$CURRENT" == false && -z "$URL" ]]; then
+    echo -e "${RED}Error: Provide a URL or use --current${NC}" >&2
+    usage
+fi
+
+if [[ ! -f "$DPT_ENGINE" ]]; then
+    echo -e "${RED}Error: DPT engine not found at $DPT_ENGINE${NC}" >&2
+    echo -e "${DIM}Run: cd $DPT_DIR && bash bin/build${NC}" >&2
+    exit 1
+fi
+
+# Navigate if URL provided
+if [[ -n "$URL" ]]; then
+    echo -e "${CYAN}Opening ${URL}...${NC}" >&2
+    agent-do browse open "$URL" > /dev/null 2>&1
+    echo -e "${DIM}Waiting for page stability...${NC}" >&2
+    agent-do browse wait --stable > /dev/null 2>&1
+fi
+
+# Read the DPT engine script
+ENGINE_JS=$(cat "$DPT_ENGINE")
+
+echo -e "${CYAN}Scanning design perception tensor...${NC}" >&2
+
+# Inject and execute via the daemon socket
+# The engine is a self-executing function that returns the DPT JSON
+SOCK_PATH="/tmp/agent-browser-default.sock"
+
+if [[ ! -S "$SOCK_PATH" ]]; then
+    # Try to find the socket
+    SOCK_PATH=$(ls /tmp/agent-browser-*.sock 2>/dev/null | head -1 || true)
+    if [[ -z "$SOCK_PATH" || ! -S "$SOCK_PATH" ]]; then
+        echo -e "${RED}Error: No agent-browser daemon socket found.${NC}" >&2
+        echo -e "${DIM}Start a browse session first: agent-do browse open <url>${NC}" >&2
+        exit 1
+    fi
+fi
+
+# Build the JSON-RPC message
+# Escape the JS for JSON embedding
+ESCAPED_JS=$(python3 -c "
+import json, sys
+with open('$DPT_ENGINE', 'r') as f:
+    js = f.read()
+msg = json.dumps({'id': 'dpt-scan', 'action': 'evaluate', 'script': js})
+sys.stdout.write(msg)
+")
+
+# Send to daemon and capture response
+RESPONSE=$(echo "$ESCAPED_JS" | nc -U "$SOCK_PATH" -w 30 2>/dev/null | head -1)
+
+if [[ -z "$RESPONSE" ]]; then
+    echo -e "${RED}Error: No response from daemon${NC}" >&2
+    exit 1
+fi
+
+# Extract the result from the daemon response
+RESULT=$(python3 -c "
+import json, sys
+try:
+    resp = json.loads('''$RESPONSE''')
+    if resp.get('success'):
+        result = resp.get('data', {}).get('result', {})
+        print(json.dumps(result, indent=2))
+    else:
+        print(json.dumps({'error': resp.get('error', 'Unknown error')}), file=sys.stderr)
+        sys.exit(1)
+except Exception as e:
+    # Response might be too large for inline — use file-based approach
+    sys.exit(2)
+")
+
+EXIT_CODE=$?
+
+if [[ $EXIT_CODE -eq 2 ]]; then
+    # Fallback: write response to temp file and parse
+    TMPFILE=$(mktemp /tmp/dpt-response-XXXXX.json)
+    echo "$RESPONSE" > "$TMPFILE"
+    RESULT=$(python3 -c "
+import json, sys
+with open('$TMPFILE', 'r') as f:
+    resp = json.load(f)
+if resp.get('success'):
+    result = resp.get('data', {}).get('result', {})
+    print(json.dumps(result, indent=2))
+else:
+    print(json.dumps({'error': resp.get('error', 'Unknown error')}), file=sys.stderr)
+    sys.exit(1)
+")
+    rm -f "$TMPFILE"
+fi
+
+if [[ "$RAW_JSON" == true ]]; then
+    if [[ -n "$OUTPUT_FILE" ]]; then
+        echo "$RESULT" > "$OUTPUT_FILE"
+        echo -e "${GREEN}Written to ${OUTPUT_FILE}${NC}" >&2
+    else
+        echo "$RESULT"
+    fi
+else
+    # Pretty-print summary to stderr, JSON to stdout
+    echo "$RESULT" | python3 -c "
+import json, sys
+
+data = json.load(sys.stdin)
+meta = data.get('meta', {})
+layers = ['chromatic_field', 'typographic_skeleton', 'spatial_rhythm', 'attention_architecture', 'coherence']
+
+print(f'')
+print(f'  \033[1mDESIGN PERCEPTION TENSOR\033[0m')
+print(f'  \033[2m{meta.get(\"url\", \"unknown\")} @ {meta.get(\"viewport\", {}).get(\"width\", \"?\")}x{meta.get(\"viewport\", {}).get(\"height\", \"?\")}\033[0m')
+print(f'  \033[2m{meta.get(\"timestamp\", \"\")}\033[0m')
+print(f'')
+
+for layer in layers:
+    ld = data.get(layer, {})
+    name = layer.replace('_', ' ').upper()
+    # Count passes and fails
+    passes = 0
+    fails = 0
+    for key, val in ld.items():
+        if isinstance(val, dict) and 'pass' in val:
+            if val['pass']: passes += 1
+            else: fails += 1
+        elif isinstance(val, bool) and key == 'pass':
+            if val: passes += 1
+            else: fails += 1
+
+    if fails == 0 and passes > 0:
+        icon = '\033[32m●\033[0m'
+    elif fails > 0:
+        icon = '\033[31m●\033[0m'
+    else:
+        icon = '\033[33m○\033[0m'
+
+    print(f'  {icon} {name}: {passes} pass, {fails} issues')
+
+coherence_data = data.get('coherence', {})
+overall = coherence_data.get('overall_score', {}).get('overall', '?')
+print(f'')
+print(f'  \033[1mCOHERENCE SCORE: {overall}/100\033[0m')
+print(f'')
+" 2>&1 >&2
+
+    # Output JSON to stdout
+    if [[ -n "$OUTPUT_FILE" ]]; then
+        echo "$RESULT" > "$OUTPUT_FILE"
+        echo -e "${GREEN}Full JSON written to ${OUTPUT_FILE}${NC}" >&2
+    else
+        echo "$RESULT"
+    fi
+fi

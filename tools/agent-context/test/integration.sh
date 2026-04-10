@@ -93,8 +93,10 @@ echo ""
 echo "9. Sources"
 check_output "sources empty" "No sources" "$TOOL" sources
 check "add-source" "$TOOL" add-source test-source https://example.com/docs
+check_output "config keeps trust policy" "trust_policy" grep -n "trust_policy" "$AGENT_DO_HOME/context/config.yaml"
 check_output "sources shows entry" "test-source" "$TOOL" sources
 check "remove-source" "$TOOL" remove-source test-source
+check_output "sources empty after remove" "No sources" "$TOOL" sources
 
 echo ""
 echo "10. Scan local"

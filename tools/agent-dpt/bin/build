@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Assembles the DPT engine from utils + layer modules into a single injectable JS file.
+# Output: dist/dpt-engine.js — a self-executing function that returns the DPT JSON.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DPT_DIR="$(dirname "$SCRIPT_DIR")"
+SRC="$DPT_DIR/src"
+DIST="$DPT_DIR/dist"
+
+mkdir -p "$DIST"
+
+echo "Assembling DPT engine..."
+
+cat > "$DIST/dpt-engine.js" << 'HEADER'
+// Design Perception Tensor — Engine v0.1.0
+// Assembled from src/utils.js + src/layers/*.js
+// Runs in browser context via page.evaluate()
+// Returns: structured JSON describing design quality across 5 perception layers
+(() => {
+try {
+HEADER
+
+# Inject utils
+echo "  + utils.js"
+cat "$SRC/utils.js" >> "$DIST/dpt-engine.js"
+echo "" >> "$DIST/dpt-engine.js"
+
+# Inject each layer
+for layer in chromatic-field typographic-skeleton spatial-rhythm attention-architecture coherence; do
+    LAYER_FILE="$SRC/layers/${layer}.js"
+    if [[ -f "$LAYER_FILE" ]]; then
+        echo "  + layers/${layer}.js"
+        cat "$LAYER_FILE" >> "$DIST/dpt-engine.js"
+        echo "" >> "$DIST/dpt-engine.js"
+    else
+        echo "  ! MISSING: layers/${layer}.js"
+    fi
+done
+
+# Inject synthesis
+echo "  + synthesis.js"
+cat "$SRC/synthesis.js" >> "$DIST/dpt-engine.js"
+echo "" >> "$DIST/dpt-engine.js"
+
+# Inject the orchestrator
+cat >> "$DIST/dpt-engine.js" << 'ORCHESTRATOR'
+
+// ─── Orchestrator ──────────────────────────────────────────────────
+const __DPT_START = performance.now();
+
+const result = {
+  meta: {
+    version: "0.1.0",
+    url: window.location.href,
+    title: document.title,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio
+    },
+    timestamp: new Date().toISOString(),
+    element_count: document.querySelectorAll('*').length
+  }
+};
+
+// Execute each layer with error isolation
+const layers = [
+  ['chromatic_field', chromaticField],
+  ['typographic_skeleton', typographicSkeleton],
+  ['spatial_rhythm', spatialRhythm],
+  ['attention_architecture', attentionArchitecture],
+  ['coherence', coherence]
+];
+
+for (const [name, fn] of layers) {
+  try {
+    const layerStart = performance.now();
+    result[name] = fn(DPT_UTILS);
+    result[name]._timing_ms = Math.round(performance.now() - layerStart);
+  } catch (e) {
+    result[name] = { _error: e.message, _stack: e.stack?.split('\n').slice(0, 3).join(' | ') };
+  }
+}
+
+// Execute synthesis across all layers
+try {
+  result.synthesis = synthesis(
+    result.chromatic_field || {},
+    result.typographic_skeleton || {},
+    result.spatial_rhythm || {},
+    result.attention_architecture || {},
+    result.coherence || {}
+  );
+} catch (e) {
+  result.synthesis = { _error: e.message };
+}
+
+result.meta.total_timing_ms = Math.round(performance.now() - __DPT_START);
+
+return result;
+
+} catch (e) {
+  return { _fatal_error: e.message, _stack: e.stack };
+}
+})()
+ORCHESTRATOR
+
+# Get file size
+SIZE=$(wc -c < "$DIST/dpt-engine.js" | tr -d ' ')
+LINES=$(wc -l < "$DIST/dpt-engine.js" | tr -d ' ')
+
+echo ""
+echo "Built: dist/dpt-engine.js"
+echo "  ${LINES} lines, ${SIZE} bytes"
+echo ""
+echo "Usage:"
+echo "  dpt-scan <url>          # Full scan"
+echo "  dpt-scan --current      # Scan current page"

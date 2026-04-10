@@ -3,18 +3,18 @@
 Natural language automation CLI. One command to control anything.
 
 ```bash
-agent-do "what you want to do"
+agent-do -n "what you want to do"
 ```
 
 ## The Vision
 
 ```bash
 # The outer LLM only ever needs to know this:
-agent-do "take a screenshot of the iOS simulator"
-agent-do "send 'x = 42' to my python REPL"
-agent-do "click the Save button in Photoshop"
-agent-do "post 'deploy complete' to #engineering on Slack"
-agent-do "what's using port 3000"
+agent-do -n "take a screenshot of the iOS simulator"
+agent-do -n "send 'x = 42' to my python REPL"
+agent-do -n "click the Save button in Photoshop"
+agent-do -n "post 'deploy complete' to #engineering on Slack"
+agent-do -n "what's using port 3000"
 ```
 
 One command. Natural language. Done.
@@ -25,7 +25,7 @@ One command. Natural language. Done.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    agent-do "intent"                     │
+│                    agent-do -n "intent"                     │
 └─────────────────────┬───────────────────────────────────┘
                       │
                       ▼
@@ -44,7 +44,7 @@ One command. Natural language. Done.
 │                  Tool Executor                           │
 │                                                          │
 │   agent-tui  agent-macos  agent-ios  agent-db  ...       │
-│                     (76 tools)                           │
+│                     (80 tools)                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -246,11 +246,11 @@ esac
 ### Primary (LLM-facing)
 
 ```bash
-agent-do "take a screenshot of the iOS simulator and save to ~/Desktop"
-agent-do "send 'print(x)' to my python session"
-agent-do "click the Save button in Photoshop"
-agent-do "post 'deploy complete' to #engineering on Slack"
-agent-do "show me what's using port 3000"
+agent-do -n "take a screenshot of the iOS simulator and save to ~/Desktop"
+agent-do -n "send 'print(x)' to my python session"
+agent-do -n "click the Save button in Photoshop"
+agent-do -n "post 'deploy complete' to #engineering on Slack"
+agent-do -n "show me what's using port 3000"
 ```
 
 ### Helper Commands
@@ -263,7 +263,7 @@ agent-do --status              # Show active sessions/state
 
 agent-do --how "control a desktop application"
 # → Use agent-macos. It controls native apps via accessibility APIs.
-#   Example: agent-do "click Save in Photoshop"
+#   Example: agent-do -n "click Save in Photoshop"
 
 agent-do --dry-run "screenshot iOS"
 # → Would execute: agent-ios screenshot /tmp/screenshot.png
@@ -470,7 +470,7 @@ if __name__ == "__main__":
 The router needs context about active sessions:
 
 ```bash
-agent-do "send 'print(x)' to my python session"
+agent-do -n "send 'print(x)' to my python session"
 ```
 
 How does it know which session? State file tracks active sessions:
@@ -511,15 +511,15 @@ Tools update state when sessions are created/destroyed. Router includes state in
 Control anything with natural language.
 
 ```bash
-agent-do "what you want to do"
+agent-do -n "what you want to do"
 ```
 
 Examples:
-- `agent-do "start a python REPL"`
-- `agent-do "screenshot the iOS simulator"`
-- `agent-do "click Save in Photoshop"`
-- `agent-do "send 'SELECT * FROM users' to postgres"`
-- `agent-do "post 'done' to #general on Slack"`
+- `agent-do -n "start a python REPL"`
+- `agent-do -n "screenshot the iOS simulator"`
+- `agent-do -n "click Save in Photoshop"`
+- `agent-do -n "send 'SELECT * FROM users' to postgres"`
+- `agent-do -n "post 'done' to #general on Slack"`
 
 Status: `agent-do --status`
 Help: `agent-do --how "your question"`
@@ -722,7 +722,7 @@ ANTHROPIC_API_KEY  # Required for intent routing
 
 3. **Learning**: Improve routing based on corrections
    ```bash
-   agent-do "screenshot my app"
+   agent-do -n "screenshot my app"
    → agent-macos screenshot
    $ agent-do --correct "I meant the iOS simulator"
    # Updates pattern cache

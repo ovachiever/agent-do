@@ -5,21 +5,44 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="$SCRIPT_DIR/target/release/manna-core"
+BINARY_NAME="manna-core"
 
-# Check if binary exists
-if [[ ! -f "$BINARY" ]]; then
+find_binary() {
+    local candidates=(
+        "$SCRIPT_DIR/target/release/$BINARY_NAME"
+        "$SCRIPT_DIR/target/debug/$BINARY_NAME"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    if command -v "$BINARY_NAME" &>/dev/null; then
+        command -v "$BINARY_NAME"
+        return 0
+    fi
+
+    return 1
+}
+
+BINARY="$(find_binary)" || {
     cat >&2 << EOF
-Error: manna-core binary not found
+Error: $BINARY_NAME binary not found
 
-Expected location: $BINARY
+Expected one of:
+  $SCRIPT_DIR/target/release/$BINARY_NAME
+  $SCRIPT_DIR/target/debug/$BINARY_NAME
+  \$PATH entry named $BINARY_NAME
 
 To build the binary, run:
   cd "$SCRIPT_DIR"
   cargo build --release
 EOF
     exit 1
-fi
+}
 
 # Exec binary with all arguments
 exec "$BINARY" "$@"

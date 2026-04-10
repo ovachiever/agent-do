@@ -23,8 +23,8 @@ fi
 
 # Parse YAML with python (simpler than pure bash)
 python3 << 'PYTHON'
-import yaml
 import os
+import sys
 from pathlib import Path
 
 state_file = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do")) / "state.yaml"
@@ -32,6 +32,13 @@ state_file = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do")) / 
 if not state_file.exists():
     print("No active sessions.")
     exit(0)
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    print("State file exists, but PyYAML is not installed.")
+    print("Install dependencies with: pip3 install -r requirements.txt")
+    sys.exit(1)
 
 with open(state_file) as f:
     state = yaml.safe_load(f) or {}

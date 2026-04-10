@@ -40,15 +40,57 @@ if [ -n "$AGENT_DO_DIR" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
     echo "export PATH=\"$AGENT_DO_DIR:\$PATH\"" >> "$CLAUDE_ENV_FILE"
 fi
 
+append_bootstrap_prompt() {
+    local bootstrap_json needs_bootstrap ask_prompt project_root commands
+
+    [ -n "$AGENT_DO_DIR" ] || return 0
+    [ -n "$CWD" ] || return 0
+    [ -x "$AGENT_DO_DIR/agent-do" ] || return 0
+
+    bootstrap_json=$("$AGENT_DO_DIR/agent-do" bootstrap --recommend --json --cwd "$CWD" 2>/dev/null || true)
+    [ -n "$bootstrap_json" ] || return 0
+
+    needs_bootstrap=$(echo "$bootstrap_json" | python3 -c "import json,sys; print('true' if json.load(sys.stdin).get('needs_bootstrap') else 'false')" 2>/dev/null || echo "false")
+    [ "$needs_bootstrap" = "true" ] || return 0
+
+    ask_prompt=$(echo "$bootstrap_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ask_prompt',''))" 2>/dev/null || true)
+    project_root=$(echo "$bootstrap_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('project_root',''))" 2>/dev/null || true)
+    commands=$(echo "$bootstrap_json" | python3 -c "import json,sys; data=json.load(sys.stdin); [print(cmd) for cmd in data.get('commands', [])]" 2>/dev/null || true)
+
+    CONTEXT="$CONTEXT
+
+---
+
+## Bootstrap Opportunity
+
+This project has pending agent-do bootstrap work.
+
+At the start of your first reply in this session, ask exactly one short yes/no question:
+\"$ask_prompt\"
+
+If the user says yes, run:
+\`agent-do bootstrap --yes\`
+
+Run it from:
+\`$project_root\`
+
+Planned bootstrap:
+\`\`\`
+$commands
+\`\`\`
+
+If the user says no, continue normally and do not ask again in this session."
+}
+
 # --- Inject tooling reminder ---
 CONTEXT="## TOOLING REMINDER - agent-do
 
 BEFORE using raw commands (xcrun, adb, osascript, curl for APIs, etc.), CHECK if agent-do has a tool:
 
 \`\`\`
-agent-do \"natural language description of what you want\"
+agent-do <tool> <command> [args...]
+agent-do -n \"natural language description of what you want\"
 agent-do --how \"...\"     # Explain without executing
-agent-do --raw <tool> ... # Direct tool access
 \`\`\`
 
 Discovery: agent-do --list (all tools) | agent-do <tool> --help (per-tool)
@@ -175,6 +217,8 @@ agent-do zpc patterns    # Established conventions — read before coding
 \`\`\`
 Log lessons and decisions as you work. Run \`agent-do zpc harvest\` after significant work."
 fi
+
+append_bootstrap_prompt
 
 ESCAPED=$(echo "$CONTEXT" | jq -Rs .)
 echo "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":$ESCAPED}}"

@@ -1,4 +1,4 @@
-# agent-gui v2 Specification
+# agent-macos v2 Specification
 
 > Desktop GUI automation with semantic element refs - see and control native apps like a human.
 
@@ -16,7 +16,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       agent-gui                              │
+│                       agent-macos                              │
 ├─────────────────────────────────────────────────────────────┤
 │  Layer 1: Accessibility APIs (fast, semantic)               │
 │  └─ macOS: AXUIElement via pyobjc                           │
@@ -64,7 +64,7 @@ Application (Finder)
 ```
 
 ### Session State
-Like other agent-do tools, agent-gui maintains session state:
+Like other agent-do tools, agent-macos maintains session state:
 - Active application
 - Last snapshot (for ref resolution)
 - Interaction history
@@ -75,22 +75,22 @@ Like other agent-do tools, agent-gui maintains session state:
 
 ```bash
 # List running applications
-agent-gui apps
+agent-macos apps
 # → {"apps": ["Finder", "Safari", "VS Code", ...], "frontmost": "Finder"}
 
 # Open application
-agent-gui open "Calculator"
-agent-gui open "com.apple.calculator"  # By bundle ID
+agent-macos open "Calculator"
+agent-macos open "com.apple.calculator"  # By bundle ID
 
 # Focus/activate application
-agent-gui focus "Safari"
+agent-macos focus "Safari"
 
 # Quit application
-agent-gui quit "Preview"
-agent-gui quit "Preview" --force  # Force quit
+agent-macos quit "Preview"
+agent-macos quit "Preview" --force  # Force quit
 
 # Get frontmost app
-agent-gui frontmost
+agent-macos frontmost
 # → {"app": "Finder", "pid": 12345, "bundle": "com.apple.finder"}
 ```
 
@@ -98,28 +98,28 @@ agent-gui frontmost
 
 ```bash
 # List windows for app (or all)
-agent-gui windows "Safari"
-agent-gui windows --all
+agent-macos windows "Safari"
+agent-macos windows --all
 
 # Focus specific window
-agent-gui window focus "Safari" --title "Downloads"
-agent-gui window focus "Safari" --index 1
+agent-macos window focus "Safari" --title "Downloads"
+agent-macos window focus "Safari" --index 1
 
 # Window actions
-agent-gui window minimize "Finder"
-agent-gui window maximize "Finder"       # Zoom button
-agent-gui window fullscreen "Safari"     # Enter fullscreen
-agent-gui window close "Preview"
+agent-macos window minimize "Finder"
+agent-macos window maximize "Finder"       # Zoom button
+agent-macos window fullscreen "Safari"     # Enter fullscreen
+agent-macos window close "Preview"
 
 # Window positioning
-agent-gui window move "Finder" 0 0           # Move to x,y
-agent-gui window resize "Finder" 800 600     # Set size
-agent-gui window tile "Finder" left          # Tile left half
-agent-gui window tile "Safari" right         # Tile right half
-agent-gui window center "Calculator"
+agent-macos window move "Finder" 0 0           # Move to x,y
+agent-macos window resize "Finder" 800 600     # Set size
+agent-macos window tile "Finder" left          # Tile left half
+agent-macos window tile "Safari" right         # Tile right half
+agent-macos window center "Calculator"
 
 # Get window info
-agent-gui window info "Finder"
+agent-macos window info "Finder"
 # → {"title": "Documents", "position": [100, 100], "size": [800, 600], "minimized": false}
 ```
 
@@ -127,23 +127,23 @@ agent-gui window info "Finder"
 
 ```bash
 # Snapshot frontmost app
-agent-gui snapshot
+agent-macos snapshot
 # → Full element tree with @refs
 
 # Snapshot specific app
-agent-gui snapshot "Finder"
+agent-macos snapshot "Finder"
 
 # Snapshot options
-agent-gui snapshot -i              # Interactive elements only (buttons, fields, etc.)
-agent-gui snapshot -d 3            # Limit depth to 3
-agent-gui snapshot --window 1      # Specific window
-agent-gui snapshot --focused       # Only focused element subtree
-agent-gui snapshot --visible       # Only visible elements
+agent-macos snapshot -i              # Interactive elements only (buttons, fields, etc.)
+agent-macos snapshot -d 3            # Limit depth to 3
+agent-macos snapshot --window 1      # Specific window
+agent-macos snapshot --focused       # Only focused element subtree
+agent-macos snapshot --visible       # Only visible elements
 
 # Output formats
-agent-gui snapshot --json          # Full JSON (default)
-agent-gui snapshot --tree          # ASCII tree view
-agent-gui snapshot --csv           # Flat CSV of elements
+agent-macos snapshot --json          # Full JSON (default)
+agent-macos snapshot --tree          # ASCII tree view
+agent-macos snapshot --csv           # Flat CSV of elements
 ```
 
 **Snapshot JSON Output:**
@@ -192,188 +192,188 @@ agent-gui snapshot --csv           # Flat CSV of elements
 
 ```bash
 # Click element
-agent-gui click @g2                # Single click
-agent-gui dblclick @g12            # Double click (open file)
-agent-gui rightclick @g12          # Context menu
-agent-gui click @g4 --hold 1.0     # Click and hold
+agent-macos click @g2                # Single click
+agent-macos dblclick @g12            # Double click (open file)
+agent-macos rightclick @g12          # Context menu
+agent-macos click @g4 --hold 1.0     # Click and hold
 
 # Type into element (or focused)
-agent-gui type @g5 "search query"  # Type into specific element
-agent-gui type "hello"             # Type into focused element
+agent-macos type @g5 "search query"  # Type into specific element
+agent-macos type "hello"             # Type into focused element
 
 # Clear and type
-agent-gui fill @g5 "new text"      # Clear first, then type
+agent-macos fill @g5 "new text"      # Clear first, then type
 
 # Press keys
-agent-gui press Enter
-agent-gui press Tab
-agent-gui press Escape
-agent-gui press "Cmd+S"            # Keyboard shortcut
-agent-gui press "Cmd+Shift+4"      # Multi-modifier
+agent-macos press Enter
+agent-macos press Tab
+agent-macos press Escape
+agent-macos press "Cmd+S"            # Keyboard shortcut
+agent-macos press "Cmd+Shift+4"      # Multi-modifier
 
 # Key sequences
-agent-gui keys "Cmd+A" "Cmd+C"     # Select all, copy
+agent-macos keys "Cmd+A" "Cmd+C"     # Select all, copy
 
 # Element-specific actions
-agent-gui action @g5 "showMenu"    # Trigger AX action
-agent-gui action @g7 "expand"      # Expand disclosure
-agent-gui action @g7 "collapse"
+agent-macos action @g5 "showMenu"    # Trigger AX action
+agent-macos action @g7 "expand"      # Expand disclosure
+agent-macos action @g7 "collapse"
 
 # Drag and drop
-agent-gui drag @g12 to @g8         # Drag file to folder
-agent-gui drag @g12 to 500 300     # Drag to coordinates
+agent-macos drag @g12 to @g8         # Drag file to folder
+agent-macos drag @g12 to 500 300     # Drag to coordinates
 
 # Scroll
-agent-gui scroll @g10 down 3       # Scroll down 3 units
-agent-gui scroll @g10 up
-agent-gui scroll @g10 to @g20      # Scroll until element visible
+agent-macos scroll @g10 down 3       # Scroll down 3 units
+agent-macos scroll @g10 up
+agent-macos scroll @g10 to @g20      # Scroll until element visible
 
 # Checkbox/radio
-agent-gui check @g15               # Check checkbox
-agent-gui uncheck @g15
-agent-gui toggle @g15
+agent-macos check @g15               # Check checkbox
+agent-macos uncheck @g15
+agent-macos toggle @g15
 
 # Slider/stepper
-agent-gui set @g16 75              # Set slider to 75
-agent-gui increment @g17           # Increment stepper
-agent-gui decrement @g17
+agent-macos set @g16 75              # Set slider to 75
+agent-macos increment @g17           # Increment stepper
+agent-macos decrement @g17
 
 # Select (dropdown, list, table)
-agent-gui select @g18 "Option 2"   # Select by label
-agent-gui select @g18 --index 2    # Select by index
+agent-macos select @g18 "Option 2"   # Select by label
+agent-macos select @g18 --index 2    # Select by index
 ```
 
 ### Reading Element Data
 
 ```bash
 # Get element attribute
-agent-gui get @g12 label           # Get label/title
-agent-gui get @g5 value            # Get current value
-agent-gui get @g15 checked         # Get checkbox state
-agent-gui get @g16 value           # Get slider value
-agent-gui get @g12 position        # Get position [x, y]
-agent-gui get @g12 size            # Get size [w, h]
-agent-gui get @g2 enabled          # Is enabled?
-agent-gui get @g5 focused          # Is focused?
+agent-macos get @g12 label           # Get label/title
+agent-macos get @g5 value            # Get current value
+agent-macos get @g15 checked         # Get checkbox state
+agent-macos get @g16 value           # Get slider value
+agent-macos get @g12 position        # Get position [x, y]
+agent-macos get @g12 size            # Get size [w, h]
+agent-macos get @g2 enabled          # Is enabled?
+agent-macos get @g5 focused          # Is focused?
 
 # Get all attributes
-agent-gui inspect @g12
+agent-macos inspect @g12
 # → {"ref": "@g12", "role": "row", "label": "file1.txt", "position": [...], ...}
 
 # Find elements
-agent-gui find --role button                    # All buttons
-agent-gui find --label "Save"                   # By label
-agent-gui find --role textfield --empty         # Empty text fields
-agent-gui find --contains "report"              # Label contains text
+agent-macos find --role button                    # All buttons
+agent-macos find --label "Save"                   # By label
+agent-macos find --role textfield --empty         # Empty text fields
+agent-macos find --contains "report"              # Label contains text
 
 # Count elements
-agent-gui count --role button
-agent-gui count --role row --parent @g11
+agent-macos count --role button
+agent-macos count --role row --parent @g11
 ```
 
 ### Menu Interaction
 
 ```bash
 # Click menu item
-agent-gui menu "File" "New Window"
-agent-gui menu "File" "Open Recent" "file.txt"  # Submenu
+agent-macos menu "File" "New Window"
+agent-macos menu "File" "Open Recent" "file.txt"  # Submenu
 
 # Get menu structure
-agent-gui menubar
+agent-macos menubar
 # → {"menus": ["Apple", "Finder", "File", "Edit", "View", ...]}
 
-agent-gui menubar "File"
+agent-macos menubar "File"
 # → {"items": ["New Finder Window", "New Folder", "---", "Open", ...]}
 
 # Menu bar item by index
-agent-gui menubar --index 3 "New Window"
+agent-macos menubar --index 3 "New Window"
 ```
 
 ### Dialog Handling
 
 ```bash
 # Detect dialogs
-agent-gui dialog detect
+agent-macos dialog detect
 # → {"type": "sheet", "title": "Save changes?", "buttons": ["Don't Save", "Cancel", "Save"]}
 
 # Click dialog button
-agent-gui dialog click "Save"
-agent-gui dialog click --default              # Click default button
-agent-gui dialog click --cancel               # Click cancel button
+agent-macos dialog click "Save"
+agent-macos dialog click --default              # Click default button
+agent-macos dialog click --cancel               # Click cancel button
 
 # Handle file dialogs
-agent-gui filepicker detect
+agent-macos filepicker detect
 # → {"type": "save", "filename": "Untitled.txt", "location": "Documents"}
 
-agent-gui filepicker navigate ~/Downloads
-agent-gui filepicker filename "report.pdf"
-agent-gui filepicker select "file.txt"        # In open dialog
-agent-gui filepicker save                     # Click Save
-agent-gui filepicker cancel
+agent-macos filepicker navigate ~/Downloads
+agent-macos filepicker filename "report.pdf"
+agent-macos filepicker select "file.txt"        # In open dialog
+agent-macos filepicker save                     # Click Save
+agent-macos filepicker cancel
 ```
 
 ### Clipboard
 
 ```bash
 # Get clipboard
-agent-gui clipboard
+agent-macos clipboard
 # → {"text": "copied text", "types": ["public.utf8-plain-text"]}
 
 # Set clipboard
-agent-gui clipboard "text to copy"
-agent-gui clipboard --file /path/to/file      # Copy file reference
+agent-macos clipboard "text to copy"
+agent-macos clipboard --file /path/to/file      # Copy file reference
 
 # Copy from element
-agent-gui copy @g12                           # Copy element content
+agent-macos copy @g12                           # Copy element content
 ```
 
 ### Screenshots
 
 ```bash
 # Screenshot app window
-agent-gui screenshot "Finder"
-agent-gui screenshot "Finder" ~/Desktop/finder.png
+agent-macos screenshot "Finder"
+agent-macos screenshot "Finder" ~/Desktop/finder.png
 
 # Screenshot element
-agent-gui screenshot @g10
-agent-gui screenshot @g10 --highlight         # With highlight box
+agent-macos screenshot @g10
+agent-macos screenshot @g10 --highlight         # With highlight box
 
 # Screenshot with annotation
-agent-gui screenshot --annotate               # Show all @refs on image
+agent-macos screenshot --annotate               # Show all @refs on image
 ```
 
 ### Waiting
 
 ```bash
 # Wait for element
-agent-gui wait @g5                            # Wait for element to exist
-agent-gui wait @g5 --enabled                  # Wait until enabled
-agent-gui wait @g5 --visible                  # Wait until visible
-agent-gui wait --label "Complete"             # Wait for element with label
-agent-gui wait --gone @g5                     # Wait until element removed
+agent-macos wait @g5                            # Wait for element to exist
+agent-macos wait @g5 --enabled                  # Wait until enabled
+agent-macos wait @g5 --visible                  # Wait until visible
+agent-macos wait --label "Complete"             # Wait for element with label
+agent-macos wait --gone @g5                     # Wait until element removed
 
 # Wait for window/dialog
-agent-gui wait --window "Preferences"         # Wait for window
-agent-gui wait --dialog                       # Wait for any dialog
-agent-gui wait --dialog "Save changes?"       # Wait for specific dialog
+agent-macos wait --window "Preferences"         # Wait for window
+agent-macos wait --dialog                       # Wait for any dialog
+agent-macos wait --dialog "Save changes?"       # Wait for specific dialog
 
 # Timeouts
-agent-gui wait @g5 --timeout 10               # 10 second timeout (default: 30)
+agent-macos wait @g5 --timeout 10               # 10 second timeout (default: 30)
 ```
 
 ### Notifications
 
 ```bash
 # List notifications
-agent-gui notifications
+agent-macos notifications
 # → [{"app": "Messages", "title": "New Message", "body": "Hey!"}]
 
 # Dismiss notifications
-agent-gui notifications dismiss --all
-agent-gui notifications dismiss --app "Messages"
+agent-macos notifications dismiss --all
+agent-macos notifications dismiss --app "Messages"
 
 # Click notification
-agent-gui notifications click 0               # Click first notification
+agent-macos notifications click 0               # Click first notification
 ```
 
 ### Vision Fallback
@@ -382,30 +382,30 @@ When accessibility APIs don't expose elements (games, Electron apps, custom UI):
 
 ```bash
 # Force vision-based snapshot
-agent-gui snapshot --vision
+agent-macos snapshot --vision
 # Uses agent-vision to OCR text and detect UI elements
 
 # Find by visual appearance
-agent-gui vision find "red button"
-agent-gui vision find "Save icon"
+agent-macos vision find "red button"
+agent-macos vision find "Save icon"
 
 # Click by visual description
-agent-gui vision click "the submit button at bottom right"
+agent-macos vision click "the submit button at bottom right"
 
 # OCR region
-agent-gui vision ocr @g10                     # OCR within element bounds
-agent-gui vision ocr --region 100,100,200,50  # OCR specific region
+agent-macos vision ocr @g10                     # OCR within element bounds
+agent-macos vision ocr --region 100,100,200,50  # OCR specific region
 ```
 
 ### Session Management
 
 ```bash
 # Status
-agent-gui status
+agent-macos status
 # → {"app": "Finder", "window": "Documents", "elements": 47, "last_snapshot": "..."}
 
 # Clear session
-agent-gui reset
+agent-macos reset
 ```
 
 ## Exit Codes
@@ -424,13 +424,13 @@ agent-gui reset
 
 ## Accessibility Permissions
 
-agent-gui requires accessibility permissions on macOS:
+agent-macos requires accessibility permissions on macOS:
 - System Settings → Privacy & Security → Accessibility
 - Add Terminal (or the running app) to allowed apps
 
 First run will prompt. Can check programmatically:
 ```bash
-agent-gui --check-permissions
+agent-macos --check-permissions
 # → {"accessibility": true, "screen_recording": true}
 ```
 
@@ -440,74 +440,74 @@ agent-gui --check-permissions
 
 ```bash
 # User is in TextEdit with unsaved document
-agent-gui focus "TextEdit"
-agent-gui press "Cmd+S"
-agent-gui wait --dialog
-agent-gui filepicker filename "notes.txt"
-agent-gui filepicker navigate ~/Documents
-agent-gui filepicker save
+agent-macos focus "TextEdit"
+agent-macos press "Cmd+S"
+agent-macos wait --dialog
+agent-macos filepicker filename "notes.txt"
+agent-macos filepicker navigate ~/Documents
+agent-macos filepicker save
 ```
 
 ### 2. Extract Data from Native App
 
 ```bash
 # Get contacts from Contacts.app
-agent-gui open "Contacts"
-agent-gui wait --window "Contacts"
-agent-gui snapshot -i
+agent-macos open "Contacts"
+agent-macos wait --window "Contacts"
+agent-macos snapshot -i
 # Find the contact list
-agent-gui click @g8                    # First contact
-agent-gui snapshot --focused
+agent-macos click @g8                    # First contact
+agent-macos snapshot --focused
 # Read contact details
-agent-gui get @g15 value               # Phone number field
+agent-macos get @g15 value               # Phone number field
 ```
 
 ### 3. System Settings Automation
 
 ```bash
-agent-gui open "System Settings"
-agent-gui wait --window "System Settings"
-agent-gui snapshot -i
+agent-macos open "System Settings"
+agent-macos wait --window "System Settings"
+agent-macos snapshot -i
 
 # Navigate to Displays
-agent-gui find --label "Displays"      # Find in sidebar
-agent-gui click @g12                   # Click Displays
+agent-macos find --label "Displays"      # Find in sidebar
+agent-macos click @g12                   # Click Displays
 
-agent-gui wait --stable
-agent-gui snapshot -i
+agent-macos wait --stable
+agent-macos snapshot -i
 
 # Change resolution
-agent-gui click @g18                   # Resolution dropdown
-agent-gui select @g18 "1920 x 1080"
+agent-macos click @g18                   # Resolution dropdown
+agent-macos select @g18 "1920 x 1080"
 ```
 
 ### 4. Cross-App Workflow
 
 ```bash
 # Copy table from Numbers to Pages
-agent-gui focus "Numbers"
-agent-gui snapshot -i
-agent-gui click @g25                   # Select table
-agent-gui press "Cmd+C"
+agent-macos focus "Numbers"
+agent-macos snapshot -i
+agent-macos click @g25                   # Select table
+agent-macos press "Cmd+C"
 
-agent-gui focus "Pages"
-agent-gui snapshot -i
-agent-gui click @g10                   # Click in document
-agent-gui press "Cmd+V"
-agent-gui press "Cmd+S"
+agent-macos focus "Pages"
+agent-macos snapshot -i
+agent-macos click @g10                   # Click in document
+agent-macos press "Cmd+V"
+agent-macos press "Cmd+S"
 ```
 
 ### 5. Handle Unknown App with Vision
 
 ```bash
 # Electron app with poor accessibility
-agent-gui focus "Slack"
-agent-gui snapshot --vision            # Use vision fallback
+agent-macos focus "Slack"
+agent-macos snapshot --vision            # Use vision fallback
 
 # Elements detected via OCR/vision
-agent-gui vision click "message field"
-agent-gui type "Hello team!"
-agent-gui press Enter
+agent-macos vision click "message field"
+agent-macos type "Hello team!"
+agent-macos press Enter
 ```
 
 ## Implementation Notes

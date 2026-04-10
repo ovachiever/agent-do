@@ -6,14 +6,23 @@ Provides fallback when LLM is unavailable.
 
 import sys
 import re
+import shutil
 from pathlib import Path
 from typing import Optional
 
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
-from registry import load_registry, search_tools
-from cache import fuzzy_match, get_all_patterns
+try:
+    from registry import load_registry, search_tools
+except ModuleNotFoundError as e:
+    if e.name == "yaml":
+        load_registry = None
+        search_tools = None
+    else:
+        raise
+
+from cache import fuzzy_match
 
 
 # Common intent patterns
@@ -28,9 +37,17 @@ PATTERNS = [
     (r'tap\s+(?:at\s+)?(\d+)[,\s]+(\d+)', 'ios', 'tap', lambda m: [m.group(1), m.group(2)]),
     (r'launch\s+(.+?)\s+(?:on\s+)?(?:ios|iphone|simulator)', 'ios', 'launch', lambda m: [m.group(1)]),
 
-    # GUI patterns
-    (r'click\s+(?:the\s+)?(.+?)\s+(?:button\s+)?(?:in\s+)?(\w+)', 'gui', 'click', lambda m: [m.group(2), '--title', m.group(1)]),
-    (r'type\s+[\'"]?(.+?)[\'"]?\s+(?:in|into)\s+(.+)', 'gui', 'type', lambda m: ['--role', 'textfield', m.group(1)]),
+    # Desktop GUI patterns require a snapshot before interaction.
+    (
+        r'click\s+(?:the\s+)?(.+?)\s+(?:button\s+)?(?:in\s+)?(\w+)',
+        'macos',
+        'snapshot',
+        lambda m: [m.group(2)],
+        lambda m: (
+            f"Desktop automation needs a snapshot before clicking '{m.group(1)}' in {m.group(2)}. "
+            f"Run 'agent-do macos snapshot {m.group(2)}' first, then click the returned @ref."
+        ),
+    ),
 
     # Docker patterns
     (r'(?:show|list).*(?:running\s+)?containers', 'docker', 'ps', lambda m: []),
@@ -64,7 +81,13 @@ def match_patterns(intent: str) -> Optional[dict]:
     """Try to match intent against known patterns."""
     intent_lower = intent.lower()
 
-    for pattern, tool, command, args_fn in PATTERNS:
+    for entry in PATTERNS:
+        if len(entry) == 4:
+            pattern, tool, command, args_fn = entry
+            clarification_fn = None
+        else:
+            pattern, tool, command, args_fn, clarification_fn = entry
+
         match = re.search(pattern, intent_lower, re.IGNORECASE)
         if match:
             return {
@@ -74,14 +97,38 @@ def match_patterns(intent: str) -> Optional[dict]:
                 'flags': {},
                 'confidence': 0.7,
                 'explanation': f"Matched pattern for {tool} {command}",
-                'from_pattern': True
+                'from_pattern': True,
+                'clarification_needed': clarification_fn(match) if clarification_fn else None,
             }
 
     return None
 
 
+def route_has_valid_tool(result: Optional[dict]) -> bool:
+    """Return whether a cached route still targets a real tool."""
+    if not result:
+        return False
+
+    tool_name = result.get("tool")
+    if not tool_name:
+        return True
+
+    script_dir = Path(__file__).parent.parent
+    tool_root = script_dir / "tools" / f"agent-{tool_name}"
+    nested_exec = tool_root / f"agent-{tool_name}"
+
+    return (
+        (tool_root.is_file())
+        or (tool_root.is_dir() and nested_exec.is_file())
+        or shutil.which(f"agent-{tool_name}") is not None
+    )
+
+
 def keyword_match(intent: str, registry: dict) -> Optional[dict]:
     """Try to match based on keywords in registry."""
+    if registry is None or search_tools is None:
+        return None
+
     results = search_tools(registry, intent)
 
     if not results:
@@ -118,7 +165,7 @@ def match_intent(intent: str) -> dict:
 
     # 1. Try cache/fuzzy match
     fuzzy = fuzzy_match(intent)
-    if fuzzy:
+    if fuzzy and route_has_valid_tool(fuzzy):
         fuzzy['from_fuzzy'] = True
         return fuzzy
 
@@ -128,7 +175,7 @@ def match_intent(intent: str) -> dict:
         return pattern_match
 
     # 3. Try keyword matching
-    registry = load_registry()
+    registry = load_registry() if load_registry is not None else None
     keyword = keyword_match(intent, registry)
     if keyword:
         return keyword
@@ -163,7 +210,11 @@ def main():
         import json
         print(json.dumps(result, indent=2))
     else:
-        if result.get('tool'):
+        if result.get('clarification_needed'):
+            print(result['clarification_needed'])
+            if result.get('explanation'):
+                print(f"  ({result['explanation']})")
+        elif result.get('tool'):
             cmd = f"agent-{result['tool']} {result['command']}"
             if result.get('args'):
                 cmd += ' ' + ' '.join(result['args'])
@@ -173,6 +224,8 @@ def main():
         else:
             print(result.get('clarification_needed', 'No match found'))
 
+    if result.get('clarification_needed'):
+        return 2
     return 0 if result.get('tool') else 1
 
 

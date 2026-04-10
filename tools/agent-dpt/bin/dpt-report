@@ -1,0 +1,837 @@
+#!/usr/bin/env python3
+"""
+dpt-report — Narrative Design Perception Report
+Transforms raw DPT JSON into a structured design critique.
+
+Usage:
+    dpt-report <dpt-result.json>
+    dpt-report < dpt-result.json
+    dpt-report --json <dpt-result.json>   # Output as structured JSON narrative
+"""
+
+import json
+import sys
+import os
+from datetime import datetime
+
+
+def load_data(args):
+    # Find the file path: any arg that doesn't start with --
+    path = None
+    for a in args:
+        if not a.startswith('--'):
+            path = a
+    if path:
+        with open(path) as f:
+            return json.load(f)
+    return json.load(sys.stdin)
+
+
+def severity(val, thresholds):
+    """Map a value to severity: 'good', 'warning', 'critical'."""
+    good, warn = thresholds
+    if val >= good:
+        return 'good'
+    if val >= warn:
+        return 'warning'
+    return 'critical'
+
+
+def pct(n, total):
+    if total == 0:
+        return 0
+    return round(n / total * 100)
+
+
+def icon(status):
+    return {'good': '\033[32m●\033[0m', 'warning': '\033[33m●\033[0m', 'critical': '\033[31m●\033[0m'}[status]
+
+
+def dim(text):
+    return f'\033[2m{text}\033[0m'
+
+
+def bold(text):
+    return f'\033[1m{text}\033[0m'
+
+
+def cyan(text):
+    return f'\033[36m{text}\033[0m'
+
+
+def red(text):
+    return f'\033[31m{text}\033[0m'
+
+
+def yellow(text):
+    return f'\033[33m{text}\033[0m'
+
+
+def green(text):
+    return f'\033[32m{text}\033[0m'
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Layer narrators
+# ──────────────────────────────────────────────────────────────────────
+
+def narrate_chromatic(cf, lines):
+    lines.append(bold('  CHROMATIC FIELD'))
+    lines.append('')
+
+    # Contrast
+    tc = cf.get('cf01_text_contrast', {})
+    checked = tc.get('pairs_checked', 0)
+    pass_rate = tc.get('pass_rate', 1)
+    adjusted_rate = tc.get('adjusted_pass_rate', pass_rate)
+    hard_fails = tc.get('hard_failures', 0)
+    soft_fails = tc.get('soft_failures', 0)
+    violations = tc.get('violations', [])
+    note = tc.get('violations_note', '')
+    # Use adjusted rate for severity (accounts for intentional secondary text)
+    sev = severity(adjusted_rate, (0.95, 0.80))
+
+    if checked == 0:
+        lines.append(f'  {icon("warning")} Text contrast: No text elements found to check.')
+    else:
+        total_fails = hard_fails + soft_fails
+        if total_fails == 0:
+            total_fails = len(violations)
+            if note:
+                parts = note.split(' of ')
+                if len(parts) > 1:
+                    total_fails = int(parts[1].split(' ')[0])
+        adj_pct = pct(int(checked * adjusted_rate), checked)
+        strict_pct = pct(int(checked * pass_rate), checked)
+        if adj_pct != strict_pct:
+            lines.append(f'  {icon(sev)} Text contrast: {adj_pct}% pass (adjusted for secondary text). Strict WCAG AA: {strict_pct}%.')
+            if hard_fails > 0:
+                lines.append(f'      {dim(f"{hard_fails} hard failures (< 3:1), {soft_fails} soft failures (3-4.5:1 on primary text)")}')
+        else:
+            lines.append(f'  {icon(sev)} Text contrast: {strict_pct}% of {checked} text elements pass WCAG AA.')
+        if violations:
+            worst = sorted(violations, key=lambda v: v['contrast'])[:3]
+            for v in worst:
+                role = v.get('text_role', '')
+                role_tag = f' [{role}]' if role and role != 'primary' else ''
+                lines.append(f'      {dim(v["selector"])}: {v["contrast"]}:1 ({v["fg"]} on {v["bg"]}){role_tag}')
+        if total_fails > 3:
+            lines.append(f'      {dim(f"...and {total_fails - 3} more")}')
+
+    # Palette
+    pal = cf.get('cf02_palette', {})
+    total = pal.get('total_colors', 0)
+    chrom = pal.get('chromatic_hues', 0)
+    neutrals = pal.get('neutrals', 0)
+    status = pal.get('status_colors', 0)
+    pal_sev = severity(1, (1, 1)) if chrom <= 5 else 'warning' if chrom <= 8 else 'critical'
+    lines.append(f'  {icon(pal_sev)} Palette: {total} colors — {chrom} chromatic hues, {neutrals} neutrals, {status} status.')
+
+    # Top colors
+    palette = pal.get('palette', [])[:5]
+    if palette:
+        swatches = '  '.join(f'{c["hex"]}({c["area_count"]})' for c in palette)
+        lines.append(f'      {dim("Top: " + swatches)}')
+
+    # Grey saturation
+    gs = cf.get('cf03_grey_saturation', {})
+    tinted = gs.get('tinted_greys', 0)
+    untinted = gs.get('untinted_greys', 0)
+    dom_hue = gs.get('dominant_grey_hue')
+    if tinted + untinted > 0:
+        if untinted == 0:
+            lines.append(f'  {icon("good")} Grey system: All {tinted} greys are tinted (dominant hue: {dom_hue or "?"}\u00b0). No lifeless greys.')
+        else:
+            lines.append(f'  {icon("warning")} Grey system: {untinted} untinted (0% saturation) greys. Add 3-10% saturation.')
+
+    # Interactive primary hue
+    ip = cf.get('cf04_interactive_primary', {})
+    primary_hue = ip.get('primary_hue')
+    leaks = ip.get('non_interactive_leaks', 0)
+    if primary_hue is not None:
+        if leaks == 0:
+            lines.append(f'  {icon("good")} Interactive hue ({primary_hue}\u00b0): Used exclusively on interactive elements.')
+        else:
+            lines.append(f'  {icon("critical")} Interactive hue ({primary_hue}\u00b0): Leaked to {leaks} non-interactive elements. The signaling system is diluted.')
+            leaked = ip.get('leaked_selectors', [])[:3]
+            for s in leaked:
+                lines.append(f'      {dim(s)}')
+
+    # Warm/cool
+    wc = cf.get('cf05_warm_cool_balance', {})
+    warm = wc.get('warm_pct', 50)
+    cool = wc.get('cool_pct', 50)
+    mono = wc.get('monotony', False)
+    if mono:
+        dominant = 'cool' if cool > warm else 'warm'
+        lines.append(f'  {icon("warning")} Temperature: {dominant} monotony ({warm:.0f}% warm / {cool:.0f}% cool). The eye generates phantom complements it never receives.')
+    else:
+        lines.append(f'  {icon("good")} Temperature: {warm:.0f}% warm / {cool:.0f}% cool. Balanced.')
+
+    # Saturation overuse
+    so = cf.get('cf08_saturation_overuse', {})
+    sat_els = so.get('full_saturation_elements', 0)
+    sat_hues = so.get('full_saturation_hues', 0)
+    if sat_els > 0 and sat_hues > 1:
+        lines.append(f'  {icon("critical")} Saturation: {sat_els} elements at full saturation across {sat_hues} hues. Reserve full saturation for one focal point.')
+    elif sat_els > 10:
+        lines.append(f'  {icon("warning")} Saturation: {sat_els} fully-saturated elements. The eye has no resting place.')
+
+    # Dark mode
+    dm = cf.get('cf06_dark_mode', {})
+    if dm.get('halation_risk'):
+        lines.append(f'  {icon("critical")} Halation: Pure #FFF on #000 detected. Use off-white on near-black for OLED safety.')
+
+    # Complementary adjacency
+    ca = cf.get('cf10_complementary_adjacency', {})
+    ca_count = ca.get('complementary_pairs', 0)
+    if ca_count > 0:
+        ca_sev = 'critical' if ca_count > 3 else 'warning'
+        lines.append(f'  {icon(ca_sev)} Complementary adjacency: {ca_count} adjacent element pairs with opposing hues. Vibration at the boundary fatigues the eye.')
+        for p in ca.get('pairs', [])[:3]:
+            s1, s2, h1, h2, hd = p['sel1'], p['sel2'], p['hue1'], p['hue2'], p['hue_distance']
+            lines.append(f'      {dim(f"{s1} / {s2}: {h1}° vs {h2}° ({hd}° apart)")}')
+        if ca_count > 3:
+            lines.append(f'      {dim(f"...and {ca_count - 3} more")}')
+
+    # Saturated area overuse
+    sa = cf.get('cf11_saturated_area', {})
+    sa_overuse = sa.get('overuse_hues', 0)
+    if sa_overuse > 0:
+        lines.append(f'  {icon("critical")} Saturated area: {sa_overuse} hue bucket{"s" if sa_overuse != 1 else ""} exceed 25% viewport coverage.')
+        for h in sa.get('hue_areas', [])[:3]:
+            apct = h.get('area_pct', 0)
+            if apct > 25:
+                hb = h.get('hue_bucket', 0)
+                lines.append(f'      {dim(f"Hue {hb}°: {apct:.1f}% of viewport")}')
+    elif sa.get('pass') is False:
+        lines.append(f'  {icon("warning")} Saturated area: High-saturation colors dominate.')
+
+    # Perceived brightness consistency
+    pb = cf.get('cf12_perceived_brightness', {})
+    if pb:
+        pb_sev = 'good' if pb.get('pass', True) else 'warning'
+        lines.append(f'  {icon(pb_sev)} Perceived brightness: {pb.get("inconsistent_groups", 0)} groups with inconsistent lightness (max delta: {pb.get("max_delta", 0):.0f}).')
+        if not pb.get('pass', True):
+            for g in pb.get('groups', [])[:3]:
+                lines.append(f'      {dim(g.get("name", "?") + ": delta " + str(round(g.get("delta", 0))))}')
+
+    lines.append('')
+
+
+def narrate_typography(ts, lines):
+    lines.append(bold('  TYPOGRAPHIC SKELETON'))
+    lines.append('')
+
+    # Type system overview
+    families = ts.get('ts06_typeface_family_count', {}).get('families', [])
+    scale = ts.get('ts08_type_scale', {})
+    sizes = scale.get('sizes', [])
+    systematic = scale.get('systematic', False)
+    ratio = scale.get('detected_ratio')
+    best = scale.get('best_known_match')
+    weights = ts.get('ts07_font_weight_count', {})
+    band_count = weights.get('band_count', 0)
+
+    if families:
+        lines.append(f'  {icon("good" if len(families) <= 2 else "warning")} Typefaces: {" + ".join(families)} ({len(families)} families)')
+
+    if sizes:
+        sizes_str = ', '.join(str(s) for s in sizes)
+        if systematic:
+            lines.append(f'  {icon("good")} Type scale: {sizes_str} — ratio ~{ratio} (near {best}). Systematic.')
+        else:
+            lines.append(f'  {icon("critical")} Type scale: {sizes_str} — {len(sizes)} distinct sizes with no governing ratio. This is a spectrum, not a system.')
+            if ratio:
+                lines.append(f'      {dim(f"Average ratio {ratio}, nearest known: {best}, but variance too high")}')
+
+    w_sev = 'good' if band_count <= 2 else 'warning' if band_count <= 3 else 'critical'
+    w_used = weights.get('weights_used', [])
+    lines.append(f'  {icon(w_sev)} Weights: {band_count} bands ({", ".join(str(w) for w in w_used)}). {"Clean hierarchy." if band_count <= 2 else "Fuzzy gradient — nothing clearly outranks."}')
+
+    # Body text minimum
+    body = ts.get('ts01_body_text_min_size', {})
+    min_size = body.get('min_size', 16)
+    body_violations = body.get('violations', 0)
+    if body_violations > 0:
+        lines.append(f'  {icon("critical")} Body text: {body_violations} elements below 16px minimum (smallest: {min_size}px).')
+
+    # Absolute floor
+    floor = ts.get('ts02_absolute_floor', {})
+    sub12 = floor.get('sub_12px_count', 0)
+    if sub12 > 0:
+        lines.append(f'  {icon("critical")} Size floor: {sub12} elements below 12px. At any size, on any device — never.')
+
+    # Line height
+    lh = ts.get('ts04_body_line_height', {})
+    median = lh.get('median_ratio', 0)
+    if median > 0:
+        lh_sev = 'good' if 1.4 <= median <= 1.6 else 'warning'
+        lines.append(f'  {icon(lh_sev)} Body line-height: {median} (target: 1.4-1.6).')
+
+    # Headline
+    hlh = ts.get('ts05_headline_line_height', {})
+    if not hlh.get('pass', True) and hlh.get('ratios'):
+        ratios = hlh['ratios']
+        lines.append(f'  {icon("warning")} Headline line-height: Too loose. {", ".join(r["tag"] + "=" + str(r["ratio"]) for r in ratios[:3])} (target: 1.1-1.25).')
+
+    # H1/body ratio
+    jump = ts.get('ts09_headline_size_jump', {})
+    if jump.get('h1_size') and jump.get('body_size'):
+        r = jump['ratio']
+        sev = 'good' if 2.0 <= r <= 3.0 else 'warning' if 1.5 <= r <= 4.0 else 'critical'
+        lines.append(f'  {icon(sev)} Headline jump: h1 {jump["h1_size"]}px / body {jump["body_size"]}px = {r:.1f}x (target: 2-3x).')
+
+    # CAPS
+    caps = ts.get('ts10_caps_letter_spacing', {})
+    caps_total = caps.get('uppercase_elements', 0)
+    caps_good = caps.get('properly_spaced', 0)
+    if caps_total > 0 and not caps.get('pass', True):
+        lines.append(f'  {icon("warning")} CAPS tracking: {caps_good}/{caps_total} uppercase elements have proper letter-spacing.')
+
+    # Straight quotes
+    sq = ts.get('ts15_straight_quotes', {})
+    sq_count = sq.get('straight_quote_count', 0)
+    if sq_count > 0:
+        lines.append(f'  {icon("warning")} Typographic craft: {sq_count} straight quotes found. Use curly quotes (\u201c \u201d) outside code blocks.')
+
+    # Heading structure
+    hs = ts.get('ts13_heading_semantic_visual', {})
+    if hs.get('pass'):
+        seq = hs.get('sequence', [])
+        if seq:
+            lines.append(f'  {icon("good")} Heading hierarchy: {len(seq)} headings, no skipped levels, visual size monotonically decreasing.')
+
+    # Faux bold/italic
+    fb = ts.get('ts17_faux_bold_italic', {})
+    faux_b = fb.get('faux_bold', 0)
+    faux_i = fb.get('faux_italic', 0)
+    if faux_b + faux_i > 0:
+        fb_sev = 'critical' if faux_b + faux_i > 3 else 'warning'
+        parts = []
+        if faux_b: parts.append(f'{faux_b} faux bold')
+        if faux_i: parts.append(f'{faux_i} faux italic')
+        lines.append(f'  {icon(fb_sev)} Faux styles: {", ".join(parts)}. The browser is synthesizing weights the font file doesn\'t contain.')
+        for el in fb.get('elements', [])[:3]:
+            sel, issue = el['selector'], el['issue']
+            lines.append(f'      {dim(f"{sel}: {issue}")}')
+
+    # Tabular numerals
+    tn = ts.get('ts18_tabular_numerals', {})
+    tn_viols = tn.get('violations', [])
+    if tn_viols:
+        lines.append(f'  {icon("warning")} Tabular numerals: {len(tn_viols)} numeric table cells without font-variant-numeric: tabular-nums. Columns won\'t align.')
+        for v in tn_viols[:3]:
+            lines.append(f'      {dim(v["selector"])}')
+
+    # Justified text without hyphenation
+    jh = ts.get('ts19_justified_hyphenation', {})
+    jh_count = jh.get('without_hyphens', 0)
+    if jh_count > 0:
+        lines.append(f'  {icon("warning")} Justification: {jh_count} justified element{"s" if jh_count != 1 else ""} without hyphens: auto. Rivers of white space form in narrow columns.')
+        for v in jh.get('violations', [])[:3]:
+            lines.append(f'      {dim(v["selector"])}')
+
+    # Paragraph separation
+    ps = ts.get('ts20_paragraph_separation', {})
+    if ps.get('mixed'):
+        lines.append(f'  {icon("warning")} Paragraph separation: Mixed methods — {ps.get("indent_count", 0)} indented, {ps.get("space_count", 0)} spaced. Pick one convention.')
+
+    # Typeface distortion
+    td = ts.get('ts21_typeface_distortion', {})
+    td_count = td.get('distorted_elements', 0)
+    if td_count > 0:
+        lines.append(f'  {icon("critical")} Typeface distortion: {td_count} element{"s" if td_count != 1 else ""} with non-uniform scaling. Stretching type destroys the designer\'s stroke contrast.')
+        for el in td.get('elements', [])[:3]:
+            sel, sx, sy = el['selector'], el['scaleX'], el['scaleY']
+            lines.append(f'      {dim(f"{sel}: scaleX={sx}, scaleY={sy}")}')
+
+    # Heading letter-spacing (gracefully skip if absent)
+    hls = ts.get('ts22_heading_letter_spacing', {})
+    hls_count = hls.get('positive_tracking', 0)
+    if hls_count > 0:
+        lines.append(f'  {icon("warning")} Heading tracking: {hls_count} large heading{"s" if hls_count != 1 else ""} with positive letter-spacing. Large text needs tighter, not looser, tracking.')
+        for v in hls.get('violations', [])[:3]:
+            sel, sz, ls = v['selector'], v['size'], v['letter_spacing']
+            lines.append(f'      {dim(f"{sel}: {sz}px at +{ls}px")}')
+
+    lines.append('')
+
+
+def narrate_spatial(sr, lines):
+    lines.append(bold('  SPATIAL RHYTHM'))
+    lines.append('')
+
+    # Spacing scale
+    sp = sr.get('sr01_spacing_scale', {})
+    base = sp.get('base_unit', 8)
+    conf = sp.get('confidence', 0)
+    total = sp.get('total_values', 0)
+    on = sp.get('on_grid', 0)
+    off = sp.get('off_grid', 0)
+    off_vals = sp.get('off_grid_values', [])
+
+    sev = severity(conf, (0.85, 0.65))
+    lines.append(f'  {icon(sev)} Spacing system: {base}px base unit at {conf*100:.0f}% confidence. {on}/{total} values on grid.')
+    if off_vals:
+        lines.append(f'      {dim("Off-grid: " + ", ".join(str(v) + "px" for v in off_vals[:6]))}')
+
+    # Touch targets
+    tt = sr.get('sr02_touch_targets', {})
+    total_int = tt.get('total_interactive', 0)
+    undersized = tt.get('undersized', 0)
+    if total_int > 0:
+        tt_sev = 'good' if undersized == 0 else 'critical' if undersized > total_int * 0.5 else 'warning'
+        lines.append(f'  {icon(tt_sev)} Touch targets: {undersized}/{total_int} interactive elements below 44px minimum.')
+        if undersized > 0:
+            viols = tt.get('violations', [])[:3]
+            for v in viols:
+                sel, w, h = v['selector'], v['width'], v['height']
+                lines.append(f'      {dim(f"{sel}: {w}x{h}px")}')
+
+    # Border radius
+    br = sr.get('sr04_border_radius', {})
+    radii = br.get('distinct_radii', [])
+    if radii:
+        br_sev = 'good' if len(radii) <= 4 else 'warning'
+        lines.append(f'  {icon(br_sev)} Border radius: {len(radii)} distinct values ({", ".join(str(r) + "px" for r in radii[:6])}). Target: 3-4 tokens.')
+
+    # Shadows
+    sh = sr.get('sr05_shadow_elevation', {})
+    levels = sh.get('elevation_levels', 0)
+    consistent = sh.get('direction_consistent', True)
+    if levels > 0:
+        sh_sev = 'good' if levels <= 5 and consistent else 'warning'
+        lines.append(f'  {icon(sh_sev)} Elevation: {levels} shadow levels, direction {"consistent" if consistent else "INCONSISTENT (multiple suns)"}.')
+
+    # Alignment
+    al = sr.get('sr07_alignment_vectors', {})
+    score = al.get('alignment_score', 1)
+    guides = al.get('alignment_guides', [])
+    if guides:
+        al_sev = severity(score, (0.9, 0.7))
+        lines.append(f'  {icon(al_sev)} Alignment: {len(guides)} guides detected, {score*100:.0f}% of elements aligned.')
+
+    # Container width
+    cw = sr.get('sr06_container_max_width', {})
+    blowouts = cw.get('blowout_risk', [])
+    if blowouts:
+        lines.append(f'  {icon("warning")} Measure: {len(blowouts)} text containers exceed 75ch without max-width constraint.')
+
+    # Body text margins
+    bm = sr.get('sr09_body_text_margin', {})
+    bm_count = bm.get('inadequate_margin', 0)
+    if bm_count > 0:
+        bm_sev = 'critical' if bm_count > 3 else 'warning'
+        lines.append(f'  {icon(bm_sev)} Body margins: {bm_count} paragraph{"s" if bm_count != 1 else ""} with parent padding below 1em. Text touching the edge signals neglect.')
+        for v in bm.get('violations', [])[:3]:
+            sel, pl, pr, fs = v['selector'], v['parent_padding_left'], v['parent_padding_right'], v['font_size']
+            lines.append(f'      {dim(f"{sel}: padding {pl}px / {pr}px (font-size: {fs}px)")}')
+
+    # Shadow color temperature
+    st = sr.get('sr10_shadow_color_temperature', {})
+    st_total = st.get('shadows_found', 0)
+    st_achro = st.get('achromatic_shadows', 0)
+    st_tinted = st.get('tinted_shadows', 0)
+    if st_total > 0 and not st.get('pass', True):
+        lines.append(f'  {icon("warning")} Shadow temperature: {st_achro} achromatic vs {st_tinted} tinted shadows. Tint shadows toward the ambient hue for natural depth.')
+
+    lines.append('')
+
+
+def narrate_attention(aa, lines):
+    lines.append(bold('  ATTENTION ARCHITECTURE'))
+    lines.append('')
+
+    # Visual weight
+    vw = aa.get('aa01_visual_weight_ranking', {})
+    rankings = vw.get('rankings', [])
+    spread = vw.get('weight_spread', 0)
+    if rankings:
+        # Filter to non-structural elements
+        meaningful = [r for r in rankings if r['selector'] not in ('html', 'body') and 'min-h-screen' not in r['selector']][:3]
+        if meaningful:
+            lines.append(f'  Visual weight (top 3):')
+            for r in meaningful:
+                text = r.get('text', '')[:50]
+                rank, sel, weight = r['rank'], r['selector'], r['weight']
+                label = dim(f"#{rank} {sel} — weight {weight:.3f}")
+                suffix = dim(f' "{text}"') if text else ''
+                lines.append(f'      {label}{suffix}')
+
+    # Button hierarchy
+    bh = aa.get('aa02_button_hierarchy', {})
+    primary = bh.get('primary', 0)
+    secondary = bh.get('secondary', 0)
+    tertiary = bh.get('tertiary', 0)
+    bh_sev = 'good' if primary == 1 else 'critical' if primary == 0 else 'warning'
+    lines.append(f'  {icon(bh_sev)} Button hierarchy: {primary} primary, {secondary} secondary, {tertiary} tertiary. {"One primary — correct." if primary == 1 else "Zero primaries — no clear call to action." if primary == 0 else f"{primary} primaries — competing for attention."}')
+    if bh.get('primary_buttons'):
+        for b in bh['primary_buttons'][:3]:
+            sel, txt = b['selector'], b['text']
+            desc = f'Primary: {sel} "{txt}"'
+            lines.append(f'      {dim(desc)}')
+
+    # Interactive affordance
+    ia = aa.get('aa03_interactive_affordance', {})
+    total = ia.get('total', 0)
+    with_aff = ia.get('with_affordance', 0)
+    if total > 0:
+        ia_sev = 'good' if with_aff == total else 'warning'
+        lines.append(f'  {icon(ia_sev)} Affordance: {with_aff}/{total} interactive elements look interactive.')
+
+    # Icons
+    ic = aa.get('aa04_icon_text_labels', {})
+    found = ic.get('icons_found', 0)
+    labeled = ic.get('with_labels', 0)
+    if found > 0:
+        ic_sev = 'good' if labeled == found else 'critical' if labeled < found * 0.5 else 'warning'
+        lines.append(f'  {icon(ic_sev)} Icon labels: {labeled}/{found} icons have text labels or aria-labels.')
+
+    # Form labels
+    fl = aa.get('aa06_form_label_presence', {})
+    fields = fl.get('fields', 0)
+    if fields > 0:
+        ph_only = fl.get('placeholder_only', 0)
+        no_label = fl.get('no_label', 0)
+        fl_sev = 'good' if ph_only == 0 and no_label == 0 else 'critical'
+        issues = []
+        if ph_only: issues.append(f'{ph_only} placeholder-only')
+        if no_label: issues.append(f'{no_label} unlabeled')
+        lines.append(f'  {icon(fl_sev)} Form labels: {fields} fields — {", ".join(issues) if issues else "all properly labeled"}.')
+
+    # Navigation
+    nav = aa.get('aa09_navigation_item_count', {})
+    navs = nav.get('items_per_nav', [])
+    for n in navs:
+        n_sev = 'good' if n['pass'] else 'critical'
+        lines.append(f'  {icon(n_sev)} Navigation: {n["count"]} items in primary nav (target: 4-7). {"Fine." if n["pass"] else "Cognitive overload — working memory holds 3-4 items."}')
+
+    # Tab order
+    to = aa.get('aa10_tab_order_visual', {})
+    mismatches = to.get('order_mismatches', 0)
+    if mismatches > 0:
+        lines.append(f'  {icon("warning")} Tab order: {mismatches} positions where keyboard navigation breaks visual reading order.')
+
+    # Form field border contrast
+    fbc = aa.get('aa11_form_field_border_contrast', {})
+    fbc_viols = fbc.get('violations', [])
+    if fbc_viols:
+        fbc_sev = 'critical' if len(fbc_viols) > 3 else 'warning'
+        lines.append(f'  {icon(fbc_sev)} Field borders: {len(fbc_viols)}/{fbc.get("fields_checked", 0)} form fields below 3:1 border contrast. Invisible boundaries break affordance.')
+        for v in fbc_viols[:3]:
+            sel, cr, bc, bg = v['selector'], v['contrast'], v['border_color'], v['background']
+            lines.append(f'      {dim(f"{sel}: {cr}:1 ({bc} on {bg})")}')
+
+    # Generic button text (gracefully skip if absent)
+    gbt = aa.get('aa12_generic_button_text', {})
+    gbt_count = gbt.get('generic_labels', 0)
+    if gbt_count > 0:
+        gbt_sev = 'critical' if gbt_count > 3 else 'warning'
+        lines.append(f'  {icon(gbt_sev)} Button labels: {gbt_count} button{"s" if gbt_count != 1 else ""} with generic text. "Click here" says nothing about what happens next.')
+        for s in gbt.get('samples', [])[:3]:
+            sel, txt = s['selector'], s['text']
+            lines.append('      ' + dim(f'{sel}: "{txt}"'))
+
+    # Destructive action weight
+    daw = aa.get('aa16_destructive_action_weight', {})
+    if daw and daw.get('destructive_as_primary', 0) > 0:
+        daw_count = daw['destructive_as_primary']
+        lines.append(f'  {icon("critical")} Destructive actions: {daw_count} destructive button{"s" if daw_count != 1 else ""} styled as primary. Irreversible actions must never be the loudest element.')
+        for s in daw.get('violations', [])[:3]:
+            lines.append(f'      {dim(s.get("selector", "?") + ": " + s.get("text", "?"))}')
+
+    lines.append('')
+
+
+def narrate_coherence(co, lines):
+    lines.append(bold('  COHERENCE'))
+    lines.append('')
+
+    overall = co.get('co08_overall_coherence', {})
+    score = overall.get('overall', 0)
+    sev = severity(score, (70, 40))
+    lines.append(f'  {icon(sev)} Overall coherence: {bold(str(score) + "/100")}')
+
+    components = [
+        ('Color tokens', overall.get('color_coherence', 0)),
+        ('Spacing tokens', overall.get('spacing_coherence', 0)),
+        ('Component consistency', overall.get('component_coherence', 0)),
+        ('Type tokens', overall.get('type_coherence', 0)),
+    ]
+    for name, val in components:
+        c_sev = severity(val, (0.7, 0.3))
+        bar_len = int(val * 20)
+        bar = '\u2588' * bar_len + '\u2591' * (20 - bar_len)
+        lines.append(f'      {icon(c_sev)} {name}: {bar} {val*100:.0f}%')
+
+    # Shadows
+    sd = co.get('co04_shadow_direction', {})
+    if not sd.get('direction_consistent', True):
+        lines.append(f'  {icon("warning")} Shadow direction: Inconsistent. Multiple light sources create spatial confusion.')
+
+    # Animations
+    an = co.get('co05_animation_duration_bounds', {})
+    too_slow = an.get('too_slow', [])
+    if too_slow:
+        lines.append(f'  {icon("warning")} Animations: {len(too_slow)} exceed duration bounds.')
+        for a in too_slow[:3]:
+            sel, dur, prop = a['selector'], a['duration_ms'], a['property']
+            lines.append(f'      {dim(f"{sel}: {dur}ms ({prop})")}')
+
+    # Transition: all
+    tp = co.get('co06_transition_property_specificity', {})
+    t_all = tp.get('transition_all_count', 0)
+    t_spec = tp.get('specific_count', 0)
+    if t_all > 0:
+        lines.append(f'  {icon("warning")} Transition specificity: {t_all} use "all" vs. {t_spec} specific. "all" can animate layout properties accidentally.')
+
+    lines.append('')
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Top-level diagnosis
+# ──────────────────────────────────────────────────────────────────────
+
+def grade_color(g):
+    """Color a letter grade by severity."""
+    if g.startswith('A'):
+        return green(g)
+    if g.startswith('B'):
+        return cyan(g)
+    if g.startswith('C'):
+        return yellow(g)
+    return red(g)
+
+
+def narrate_synthesis(syn, lines):
+    """Score card from the synthesis layer — grades and overall score."""
+    if not syn or '_error' in syn:
+        return
+
+    overall = syn.get('overall_score', 0)
+    overall_g = syn.get('overall_grade', '?')
+    dims = syn.get('dimensions', {})
+    scoring = syn.get('scoring', {})
+
+    lines.append(bold('  QUALITY SCORE'))
+    lines.append('')
+    lines.append(f'  Overall: {bold(grade_color(overall_g))} ({overall}/100)')
+    lines.append('')
+
+    dim_order = [
+        ('chromatic',  'Chromatic  '),
+        ('typography', 'Typography '),
+        ('spatial',    'Spatial    '),
+        ('attention',  'Attention  '),
+        ('coherence',  'Coherence  '),
+    ]
+    for key, label in dim_order:
+        d = dims.get(key, {})
+        s = d.get('score', 0)
+        g = d.get('grade', '?')
+        bar_len = s // 5
+        bar = '\u2588' * bar_len + '\u2591' * (20 - bar_len)
+        floors = d.get('hard_floors_hit', [])
+        floor_tag = f'  {red("!" + ",".join(floors))}' if floors else ''
+        lines.append(f'      {label} {bar} {grade_color(g):>4} {dim(str(s))}{floor_tag}')
+
+    # Scoring derivation
+    if scoring:
+        base = scoring.get('base', 0)
+        cf = scoring.get('coherence_factor', 1.0)
+        scaled = scoring.get('scaled', 0)
+        anchor = scoring.get('floor_anchor', 100)
+        vp = scoring.get('variance_penalty', 0)
+        sd = scoring.get('std_dev', 0)
+        derivation = f'base {base}'
+        if cf < 1.0:
+            derivation += f' \u00d7 {cf} coherence'
+        if scaled > anchor:
+            derivation += f' \u2192 capped by weakest+25={anchor}'
+        if vp > 0:
+            derivation += f' \u2212 {vp} variance(\u03c3={sd})'
+        lines.append(f'      {dim(derivation)}')
+
+    crit = syn.get('critical_failures', [])
+    if crit:
+        lines.append('')
+        lines.append(f'  {red("Critical:")} {"; ".join(crit)}')
+
+    strengths = syn.get('top_strengths', [])
+    if strengths:
+        lines.append(f'  {green("Strengths:")} {", ".join(strengths)}')
+
+    lines.append('')
+
+
+def narrate_diagnosis(data, lines):
+    """The opening paragraph — the gestalt impression."""
+    meta = data.get('meta', {})
+    cf = data.get('chromatic_field', {})
+    ts = data.get('typographic_skeleton', {})
+    sr = data.get('spatial_rhythm', {})
+    aa = data.get('attention_architecture', {})
+    co = data.get('coherence', {})
+
+    # If synthesis is available, use it for the diagnosis opener
+    syn = data.get('synthesis', {})
+    if syn and '_error' not in syn:
+        narrate_synthesis(syn, lines)
+
+    score = co.get('co08_overall_coherence', {}).get('overall', 0)
+    contrast_rate = cf.get('cf01_text_contrast', {}).get('adjusted_pass_rate',
+                    cf.get('cf01_text_contrast', {}).get('pass_rate', 1))
+    sub12 = ts.get('ts02_absolute_floor', {}).get('sub_12px_count', 0)
+    spacing_conf = sr.get('sr01_spacing_scale', {}).get('confidence', 0)
+    hue_count = cf.get('cf02_palette', {}).get('chromatic_hues', 0)
+    families = ts.get('ts06_typeface_family_count', {}).get('families', [])
+    sizes = ts.get('ts08_type_scale', {}).get('sizes', [])
+    weights = ts.get('ts07_font_weight_count', {}).get('band_count', 0)
+    nav_count = 0
+    for n in aa.get('aa09_navigation_item_count', {}).get('items_per_nav', []):
+        nav_count = max(nav_count, n.get('count', 0))
+
+    # Build the summary sentence
+    strengths = []
+    concerns = []
+
+    if contrast_rate >= 0.95:
+        strengths.append('strong text contrast')
+    elif contrast_rate < 0.80:
+        concerns.append(f'contrast failures ({pct(int(contrast_rate*100), 100)}% pass rate)')
+
+    if spacing_conf >= 0.85:
+        strengths.append(f'{sr.get("sr01_spacing_scale", {}).get("base_unit", 8)}px spacing discipline')
+    elif spacing_conf < 0.65:
+        concerns.append('spacing lacks systematic base')
+
+    if len(families) <= 2:
+        strengths.append(f'{" + ".join(families)}' if families else 'restrained type selection')
+
+    if weights > 3:
+        concerns.append(f'{weights} weight bands (target: 2)')
+
+    if sub12 > 0:
+        concerns.append(f'{sub12} elements below 12px')
+
+    if len(sizes) > 8:
+        concerns.append(f'{len(sizes)} distinct font sizes without a scale')
+
+    if hue_count > 5:
+        concerns.append(f'{hue_count} chromatic hues (target: 3-4)')
+
+    if nav_count > 7:
+        concerns.append(f'{nav_count}-item navigation')
+
+    lines.append(bold('  DIAGNOSIS'))
+    lines.append('')
+
+    if strengths:
+        lines.append(f'  Strengths: {", ".join(strengths)}.')
+    if concerns:
+        lines.append(f'  Concerns: {", ".join(concerns)}.')
+
+    lines.append('')
+
+
+def narrate_recommendations(data, lines):
+    """Actionable fixes ordered by impact."""
+    cf = data.get('chromatic_field', {})
+    ts = data.get('typographic_skeleton', {})
+    sr = data.get('spatial_rhythm', {})
+    aa = data.get('attention_architecture', {})
+
+    recs = []
+
+    # Contrast
+    tc = cf.get('cf01_text_contrast', {})
+    if tc.get('pass_rate', 1) < 0.90:
+        violations = tc.get('violations', [])
+        if violations:
+            common_fg = violations[0].get('fg', '')
+            recs.append(f'Raise {common_fg} text contrast to 4.5:1. Consider lightening the foreground or darkening the background.')
+
+    # Sub-12px
+    if ts.get('ts02_absolute_floor', {}).get('sub_12px_count', 0) > 10:
+        recs.append('Eliminate sub-12px text. The 6-9px elements are unreadable at standard viewing distance.')
+
+    # Weight bands
+    if ts.get('ts07_font_weight_count', {}).get('band_count', 0) > 3:
+        recs.append('Reduce to 2 weight bands (regular + bold). The current gradient creates ambiguous hierarchy.')
+
+    # Type scale
+    if not ts.get('ts08_type_scale', {}).get('systematic', False):
+        best = ts.get('ts08_type_scale', {}).get('best_known_match')
+        if best:
+            recs.append(f'Adopt a {best} type scale. The closest match to current sizes, but enforced rather than approximate.')
+
+    # Touch targets
+    tt = sr.get('sr02_touch_targets', {})
+    if tt.get('undersized', 0) > tt.get('total_interactive', 1) * 0.5:
+        recs.append('Expand interactive elements to 44px minimum height. The sidebar links at 32px are the primary offenders.')
+
+    # Nav items
+    for n in aa.get('aa09_navigation_item_count', {}).get('items_per_nav', []):
+        if n.get('count', 0) > 10:
+            recs.append(f'Group the {n["count"]} nav items into 5-6 categories. Working memory holds 3-4 items; progressive disclosure reduces cognitive load.')
+
+    # Icon labels
+    ic = aa.get('aa04_icon_text_labels', {})
+    if ic.get('icons_found', 0) > 0 and ic.get('with_labels', 0) < ic.get('icons_found', 0) * 0.5:
+        recs.append('Add text labels to sidebar icons. Icons without labels are a recall test — labels are a recognition test.')
+
+    # Interactive hue leaks
+    ip = cf.get('cf04_interactive_primary', {})
+    if ip.get('non_interactive_leaks', 0) > 20:
+        recs.append(f'Reserve the {ip.get("primary_hue", "?")} hue for interactive elements only. {ip["non_interactive_leaks"]} decorative uses dilute the signaling system.')
+
+    if recs:
+        lines.append(bold('  RECOMMENDATIONS'))
+        lines.append('')
+        for i, rec in enumerate(recs, 1):
+            lines.append(f'  {i}. {rec}')
+        lines.append('')
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────
+
+def main():
+    data = load_data(sys.argv[1:])
+    meta = data.get('meta', {})
+
+    lines = []
+    lines.append('')
+    lines.append(bold('  ╔══════════════════════════════════════════════════════════╗'))
+    lines.append(bold('  ║          DESIGN PERCEPTION TENSOR — REPORT              ║'))
+    lines.append(bold('  ╚══════════════════════════════════════════════════════════╝'))
+    lines.append('')
+    lines.append(f'  {dim("URL:")} {meta.get("url", "unknown")}')
+    lines.append(f'  {dim("Title:")} {meta.get("title", "")}')
+    lines.append(f'  {dim("Viewport:")} {meta.get("viewport", {}).get("width", "?")}x{meta.get("viewport", {}).get("height", "?")} @ {meta.get("viewport", {}).get("devicePixelRatio", 1)}x')
+    lines.append(f'  {dim("Elements:")} {meta.get("element_count", "?")} | {dim("Computed in")} {meta.get("total_timing_ms", "?")}ms')
+    lines.append(f'  {dim("Scanned:")} {meta.get("timestamp", "")}')
+    lines.append('')
+    lines.append(f'  {"─" * 58}')
+    lines.append('')
+
+    narrate_diagnosis(data, lines)
+    narrate_chromatic(data.get('chromatic_field', {}), lines)
+    narrate_typography(data.get('typographic_skeleton', {}), lines)
+    narrate_spatial(data.get('spatial_rhythm', {}), lines)
+    narrate_attention(data.get('attention_architecture', {}), lines)
+    narrate_coherence(data.get('coherence', {}), lines)
+    narrate_recommendations(data, lines)
+
+    lines.append(f'  {dim("─" * 58)}')
+    lines.append(f'  {dim("DPT v" + meta.get("version", "0.1.0") + " — Design Perception Tensor")}')
+    lines.append(f'  {dim("Non-human design perception: 70+ rules, 5 layers, " + str(meta.get("total_timing_ms", "?")) + "ms")}')
+    lines.append('')
+
+    print('\n'.join(lines))
+
+
+if __name__ == '__main__':
+    main()
