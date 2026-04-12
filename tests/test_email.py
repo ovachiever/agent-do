@@ -92,6 +92,26 @@ def main() -> int:
         code_payload = json.loads(code.stdout)
         require(code_payload["code"] == "731902", f"unexpected code payload: {code_payload}")
 
+        code_excluding = run(
+            str(AGENT_DO),
+            "email",
+            "code",
+            "--from",
+            "widgethub",
+            "--subject",
+            "verification code",
+            "--exclude-id",
+            "msg-code",
+            "--timeout",
+            "1",
+            "--interval",
+            "1",
+            "--json",
+            cwd=ROOT,
+            env=env,
+        )
+        require(code_excluding.returncode != 0, "expected excluded code lookup to fail when only stale message remains")
+
         link = run(
             str(AGENT_DO),
             "email",

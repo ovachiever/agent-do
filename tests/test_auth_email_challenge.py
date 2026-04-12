@@ -89,8 +89,16 @@ command = args[0]
 
 if command == "open":
     url = args[1]
-    if "magic" in url:
+    if "magic?token=abc123" in url:
         current = dashboard()
+    elif "magic" in url:
+        current = {
+            "page": "expired_link",
+            "url": url,
+            "text": "This magic link has expired",
+            "selectors": [],
+            "fields": {},
+        }
     elif "login" in url:
         current = {
             "page": "login",
@@ -219,17 +227,53 @@ if args and args[0] == "--json":
 
 command = args[0]
 mode = os.environ.get("FAKE_AUTH_EMAIL_MODE", "code")
+exclude_ids = []
+i = 1
+while i < len(args):
+    if args[i] == "--exclude-id" and i + 1 < len(args):
+        exclude_ids.append(args[i + 1])
+        i += 2
+    else:
+        i += 1
 
 if os.environ.get("FAKE_AUTH_EMAIL_TIMEOUT") == "1":
     print(json.dumps({"ok": False, "message": "Timed out waiting for matching email"}))
     raise SystemExit(1)
 
+if command == "snapshot":
+    stale_id = "msg-old-link" if mode == "link" else "msg-old-code"
+    payload = {
+        "ok": True,
+        "platform": "fixture",
+        "accounts": {"count": 1, "items": [{"name": "Primary", "type": "IMAP"}]},
+        "inbox_unread": 1,
+        "recent_messages": {
+            "count": 1,
+            "items": [
+                {
+                    "id": stale_id,
+                    "subject": "Verification email",
+                    "from": "WidgetHub <login@widgethub.com>",
+                    "status": "unread",
+                    "date": "2026-04-12T12:00:00Z",
+                    "body": "Previously delivered verification material",
+                }
+            ],
+        },
+    }
+    print(json.dumps(payload))
+    raise SystemExit(0)
+
 if command == "code":
-    print(json.dumps({"ok": True, "code": "731902", "message": {"id": "msg-code"}}))
+    message_id = "msg-code" if "msg-old-code" in exclude_ids else "msg-old-code"
+    code = "731902" if message_id == "msg-code" else "000000"
+    print(json.dumps({"ok": True, "code": code, "message": {"id": message_id}}))
     raise SystemExit(0)
 
 if command == "link":
-    print(json.dumps({"ok": True, "link": "https://app.example.com/magic?token=abc123", "message": {"id": "msg-link"}}))
+    message_id = "msg-link" if "msg-old-link" in exclude_ids else "msg-old-link"
+    link = "https://app.example.com/magic?token=abc123" if message_id == "msg-link" else "https://app.example.com/magic?token=stale000"
+    print(json.dumps({"ok": True, "link": link, "message": {"id": message_id}}))
     raise SystemExit(0)
 
 print(json.dumps({"ok": False, "message": f"unsupported command: {command}"}))

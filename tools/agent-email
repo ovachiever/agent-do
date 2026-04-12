@@ -34,6 +34,7 @@ Options:
   --length <n>               Preferred verification code length
   --regex <pattern>          Explicit regex for verification code extraction
   --domain <host>            Restrict extracted link to a domain
+  --exclude-id <id>          Ignore a previously seen message id
   --json                     Output JSON for query commands
 
 Environment:
@@ -51,6 +52,7 @@ Examples:
   agent-email search "invoice"
   agent-email code --from login@example.com --subject "verification code"
   agent-email link --from auth@example.com --domain app.example.com
+  agent-email code --subject "verification code" --exclude-id old-message-id
 EOF
 }
 
@@ -442,6 +444,9 @@ def matches(message, args):
     sender = message.get("from", "").lower()
     body = message.get("body", "").lower()
     text = f"{subject}\n{body}"
+    exclude_ids = {item for item in getattr(args, "exclude_ids", []) if item}
+    if message.get("id") in exclude_ids:
+        return False
     if args.from_filter and args.from_filter.lower() not in sender:
         return False
     if args.subject_filter and args.subject_filter.lower() not in subject:
@@ -553,6 +558,7 @@ def build_parser():
         subparser.add_argument("--contains")
         subparser.add_argument("--unread", action="store_true")
         subparser.add_argument("--limit", type=int, default=20)
+        subparser.add_argument("--exclude-id", dest="exclude_ids", action="append", default=[])
 
     snapshot = sub.add_parser("snapshot")
     snapshot.add_argument("--limit", type=int, default=10)

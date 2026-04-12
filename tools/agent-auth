@@ -471,6 +471,23 @@ def run_email_json(*args: str) -> dict[str, Any]:
     return payload
 
 
+def capture_email_baseline(profile: dict[str, Any], *, limit: int = 25) -> list[str]:
+    if not email_challenge_config(profile):
+        return []
+    try:
+        payload = run_email_json("snapshot", "--limit", str(limit))
+    except Exception:
+        return []
+    recent = ((payload.get("recent_messages") or {}).get("items") or [])
+    baseline_ids: list[str] = []
+    for item in recent:
+        if isinstance(item, dict):
+            message_id = str(item.get("id") or "").strip()
+            if message_id:
+                baseline_ids.append(message_id)
+    return baseline_ids
+
+
 def resolve_secret(key: str | None) -> str | None:
     if not key:
         return None
@@ -770,6 +787,10 @@ def complete_totp_if_present(
 
 
 def complete_email_challenge_if_present(profile: dict[str, Any]) -> list[str]:
+    return complete_email_challenge_with_baseline(profile, baseline_ids=[])
+
+
+def complete_email_challenge_with_baseline(profile: dict[str, Any], baseline_ids: list[str] | None = None) -> list[str]:
     challenge = email_challenge_config(profile)
     if not challenge:
         return []
@@ -791,6 +812,8 @@ def complete_email_challenge_if_present(profile: dict[str, Any]) -> list[str]:
         common_args.extend(["--contains", contains_filter])
     if unread_only:
         common_args.append("--unread")
+    for message_id in baseline_ids or []:
+        common_args.extend(["--exclude-id", message_id])
     common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
 
     try:
@@ -852,6 +875,7 @@ def login_with_generic(profile: dict[str, Any], username: str, password: str, to
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    email_baseline = capture_email_baseline(profile)
     run_browse("auth", "autofill", str(username), str(password), "--submit")
     wait_for_settle()
     missing = complete_totp_if_present(
@@ -866,13 +890,14 @@ def login_with_generic(profile: dict[str, Any], username: str, password: str, to
     )
     if missing:
         return missing
-    return complete_email_challenge_if_present(profile)
+    return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
 
 
 def login_with_github(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    email_baseline = capture_email_baseline(profile)
 
     username_selector = fill_first_selector(
         [
@@ -909,7 +934,7 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
     )
     if missing:
         return missing
-    return complete_email_challenge_if_present(profile)
+    return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
 
 
 def login_with_google(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -942,6 +967,7 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
     if not password_selector:
         return []
 
+    email_baseline = capture_email_baseline(profile)
     click_first_selector(["#passwordNext", "#passwordNext button", 'button[type="button"]'])
     wait_for_settle()
     missing = complete_totp_if_present(
@@ -955,7 +981,7 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
     )
     if missing:
         return missing
-    return complete_email_challenge_if_present(profile)
+    return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
 
 
 def run_site_login_adapter(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -1031,6 +1057,7 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    email_baseline = capture_email_baseline(profile)
 
     refresh_cfg = provider_refresh_config(profile)
     defaults = provider_default_refresh(provider_name)
@@ -1044,7 +1071,7 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
 
     checkpoint_state = provider_checkpoint_state(profile, provider_name, provider_username)
 
-    complete_email_challenge_if_present(profile)
+    complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
 
     validation = apply_validation(site, profile)
     if validation["ok"]:
