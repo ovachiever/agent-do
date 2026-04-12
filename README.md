@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 83 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 84 tools.
 
 ## Why It Exists
 
@@ -81,6 +81,14 @@ When a tool needs secrets:
 agent-do creds required render
 agent-do creds store RENDER_API_KEY --stdin
 agent-do creds check --tool render
+```
+
+When a site needs authenticated state:
+
+```bash
+agent-do auth init github
+agent-do auth ensure github
+agent-do auth validate github
 ```
 
 When the repo needs durable behavior specs and change artifacts:
@@ -168,6 +176,17 @@ agent-do context budget 4000 "react hooks"
 agent-do context annotate stripe-llms "Use idempotency keys"
 ```
 
+### `auth`
+
+Site-level authentication orchestration over saved browser sessions, browser import, and secure credentials.
+
+```bash
+agent-do auth init github
+agent-do auth ensure github
+agent-do auth status github
+agent-do auth validate github
+```
+
 ### `resend`
 
 Exact Resend domain records and verification state without UI truncation.
@@ -203,13 +222,14 @@ agent-do spec status --change add-oauth-device-flow
 
 ## Tool Surface
 
-There are 83 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 84 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
 | Browser | `browse`, `unbrowse` | Browser automation, session capture, API extraction |
 | Context | `context` | Docs ingestion, search, token budgeting, annotations |
 | Credentials | `creds` | Secure secret storage and tool credential checks |
+| Auth | `auth` | Site-level authenticated state orchestration and session reuse |
 | Specification | `spec` | Repo-local intended behavior specs and change packages |
 | Memory | `zpc` | Lessons, decisions, patterns, checkpointing |
 | Design | `dpt` | UI scoring and design critique |

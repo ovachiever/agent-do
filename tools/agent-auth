@@ -1,0 +1,1101 @@
+#!/usr/bin/env python3
+"""agent-auth - site-level authentication orchestration for agent-do."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import fnmatch
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
+
+
+ROOT = Path(__file__).resolve().parents[1]
+AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
+AUTH_ROOT = AGENT_DO_HOME / "auth"
+PROFILES_DIR = AUTH_ROOT / "profiles"
+SESSIONS_DIR = AUTH_ROOT / "sessions"
+CONFIG_PATH = AUTH_ROOT / "config.yaml"
+SITE_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
+
+KNOWN_PROFILES: dict[str, dict[str, Any]] = {
+    "github": {
+        "id": "github",
+        "title": "GitHub",
+        "domains": ["github.com", "api.github.com"],
+        "login_url": "https://github.com/login",
+        "validation": {
+            "url_patterns": ["https://github.com/*"],
+            "signed_in_markers": ["View profile and more", "You’re signed in", "Signed in"],
+            "signed_out_markers": ["Sign in to GitHub", "Sign in to GitHub · GitHub"],
+        },
+        "strategies": ["saved-session", "browser-import", "site-creds", "interactive"],
+        "provider": {"type": "github"},
+        "credentials": {
+            "site": {
+                "username": "GITHUB_EMAIL",
+                "password": "GITHUB_PASSWORD",
+            },
+            "totp": {"secret": "GITHUB_TOTP_SECRET"},
+        },
+        "browser_import": {"browser": "arc", "domains": [".github.com"]},
+        "notes": ["Prefer saved-session reuse before browser import or fresh login."],
+    },
+    "google": {
+        "id": "google",
+        "title": "Google",
+        "domains": ["accounts.google.com", "google.com"],
+        "login_url": "https://accounts.google.com/",
+        "validation": {
+            "url_patterns": ["https://accounts.google.com/*", "https://www.google.com/*"],
+            "signed_in_markers": ["Google Account", "Manage your Google Account"],
+            "signed_out_markers": ["Sign in - Google Accounts", "Choose an account"],
+        },
+        "strategies": ["saved-session", "browser-import", "site-creds", "interactive"],
+        "provider": {"type": "google"},
+        "credentials": {
+            "site": {
+                "username": "GOOGLE_EMAIL",
+                "password": "GOOGLE_PASSWORD",
+            },
+            "totp": {"secret": "GOOGLE_TOTP_SECRET"},
+        },
+        "browser_import": {"browser": "arc", "domains": [".google.com"]},
+        "notes": ["Fresh Google SSO often requires human approval. Reuse authenticated state first."],
+    },
+}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def fail(message: str, *, json_mode: bool = False, code: str = "error", exit_code: int = 1, extra: dict[str, Any] | None = None) -> int:
+    payload = {"ok": False, "error": code, "message": message}
+    if extra:
+        payload.update(extra)
+    if json_mode:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    return exit_code
+
+
+def _load_yaml_data(path: Path) -> dict[str, Any]:
+    if yaml is not None:
+        with open(path, encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+
+    ruby = subprocess.run(
+        [
+            "ruby",
+            "-e",
+            'require "yaml"; require "json"; print JSON.generate(YAML.load_file(ARGV[0]) || {})',
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if ruby.returncode != 0:
+        raise RuntimeError(
+            f"Could not parse YAML without PyYAML. Ruby fallback failed: {ruby.stderr.strip()}"
+        )
+    return json.loads(ruby.stdout or "{}")
+
+
+def _yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    if text == "" or re.search(r"[:#\-\[\]\{\}\n]|^\s|\s$", text):
+        return json.dumps(text)
+    return text
+
+
+def dump_yaml_lines(value: Any, indent: int = 0) -> list[str]:
+    prefix = " " * indent
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, dict):
+                if not item:
+                    lines.append(f"{prefix}{key}: {{}}")
+                else:
+                    lines.append(f"{prefix}{key}:")
+                    lines.extend(dump_yaml_lines(item, indent + 2))
+            elif isinstance(item, list):
+                if not item:
+                    lines.append(f"{prefix}{key}: []")
+                else:
+                    lines.append(f"{prefix}{key}:")
+                    for entry in item:
+                        if isinstance(entry, (dict, list)):
+                            lines.append(f"{prefix}  -")
+                            lines.extend(dump_yaml_lines(entry, indent + 4))
+                        else:
+                            lines.append(f"{prefix}  - {_yaml_scalar(entry)}")
+            else:
+                lines.append(f"{prefix}{key}: {_yaml_scalar(item)}")
+        return lines
+
+    if isinstance(value, list):
+        lines = []
+        for entry in value:
+            if isinstance(entry, (dict, list)):
+                lines.append(f"{prefix}-")
+                lines.extend(dump_yaml_lines(entry, indent + 2))
+            else:
+                lines.append(f"{prefix}- {_yaml_scalar(entry)}")
+        return lines
+
+    return [f"{prefix}{_yaml_scalar(value)}"]
+
+
+def dump_yaml_data(data: dict[str, Any]) -> str:
+    return "\n".join(dump_yaml_lines(data)) + "\n"
+
+
+def ensure_root() -> None:
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        CONFIG_PATH.write_text("version: 1\n", encoding="utf-8")
+
+
+def site_slug(site: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", site.strip().lower()).strip("-")
+
+
+def env_prefix(source: str) -> str:
+    value = source
+    if "." in source:
+        value = re.sub(r"^(www\.|app\.|accounts\.)", "", source)
+        value = re.sub(r"\.[a-z0-9]+$", "", value)
+    return re.sub(r"[^A-Za-z0-9]+", "_", value).upper().strip("_") or "SITE"
+
+
+def auth_paths(site: str, name: str = "default") -> dict[str, Path]:
+    slug = site_slug(site)
+    return {
+        "profile": PROFILES_DIR / f"{slug}.yaml",
+        "session_dir": SESSIONS_DIR / slug / name,
+        "meta": SESSIONS_DIR / slug / name / "meta.json",
+    }
+
+
+def browse_session_name(site: str, name: str = "default") -> str:
+    return f"auth-{site_slug(site)}-{site_slug(name)}"
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def load_profile(site: str) -> dict[str, Any] | None:
+    path = auth_paths(site)["profile"]
+    if not path.exists():
+        return None
+    data = _load_yaml_data(path)
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def list_profiles() -> list[dict[str, Any]]:
+    ensure_root()
+    profiles = []
+    for path in sorted(PROFILES_DIR.glob("*.yaml")):
+        data = _load_yaml_data(path)
+        if isinstance(data, dict):
+            profiles.append(data)
+    return profiles
+
+
+def list_session_meta(site: str) -> list[dict[str, Any]]:
+    site_dir = SESSIONS_DIR / site_slug(site)
+    if not site_dir.exists():
+        return []
+    sessions = []
+    for meta_path in sorted(site_dir.glob("*/meta.json")):
+        data = read_json(meta_path)
+        if data:
+            sessions.append(data)
+    sessions.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+    return sessions
+
+
+def get_session_meta(site: str, name: str = "default") -> dict[str, Any] | None:
+    data = read_json(auth_paths(site, name)["meta"])
+    return data or None
+
+
+def write_session_meta(site: str, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    path_info = auth_paths(site, name)
+    session_dir = path_info["session_dir"]
+    session_dir.mkdir(parents=True, exist_ok=True)
+    base = get_session_meta(site, name) or {
+        "site": site_slug(site),
+        "name": name,
+        "browse_session": browse_session_name(site, name),
+        "created_at": now_iso(),
+    }
+    base.update(payload)
+    base["updated_at"] = now_iso()
+    write_json(path_info["meta"], base)
+    return base
+
+
+def delete_session_meta(site: str, name: str) -> None:
+    path_info = auth_paths(site, name)
+    if path_info["session_dir"].exists():
+        shutil.rmtree(path_info["session_dir"], ignore_errors=True)
+
+
+def default_profile(site: str, *, domain: str | None = None, login_url: str | None = None) -> dict[str, Any]:
+    slug = site_slug(site)
+    if slug in KNOWN_PROFILES:
+        profile = copy.deepcopy(KNOWN_PROFILES[slug])
+        if domain:
+            if domain not in profile["domains"]:
+                profile["domains"] = [domain, *profile["domains"]]
+            browser_domains = profile.get("browser_import", {}).get("domains", [])
+            normalized = f".{domain.lstrip('.')}"
+            if normalized not in browser_domains:
+                browser_domains.insert(0, normalized)
+                profile["browser_import"]["domains"] = browser_domains
+        if login_url:
+            profile["login_url"] = login_url
+        return profile
+
+    resolved_domain = (domain or site).strip()
+    title = " ".join(part.capitalize() for part in slug.replace("_", "-").split("-"))
+    prefix = env_prefix(resolved_domain)
+    normalized_domain = resolved_domain.lstrip(".")
+    return {
+        "id": slug,
+        "title": title or "Site",
+        "domains": [normalized_domain],
+        "login_url": login_url or f"https://{normalized_domain}/login",
+        "validation": {
+            "url_patterns": [f"https://{normalized_domain}/*"],
+            "signed_in_markers": [],
+            "signed_out_markers": ["Sign in", "Log in", "Login"],
+        },
+        "strategies": ["saved-session", "browser-import", "site-creds", "interactive"],
+        "provider": {"type": "generic"},
+        "credentials": {
+            "site": {
+                "username": f"{prefix}_EMAIL",
+                "password": f"{prefix}_PASSWORD",
+            }
+        },
+        "browser_import": {"browser": "arc", "domains": [f".{normalized_domain}"]},
+        "notes": ["Tune validation markers for this site after the first successful authenticated run."],
+    }
+
+
+def state_from_profile(site: str) -> str:
+    profile = load_profile(site)
+    if profile is None:
+        return "unconfigured"
+    meta = get_session_meta(site)
+    if not meta:
+        return "configured"
+    if meta.get("state") == "authenticated" and meta.get("last_validation_ok") is True:
+        return "authenticated"
+    if meta.get("state") == "stale" or meta.get("last_validation_ok") is False:
+        return "stale"
+    return "configured"
+
+
+def tool_cmd_from_env(var_name: str, default: list[str]) -> list[str]:
+    override = os.environ.get(var_name)
+    return shlex.split(override) if override else default
+
+
+def browse_cmd() -> list[str]:
+    default = [str(ROOT / "tools" / "agent-browse" / "agent-browse")]
+    return tool_cmd_from_env("AGENT_DO_AUTH_BROWSE_CMD", default)
+
+
+def creds_cmd() -> list[str]:
+    default = [str(ROOT / "tools" / "agent-creds")]
+    return tool_cmd_from_env("AGENT_DO_AUTH_CREDS_CMD", default)
+
+
+def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, text=True, capture_output=True, check=False)
+
+
+def run_browse(*args: str) -> dict[str, Any]:
+    proc = run_tool([*browse_cmd(), "--json", *args])
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"browse failed: {' '.join(args)}")
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("success") is False:
+        message = payload.get("error") or payload.get("message") or json.dumps(payload)
+        raise RuntimeError(str(message))
+    return payload.get("data") or payload.get("result") or payload
+
+
+def resolve_secret(key: str | None) -> str | None:
+    if not key:
+        return None
+    env_value = os.environ.get(key)
+    if env_value:
+        return env_value
+    proc = run_tool([*creds_cmd(), "get", key, "--reveal"])
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def write_profile(profile: dict[str, Any], *, force: bool = False) -> Path:
+    ensure_root()
+    path = auth_paths(profile["id"])["profile"]
+    if path.exists() and not force:
+        raise FileExistsError(f"Profile already exists: {path}")
+    path.write_text(dump_yaml_data(profile), encoding="utf-8")
+    return path
+
+
+def profile_summary(profile: dict[str, Any]) -> dict[str, Any]:
+    site = str(profile.get("id", ""))
+    sessions = list_session_meta(site)
+    latest = sessions[0] if sessions else None
+    return {
+        "site": site,
+        "title": profile.get("title", site),
+        "domains": profile.get("domains") or [],
+        "login_url": profile.get("login_url"),
+        "state": state_from_profile(site),
+        "last_strategy": (latest or {}).get("last_strategy"),
+        "validated_at": (latest or {}).get("validated_at"),
+        "session_count": len(sessions),
+    }
+
+
+def read_page_text() -> str:
+    data = run_browse("eval", "document.body && document.body.innerText ? document.body.innerText : ''")
+    return str(data.get("result", "") if isinstance(data, dict) else data)
+
+
+def read_page_url() -> str:
+    data = run_browse("get", "url")
+    if isinstance(data, dict):
+        return str(data.get("url", ""))
+    return str(data or "")
+
+
+def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
+    validation = profile.get("validation") or {}
+    current_url = read_page_url().strip()
+    if (not current_url or current_url == "about:blank") and profile.get("login_url"):
+        run_browse("open", str(profile["login_url"]))
+        current_url = read_page_url().strip()
+
+    body_text = read_page_text()
+    body_lower = body_text.lower()
+    signed_out_markers = [marker for marker in validation.get("signed_out_markers", []) if marker]
+    signed_in_markers = [marker for marker in validation.get("signed_in_markers", []) if marker]
+    url_patterns = [pattern for pattern in validation.get("url_patterns", []) if pattern]
+
+    matched_out = [marker for marker in signed_out_markers if marker.lower() in body_lower]
+    matched_in = [marker for marker in signed_in_markers if marker.lower() in body_lower]
+    matched_urls = [pattern for pattern in url_patterns if fnmatch.fnmatch(current_url, pattern)]
+
+    ok = not matched_out and bool(matched_in or matched_urls or (not signed_in_markers and not signed_out_markers))
+    state = "authenticated" if ok else "stale"
+
+    details = {
+        "ok": ok,
+        "site": site,
+        "state": state,
+        "url": current_url,
+        "matched": {
+            "signed_in_markers": matched_in,
+            "signed_out_markers": matched_out,
+            "url_patterns": matched_urls,
+        },
+    }
+    return details
+
+
+def save_current_session(site: str, *, name: str = "default", strategy: str) -> dict[str, Any]:
+    alias = browse_session_name(site, name)
+    run_browse("session", "save", alias, f"agent-do auth session for {site}")
+    meta = write_session_meta(
+        site,
+        name,
+        {
+            "browse_session": alias,
+            "last_strategy": strategy,
+            "validated_at": now_iso(),
+            "last_validation_ok": True,
+            "state": "authenticated",
+        },
+    )
+    return meta
+
+
+def load_saved_session(site: str, *, name: str = "default") -> dict[str, Any]:
+    meta = get_session_meta(site, name)
+    if not meta:
+        raise FileNotFoundError(f"No saved auth session for {site}")
+    alias = meta.get("browse_session") or browse_session_name(site, name)
+    run_browse("session", "load", str(alias))
+    return meta
+
+
+def browser_import(site: str, profile: dict[str, Any], *, name: str = "default") -> dict[str, Any]:
+    config = profile.get("browser_import") or {}
+    browser = str(config.get("browser") or "arc")
+    domains = config.get("domains") or []
+    alias = browse_session_name(site, name)
+    args = ["session", "import-browser", alias, "--browser", browser]
+    if domains:
+        args.extend(["--domain", str(domains[0])])
+    run_browse(*args)
+    run_browse("session", "load", alias)
+    meta = write_session_meta(
+        site,
+        name,
+        {
+            "browse_session": alias,
+            "last_strategy": "browser-import",
+            "source_browser": browser,
+        },
+    )
+    return meta
+
+
+def site_creds_login(site: str, profile: dict[str, Any], *, name: str = "default") -> tuple[bool, list[str]]:
+    creds = ((profile.get("credentials") or {}).get("site") or {})
+    username_key = creds.get("username")
+    password_key = creds.get("password")
+    missing: list[str] = []
+    username = resolve_secret(str(username_key) if username_key else None)
+    password = resolve_secret(str(password_key) if password_key else None)
+    if not username and username_key:
+        missing.append(str(username_key))
+    if not password and password_key:
+        missing.append(str(password_key))
+    if missing:
+        return False, missing
+
+    login_url = profile.get("login_url")
+    if login_url:
+        run_browse("open", str(login_url))
+    run_browse("auth", "autofill", str(username), str(password), "--submit")
+    try:
+        run_browse("wait", "--stable")
+    except Exception:
+        pass
+    validation = apply_validation(site, profile)
+    if validation["ok"]:
+        save_current_session(site, name=name, strategy="site-creds")
+        return True, []
+    write_session_meta(
+        site,
+        name,
+        {
+            "browse_session": browse_session_name(site, name),
+            "last_strategy": "site-creds",
+            "last_validation_ok": False,
+            "state": "stale",
+            "last_error": "validation_failed_after_site_creds",
+        },
+    )
+    return False, []
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    site = site_slug(args.site)
+    if not site or not SITE_RE.match(site):
+        return fail("site id must be kebab/underscore-safe lowercase text", json_mode=args.json, code="invalid_site")
+
+    profile = default_profile(site, domain=args.domain, login_url=args.login_url)
+    if args.browser:
+        profile.setdefault("browser_import", {})["browser"] = args.browser
+    if args.no_browser_import:
+        profile["strategies"] = [entry for entry in profile.get("strategies", []) if entry != "browser-import"]
+        profile.pop("browser_import", None)
+    if args.no_site_creds:
+        profile["strategies"] = [entry for entry in profile.get("strategies", []) if entry != "site-creds"]
+        profile.get("credentials", {}).pop("site", None)
+    try:
+        path = write_profile(profile, force=args.force)
+    except FileExistsError as exc:
+        return fail(str(exc), json_mode=args.json, code="profile_exists")
+
+    payload = {
+        "ok": True,
+        "site": site,
+        "path": str(path),
+        "strategies": profile.get("strategies", []),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Initialized auth profile for {site}")
+        print(path)
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    profiles = [profile_summary(profile) for profile in list_profiles()]
+    if args.json:
+        print(json.dumps({"profiles": profiles}, indent=2))
+    else:
+        if not profiles:
+            print("No auth profiles configured.")
+            return 0
+        for profile in profiles:
+            print(
+                f"{profile['site']}  [{profile['state']}]  sessions:{profile['session_count']}  "
+                f"last_strategy:{profile.get('last_strategy') or '-'}"
+            )
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    sessions = list_session_meta(args.site)
+    payload = {
+        "site": args.site,
+        "profile": profile,
+        "state": state_from_profile(args.site),
+        "sessions": sessions,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Site:        {args.site}")
+        print(f"Title:       {profile.get('title', args.site)}")
+        print(f"State:       {payload['state']}")
+        print(f"Login URL:   {profile.get('login_url', '')}")
+        print(f"Strategies:  {', '.join(profile.get('strategies', []))}")
+        print(f"Domains:     {', '.join(profile.get('domains', []))}")
+        print(f"Sessions:    {len(sessions)}")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    meta = get_session_meta(args.site, args.name) or {}
+    payload = {
+        "site": args.site,
+        "state": state_from_profile(args.site),
+        "last_strategy": meta.get("last_strategy"),
+        "session": {
+            "name": args.name,
+            "browse_session": meta.get("browse_session"),
+            "validated_at": meta.get("validated_at"),
+            "updated_at": meta.get("updated_at"),
+        },
+        "next": [] if meta.get("last_validation_ok") else [f"agent-do auth ensure {args.site}"],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Site:         {args.site}")
+        print(f"State:        {payload['state']}")
+        print(f"Last strategy:{payload.get('last_strategy') or '-'}")
+        print(f"Validated:    {payload['session'].get('validated_at') or '-'}")
+    return 0
+
+
+def cmd_load(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    try:
+        meta = load_saved_session(args.site, name=args.name)
+    except FileNotFoundError as exc:
+        return fail(str(exc), json_mode=args.json, code="missing_session")
+    payload = {
+        "ok": True,
+        "site": args.site,
+        "session": args.name,
+        "browse_session": meta.get("browse_session"),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Loaded auth session for {args.site} ({args.name})")
+    return 0
+
+
+def cmd_save(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    meta = save_current_session(args.site, name=args.name, strategy="saved-session")
+    payload = {
+        "ok": True,
+        "site": args.site,
+        "session": args.name,
+        "browse_session": meta.get("browse_session"),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Saved auth session for {args.site} ({args.name})")
+    return 0
+
+
+def cmd_import_browser(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    if args.browser:
+        profile.setdefault("browser_import", {})["browser"] = args.browser
+    if args.domain:
+        profile.setdefault("browser_import", {})["domains"] = [args.domain]
+
+    try:
+        meta = browser_import(args.site, profile, name=args.name)
+        validation = apply_validation(args.site, profile)
+    except Exception as exc:
+        write_session_meta(
+            args.site,
+            args.name,
+            {
+                "last_strategy": "browser-import",
+                "last_validation_ok": False,
+                "state": "stale",
+                "last_error": str(exc),
+            },
+        )
+        return fail(str(exc), json_mode=args.json, code="browser_import_failed")
+
+    payload = {
+        "ok": validation["ok"],
+        "site": args.site,
+        "strategy_used": "browser-import",
+        "session": {"name": args.name, "browse_session": meta.get("browse_session")},
+        "validation": validation,
+    }
+    if validation["ok"]:
+        meta = write_session_meta(
+            args.site,
+            args.name,
+            {
+                "last_strategy": "browser-import",
+                "validated_at": now_iso(),
+                "last_validation_ok": True,
+                "state": "authenticated",
+            },
+        )
+        payload["session"]["browse_session"] = meta.get("browse_session")
+    else:
+        write_session_meta(
+            args.site,
+            args.name,
+            {
+                "last_strategy": "browser-import",
+                "validated_at": now_iso(),
+                "last_validation_ok": False,
+                "state": "stale",
+                "last_error": "validation_failed_after_browser_import",
+            },
+        )
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Imported browser auth for {args.site}: {'ok' if validation['ok'] else 'stale'}")
+    return 0 if validation["ok"] else 1
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    meta = get_session_meta(args.site, args.name)
+    if meta:
+        try:
+            load_saved_session(args.site, name=args.name)
+        except Exception as exc:
+            write_session_meta(
+                args.site,
+                args.name,
+                {
+                    "last_validation_ok": False,
+                    "state": "stale",
+                    "last_error": str(exc),
+                },
+            )
+            return fail(str(exc), json_mode=args.json, code="session_load_failed")
+
+    try:
+        validation = apply_validation(args.site, profile)
+    except Exception as exc:
+        write_session_meta(
+            args.site,
+            args.name,
+            {
+                "last_validation_ok": False,
+                "state": "stale",
+                "last_error": str(exc),
+            },
+        )
+        return fail(str(exc), json_mode=args.json, code="validation_failed")
+
+    write_session_meta(
+        args.site,
+        args.name,
+        {
+            "last_validation_ok": validation["ok"],
+            "validated_at": now_iso(),
+            "state": validation["state"],
+            "last_error": None if validation["ok"] else "validation_markers_not_satisfied",
+        },
+    )
+
+    if args.json:
+        print(json.dumps(validation, indent=2))
+    else:
+        print(f"{args.site}: {'authenticated' if validation['ok'] else 'not authenticated'}")
+        print(validation["url"])
+    return 0 if validation["ok"] else 1
+
+
+def cmd_instructions(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        payload = {
+            "site": args.site,
+            "state": "unconfigured",
+            "recommended": [f"agent-do auth init {args.site}"],
+            "missing": ["profile"],
+            "guidance": ["Create a site profile before attempting auth orchestration."],
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Create a profile first: agent-do auth init {args.site}")
+        return 0
+
+    state = state_from_profile(args.site)
+    recommended = [f"agent-do auth ensure {args.site}"]
+    missing: list[str] = []
+    guidance: list[str] = []
+
+    strategies = profile.get("strategies", [])
+    if state == "authenticated":
+        recommended = [f"agent-do auth load {args.site}", f"agent-do auth validate {args.site}"]
+        guidance.append("Saved authenticated state exists. Reuse it before trying a fresh login.")
+    else:
+        if "browser-import" in strategies and profile.get("browser_import"):
+            guidance.append("Browser import is configured and should be attempted before site credentials.")
+        if "site-creds" in strategies:
+            site_creds = ((profile.get("credentials") or {}).get("site") or {})
+            username_key = site_creds.get("username")
+            password_key = site_creds.get("password")
+            if username_key and not resolve_secret(str(username_key)):
+                missing.append(str(username_key))
+            if password_key and not resolve_secret(str(password_key)):
+                missing.append(str(password_key))
+            if not missing:
+                guidance.append("Site credentials are available for automated form login if session reuse fails.")
+
+    payload = {
+        "site": args.site,
+        "state": state,
+        "recommended": recommended,
+        "missing": missing,
+        "guidance": guidance or ["Run ensure to try saved-session, browser-import, then site credentials."],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"State: {state}")
+        for command in recommended:
+            print(command)
+    return 0
+
+
+def cmd_clear(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+    sessions = list_session_meta(args.site)
+    cleared: list[str] = []
+    names = [args.name]
+    if args.all:
+        names = [session.get("name", "default") for session in sessions] or [args.name]
+
+    for name in names:
+        alias = browse_session_name(args.site, name)
+        run_tool([*browse_cmd(), "session", "delete", alias])
+        delete_session_meta(args.site, name)
+        cleared.append(name)
+
+    payload = {"ok": True, "site": args.site, "cleared": cleared}
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Cleared auth state for {args.site}: {', '.join(cleared)}")
+    return 0
+
+
+def cmd_ensure(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+
+    name = args.name
+    attempted: list[str] = []
+    strategies = [args.strategy] if args.strategy else list(profile.get("strategies", []))
+
+    for strategy in strategies:
+        if strategy == "saved-session":
+            attempted.append(strategy)
+            if not get_session_meta(args.site, name):
+                continue
+            try:
+                load_saved_session(args.site, name=name)
+                validation = apply_validation(args.site, profile)
+            except Exception as exc:
+                write_session_meta(
+                    args.site,
+                    name,
+                    {
+                        "last_strategy": strategy,
+                        "last_validation_ok": False,
+                        "state": "stale",
+                        "last_error": str(exc),
+                    },
+                )
+                continue
+            if validation["ok"]:
+                meta = write_session_meta(
+                    args.site,
+                    name,
+                    {
+                        "last_strategy": strategy,
+                        "validated_at": now_iso(),
+                        "last_validation_ok": True,
+                        "state": "authenticated",
+                    },
+                )
+                payload = {
+                    "site": args.site,
+                    "ok": True,
+                    "strategy_used": strategy,
+                    "validated": True,
+                    "session": {"name": name, "browse_session": meta.get("browse_session")},
+                }
+                print(json.dumps(payload, indent=2) if args.json else f"{args.site}: authenticated via {strategy}")
+                return 0
+
+        elif strategy == "browser-import":
+            attempted.append(strategy)
+            if not profile.get("browser_import"):
+                continue
+            try:
+                browser_import(args.site, profile, name=name)
+                validation = apply_validation(args.site, profile)
+            except Exception:
+                continue
+            if validation["ok"]:
+                meta = write_session_meta(
+                    args.site,
+                    name,
+                    {
+                        "last_strategy": strategy,
+                        "validated_at": now_iso(),
+                        "last_validation_ok": True,
+                        "state": "authenticated",
+                    },
+                )
+                payload = {
+                    "site": args.site,
+                    "ok": True,
+                    "strategy_used": strategy,
+                    "validated": True,
+                    "session": {"name": name, "browse_session": meta.get("browse_session")},
+                }
+                print(json.dumps(payload, indent=2) if args.json else f"{args.site}: authenticated via {strategy}")
+                return 0
+
+        elif strategy == "site-creds":
+            attempted.append(strategy)
+            ok, missing = site_creds_login(args.site, profile, name=name)
+            if ok:
+                meta = get_session_meta(args.site, name) or {}
+                payload = {
+                    "site": args.site,
+                    "ok": True,
+                    "strategy_used": strategy,
+                    "validated": True,
+                    "session": {"name": name, "browse_session": meta.get("browse_session")},
+                }
+                print(json.dumps(payload, indent=2) if args.json else f"{args.site}: authenticated via {strategy}")
+                return 0
+            if missing:
+                payload = {
+                    "site": args.site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": attempted,
+                    "action_required": "MISSING_CREDENTIALS",
+                    "missing": missing,
+                    "message": "Required site credentials are missing from env or agent-do creds",
+                }
+                print(json.dumps(payload, indent=2) if args.json else f"Missing credentials: {', '.join(missing)}")
+                return 1
+
+        elif strategy == "provider-refresh":
+            attempted.append(strategy)
+            continue
+
+        elif strategy == "interactive":
+            attempted.append(strategy)
+            break
+
+    payload = {
+        "site": args.site,
+        "ok": False,
+        "state": "action-required",
+        "attempted": attempted,
+        "action_required": "INTERACTIVE_LOGIN",
+        "message": "No reusable authenticated state is available and configured strategies were exhausted",
+    }
+    print(json.dumps(payload, indent=2) if args.json else payload["message"])
+    return 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Site-level authentication orchestration for agent-do")
+    parser.add_argument("--json", action="store_true", help="Output JSON")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    init_parser = sub.add_parser("init", help="Initialize a site auth profile")
+    init_parser.add_argument("site")
+    init_parser.add_argument("--domain")
+    init_parser.add_argument("--login-url")
+    init_parser.add_argument("--browser")
+    init_parser.add_argument("--force", action="store_true")
+    init_parser.add_argument("--no-browser-import", action="store_true")
+    init_parser.add_argument("--no-site-creds", action="store_true")
+
+    sub.add_parser("list", help="List auth profiles")
+
+    show_parser = sub.add_parser("show", help="Show one auth profile")
+    show_parser.add_argument("site")
+
+    status_parser = sub.add_parser("status", help="Show auth status for one site")
+    status_parser.add_argument("site")
+    status_parser.add_argument("--name", default="default")
+
+    ensure_parser = sub.add_parser("ensure", help="Ensure authenticated state using the strategy ladder")
+    ensure_parser.add_argument("site")
+    ensure_parser.add_argument("--name", default="default")
+    ensure_parser.add_argument("--strategy", choices=["saved-session", "browser-import", "site-creds", "provider-refresh", "interactive"])
+
+    save_parser = sub.add_parser("save", help="Save current authenticated browser state")
+    save_parser.add_argument("site")
+    save_parser.add_argument("--name", default="default")
+
+    load_parser = sub.add_parser("load", help="Load saved authenticated browser state")
+    load_parser.add_argument("site")
+    load_parser.add_argument("--name", default="default")
+
+    import_parser = sub.add_parser("import-browser", help="Import cookies/state from a real browser")
+    import_parser.add_argument("site")
+    import_parser.add_argument("--name", default="default")
+    import_parser.add_argument("--browser")
+    import_parser.add_argument("--domain")
+
+    clear_parser = sub.add_parser("clear", help="Clear saved auth state")
+    clear_parser.add_argument("site")
+    clear_parser.add_argument("--name", default="default")
+    clear_parser.add_argument("--all", action="store_true")
+
+    validate_parser = sub.add_parser("validate", help="Validate authenticated state")
+    validate_parser.add_argument("site")
+    validate_parser.add_argument("--name", default="default")
+
+    instructions_parser = sub.add_parser("instructions", help="Show next-step auth guidance")
+    instructions_parser.add_argument("site")
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    argv = sys.argv[1:]
+    json_mode = False
+    filtered_argv: list[str] = []
+    for item in argv:
+        if item == "--json":
+            json_mode = True
+        else:
+            filtered_argv.append(item)
+
+    args = parser.parse_args(filtered_argv)
+    args.json = json_mode or getattr(args, "json", False)
+    if hasattr(args, "site") and getattr(args, "site", None):
+        args.site = site_slug(str(args.site))
+
+    try:
+        if args.command == "init":
+            return cmd_init(args)
+        if args.command == "list":
+            return cmd_list(args)
+        if args.command == "show":
+            return cmd_show(args)
+        if args.command == "status":
+            return cmd_status(args)
+        if args.command == "ensure":
+            return cmd_ensure(args)
+        if args.command == "save":
+            return cmd_save(args)
+        if args.command == "load":
+            return cmd_load(args)
+        if args.command == "import-browser":
+            return cmd_import_browser(args)
+        if args.command == "clear":
+            return cmd_clear(args)
+        if args.command == "validate":
+            return cmd_validate(args)
+        if args.command == "instructions":
+            return cmd_instructions(args)
+        return fail("unknown command", json_mode=args.json)
+    except RuntimeError as exc:
+        return fail(str(exc), json_mode=args.json)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -128,6 +128,66 @@ tools:
         example: agent-do creds store RENDER_API_KEY --stdin
         reason: agent-do creds keeps secrets out of shell history and centralizes resolution
     concurrency: read
+  auth:
+    description: Site-level authentication orchestration over saved browser sessions, browser import, and secure credentials
+    capabilities:
+    - create site auth profiles with validation rules and strategy ladders
+    - reuse saved authenticated browser state before trying fresh login
+    - import cookies and storage from a real authenticated browser profile
+    - drive site login with secrets resolved from env or agent-do creds
+    - validate whether saved authenticated state is still usable
+    - return next-step auth guidance for agents
+    commands:
+      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL]'
+      list: 'List configured auth profiles: list'
+      show: 'Show one auth profile: show <site>'
+      status: 'Show auth state: status <site> [--name default]'
+      ensure: 'Run the strategy ladder: ensure <site> [--strategy saved-session|browser-import|site-creds]'
+      save: 'Save current authenticated browser state: save <site> [--name default]'
+      load: 'Load saved browser auth state: load <site> [--name default]'
+      import-browser: 'Import cookies from a real browser: import-browser <site> [--browser arc] [--domain .example.com]'
+      clear: 'Clear saved auth state: clear <site> [--all]'
+      validate: 'Validate signed-in state: validate <site>'
+      instructions: 'Next-step guidance: instructions <site>'
+    examples:
+    - intent: create a github auth profile
+      command: agent-auth init github
+    - intent: reuse saved github auth
+      command: agent-auth ensure github
+    - intent: import cookies from arc for github
+      command: agent-auth import-browser github --browser arc --domain .github.com
+    - intent: check if we are still signed in
+      command: agent-auth validate github
+    - intent: inspect auth state for a site
+      command: agent-auth status github
+    routing:
+      discover_keywords:
+      - auth session
+      - login state
+      - signed in
+      - sso reuse
+      - browser cookies
+      - github auth
+      - google auth
+      prompt_patterns:
+      - \blog into this site\b
+      - \breuse .* auth\b
+      - \b(load|reuse) the saved .* session\b
+      - \bcheck if (we|i) (am|are) signed in\b
+      - \bimport cookies from\b
+      - \bsso\b
+      recommended_entrypoints:
+      - agent-do auth ensure <site>
+      - agent-do auth status <site>
+      - agent-do auth validate <site>
+      default_command: list
+      project_signals:
+      - auth
+      - login
+      - sso
+      - oauth
+      - identity
+    concurrency: mixed
   spec:
     description: Repo-local specifications and change artifacts for intended behavior, change deltas, and archive readiness
     capabilities:

@@ -162,7 +162,7 @@ CHECK if agent-do has a tool:
     agent-do --health                     # Dependency readiness
     agent-do bootstrap --recommend        # Detect pending project setup
     agent-do nudges stats                 # summary of hook nudges on this machine
-    agent-do --list                       # List all 83 tools
+    agent-do --list                       # List all 84 tools
     agent-do <tool> --help                # Per-tool help
 
 Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,

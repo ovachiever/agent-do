@@ -9,7 +9,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 3. **Natural Language Mode** — LLM-routed for human users
 4. **Discovery + nudge layer** — task suggestions, project-scoped tool ranking, and hook nudges
 5. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
-6. **83 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+6. **84 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -109,7 +109,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
 │       ├── auth.js         # Auth extraction from captured headers/cookies
 │       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
-├── tools/agent-*           # 83 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 84 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -220,6 +220,7 @@ Directory-based tools with complex backends:
 | Tool | Tech Stack | Notes |
 |------|-----------|-------|
 | `tools/agent-browse/` | Node.js, Playwright | Headless browser with @ref element selection. `daemon.js` manages browser lifecycle. `login <url>` opens headed browser for SSO/MFA → `login done` transfers auth to headless. `session load` creates new context with saved cookies. API capture via `capture start/stop`, replay via `api` subcommand. |
+| `tools/agent-auth` | Python | Site-level auth orchestrator over saved browser sessions, browser import, and secure credentials. Profiles live under `~/.agent-do/auth/`; validation decides whether a session is actually usable. |
 | `tools/agent-unbrowse/` | Node.js, Playwright | Standalone API traffic capture. 2 files (`daemon.js`, `protocol.js`). Launches headed browser for manual browsing. Capture pipeline shared via `lib/capture/`. |
 | `tools/agent-manna/` | Rust | Git-backed issue tracking. Session-based claims prevent multi-agent conflicts. |
 | `tools/agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |

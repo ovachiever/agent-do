@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `agent-do auth` for site-level authentication orchestration over saved browser sessions, browser import, and secure credentials.
 - `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
 - `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.
 - `agent-do resend` for exact Resend domain records, verification state, and public DNS checks without relying on UI text.
@@ -11,6 +12,7 @@
 - Browser clipboard commands through `agent-do browse clipboard read|copy|paste` for copy-first extraction flows.
 
 ### Changed
+- Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.

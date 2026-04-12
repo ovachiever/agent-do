@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 83 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 84 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
@@ -18,6 +18,7 @@ agent-do is a universal automation CLI for AI agents with 83 specialized tools. 
 ./agent-do find playwright             # Search tools by keyword
 ./agent-do creds check --tool render   # Check a tool's declared credentials
 ./agent-do creds required namecheap    # Show which secrets a tool expects
+./agent-do auth ensure github          # Reuse saved auth or import browser cookies
 ./agent-do resend status example.com   # Check Resend domain DNS/verification state
 ./agent-do spec init                   # Initialize repo-local spec storage
 ./agent-do spec status --change id     # Check one change package
@@ -100,7 +101,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 83 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 84 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -120,6 +121,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | Tool | Tech | Notes |
 |------|------|-------|
 | `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. `login <url>` opens headed browser for SSO/MFA, `login done` transfers auth to headless. `session save/load` persists and restores full auth state (cookies + localStorage injected at context creation). `capture start/stop` records API traffic, `api` replays captured skills. |
+| `agent-auth` | Python | Site-level auth orchestrator over saved browser sessions, browser import, and secure credentials. Profiles live under `~/.agent-do/auth/`, and `ensure` tries saved-session, browser-import, then site-creds before requiring a human. |
 | `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser. 2 files: `daemon.js` + `protocol.js`. Capture pipeline shared via `lib/capture/`. |
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims. Build with `cargo build --release`. |
 | `agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |
