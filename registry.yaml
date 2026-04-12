@@ -1540,6 +1540,7 @@ tools:
     - persistent session save/load with cookies injected at context creation
     - capture API traffic and generate reusable curl skills
     - extract text, HTML, attributes from elements
+    - read browser clipboard contents after clicking UI copy buttons
     - credential management via OS keychain
     - tab management (new, switch, close, list)
     - vision-powered element finding and page description
@@ -1552,6 +1553,7 @@ tools:
       type: 'Append text: type <@ref> <text>'
       press: 'Press key: press <key>'
       get: 'Read data: get text|value|attr|title|url <@ref>'
+      clipboard: 'Browser clipboard: clipboard read|copy|paste'
       wait: 'Wait for condition: wait <ms|selector|--text|--stable>'
       login: 'SSO/MFA auth: login <url> opens headed browser; login done [--save <name>] transfers auth to headless; login
         status; login cancel'
@@ -1583,6 +1585,8 @@ tools:
       command: agent-browse capture start
     - intent: wait for page to load
       command: agent-browse wait --stable
+    - intent: read the copied value from the page
+      command: agent-browse clipboard read
     routing:
       discover_keywords:
       - browser automation
@@ -1967,13 +1971,17 @@ tools:
       command: agent-unbrowse delete myservice
     concurrency: mixed
   namecheap:
-    description: Namecheap domain and DNS management — domains, DNS records (safe upsert), nameservers, SSL, availability
+    description: Namecheap domain and DNS management — domains, DNS records (safe upsert with exact verification), nameservers,
+      SSL, availability
     capabilities:
     - list domains with expiry dates and auto-renew status
     - domain details (whois, nameservers, lock status)
     - check domain availability
     - renew domains
     - list and manage DNS records (safe GET-merge-SET pattern)
+    - reject suspicious masked or truncated DNS values before write
+    - verify exact provider read-back after DNS writes
+    - compare expected records against public DNS when requested
     - manage nameservers (custom or default)
     - list SSL certificates
     commands:
@@ -1984,6 +1992,7 @@ tools:
       dns: 'List DNS records: dns <domain>'
       dns-add: 'Add record (safe): dns-add <domain> <type> <host> <addr>'
       dns-update: 'Update record (safe): dns-update <domain> <host> <type> <addr>'
+      dns-verify: 'Verify exact record match: dns-verify <domain> <type> <host> <addr> [--public-verify]'
       dns-del: 'Delete record (safe): dns-del <domain> <host> [type]'
       nameservers: 'Show nameservers: nameservers <domain>'
       nameservers-set: 'Set custom NS: nameservers-set <domain> <ns1,ns2>'
@@ -1998,6 +2007,8 @@ tools:
       command: agent-namecheap dns example.com
     - intent: add a DNS record
       command: agent-namecheap dns-add example.com A www 1.2.3.4
+    - intent: verify a DKIM record exactly
+      command: agent-namecheap dns-verify example.com TXT resend._domainkey "p=..."
     - intent: domain expiry dates
       command: agent-namecheap domains --expiring
     credentials:
@@ -2005,6 +2016,69 @@ tools:
       - NAMECHEAP_API_USER
       - NAMECHEAP_API_KEY
     concurrency: write
+  resend:
+    description: Resend domain management and DNS verification — exact records, verification state, and public DNS checks
+    capabilities:
+    - list and inspect Resend domains
+    - create Resend domains
+    - retrieve exact DNS records without UI truncation
+    - trigger domain verification
+    - compare public DNS against Resend's expected records
+    commands:
+      domains: 'List domains: domains [--limit N]'
+      domain: 'Domain details: domain <name-or-id>'
+      add: 'Create domain: add <name> [--region R] [--tracking-subdomain sub]'
+      records: 'Exact DNS records: records <name-or-id>'
+      status: 'Verification summary: status <name-or-id>'
+      verify: 'Trigger verification: verify <name-or-id> [--wait N]'
+      dns-check: 'Compare public DNS to Resend records: dns-check <name-or-id> [--wait N]'
+    examples:
+    - intent: list my resend domains
+      command: agent-resend domains
+    - intent: inspect one resend domain
+      command: agent-resend domain example.com
+    - intent: get exact dns records from resend
+      command: agent-resend records example.com
+    - intent: trigger resend verification
+      command: agent-resend verify example.com
+    - intent: compare public dns against resend
+      command: agent-resend dns-check example.com --wait 60
+    credentials:
+      required:
+      - RESEND_API_KEY
+    routing:
+      discover_keywords:
+      - resend
+      - resend dns
+      - resend domain
+      - email domain verification
+      - dkim
+      - spf
+      prompt_patterns:
+      - \bresend\b
+      - \bdkim\b
+      - \bspf\b
+      - \bdomain verification\b
+      - \bemail domain\b
+      recommended_entrypoints:
+      - agent-do resend records <domain>
+      - agent-do resend status <domain>
+      - agent-do resend dns-check <domain>
+      default_command: domains
+      raw_cli_equivalents:
+      - pattern: \bcurl\b.*\bapi\.resend\.com\b
+        replacement: agent-do resend
+        example: agent-do resend records <domain>
+        reason: agent-do resend returns exact domain records and verification state without ad hoc API glue
+      project_signals:
+      - email
+      - resend
+      - dns
+      readiness:
+        check: agent-do resend domains
+        fix: agent-do creds store RESEND_API_KEY --stdin
+        note: Requires a Resend API key; agent-do will resolve it from env or secure storage
+    concurrency: read
   okta:
     description: Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, authorization servers,
       system logs

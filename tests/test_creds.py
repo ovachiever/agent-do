@@ -137,6 +137,10 @@ def main() -> int:
         f"unexpected cloudflare credentials: {cloudflare_creds}",
     )
 
+    resend_info = get_tool_info(registry, "resend")
+    resend_creds = get_tool_credentials(resend_info or {})
+    require(resend_creds["required"] == ["RESEND_API_KEY"], f"unexpected resend credentials: {resend_creds}")
+
     required = run("./agent-do", "creds", "required", "render", "--json")
     require(required.returncode == 0, f"render required failed: {required.stderr}")
     required_payload = json.loads(required.stdout)

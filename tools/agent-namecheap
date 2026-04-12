@@ -20,11 +20,13 @@ DOMAINS:
 DNS:
   dns <domain>                   List DNS records
   dns-add <domain> <type> <host> <addr> [--ttl N] [--mx-pref N]
-                                 Add a DNS record (safe: GET → merge → SET)
+                                 Add a DNS record (safe: GET → merge → SET → verify)
   dns-update <domain> <host> <type> <addr> [--ttl N] [--mx-pref N]
-                                 Update a DNS record (matches by host+type)
+                                 Update a DNS record (matches by host+type, verifies exact read-back)
   dns-del <domain> <host> [type] Delete DNS record(s) (matches by host, optionally type)
   dns-set-all <domain> <json>    Replace ALL records from JSON array (dangerous)
+  dns-verify <domain> <type> <host> <addr>
+                                 Verify exact provider match; add --public-verify to compare public DNS
 
 NAMESERVERS:
   nameservers <domain>           Show current nameservers
@@ -57,6 +59,7 @@ Examples:
   agent-namecheap dns recognitionoracle.com
   agent-namecheap dns-add recognitionoracle.com A www 1.2.3.4
   agent-namecheap dns-add recognitionoracle.com TXT @ "v=spf1 include:_spf.google.com ~all"
+  agent-namecheap dns-verify recognitionoracle.com TXT resend._domainkey "p=..."
   agent-namecheap dns-del recognitionoracle.com www A
   agent-namecheap nameservers recognitionoracle.com
   agent-namecheap snapshot
@@ -197,6 +200,215 @@ else:
 
 urlencode() {
     python3 -c "import urllib.parse; print(urllib.parse.quote('$1', safe=''))"
+}
+
+parse_dns_write_flags() {
+    DNS_TTL="$1"
+    DNS_MX_PREF="$2"
+    DNS_VERIFY_WRITE=true
+    DNS_PUBLIC_VERIFY=false
+    DNS_ALLOW_SUSPICIOUS=false
+    DNS_VERIFY_WAIT="0"
+    shift 2
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ttl) DNS_TTL="$2"; shift 2 ;;
+            --mx-pref) DNS_MX_PREF="$2"; shift 2 ;;
+            --no-verify) DNS_VERIFY_WRITE=false; shift ;;
+            --public-verify) DNS_PUBLIC_VERIFY=true; shift ;;
+            --wait) DNS_VERIFY_WAIT="$2"; shift 2 ;;
+            --allow-suspicious) DNS_ALLOW_SUSPICIOUS=true; shift ;;
+            *) shift ;;
+        esac
+    done
+}
+
+ensure_not_suspicious_dns_value() {
+    local rtype="$1"
+    local value="$2"
+    local allow_suspicious="${3:-false}"
+
+    [[ "$allow_suspicious" == "true" ]] && return 0
+
+    python3 - "$rtype" "$value" <<'PY'
+import re
+import sys
+
+rtype = sys.argv[1].upper()
+value = sys.argv[2]
+
+markers = ("...", "…", "[...]", "[…]", "***", "<hidden>", "<masked>")
+
+def suspicious(v: str) -> bool:
+    if any(marker in v for marker in markers):
+        return True
+    if re.search(r"\[[^\]]+\]", v):
+        return True
+    return False
+
+if suspicious(value):
+    print(
+        f"Refusing suspicious {rtype} value that looks masked or truncated. "
+        "Use an API response, copy button, or exact machine-readable source instead.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}
+
+verify_record_provider_exact() {
+    local domain="$1" rtype="$2" host="$3" addr="$4"
+    local mx_pref="${5:-}"
+
+    local current
+    current=$(_get_hosts_json "$domain") || return 1
+
+    echo "$current" | python3 - "$host" "${rtype^^}" "$addr" "$mx_pref" <<'PY'
+import json
+import sys
+
+host, rtype, expected, mx_pref = sys.argv[1:5]
+data = json.load(sys.stdin)
+
+def normalize(value: str, record_type: str) -> str:
+    value = "" if value is None else str(value).strip()
+    if record_type == "TXT":
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        return value
+    if record_type in {"CNAME", "MX", "MXE"}:
+        return value.rstrip(".").lower()
+    return value
+
+expected_norm = normalize(expected, rtype)
+
+for record in data.get("records", []):
+    if record.get("HostName", "") != host:
+        continue
+    if record.get("RecordType", "").upper() != rtype:
+        continue
+    if normalize(record.get("Address", ""), rtype) != expected_norm:
+        continue
+    if rtype in {"MX", "MXE"} and mx_pref and str(record.get("MXPref", "10")) != mx_pref:
+        continue
+    print(json.dumps(record))
+    sys.exit(0)
+
+print(
+    json.dumps(
+        {
+            "error": f"Exact read-back mismatch for {rtype} {host}",
+            "expected": {"host": host, "type": rtype, "address": expected, "mxPref": mx_pref or None},
+            "records": data.get("records", []),
+        }
+    ),
+    file=sys.stderr,
+)
+sys.exit(1)
+PY
+}
+
+verify_record_public_exact() {
+    local domain="$1" rtype="$2" host="$3" addr="$4"
+    local mx_pref="${5:-}"
+    local wait_seconds="${6:-0}"
+
+    python3 - "$domain" "${rtype^^}" "$host" "$addr" "$mx_pref" "$wait_seconds" <<'PY'
+import json
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+domain, rtype, host, expected, mx_pref, wait_seconds = sys.argv[1:7]
+wait_seconds = int(wait_seconds or "0")
+
+def fqdn() -> str:
+    if host in {"", "@"}:
+        return domain
+    return f"{host}.{domain}".rstrip(".")
+
+def normalize(value: str, record_type: str) -> str:
+    value = "" if value is None else str(value).strip()
+    if record_type == "TXT":
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        return value
+    if record_type in {"CNAME", "MX", "MXE"}:
+        return value.rstrip(".").lower()
+    return value
+
+def run_query() -> list:
+    if shutil.which("dig"):
+        proc = subprocess.run(
+            ["dig", "+short", rtype, fqdn()],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout
+    elif shutil.which("nslookup"):
+        proc = subprocess.run(
+            ["nslookup", f"-type={rtype}", fqdn()],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout
+    else:
+        print("Public DNS verification requires dig or nslookup", file=sys.stderr)
+        sys.exit(1)
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    parsed = []
+    for line in lines:
+        if rtype == "TXT":
+            chunks = re.findall(r'"([^"]*)"', line)
+            if chunks:
+                parsed.append("".join(chunks))
+            elif "=" in line or line.startswith("v="):
+                parsed.append(line.strip('"'))
+        elif rtype in {"MX", "MXE"}:
+            parts = line.rstrip(".").split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                parsed.append({"mxPref": parts[0], "value": parts[1].rstrip(".").lower()})
+        else:
+            parsed.append(line.rstrip("."))
+    return parsed
+
+expected_norm = normalize(expected, rtype)
+deadline = time.time() + wait_seconds
+last_values = []
+
+while True:
+    last_values = run_query()
+    if rtype in {"MX", "MXE"}:
+        for item in last_values:
+            if item.get("value") == expected_norm and (not mx_pref or item.get("mxPref") == mx_pref):
+                print(json.dumps(item))
+                sys.exit(0)
+    else:
+        if expected_norm in [normalize(item, rtype) for item in last_values]:
+            print(json.dumps({"value": expected_norm}))
+            sys.exit(0)
+    if time.time() >= deadline:
+        break
+    time.sleep(1)
+
+print(
+    json.dumps(
+        {
+            "error": f"Public DNS mismatch for {rtype} {fqdn()}",
+            "expected": {"address": expected, "mxPref": mx_pref or None},
+            "answers": last_values,
+        }
+    ),
+    file=sys.stderr,
+)
+sys.exit(1)
+PY
 }
 
 # --- Domain Commands ---
@@ -479,7 +691,6 @@ print('&'.join(params))
 
 cmd_dns_add() {
     local domain="${1:-}" rtype="${2:-}" host="${3:-}" addr="${4:-}"
-    local ttl="1800" mx_pref="10"
 
     if [[ -z "$domain" || -z "$rtype" || -z "$host" || -z "$addr" ]]; then
         echo "Usage: agent-namecheap dns-add <domain> <type> <host> <address> [--ttl N] [--mx-pref N]" >&2
@@ -487,13 +698,8 @@ cmd_dns_add() {
         return 1
     fi
     shift 4
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --ttl) ttl="$2"; shift 2 ;;
-            --mx-pref) mx_pref="$2"; shift 2 ;;
-            *) shift ;;
-        esac
-    done
+    parse_dns_write_flags "1800" "10" "$@"
+    ensure_not_suspicious_dns_value "$rtype" "$addr" "$DNS_ALLOW_SUSPICIOUS" || return 1
 
     # GET current records, add new one, SET all
     local current
@@ -515,8 +721,8 @@ data['records'].append({
     'HostName': '$host',
     'RecordType': '${rtype^^}',
     'Address': '$addr',
-    'MXPref': '$mx_pref',
-    'TTL': '$ttl',
+    'MXPref': '$DNS_MX_PREF',
+    'TTL': '$DNS_TTL',
 })
 print(json.dumps(data))
 ")
@@ -535,29 +741,38 @@ res = root.find('.//nc:DomainDNSSetHostsResult', ns)
 if res is None:
     res = root.find('.//DomainDNSSetHostsResult')
 if res is not None and res.get('IsSuccess', '').lower() == 'true':
-    print(f'Added: ${rtype^^} ${host} → ${addr}  (TTL: ${ttl})')
+    print(f'Added: ${rtype^^} ${host} → ${addr}  (TTL: ${DNS_TTL})')
 else:
     print('Failed to set DNS records', file=sys.stderr)
     sys.exit(1)
 " || return 1
+
+    if [[ "$DNS_VERIFY_WRITE" == "true" ]]; then
+        verify_record_provider_exact "$domain" "${rtype^^}" "$host" "$addr" "$DNS_MX_PREF" >/dev/null || {
+            echo "Error: Namecheap read-back verification failed for ${rtype^^} ${host}" >&2
+            return 1
+        }
+        echo "Verified: Namecheap API read-back matches"
+        if [[ "$DNS_PUBLIC_VERIFY" == "true" ]]; then
+            verify_record_public_exact "$domain" "${rtype^^}" "$host" "$addr" "$DNS_MX_PREF" "$DNS_VERIFY_WAIT" >/dev/null || {
+                echo "Error: Public DNS verification failed for ${rtype^^} ${host}.${domain}" >&2
+                return 1
+            }
+            echo "Verified: Public DNS matches"
+        fi
+    fi
 }
 
 cmd_dns_update() {
     local domain="${1:-}" host="${2:-}" rtype="${3:-}" addr="${4:-}"
-    local ttl="" mx_pref=""
 
     if [[ -z "$domain" || -z "$host" || -z "$rtype" || -z "$addr" ]]; then
         echo "Usage: agent-namecheap dns-update <domain> <host> <type> <address> [--ttl N] [--mx-pref N]" >&2
         return 1
     fi
     shift 4
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --ttl) ttl="$2"; shift 2 ;;
-            --mx-pref) mx_pref="$2"; shift 2 ;;
-            *) shift ;;
-        esac
-    done
+    parse_dns_write_flags "" "" "$@"
+    ensure_not_suspicious_dns_value "$rtype" "$addr" "$DNS_ALLOW_SUSPICIOUS" || return 1
 
     local current
     current=$(_get_hosts_json "$domain")
@@ -569,8 +784,8 @@ data = json.load(sys.stdin)
 host = '$host'
 rtype = '${rtype^^}'
 addr = '$addr'
-ttl = '$ttl'
-mx = '$mx_pref'
+ttl = '$DNS_TTL'
+mx = '$DNS_MX_PREF'
 found = False
 for r in data['records']:
     if r['HostName'] == host and r['RecordType'] == rtype:
@@ -609,6 +824,47 @@ else:
     print('Failed to update DNS record', file=sys.stderr)
     sys.exit(1)
 " || return 1
+
+    if [[ "$DNS_VERIFY_WRITE" == "true" ]]; then
+        verify_record_provider_exact "$domain" "${rtype^^}" "$host" "$addr" "$DNS_MX_PREF" >/dev/null || {
+            echo "Error: Namecheap read-back verification failed for ${rtype^^} ${host}" >&2
+            return 1
+        }
+        echo "Verified: Namecheap API read-back matches"
+        if [[ "$DNS_PUBLIC_VERIFY" == "true" ]]; then
+            verify_record_public_exact "$domain" "${rtype^^}" "$host" "$addr" "$DNS_MX_PREF" "$DNS_VERIFY_WAIT" >/dev/null || {
+                echo "Error: Public DNS verification failed for ${rtype^^} ${host}.${domain}" >&2
+                return 1
+            }
+            echo "Verified: Public DNS matches"
+        fi
+    fi
+}
+
+cmd_dns_verify() {
+    local domain="${1:-}" rtype="${2:-}" host="${3:-}" addr="${4:-}"
+
+    if [[ -z "$domain" || -z "$rtype" || -z "$host" || -z "$addr" ]]; then
+        echo "Usage: agent-namecheap dns-verify <domain> <type> <host> <address> [--mx-pref N] [--public-verify] [--wait N]" >&2
+        return 1
+    fi
+    shift 4
+    parse_dns_write_flags "" "" "$@"
+    ensure_not_suspicious_dns_value "$rtype" "$addr" "$DNS_ALLOW_SUSPICIOUS" || return 1
+
+    verify_record_provider_exact "$domain" "${rtype^^}" "$host" "$addr" "$DNS_MX_PREF" >/dev/null || {
+        echo "Error: Namecheap API does not currently match ${rtype^^} ${host} → ${addr}" >&2
+        return 1
+    }
+    echo "Verified: Namecheap API read-back matches"
+
+    if [[ "$DNS_PUBLIC_VERIFY" == "true" ]]; then
+        verify_record_public_exact "$domain" "${rtype^^}" "$host" "$addr" "$DNS_MX_PREF" "$DNS_VERIFY_WAIT" >/dev/null || {
+            echo "Error: Public DNS does not currently match ${rtype^^} ${host}.${domain}" >&2
+            return 1
+        }
+        echo "Verified: Public DNS matches"
+    fi
 }
 
 cmd_dns_del() {
@@ -953,6 +1209,7 @@ main() {
         dns)                  cmd_dns "$@" ;;
         dns-add)              cmd_dns_add "$@" ;;
         dns-update)           cmd_dns_update "$@" ;;
+        dns-verify)           cmd_dns_verify "$@" ;;
         dns-del)              cmd_dns_del "$@" ;;
         dns-set-all)          cmd_dns_set_all "$@" ;;
         nameservers)          cmd_nameservers "$@" ;;

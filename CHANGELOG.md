@@ -5,14 +5,21 @@
 ### Added
 - `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
 - `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.
+- `agent-do resend` for exact Resend domain records, verification state, and public DNS checks without relying on UI text.
 - `lib/creds-helper.sh` as a shared secure-store backend for macOS Keychain, Linux Secret Service, and a Windows DPAPI-backed per-user store.
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.
+- Browser clipboard commands through `agent-do browse clipboard read|copy|paste` for copy-first extraction flows.
 
 ### Changed
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
 - Docs and smoke tests now cover the new credential workflow.
+- `agent-do namecheap dns-add` and `dns-update` now reject suspicious masked values, verify exact Namecheap read-back by default, and can optionally confirm public DNS answers.
+
+### Fixed
+- `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.
+- `agent-do namecheap dns-add` no longer crashes after successful writes because of the bare `host` reference in its success path.
 
 ## v1.1 — 2026-04-11
 

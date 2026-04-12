@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 82 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 83 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
@@ -18,6 +18,7 @@ agent-do is a universal automation CLI for AI agents with 82 specialized tools. 
 ./agent-do find playwright             # Search tools by keyword
 ./agent-do creds check --tool render   # Check a tool's declared credentials
 ./agent-do creds required namecheap    # Show which secrets a tool expects
+./agent-do resend status example.com   # Check Resend domain DNS/verification state
 ./agent-do spec init                   # Initialize repo-local spec storage
 ./agent-do spec status --change id     # Check one change package
 ./agent-do nudges stats                # Local nudge telemetry summary
@@ -99,7 +100,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 82 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 83 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -133,7 +134,8 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-cloudflare` | Bash + curl | Cloudflare management — zones, analytics (GraphQL), DNS records, Workers, Pages, R2, firewall events. 23 commands. Requires `CLOUDFLARE_API_TOKEN`. |
 | `agent-clerk` | Bash + curl | Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO (SAML/OIDC), JWT templates, roles/permissions. 55 commands. Requires `CLERK_SECRET_KEY`. |
 | `agent-okta` | Bash + curl | Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, auth servers, system logs. 34 commands. Requires `OKTA_API_TOKEN` + `OKTA_DOMAIN`. |
-| `agent-namecheap` | Bash + curl | Namecheap domain and DNS management. Safe GET→merge→SET for DNS writes. 16 commands. Requires `NAMECHEAP_API_USER` + `NAMECHEAP_API_KEY`. |
+| `agent-namecheap` | Bash + curl | Namecheap domain and DNS management. Safe GET→merge→SET writes with suspicious-value rejection, exact provider read-back verification, and optional public DNS checks. Requires `NAMECHEAP_API_USER` + `NAMECHEAP_API_KEY`. |
+| `agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. Requires `RESEND_API_KEY`. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor — visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring. 22 commands. Storage: `~/.agent-do/context/` (global, per-user). |
 | `agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons (context/problem/solution/takeaway), architectural decisions (options/chosen/rationale/confidence), pattern consolidation via harvest. Git history review, swarm checkpoints, lesson promotion (local → team → global). Storage: `.zpc/` (per-project). Sources `lib/json-output.sh` + `lib/snapshot.sh`. |
@@ -203,5 +205,6 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `NAMECHEAP_API_USER`: API username for agent-namecheap
 - `NAMECHEAP_API_KEY`: API key for agent-namecheap
 - `NAMECHEAP_CLIENT_IP`: Whitelisted IP for agent-namecheap (auto-detected if not set)
+- `RESEND_API_KEY`: API key for agent-resend (Resend), or store with `agent-do creds store RESEND_API_KEY --stdin`
 
 Prefer `agent-do creds` for secret material when possible. The dispatcher, intent router, and health checker resolve declared tool secrets from the secure store automatically.

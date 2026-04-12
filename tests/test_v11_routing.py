@@ -41,6 +41,10 @@ def main() -> int:
     require(vercel_matches, "expected shared prompt matches for vercel")
     require(vercel_matches[0]["tool"] == "vercel", f"unexpected top prompt match: {vercel_matches}")
 
+    resend_matches = match_prompt_tools(registry, "verify resend dkim and spf records for this domain", limit=3)
+    require(resend_matches, "expected shared prompt matches for resend")
+    require(resend_matches[0]["tool"] == "resend", f"unexpected resend prompt match: {resend_matches}")
+
     browse_equivalent = find_raw_cli_equivalent(registry, "npx playwright test")
     require(browse_equivalent is not None, "expected a shared raw-command equivalent for playwright")
     require(browse_equivalent["tool"] == "browse", f"unexpected raw equivalent: {browse_equivalent}")

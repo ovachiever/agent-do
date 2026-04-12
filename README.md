@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 82 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 83 tools.
 
 ## Why It Exists
 
@@ -129,6 +129,13 @@ agent-do browse capture stop myapi
 agent-do browse api myapi get_users
 ```
 
+For exact values hidden behind copy buttons instead of visible page text:
+
+```bash
+agent-do browse click @e12
+agent-do browse clipboard read
+```
+
 ### `zpc`
 
 Structured project memory for lessons, decisions, patterns, and checkpointing.
@@ -161,6 +168,17 @@ agent-do context budget 4000 "react hooks"
 agent-do context annotate stripe-llms "Use idempotency keys"
 ```
 
+### `resend`
+
+Exact Resend domain records and verification state without UI truncation.
+
+```bash
+agent-do resend records example.com
+agent-do resend status example.com
+agent-do resend dns-check example.com
+agent-do resend verify example.com
+```
+
 ### `manna`
 
 Git-backed issue coordination with claims and dependency blocking for agent work.
@@ -185,7 +203,7 @@ agent-do spec status --change add-oauth-device-flow
 
 ## Tool Surface
 
-There are 82 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 83 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
@@ -199,7 +217,7 @@ There are 82 tools today. A few are deep subsystems. Many are focused adapters. 
 | Mobile | `ios`, `android` | Simulator and emulator control |
 | Desktop | `macos`, `tui`, `screen`, `ide` | GUI and terminal UI automation |
 | Data | `db`, `excel`, `sheets`, `pdf`, `pdf2md` | Databases, spreadsheets, PDF flows |
-| Communication | `slack`, `discord`, `email`, `sms`, `teams`, `zoom`, `meet`, `voice` | Messaging and meeting surfaces |
+| Communication | `slack`, `discord`, `email`, `sms`, `teams`, `zoom`, `meet`, `voice`, `resend` | Messaging, email delivery, and meeting surfaces |
 | Productivity | `calendar`, `notion`, `linear`, `figma`, `jupyter`, `lab`, `colab` | Product and workflow tools |
 | Infrastructure | `docker`, `k8s`, `cloud`, `gcp`, `ci`, `vm`, `network`, `dns`, `ssh`, `render`, `vercel`, `supabase`, `cloudflare`, `clerk`, `okta`, `namecheap` | Infra, cloud, auth, deployment |
 | Creative | `image`, `video`, `audio`, `3d`, `cad`, `latex` | Media and document generation |

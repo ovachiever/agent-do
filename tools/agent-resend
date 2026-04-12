@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""agent-resend - Resend domain management and DNS verification."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
+
+
+RESEND_API = os.environ.get("RESEND_API_URL", "https://api.resend.com")
+
+
+def fail(message: str, *, json_mode: bool = False, code: int = 1, error: str = "error") -> int:
+    if json_mode:
+        print(json.dumps({"ok": False, "error": error, "message": message}, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    return code
+
+
+def require_api_key() -> str:
+    token = os.environ.get("RESEND_API_KEY", "").strip()
+    if not token:
+        raise SystemExit(fail("RESEND_API_KEY not set", error="missing_api_key"))
+    return token
+
+
+def request_json(method: str, path: str, *, body: dict[str, Any] | None = None) -> Any:
+    token = require_api_key()
+    url = f"{RESEND_API.rstrip('/')}{path}"
+    data = None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, method=method, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as response:
+            payload = response.read().decode("utf-8")
+            return json.loads(payload) if payload else {}
+    except urllib.error.HTTPError as exc:
+        payload = exc.read().decode("utf-8", errors="replace")
+        try:
+            data = json.loads(payload)
+            error = data.get("error") or data.get("message") or payload
+            if isinstance(error, dict):
+                detail = error.get("message") or json.dumps(error)
+            else:
+                detail = str(error)
+        except json.JSONDecodeError:
+            detail = payload or str(exc)
+        raise SystemExit(f"Error: Resend API {exc.code}: {detail}")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"Error: Resend API request failed: {exc.reason}")
+
+
+def list_domains(limit: int | None = None) -> list[dict[str, Any]]:
+    query = ""
+    if limit is not None:
+        query = f"?limit={limit}"
+    payload = request_json("GET", f"/domains{query}")
+    if isinstance(payload, dict) and "data" in payload:
+        return payload.get("data") or []
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+def get_domain_by_id(domain_id: str) -> dict[str, Any]:
+    payload = request_json("GET", f"/domains/{urllib.parse.quote(domain_id, safe='')}")
+    if isinstance(payload, dict) and "data" in payload and isinstance(payload["data"], dict):
+        return payload["data"]
+    return payload
+
+
+def resolve_domain(ref: str) -> dict[str, Any]:
+    try:
+        return get_domain_by_id(ref)
+    except SystemExit:
+        pass
+
+    for domain in list_domains():
+        if domain.get("name") == ref:
+            return get_domain_by_id(str(domain.get("id", ref)))
+
+    raise SystemExit(f"Error: Resend domain '{ref}' not found")
+
+
+def fqdn_for_record(domain_name: str, record_name: str) -> str:
+    name = (record_name or "").strip()
+    if not name or name == "@":
+        return domain_name
+    if name == domain_name or name.endswith(f".{domain_name}"):
+        return name.rstrip(".")
+    return f"{name}.{domain_name}".rstrip(".")
+
+
+def normalize_dns_value(record_type: str, value: str) -> str:
+    value = "" if value is None else str(value).strip()
+    if record_type == "TXT":
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        return value
+    if record_type in {"MX", "CNAME"}:
+        return value.rstrip(".").lower()
+    return value.rstrip(".")
+
+
+def query_public_dns(record_type: str, fqdn: str) -> list[Any]:
+    record_type = record_type.upper()
+    if shutil.which("dig"):
+        proc = subprocess.run(
+            ["dig", "+short", record_type, fqdn],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout
+    elif shutil.which("nslookup"):
+        proc = subprocess.run(
+            ["nslookup", f"-type={record_type}", fqdn],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout
+    else:
+        raise SystemExit("Error: dns-check requires dig or nslookup")
+
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    answers: list[Any] = []
+    for line in lines:
+        if record_type == "TXT":
+            parts = []
+            current = ""
+            in_quote = False
+            for char in line:
+                if char == '"':
+                    if in_quote:
+                        parts.append(current)
+                        current = ""
+                    in_quote = not in_quote
+                    continue
+                if in_quote:
+                    current += char
+            if parts:
+                answers.append("".join(parts))
+            elif "=" in line or line.startswith("v="):
+                answers.append(line.strip('"'))
+        elif record_type == "MX":
+            fields = line.rstrip(".").split(None, 1)
+            if len(fields) == 2 and fields[0].isdigit():
+                answers.append({"priority": int(fields[0]), "value": fields[1].rstrip(".").lower()})
+        else:
+            answers.append(line.rstrip("."))
+    return answers
+
+
+def domain_summary(domain: dict[str, Any]) -> dict[str, Any]:
+    records = domain.get("records") or []
+    status_counts: dict[str, int] = {}
+    for record in records:
+        status = record.get("status", "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "id": domain.get("id"),
+        "name": domain.get("name"),
+        "status": domain.get("status"),
+        "region": domain.get("region"),
+        "created_at": domain.get("created_at"),
+        "capabilities": domain.get("capabilities") or {},
+        "record_counts": status_counts,
+        "records": records,
+    }
+
+
+def print_domains(domains: list[dict[str, Any]]) -> None:
+    if not domains:
+        print("No Resend domains found")
+        return
+    for item in domains:
+        capabilities = item.get("capabilities") or {}
+        sending = capabilities.get("sending", "?")
+        receiving = capabilities.get("receiving", "?")
+        print(
+            f"{item.get('id', '')}  {item.get('name', '')}  "
+            f"[{item.get('status', '')}]  region:{item.get('region', '')}  "
+            f"sending:{sending} receiving:{receiving}"
+        )
+
+
+def print_domain(domain: dict[str, Any]) -> None:
+    summary = domain_summary(domain)
+    print(f"ID:          {summary['id']}")
+    print(f"Domain:      {summary['name']}")
+    print(f"Status:      {summary['status']}")
+    print(f"Region:      {summary['region']}")
+    print(f"Created:     {summary['created_at']}")
+    capabilities = summary["capabilities"]
+    print(f"Sending:     {capabilities.get('sending', '')}")
+    print(f"Receiving:   {capabilities.get('receiving', '')}")
+    if domain.get("tracking_subdomain"):
+        print(f"Tracking:    {domain.get('tracking_subdomain')}")
+    if "open_tracking" in domain:
+        print(f"Open Track:  {domain.get('open_tracking')}")
+    if "click_tracking" in domain:
+        print(f"Click Track: {domain.get('click_tracking')}")
+    print(f"Records:     {len(summary['records'])}")
+
+
+def print_records(domain: dict[str, Any]) -> None:
+    records = domain.get("records") or []
+    if not records:
+        print("No DNS records returned by Resend")
+        return
+    for record in records:
+        fqdn = fqdn_for_record(domain.get("name", ""), record.get("name", ""))
+        print(f"{record.get('record', '')}  {record.get('type', '')}  {fqdn}  [{record.get('status', '')}]")
+        if record.get("priority") is not None:
+            print(f"  priority: {record.get('priority')}")
+        print(f"  value: {record.get('value', '')}")
+
+
+def run_dns_check(domain: dict[str, Any], wait_seconds: int = 0, interval_seconds: int = 3) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    deadline = time.time() + wait_seconds
+
+    while True:
+        checks = []
+        pending = False
+        for record in domain.get("records") or []:
+            fqdn = fqdn_for_record(domain.get("name", ""), record.get("name", ""))
+            answers = query_public_dns(record.get("type", ""), fqdn)
+            expected_value = record.get("value", "")
+            status = "missing"
+
+            if record.get("type") == "MX":
+                expected = {
+                    "priority": int(record.get("priority", 0) or 0),
+                    "value": normalize_dns_value("MX", expected_value),
+                }
+                status = "matched" if expected in answers else "mismatch"
+            else:
+                expected = normalize_dns_value(record.get("type", ""), expected_value)
+                normalized_answers = [normalize_dns_value(record.get("type", ""), str(answer)) for answer in answers]
+                status = "matched" if expected in normalized_answers else "mismatch"
+
+            check = {
+                "record": record.get("record"),
+                "type": record.get("type"),
+                "name": record.get("name"),
+                "fqdn": fqdn,
+                "status": record.get("status"),
+                "expected": expected,
+                "public_answers": answers,
+                "match": status == "matched",
+            }
+            checks.append(check)
+            if not check["match"]:
+                pending = True
+
+        if not pending or time.time() >= deadline:
+            return checks
+        time.sleep(max(interval_seconds, 1))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Resend domain management and DNS verification for agent-do")
+    parser.add_argument("--json", action="store_true", help="Output JSON")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    list_parser = subparsers.add_parser("domains", help="List Resend domains")
+    list_parser.add_argument("--limit", type=int, help="Max domains to fetch")
+
+    domain_parser = subparsers.add_parser("domain", help="Show one Resend domain")
+    domain_parser.add_argument("ref", help="Domain name or Resend domain id")
+
+    add_parser = subparsers.add_parser("add", help="Create a new Resend domain")
+    add_parser.add_argument("name", help="Domain name")
+    add_parser.add_argument("--region", help="Region like us-east-1")
+    add_parser.add_argument("--tracking-subdomain", help="Custom tracking subdomain")
+
+    records_parser = subparsers.add_parser("records", help="Show exact DNS records for a domain")
+    records_parser.add_argument("ref", help="Domain name or Resend domain id")
+
+    status_parser = subparsers.add_parser("status", help="Summarize domain verification state")
+    status_parser.add_argument("ref", help="Domain name or Resend domain id")
+
+    verify_parser = subparsers.add_parser("verify", help="Trigger domain verification")
+    verify_parser.add_argument("ref", help="Domain name or Resend domain id")
+    verify_parser.add_argument("--wait", type=int, default=0, help="Poll for status changes for N seconds")
+    verify_parser.add_argument("--interval", type=int, default=5, help="Polling interval in seconds")
+
+    check_parser = subparsers.add_parser("dns-check", help="Compare public DNS against Resend's expected records")
+    check_parser.add_argument("ref", help="Domain name or Resend domain id")
+    check_parser.add_argument("--wait", type=int, default=0, help="Retry public DNS checks for N seconds")
+    check_parser.add_argument("--interval", type=int, default=3, help="Retry interval in seconds")
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command == "domains":
+        domains = list_domains(args.limit)
+        payload = {"domains": domains}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print_domains(domains)
+        return 0
+
+    if args.command == "add":
+        body: dict[str, Any] = {"name": args.name}
+        if args.region:
+            body["region"] = args.region
+        if args.tracking_subdomain:
+            body["tracking_subdomain"] = args.tracking_subdomain
+        created = request_json("POST", "/domains", body=body)
+        if args.json:
+            print(json.dumps(created, indent=2))
+        else:
+            print(f"Created Resend domain: {created.get('name', args.name)}")
+            print_records(created)
+        return 0
+
+    domain = resolve_domain(args.ref)
+
+    if args.command == "domain":
+        if args.json:
+            print(json.dumps(domain, indent=2))
+        else:
+            print_domain(domain)
+            print()
+            print_records(domain)
+        return 0
+
+    if args.command == "records":
+        payload = {"domain": domain.get("name"), "id": domain.get("id"), "records": domain.get("records") or []}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print_records(domain)
+        return 0
+
+    if args.command == "status":
+        payload = domain_summary(domain)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print_domain(domain)
+            print()
+            for record in domain.get("records") or []:
+                fqdn = fqdn_for_record(domain.get("name", ""), record.get("name", ""))
+                print(f"{record.get('status', ''):<12} {record.get('type', ''):<4} {fqdn}")
+        return 0
+
+    if args.command == "verify":
+        result = request_json("POST", f"/domains/{urllib.parse.quote(str(domain.get('id')), safe='')}/verify")
+        if args.wait > 0:
+            deadline = time.time() + args.wait
+            refreshed = domain
+            while time.time() < deadline:
+                time.sleep(max(args.interval, 1))
+                refreshed = get_domain_by_id(str(domain.get("id")))
+                if refreshed.get("status") not in {"pending", domain.get("status")}:
+                    domain = refreshed
+                    break
+                domain = refreshed
+        payload = {"verify": result, "domain": domain_summary(domain)}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"Triggered verification for {domain.get('name')}")
+            print(f"Current status: {domain.get('status')}")
+        return 0
+
+    if args.command == "dns-check":
+        checks = run_dns_check(domain, args.wait, args.interval)
+        payload = {
+            "domain": domain.get("name"),
+            "id": domain.get("id"),
+            "checks": checks,
+            "all_matched": all(item["match"] for item in checks),
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            for item in checks:
+                status = "OK" if item["match"] else "MISMATCH"
+                print(f"{status:<9} {item['type']:<4} {item['fqdn']}")
+                print(f"  expected: {item['expected']}")
+                if item["public_answers"]:
+                    print(f"  public:   {item['public_answers']}")
+                else:
+                    print("  public:   []")
+            if not payload["all_matched"]:
+                return 1
+        return 0
+
+    return fail(f"Unknown command: {args.command}", json_mode=args.json)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

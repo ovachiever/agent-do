@@ -61,6 +61,9 @@ READING:
   get url                        Get current URL
   get count <selector>           Count matching elements
   get options [selector]         Get options from open dropdown/select
+  clipboard read                 Read browser clipboard contents
+  clipboard copy                 Send copy shortcut to the page
+  clipboard paste                Send paste shortcut to the page
 
 WAITING:
   wait <selector|ms>             Wait for element or milliseconds
@@ -460,6 +463,13 @@ build_eval_cmd() {
 EOF
 }
 
+build_clipboard_cmd() {
+    local operation="$1"
+    cat << EOF
+{"id":"$(cmd_id)","action":"clipboard","operation":"$operation"}
+EOF
+}
+
 build_get_cmd() {
     local what="$1"
     local selector="${2:-}"
@@ -752,6 +762,18 @@ main() {
         get)
             [[ $# -lt 1 ]] && { echo "Usage: agent-browse get <what> [selector]" >&2; exit 1; }
             json=$(build_get_cmd "$@")
+            ;;
+        clipboard)
+            [[ $# -lt 1 ]] && { echo "Usage: agent-browse clipboard <read|copy|paste>" >&2; exit 1; }
+            case "$1" in
+                read|copy|paste)
+                    json=$(build_clipboard_cmd "$1")
+                    ;;
+                *)
+                    echo "Usage: agent-browse clipboard <read|copy|paste>" >&2
+                    exit 1
+                    ;;
+            esac
             ;;
             
         # Waiting
@@ -1654,7 +1676,7 @@ PYEOF
         *)
             echo "Unknown command: $cmd" >&2
             # Suggest similar commands (prefix match)
-            local commands="launch open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get wait screenshot pdf eval login session tab network auth vision agent capture api is console errors highlight install close restart status"
+            local commands="launch open back forward reload click dblclick fill type press hover focus check uncheck select upload snapshot get clipboard wait screenshot pdf eval login session tab network auth vision agent capture api is console errors highlight install close restart status"
             local suggestions=""
             for c in $commands; do
                 if [[ "$c" == "$cmd"* ]]; then
