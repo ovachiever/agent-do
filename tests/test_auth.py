@@ -141,6 +141,21 @@ def main() -> int:
                         name = args[2]
                         session_file(name).unlink(missing_ok=True)
                         success({"deleted": True, "name": name})
+                    if action == "export":
+                        name = args[2]
+                        out = Path(args[3])
+                        path = session_file(name)
+                        if not path.exists():
+                            print(json.dumps({"success": False, "error": "session not found"}))
+                            raise SystemExit(1)
+                        out.write_text(json.dumps({"name": name, "storage": json.loads(path.read_text())}))
+                        success({"exported": True, "name": name, "path": str(out)})
+                    if action == "import":
+                        input_path = Path(args[2])
+                        name = args[3]
+                        payload = json.loads(input_path.read_text())
+                        session_file(name).write_text(json.dumps(payload.get("storage", {})))
+                        success({"imported": True, "name": name})
                     if action == "import-browser":
                         name = args[2]
                         state = {"url": "https://github.com/settings/profile", "text": "View profile and more"}
@@ -157,6 +172,7 @@ def main() -> int:
         env["AGENT_DO_HOME"] = str(fake_home)
         env["AGENT_DO_AUTH_BROWSE_CMD"] = str(fake_browse)
         env["FAKE_BROWSE_ROOT"] = str(fake_state)
+        env["AUTH_SESSION_MASTER_KEY_V1"] = "test-master-key"
 
         init = run(str(AGENT_DO), "auth", "init", "github", "--json", cwd=ROOT, env=env)
         require(init.returncode == 0, f"auth init failed: {init.stderr}")
@@ -184,6 +200,8 @@ def main() -> int:
         require(ensure.returncode == 0, f"auth ensure failed: {ensure.stderr}")
         ensure_payload = json.loads(ensure.stdout)
         require(ensure_payload["strategy_used"] == "browser-import", f"unexpected ensure payload: {ensure_payload}")
+        require((fake_home / "auth" / "sessions" / "github" / "default" / "state.enc").exists(), "expected encrypted auth session bundle")
+        require(not any((fake_state / "sessions").glob("*.json")), "expected transient browse session aliases to be cleaned up")
 
         status = run(str(AGENT_DO), "auth", "status", "github", "--json", cwd=ROOT, env=env)
         require(status.returncode == 0, f"auth status failed: {status.stderr}")

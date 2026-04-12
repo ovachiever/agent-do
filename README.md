@@ -178,7 +178,7 @@ agent-do context annotate stripe-llms "Use idempotency keys"
 
 ### `auth`
 
-Site-level authentication orchestration over saved browser sessions, browser import, and secure credentials.
+Site-level authentication orchestration over encrypted auth bundles, browser import, and secure credentials.
 
 ```bash
 agent-do auth init github

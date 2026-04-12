@@ -220,7 +220,7 @@ Directory-based tools with complex backends:
 | Tool | Tech Stack | Notes |
 |------|-----------|-------|
 | `tools/agent-browse/` | Node.js, Playwright | Headless browser with @ref element selection. `daemon.js` manages browser lifecycle. `login <url>` opens headed browser for SSO/MFA → `login done` transfers auth to headless. `session load` creates new context with saved cookies. API capture via `capture start/stop`, replay via `api` subcommand. |
-| `tools/agent-auth` | Python | Site-level auth orchestrator over saved browser sessions, browser import, and secure credentials. Profiles live under `~/.agent-do/auth/`; validation decides whether a session is actually usable. |
+| `tools/agent-auth` | Python | Site-level auth orchestrator over encrypted auth bundles, browser import, and secure credentials. Profiles and encrypted session bundles live under `~/.agent-do/auth/`; validation decides whether a session is actually usable. |
 | `tools/agent-unbrowse/` | Node.js, Playwright | Standalone API traffic capture. 2 files (`daemon.js`, `protocol.js`). Launches headed browser for manual browsing. Capture pipeline shared via `lib/capture/`. |
 | `tools/agent-manna/` | Rust | Git-backed issue tracking. Session-based claims prevent multi-agent conflicts. |
 | `tools/agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |

@@ -11,8 +11,10 @@ import os
 import re
 import shlex
 import shutil
+import secrets
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,7 @@ PROFILES_DIR = AUTH_ROOT / "profiles"
 SESSIONS_DIR = AUTH_ROOT / "sessions"
 CONFIG_PATH = AUTH_ROOT / "config.yaml"
 SITE_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
+AUTH_MASTER_KEY_NAME = "AUTH_SESSION_MASTER_KEY_V1"
 
 KNOWN_PROFILES: dict[str, dict[str, Any]] = {
     "github": {
@@ -198,6 +201,7 @@ def auth_paths(site: str, name: str = "default") -> dict[str, Path]:
         "profile": PROFILES_DIR / f"{slug}.yaml",
         "session_dir": SESSIONS_DIR / slug / name,
         "meta": SESSIONS_DIR / slug / name / "meta.json",
+        "state": SESSIONS_DIR / slug / name / "state.enc",
     }
 
 
@@ -276,6 +280,10 @@ def delete_session_meta(site: str, name: str) -> None:
         shutil.rmtree(path_info["session_dir"], ignore_errors=True)
 
 
+def session_bundle_exists(site: str, name: str = "default") -> bool:
+    return auth_paths(site, name)["state"].exists()
+
+
 def default_profile(site: str, *, domain: str | None = None, login_url: str | None = None) -> dict[str, Any]:
     slug = site_slug(site)
     if slug in KNOWN_PROFILES:
@@ -324,7 +332,7 @@ def state_from_profile(site: str) -> str:
     if profile is None:
         return "unconfigured"
     meta = get_session_meta(site)
-    if not meta:
+    if not meta or (not session_bundle_exists(site) and not meta.get("browse_session")):
         return "configured"
     if meta.get("state") == "authenticated" and meta.get("last_validation_ok") is True:
         return "authenticated"
@@ -373,6 +381,75 @@ def resolve_secret(key: str | None) -> str | None:
     if proc.returncode != 0:
         return None
     return proc.stdout.strip() or None
+
+
+def ensure_auth_master_key() -> str:
+    existing = resolve_secret(AUTH_MASTER_KEY_NAME)
+    if existing:
+        return existing
+
+    generated = secrets.token_hex(32)
+    proc = run_tool([*creds_cmd(), "store", AUTH_MASTER_KEY_NAME, generated])
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "failed to persist auth session master key")
+    return generated
+
+
+def encrypt_file(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    key = ensure_auth_master_key()
+    env = os.environ.copy()
+    env["AGENT_DO_AUTH_MASTER_KEY"] = key
+    proc = subprocess.run(
+        [
+            "openssl",
+            "enc",
+            "-aes-256-cbc",
+            "-pbkdf2",
+            "-salt",
+            "-in",
+            str(source),
+            "-out",
+            str(destination),
+            "-pass",
+            "env:AGENT_DO_AUTH_MASTER_KEY",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "openssl encryption failed")
+
+
+def decrypt_file(source: Path, destination: Path) -> None:
+    key = resolve_secret(AUTH_MASTER_KEY_NAME)
+    if not key:
+        raise RuntimeError("auth session master key is missing from secure storage")
+    env = os.environ.copy()
+    env["AGENT_DO_AUTH_MASTER_KEY"] = key
+    proc = subprocess.run(
+        [
+            "openssl",
+            "enc",
+            "-d",
+            "-aes-256-cbc",
+            "-pbkdf2",
+            "-in",
+            str(source),
+            "-out",
+            str(destination),
+            "-pass",
+            "env:AGENT_DO_AUTH_MASTER_KEY",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "openssl decryption failed")
 
 
 def write_profile(profile: dict[str, Any], *, force: bool = False) -> Path:
@@ -449,18 +526,31 @@ def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
 def save_current_session(site: str, *, name: str = "default", strategy: str) -> dict[str, Any]:
     alias = browse_session_name(site, name)
     run_browse("session", "save", alias, f"agent-do auth session for {site}")
-    meta = write_session_meta(
-        site,
-        name,
-        {
-            "browse_session": alias,
-            "last_strategy": strategy,
-            "validated_at": now_iso(),
-            "last_validation_ok": True,
-            "state": "authenticated",
-        },
-    )
-    return meta
+    return persist_browse_alias(site, name=name, alias=alias, strategy=strategy)
+
+
+def persist_browse_alias(site: str, *, name: str = "default", alias: str | None = None, strategy: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    alias = alias or browse_session_name(site, name)
+    path_info = auth_paths(site, name)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        export_path = Path(tmpdir) / "session.json"
+        run_browse("session", "export", alias, str(export_path))
+        encrypt_file(export_path, path_info["state"])
+
+    run_tool([*browse_cmd(), "session", "delete", alias])
+
+    payload = {
+        "browse_session": alias,
+        "storage": "encrypted-bundle",
+        "bundle_path": str(path_info["state"]),
+        "last_strategy": strategy,
+        "validated_at": now_iso(),
+        "last_validation_ok": True,
+        "state": "authenticated",
+    }
+    if extra:
+        payload.update(extra)
+    return write_session_meta(site, name, payload)
 
 
 def load_saved_session(site: str, *, name: str = "default") -> dict[str, Any]:
@@ -468,7 +558,16 @@ def load_saved_session(site: str, *, name: str = "default") -> dict[str, Any]:
     if not meta:
         raise FileNotFoundError(f"No saved auth session for {site}")
     alias = meta.get("browse_session") or browse_session_name(site, name)
-    run_browse("session", "load", str(alias))
+    state_path = auth_paths(site, name)["state"]
+    if state_path.exists():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import_path = Path(tmpdir) / "session.json"
+            decrypt_file(state_path, import_path)
+            run_browse("session", "import", str(import_path), str(alias))
+            run_browse("session", "load", str(alias))
+        run_tool([*browse_cmd(), "session", "delete", str(alias)])
+    else:
+        run_browse("session", "load", str(alias))
     return meta
 
 
@@ -482,16 +581,7 @@ def browser_import(site: str, profile: dict[str, Any], *, name: str = "default")
         args.extend(["--domain", str(domains[0])])
     run_browse(*args)
     run_browse("session", "load", alias)
-    meta = write_session_meta(
-        site,
-        name,
-        {
-            "browse_session": alias,
-            "last_strategy": "browser-import",
-            "source_browser": browser,
-        },
-    )
-    return meta
+    return {"browse_session": alias, "last_strategy": "browser-import", "source_browser": browser}
 
 
 def site_creds_login(site: str, profile: dict[str, Any], *, name: str = "default") -> tuple[bool, list[str]]:
@@ -612,6 +702,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if profile is None:
         return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
     meta = get_session_meta(args.site, args.name) or {}
+    path_info = auth_paths(args.site, args.name)
     payload = {
         "site": args.site,
         "state": state_from_profile(args.site),
@@ -619,6 +710,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         "session": {
             "name": args.name,
             "browse_session": meta.get("browse_session"),
+            "storage": meta.get("storage"),
+            "bundle_path": str(path_info["state"]) if path_info["state"].exists() else None,
             "validated_at": meta.get("validated_at"),
             "updated_at": meta.get("updated_at"),
         },
@@ -683,9 +776,10 @@ def cmd_import_browser(args: argparse.Namespace) -> int:
         profile.setdefault("browser_import", {})["domains"] = [args.domain]
 
     try:
-        meta = browser_import(args.site, profile, name=args.name)
+        imported = browser_import(args.site, profile, name=args.name)
         validation = apply_validation(args.site, profile)
     except Exception as exc:
+        run_tool([*browse_cmd(), "session", "delete", browse_session_name(args.site, args.name)])
         write_session_meta(
             args.site,
             args.name,
@@ -702,22 +796,22 @@ def cmd_import_browser(args: argparse.Namespace) -> int:
         "ok": validation["ok"],
         "site": args.site,
         "strategy_used": "browser-import",
-        "session": {"name": args.name, "browse_session": meta.get("browse_session")},
+        "session": {"name": args.name, "browse_session": imported.get("browse_session")},
         "validation": validation,
     }
     if validation["ok"]:
-        meta = write_session_meta(
+        meta = persist_browse_alias(
             args.site,
-            args.name,
-            {
-                "last_strategy": "browser-import",
-                "validated_at": now_iso(),
-                "last_validation_ok": True,
-                "state": "authenticated",
+            name=args.name,
+            alias=imported.get("browse_session"),
+            strategy="browser-import",
+            extra={
+                "source_browser": imported.get("source_browser"),
             },
         )
         payload["session"]["browse_session"] = meta.get("browse_session")
     else:
+        run_tool([*browse_cmd(), "session", "delete", imported.get("browse_session", browse_session_name(args.site, args.name))])
         write_session_meta(
             args.site,
             args.name,
@@ -924,20 +1018,17 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             if not profile.get("browser_import"):
                 continue
             try:
-                browser_import(args.site, profile, name=name)
+                imported = browser_import(args.site, profile, name=name)
                 validation = apply_validation(args.site, profile)
             except Exception:
                 continue
             if validation["ok"]:
-                meta = write_session_meta(
+                meta = persist_browse_alias(
                     args.site,
-                    name,
-                    {
-                        "last_strategy": strategy,
-                        "validated_at": now_iso(),
-                        "last_validation_ok": True,
-                        "state": "authenticated",
-                    },
+                    name=name,
+                    alias=imported.get("browse_session"),
+                    strategy=strategy,
+                    extra={"source_browser": imported.get("source_browser")},
                 )
                 payload = {
                     "site": args.site,
@@ -948,6 +1039,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                 }
                 print(json.dumps(payload, indent=2) if args.json else f"{args.site}: authenticated via {strategy}")
                 return 0
+            run_tool([*browse_cmd(), "session", "delete", imported.get("browse_session", browse_session_name(args.site, name))])
 
         elif strategy == "site-creds":
             attempted.append(strategy)

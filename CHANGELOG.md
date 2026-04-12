@@ -12,7 +12,7 @@
 - Browser clipboard commands through `agent-do browse clipboard read|copy|paste` for copy-first extraction flows.
 
 ### Changed
-- Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`.
+- Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
