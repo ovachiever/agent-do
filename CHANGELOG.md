@@ -11,6 +11,7 @@
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.
 - Browser clipboard commands through `agent-do browse clipboard read|copy|paste` for copy-first extraction flows.
 - `agent-do email latest|wait|code|link` for inbox polling, verification code extraction, and magic-link extraction.
+- `agent-do sms snapshot|latest|wait|code|link` for message polling, verification code extraction, and link extraction.
 
 ### Changed
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
@@ -18,6 +19,8 @@
 - `agent-do auth init --provider github|google` now creates SSO-first site profiles, and `provider-refresh` can reuse upstream provider auth to complete cross-site sign-in.
 - `agent-do auth` can now continue mailbox-driven login flows through `agent-do email` when a site profile declares an email code or magic-link challenge.
 - `provider-refresh` now handles provider account choosers and consent checkpoints, and stores those checkpoint selectors in auth session metadata for later inspection.
+- `agent-do auth` can now continue SMS-driven login flows through `agent-do sms`, and it correlates email/SMS challenges against a pre-login mailbox baseline so stale unread messages are ignored.
+- `agent-do auth` now surfaces passkey or security-key checkpoints as explicit action-required states instead of flattening them into a later validation failure.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.

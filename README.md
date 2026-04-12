@@ -106,6 +106,13 @@ agent-do auth init widgethub --domain app.example.com --login-url https://app.ex
 agent-do auth ensure widgethub
 ```
 
+When a site texts a verification code or magic link:
+
+```bash
+agent-do auth init widgethub --domain app.example.com --login-url https://app.example.com/login --sms-code --sms-from WidgetHub --sms-contains "verification"
+agent-do auth ensure widgethub
+```
+
 When the repo needs durable behavior specs and change artifacts:
 
 ```bash
@@ -209,7 +216,9 @@ Known profiles like GitHub and Google now use explicit login adapters before fal
 
 Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in, including account chooser and consent checkpoints when those pages appear.
 
-Profiles can also declare mailbox-driven challenges with `--email-code` or `--magic-link`. In that mode `agent-do auth` uses `agent-do email` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw mailbox scraping.
+Profiles can also declare mailbox-driven challenges with `--email-code`, `--magic-link`, `--sms-code`, or `--sms-link`. In that mode `agent-do auth` uses `agent-do email` or `agent-do sms` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw scraping.
+
+If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
 
 ### `email`
 
@@ -220,6 +229,17 @@ agent-do email snapshot --json
 agent-do email latest --from WidgetHub --json
 agent-do email code --from WidgetHub --subject "verification code"
 agent-do email link --from WidgetHub --domain app.example.com
+```
+
+### `sms`
+
+SMS querying for agent workflows, including verification code and link extraction.
+
+```bash
+agent-do sms snapshot --json
+agent-do sms latest --from WidgetHub --json
+agent-do sms code --from WidgetHub --contains "verification"
+agent-do sms link --from WidgetHub --domain app.example.com
 ```
 
 ### `resend`

@@ -445,6 +445,11 @@ def email_cmd() -> list[str]:
     return tool_cmd_from_env("AGENT_DO_AUTH_EMAIL_CMD", default)
 
 
+def sms_cmd() -> list[str]:
+    default = [str(ROOT / "tools" / "agent-sms")]
+    return tool_cmd_from_env("AGENT_DO_AUTH_SMS_CMD", default)
+
+
 def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, text=True, capture_output=True, check=False)
 
@@ -471,11 +476,39 @@ def run_email_json(*args: str) -> dict[str, Any]:
     return payload
 
 
+def run_sms_json(*args: str) -> dict[str, Any]:
+    proc = run_tool([*sms_cmd(), "--json", *args])
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"sms failed: {' '.join(args)}"
+        raise RuntimeError(detail)
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("ok") is False:
+        raise RuntimeError(payload.get("message") or "sms command failed")
+    return payload
+
+
 def capture_email_baseline(profile: dict[str, Any], *, limit: int = 25) -> list[str]:
     if not email_challenge_config(profile):
         return []
     try:
         payload = run_email_json("snapshot", "--limit", str(limit))
+    except Exception:
+        return []
+    recent = ((payload.get("recent_messages") or {}).get("items") or [])
+    baseline_ids: list[str] = []
+    for item in recent:
+        if isinstance(item, dict):
+            message_id = str(item.get("id") or "").strip()
+            if message_id:
+                baseline_ids.append(message_id)
+    return baseline_ids
+
+
+def capture_phone_baseline(profile: dict[str, Any], *, limit: int = 25) -> list[str]:
+    if not phone_challenge_config(profile):
+        return []
+    try:
+        payload = run_sms_json("snapshot", "--limit", str(limit))
     except Exception:
         return []
     recent = ((payload.get("recent_messages") or {}).get("items") or [])
@@ -680,11 +713,53 @@ def email_challenge_config(profile: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def phone_challenge_config(profile: dict[str, Any]) -> dict[str, Any]:
+    config = profile.get("phone_challenge") or {}
+    if isinstance(config, dict):
+        return config
+    return {}
+
+
 def wait_for_settle() -> None:
     try:
         run_browse("wait", "--stable")
     except Exception:
         wait_brief(1000)
+
+
+def passkey_challenge_details() -> dict[str, Any] | None:
+    selectors = [
+        'input[autocomplete="webauthn"]',
+        '[data-webauthn]',
+        '[data-passkey]',
+        'button[aria-label*="passkey" i]',
+    ]
+    visible = [selector for selector in selectors if selector_exists(selector)]
+    text = read_page_text()
+    lowered = text.lower()
+    markers = [
+        "use a passkey",
+        "sign in with a passkey",
+        "use your passkey",
+        "touch your security key",
+        "security key",
+        "check your device",
+        "use your phone or tablet",
+    ]
+    matched = [marker for marker in markers if marker in lowered]
+    if not visible and not matched:
+        return None
+    return {"selectors": visible, "markers": matched, "url": read_page_url().strip()}
+
+
+def raise_if_passkey_challenge_visible() -> None:
+    details = passkey_challenge_details()
+    if not details:
+        return
+    message = "Passkey or security-key confirmation is required to continue this login flow"
+    if details.get("markers"):
+        message = f"{message}: {', '.join(details['markers'])}"
+    raise ActionRequiredError("PASSKEY_CHALLENGE_REQUIRED", message)
 
 
 def dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -790,6 +865,90 @@ def complete_email_challenge_if_present(profile: dict[str, Any]) -> list[str]:
     return complete_email_challenge_with_baseline(profile, baseline_ids=[])
 
 
+def complete_phone_challenge_if_present(profile: dict[str, Any]) -> list[str]:
+    return complete_phone_challenge_with_baseline(profile, baseline_ids=[])
+
+
+def complete_phone_challenge_with_baseline(profile: dict[str, Any], baseline_ids: list[str] | None = None) -> list[str]:
+    challenge = phone_challenge_config(profile)
+    if not challenge:
+        return []
+
+    challenge_type = str(challenge.get("type") or "code").strip().lower()
+    timeout_seconds = int(challenge.get("timeout_seconds") or 120)
+    poll_seconds = int(challenge.get("poll_interval_seconds") or 5)
+    contact_filter = str(challenge.get("contact_contains") or challenge.get("from_contains") or "").strip()
+    contains_filter = str(challenge.get("contains") or "").strip()
+    unread_only = bool(challenge.get("unread", True))
+
+    common_args: list[str] = []
+    if contact_filter:
+        common_args.extend(["--contact", contact_filter])
+    if contains_filter:
+        common_args.extend(["--contains", contains_filter])
+    if unread_only:
+        common_args.append("--unread")
+    for message_id in baseline_ids or []:
+        common_args.extend(["--exclude-id", message_id])
+    common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
+
+    try:
+        if challenge_type == "link":
+            link_args = ["link", *common_args]
+            domain = str(challenge.get("domain") or "").strip()
+            if domain:
+                link_args.extend(["--domain", domain])
+            payload = run_sms_json(*link_args)
+            link = str(payload.get("link") or "")
+            if not link:
+                raise RuntimeError("No SMS link returned from message lookup")
+            run_browse("open", link)
+            wait_for_settle()
+            raise_if_passkey_challenge_visible()
+            return []
+
+        input_selectors = list(
+            challenge.get("input_selectors")
+            or [
+                'input[autocomplete="one-time-code"]',
+                'input[name="code"]',
+                'input[id*="code"]',
+                'input[name*="code"]',
+            ]
+        )
+        submit_selectors = list(
+            challenge.get("submit_selectors")
+            or ['button[type="submit"]', 'input[type="submit"]', 'button[type="button"]']
+        )
+        selector = first_existing_selector(input_selectors)
+        if not selector:
+            raise ActionRequiredError(
+                "PHONE_CHALLENGE_FIELD_MISSING",
+                "Phone challenge is configured but no verification code field is visible on the page",
+            )
+        code_args = ["code", *common_args]
+        code_regex = str(challenge.get("code_regex") or "").strip()
+        code_length = challenge.get("code_length")
+        if code_regex:
+            code_args.extend(["--regex", code_regex])
+        elif code_length:
+            code_args.extend(["--length", str(code_length)])
+        payload = run_sms_json(*code_args)
+        code = str(payload.get("code") or "")
+        if not code:
+            raise RuntimeError("No verification code returned from SMS lookup")
+        run_browse("fill", selector, code)
+        wait_brief()
+        click_first_selector(submit_selectors)
+        wait_for_settle()
+        raise_if_passkey_challenge_visible()
+        return []
+    except ActionRequiredError:
+        raise
+    except RuntimeError as exc:
+        raise ActionRequiredError("PHONE_CHALLENGE_TIMEOUT", str(exc))
+
+
 def complete_email_challenge_with_baseline(profile: dict[str, Any], baseline_ids: list[str] | None = None) -> list[str]:
     challenge = email_challenge_config(profile)
     if not challenge:
@@ -828,6 +987,7 @@ def complete_email_challenge_with_baseline(profile: dict[str, Any], baseline_ids
                 raise RuntimeError("No magic link returned from email lookup")
             run_browse("open", link)
             wait_for_settle()
+            raise_if_passkey_challenge_visible()
             return []
 
         input_selectors = list(
@@ -864,6 +1024,7 @@ def complete_email_challenge_with_baseline(profile: dict[str, Any], baseline_ids
         wait_brief()
         click_first_selector(submit_selectors)
         wait_for_settle()
+        raise_if_passkey_challenge_visible()
         return []
     except ActionRequiredError:
         raise
@@ -875,9 +1036,11 @@ def login_with_generic(profile: dict[str, Any], username: str, password: str, to
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    phone_baseline = capture_phone_baseline(profile)
     email_baseline = capture_email_baseline(profile)
     run_browse("auth", "autofill", str(username), str(password), "--submit")
     wait_for_settle()
+    raise_if_passkey_challenge_visible()
     missing = complete_totp_if_present(
         profile,
         totp_secret,
@@ -890,6 +1053,9 @@ def login_with_generic(profile: dict[str, Any], username: str, password: str, to
     )
     if missing:
         return missing
+    missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
+    if missing:
+        return missing
     return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
 
 
@@ -897,6 +1063,7 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    phone_baseline = capture_phone_baseline(profile)
     email_baseline = capture_email_baseline(profile)
 
     username_selector = fill_first_selector(
@@ -922,6 +1089,7 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
 
     click_first_selector(['input[name="commit"]', 'input[type="submit"]', 'button[type="submit"]'])
     wait_for_settle()
+    raise_if_passkey_challenge_visible()
     missing = complete_totp_if_present(
         profile,
         totp_secret,
@@ -934,6 +1102,9 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
     )
     if missing:
         return missing
+    missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
+    if missing:
+        return missing
     return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
 
 
@@ -941,6 +1112,7 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    phone_baseline = capture_phone_baseline(profile)
 
     email_selector = fill_first_selector(
         [
@@ -970,6 +1142,7 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
     email_baseline = capture_email_baseline(profile)
     click_first_selector(["#passwordNext", "#passwordNext button", 'button[type="button"]'])
     wait_for_settle()
+    raise_if_passkey_challenge_visible()
     missing = complete_totp_if_present(
         profile,
         totp_secret,
@@ -979,6 +1152,9 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
         ],
         submit_selectors=["#totpNext", "#totpNext button", 'button[type="button"]'],
     )
+    if missing:
+        return missing
+    missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     if missing:
         return missing
     return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
@@ -1057,6 +1233,7 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
+    phone_baseline = capture_phone_baseline(profile)
     email_baseline = capture_email_baseline(profile)
 
     refresh_cfg = provider_refresh_config(profile)
@@ -1071,7 +1248,9 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
 
     checkpoint_state = provider_checkpoint_state(profile, provider_name, provider_username)
 
+    complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    raise_if_passkey_challenge_visible()
 
     validation = apply_validation(site, profile)
     if validation["ok"]:
@@ -1217,6 +1396,7 @@ def site_creds_login(site: str, profile: dict[str, Any], *, name: str = "default
     adapter_missing = run_site_login_adapter(profile, str(username), str(password), totp_secret)
     if adapter_missing:
         return False, adapter_missing
+    raise_if_passkey_challenge_visible()
     validation = apply_validation(site, profile)
     if validation["ok"]:
         save_current_session(site, name=name, strategy="site-creds")
@@ -1270,6 +1450,25 @@ def cmd_init(args: argparse.Namespace) -> int:
         if args.email_code_regex and challenge_type == "code":
             challenge["code_regex"] = args.email_code_regex
         profile["email_challenge"] = challenge
+    if args.sms_code or args.sms_link:
+        challenge_type = "link" if args.sms_link else "code"
+        challenge = {
+            "type": challenge_type,
+            "unread": True,
+            "timeout_seconds": int(args.sms_timeout),
+            "poll_interval_seconds": int(args.sms_interval),
+        }
+        if args.sms_from:
+            challenge["contact_contains"] = args.sms_from
+        if args.sms_contains:
+            challenge["contains"] = args.sms_contains
+        if args.sms_domain and challenge_type == "link":
+            challenge["domain"] = args.sms_domain
+        if args.sms_code_length and challenge_type == "code":
+            challenge["code_length"] = int(args.sms_code_length)
+        if args.sms_code_regex and challenge_type == "code":
+            challenge["code_regex"] = args.sms_code_regex
+        profile["phone_challenge"] = challenge
     try:
         path = write_profile(profile, force=args.force)
     except FileExistsError as exc:
@@ -1554,6 +1753,12 @@ def cmd_instructions(args: argparse.Namespace) -> int:
             guidance.append(
                 f"Email challenge is configured ({challenge_type}). agent-do auth will use agent-do email to wait for the matching message."
             )
+        if phone_challenge_config(profile):
+            challenge = phone_challenge_config(profile)
+            challenge_type = str(challenge.get("type") or "code")
+            guidance.append(
+                f"Phone challenge is configured ({challenge_type}). agent-do auth will use agent-do sms to wait for the matching message."
+            )
         if "site-creds" in strategies:
             site_creds = ((profile.get("credentials") or {}).get("site") or {})
             username_key = site_creds.get("username")
@@ -1807,6 +2012,15 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--email-interval", type=int, default=5)
     init_parser.add_argument("--email-code-length", type=int)
     init_parser.add_argument("--email-code-regex")
+    init_parser.add_argument("--sms-code", action="store_true")
+    init_parser.add_argument("--sms-link", action="store_true")
+    init_parser.add_argument("--sms-from")
+    init_parser.add_argument("--sms-contains")
+    init_parser.add_argument("--sms-domain")
+    init_parser.add_argument("--sms-timeout", type=int, default=120)
+    init_parser.add_argument("--sms-interval", type=int, default=5)
+    init_parser.add_argument("--sms-code-length", type=int)
+    init_parser.add_argument("--sms-code-regex")
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--no-browser-import", action="store_true")
     init_parser.add_argument("--no-site-creds", action="store_true")

@@ -12,6 +12,28 @@ Commands:
   list                     List recent messages (macOS)
   search <term>            Search messages
   export <path>            Export messages
+  snapshot                 Message state as JSON
+  latest                   Show latest matching message
+  wait                     Wait for a matching message
+  code                     Extract verification code from latest/waited message
+  link                     Extract magic link from latest/waited message
+
+Options:
+  --contact <value>        Contact/number contains filter
+  --from <value>           Alias for --contact
+  --contains <text>        Message text contains filter
+  --unread                 Only consider unread messages
+  --limit <n>              Maximum messages to inspect
+  --timeout <seconds>      Wait timeout for wait/code/link
+  --interval <seconds>     Poll interval for wait/code/link
+  --length <n>             Preferred verification code length
+  --regex <pattern>        Explicit regex for verification code extraction
+  --domain <host>          Restrict extracted link to a domain
+  --exclude-id <id>        Ignore a previously seen message id
+  --json                   Output JSON for query commands
+
+Environment:
+  AGENT_SMS_FIXTURE        JSON fixture file for tests or offline development
 
 Providers:
   - macOS: iMessage/SMS via Messages.app
@@ -23,6 +45,7 @@ Examples:
   agent-sms send "+1234567890" "Test" --provider twilio
   agent-sms list
   agent-sms search "meeting"
+  agent-sms code --from WidgetHub --contains "verification"
 EOF
 }
 
@@ -226,6 +249,312 @@ SQL
     echo "Exported to: $output"
 }
 
+cmd_snapshot() {
+    sms_query_python snapshot "$@"
+}
+
+sms_query_python() {
+    python3 - "$@" <<'PYTHON'
+import argparse
+import json
+import os
+import re
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+
+OUTPUT_JSON = os.environ.get("AGENT_SMS_OUTPUT_JSON") == "1"
+FIXTURE_PATH = os.environ.get("AGENT_SMS_FIXTURE")
+
+
+def emit(payload, *, raw=None):
+    if OUTPUT_JSON:
+        print(json.dumps(payload, indent=2))
+        return
+    if raw is not None:
+        print(raw)
+    else:
+        print(json.dumps(payload, indent=2))
+
+
+def fail(message: str, *, code: int = 1, extra=None):
+    payload = {"ok": False, "message": message}
+    if extra:
+        payload.update(extra)
+    if OUTPUT_JSON:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_fixture():
+    if not FIXTURE_PATH:
+        return None
+    path = Path(FIXTURE_PATH)
+    if not path.exists():
+        fail(f"fixture not found: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {"messages": payload}
+    fail("fixture payload must be a JSON object or array")
+
+
+def normalize_messages(messages):
+    normalized = []
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "")).lower()
+        read_value = item.get("read")
+        if read_value is True:
+            status = "read"
+        elif read_value is False:
+            status = "unread"
+        elif status not in {"read", "unread"}:
+            status = "read"
+        normalized.append(
+            {
+                "id": str(item.get("id") or item.get("message_id") or f"message-{index+1}"),
+                "contact": str(item.get("contact") or item.get("from") or item.get("sender") or ""),
+                "direction": str(item.get("direction") or "incoming"),
+                "status": status,
+                "date": str(item.get("date", "")),
+                "text": str(item.get("text") or item.get("body") or item.get("content") or ""),
+            }
+        )
+    return normalized
+
+
+def fetch_sms_data(limit: int = 20):
+    fixture = load_fixture()
+    if fixture is not None:
+        messages = normalize_messages(fixture.get("messages", []))[:limit]
+        unread = fixture.get("unread_count")
+        if unread is None:
+            unread = sum(1 for item in messages if item.get("status") == "unread")
+        return {
+            "platform": fixture.get("platform", "fixture"),
+            "unread_count": unread,
+            "messages": messages,
+        }
+
+    if sys.platform != "darwin":
+        fail("SMS querying currently requires macOS Messages.app or AGENT_SMS_FIXTURE")
+
+    db = Path.home() / "Library" / "Messages" / "chat.db"
+    if not db.exists():
+        fail("Messages database not accessible. Grant Full Disk Access to the terminal or use AGENT_SMS_FIXTURE")
+
+    query = f"""
+    SELECT
+        message.ROWID AS id,
+        datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') AS date,
+        CASE WHEN message.is_from_me THEN 'outgoing' ELSE 'incoming' END AS direction,
+        COALESCE(handle.id, '') AS contact,
+        COALESCE(message.text, '') AS text,
+        CASE WHEN IFNULL(message.is_read, 1) = 1 THEN 'read' ELSE 'unread' END AS status
+    FROM message
+    LEFT JOIN handle ON message.handle_id = handle.ROWID
+    WHERE message.text IS NOT NULL
+    ORDER BY message.date DESC
+    LIMIT {max(1, int(limit))}
+    """
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = [dict(row) for row in conn.execute(query)]
+    finally:
+        conn.close()
+    messages = normalize_messages(rows)
+    unread = sum(1 for item in messages if item.get("status") == "unread")
+    return {
+        "platform": "macOS Messages.app",
+        "unread_count": unread,
+        "messages": messages,
+    }
+
+
+def matches(message, args):
+    contact = message.get("contact", "").lower()
+    text = message.get("text", "").lower()
+    exclude_ids = {item for item in getattr(args, "exclude_ids", []) if item}
+    if message.get("id") in exclude_ids:
+        return False
+    if args.contact_filter and args.contact_filter.lower() not in contact:
+        return False
+    if args.contains and args.contains.lower() not in text:
+        return False
+    if args.unread and message.get("status") != "unread":
+        return False
+    return True
+
+
+def filtered_messages(args):
+    data = fetch_sms_data(limit=args.limit)
+    matches_list = [item for item in data["messages"] if matches(item, args)]
+    return data, matches_list
+
+
+def extract_code(message, args):
+    text = message.get("text", "")
+    if args.regex:
+        pattern = re.compile(args.regex)
+    else:
+        if args.length:
+            pattern = re.compile(rf"(?<!\d)(\d{{{args.length}}})(?!\d)")
+        else:
+            pattern = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
+    match = pattern.search(text)
+    if not match:
+        fail("No verification code found in matching message", extra={"message_id": message.get("id")})
+    return match.group(1) if match.groups() else match.group(0)
+
+
+def extract_link(message, args):
+    text = message.get("text", "")
+    links = re.findall(r"https?://[^\s<>\")']+", text)
+    if args.domain:
+        links = [item for item in links if args.domain.lower() in item.lower()]
+    if not links:
+        fail("No matching link found in message", extra={"message_id": message.get("id")})
+    return links[0]
+
+
+def wait_for_message(args):
+    deadline = time.time() + max(1, args.timeout)
+    last_count = 0
+    while True:
+        data, matches_list = filtered_messages(args)
+        last_count = len(matches_list)
+        if matches_list:
+            return data, matches_list[0]
+        if time.time() >= deadline:
+            fail(
+                "Timed out waiting for matching message",
+                extra={"timeout_seconds": args.timeout, "matched_count": last_count},
+            )
+        time.sleep(max(1, args.interval))
+
+
+def handle_snapshot(args):
+    data = fetch_sms_data(limit=args.limit)
+    payload = {
+        "ok": True,
+        "platform": data["platform"],
+        "unread_count": data["unread_count"],
+        "recent_messages": {"count": len(data["messages"]), "items": data["messages"]},
+    }
+    emit(payload)
+
+
+def handle_latest(args):
+    _, matches_list = filtered_messages(args)
+    if not matches_list:
+        fail("No matching message found")
+    payload = {"ok": True, "message": matches_list[0]}
+    emit(payload, raw=json.dumps(matches_list[0], indent=2))
+
+
+def handle_wait(args):
+    _, message = wait_for_message(args)
+    payload = {"ok": True, "message": message}
+    emit(payload, raw=json.dumps(message, indent=2))
+
+
+def handle_code(args):
+    _, message = wait_for_message(args)
+    code = extract_code(message, args)
+    payload = {"ok": True, "code": code, "message": message}
+    emit(payload, raw=code)
+
+
+def handle_link(args):
+    _, message = wait_for_message(args)
+    link = extract_link(message, args)
+    payload = {"ok": True, "link": link, "message": message}
+    emit(payload, raw=link)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(add_help=False)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_filter_args(subparser):
+        subparser.add_argument("--contact", "--from", dest="contact_filter")
+        subparser.add_argument("--contains")
+        subparser.add_argument("--unread", action="store_true")
+        subparser.add_argument("--limit", type=int, default=20)
+        subparser.add_argument("--exclude-id", dest="exclude_ids", action="append", default=[])
+
+    snapshot = sub.add_parser("snapshot")
+    snapshot.add_argument("--limit", type=int, default=10)
+
+    latest = sub.add_parser("latest")
+    add_filter_args(latest)
+
+    wait = sub.add_parser("wait")
+    add_filter_args(wait)
+    wait.add_argument("--timeout", type=int, default=60)
+    wait.add_argument("--interval", type=int, default=5)
+
+    code = sub.add_parser("code")
+    add_filter_args(code)
+    code.add_argument("--timeout", type=int, default=120)
+    code.add_argument("--interval", type=int, default=5)
+    code.add_argument("--length", type=int)
+    code.add_argument("--regex")
+
+    link = sub.add_parser("link")
+    add_filter_args(link)
+    link.add_argument("--timeout", type=int, default=120)
+    link.add_argument("--interval", type=int, default=5)
+    link.add_argument("--domain")
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:])
+    if args.command == "snapshot":
+        handle_snapshot(args)
+    elif args.command == "latest":
+        handle_latest(args)
+    elif args.command == "wait":
+        handle_wait(args)
+    elif args.command == "code":
+        handle_code(args)
+    elif args.command == "link":
+        handle_link(args)
+    else:
+        fail("unknown command")
+
+
+if __name__ == "__main__":
+    main()
+PYTHON
+}
+
+cmd_latest() {
+    sms_query_python latest "$@"
+}
+
+cmd_wait() {
+    sms_query_python wait "$@"
+}
+
+cmd_code() {
+    sms_query_python code "$@"
+}
+
+cmd_link() {
+    sms_query_python link "$@"
+}
+
 cmd_conversation() {
     local contact="${1:-}"
 
@@ -265,6 +594,18 @@ cmd_providers() {
     echo "Set SMS_PROVIDER or use --provider flag"
 }
 
+OUTPUT_JSON=0
+FILTERED_ARGS=()
+for arg in "$@"; do
+    if [[ "$arg" == "--json" ]]; then
+        OUTPUT_JSON=1
+    else
+        FILTERED_ARGS+=("$arg")
+    fi
+done
+set -- "${FILTERED_ARGS[@]}"
+export AGENT_SMS_OUTPUT_JSON="$OUTPUT_JSON"
+
 # Main
 case "${1:-help}" in
     send|text|msg)
@@ -281,6 +622,26 @@ case "${1:-help}" in
     export)
         shift
         cmd_export "$@"
+        ;;
+    snapshot|snap)
+        shift
+        cmd_snapshot "$@"
+        ;;
+    latest)
+        shift
+        cmd_latest "$@"
+        ;;
+    wait)
+        shift
+        cmd_wait "$@"
+        ;;
+    code)
+        shift
+        cmd_code "$@"
+        ;;
+    link)
+        shift
+        cmd_link "$@"
         ;;
     conversation|conv|thread)
         shift

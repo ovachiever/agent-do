@@ -138,12 +138,14 @@ tools:
     - handle GitHub and Google login shapes before falling back to generic form fill
     - resolve TOTP secrets from agent-do creds when login flows require one-time codes
     - wait for mailbox-delivered verification codes or magic links through agent-do email
+    - wait for SMS-delivered verification codes or magic links through agent-do sms
     - validate whether saved authenticated state is still usable
     - return next-step auth guidance for agents
     - reuse upstream GitHub or Google auth to complete SSO into another site
     - step through provider account choosers and consent screens with persisted checkpoint metadata
+    - surface passkey or security-key checkpoints as explicit action-required states
     commands:
-      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL] [--provider generic|github|google] [--email-code|--magic-link]'
+      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL] [--provider generic|github|google] [--email-code|--magic-link|--sms-code|--sms-link]'
       list: 'List configured auth profiles: list'
       show: 'Show one auth profile: show <site>'
       status: 'Show auth state: status <site> [--name default]'
@@ -165,6 +167,8 @@ tools:
       command: agent-auth ensure widgethub --strategy provider-refresh
     - intent: initialize a site that sends email verification codes
       command: agent-auth init widgethub --domain app.example.com --email-code --email-from WidgetHub --email-subject "verification code"
+    - intent: initialize a site that texts verification codes
+      command: agent-auth init widgethub --domain app.example.com --sms-code --sms-from WidgetHub --sms-contains "verification"
     - intent: log into github with saved creds and totp
       command: agent-auth ensure github --strategy site-creds
     - intent: log into google with saved creds and totp
@@ -1898,15 +1902,25 @@ tools:
     - send SMS
     - read messages
     - search conversations
+    - query recent messages for auth and automation workflows
+    - extract verification codes from matching messages
+    - extract links from matching messages
     commands:
       send: Send SMS
       list: List recent messages
       search: Search messages
+      snapshot: Inbox/message state as JSON
+      latest: Show latest matching message
+      wait: Wait for a matching message
+      code: Extract verification code from matching message
+      link: Extract link from matching message
     examples:
     - intent: send sms to +1234567890
       command: agent-sms send '+1234567890' 'Hello!'
     - intent: list recent sms
       command: agent-sms list
+    - intent: wait for a verification code text
+      command: agent-sms code --from WidgetHub --contains verification
     concurrency: write
   prompt:
     description: Prompt management and templating
