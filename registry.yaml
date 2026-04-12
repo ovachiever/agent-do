@@ -139,8 +139,9 @@ tools:
     - resolve TOTP secrets from agent-do creds when login flows require one-time codes
     - validate whether saved authenticated state is still usable
     - return next-step auth guidance for agents
+    - reuse upstream GitHub or Google auth to complete SSO into another site
     commands:
-      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL]'
+      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL] [--provider generic|github|google]'
       list: 'List configured auth profiles: list'
       show: 'Show one auth profile: show <site>'
       status: 'Show auth state: status <site> [--name default]'
@@ -154,8 +155,12 @@ tools:
     examples:
     - intent: create a github auth profile
       command: agent-auth init github
+    - intent: create a github sso profile for another site
+      command: agent-auth init widgethub --domain app.example.com --provider github
     - intent: reuse saved github auth
       command: agent-auth ensure github
+    - intent: reuse github auth to sign into another app
+      command: agent-auth ensure widgethub --strategy provider-refresh
     - intent: log into github with saved creds and totp
       command: agent-auth ensure github --strategy site-creds
     - intent: log into google with saved creds and totp

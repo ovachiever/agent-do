@@ -92,6 +92,13 @@ agent-do auth ensure github
 agent-do auth validate github
 ```
 
+When another site uses provider SSO:
+
+```bash
+agent-do auth init widgethub --domain app.example.com --login-url https://app.example.com/login --provider github
+agent-do auth ensure widgethub --strategy provider-refresh
+```
+
 When the repo needs durable behavior specs and change artifacts:
 
 ```bash
@@ -192,6 +199,8 @@ agent-do auth validate github
 ```
 
 Known profiles like GitHub and Google now use explicit login adapters before falling back to generic form fill. If a TOTP challenge appears and the provider profile declares a secret name, `agent-do auth ensure` reports the exact missing key instead of silently stalling in a partial login flow.
+
+Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in.
 
 ### `resend`
 

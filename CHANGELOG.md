@@ -14,6 +14,7 @@
 ### Changed
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
 - `agent-do auth` now uses provider-aware GitHub and Google login adapters for `site-creds`, with TOTP secrets resolved through `agent-do creds` when those flows require one-time codes.
+- `agent-do auth init --provider github|google` now creates SSO-first site profiles, and `provider-refresh` can reuse upstream provider auth to complete cross-site sign-in.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.

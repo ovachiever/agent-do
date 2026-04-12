@@ -284,9 +284,65 @@ def session_bundle_exists(site: str, name: str = "default") -> bool:
     return auth_paths(site, name)["state"].exists()
 
 
-def default_profile(site: str, *, domain: str | None = None, login_url: str | None = None) -> dict[str, Any]:
+def provider_default_refresh(provider: str) -> dict[str, Any]:
+    provider = provider.strip().lower()
+    if provider == "github":
+        return {
+            "sso_selectors": [
+                'a[href*="github"]',
+                'button[data-provider="github"]',
+                'text=Continue with GitHub',
+                'text=Sign in with GitHub',
+                'text=GitHub',
+            ],
+            "consent_selectors": [
+                'button[name="authorize"]',
+                'input[name="authorize"]',
+                'button[type="submit"]',
+                'input[type="submit"]',
+                'text=Authorize',
+                'text=Continue',
+            ],
+        }
+    if provider == "google":
+        return {
+            "sso_selectors": [
+                'a[href*="google"]',
+                'button[data-provider="google"]',
+                'text=Continue with Google',
+                'text=Sign in with Google',
+                'text=Google',
+            ],
+            "consent_selectors": [
+                '#submit_approve_access',
+                'button[type="submit"]',
+                'input[type="submit"]',
+                'text=Continue',
+                'text=Allow',
+            ],
+        }
+    return {}
+
+
+def provider_display_name(provider: str) -> str:
+    value = provider.strip().lower()
+    if value == "github":
+        return "GitHub"
+    if value == "google":
+        return "Google"
+    return provider.capitalize()
+
+
+def default_profile(
+    site: str,
+    *,
+    domain: str | None = None,
+    login_url: str | None = None,
+    provider_override: str | None = None,
+) -> dict[str, Any]:
     slug = site_slug(site)
-    if slug in KNOWN_PROFILES:
+    provider_override = (provider_override or "").strip().lower() or None
+    if slug in KNOWN_PROFILES and provider_override in (None, slug, "generic"):
         profile = copy.deepcopy(KNOWN_PROFILES[slug])
         if domain:
             if domain not in profile["domains"]:
@@ -304,7 +360,7 @@ def default_profile(site: str, *, domain: str | None = None, login_url: str | No
     title = " ".join(part.capitalize() for part in slug.replace("_", "-").split("-"))
     prefix = env_prefix(resolved_domain)
     normalized_domain = resolved_domain.lstrip(".")
-    return {
+    profile = {
         "id": slug,
         "title": title or "Site",
         "domains": [normalized_domain],
@@ -325,6 +381,15 @@ def default_profile(site: str, *, domain: str | None = None, login_url: str | No
         "browser_import": {"browser": "arc", "domains": [f".{normalized_domain}"]},
         "notes": ["Tune validation markers for this site after the first successful authenticated run."],
     }
+
+    provider_name = provider_override or "generic"
+    profile["provider"] = {"type": provider_name}
+    if provider_name in {"github", "google"}:
+        profile["strategies"] = ["saved-session", "browser-import", "provider-refresh", "interactive"]
+        profile.get("credentials", {}).pop("site", None)
+        profile["provider"]["refresh"] = provider_default_refresh(provider_name)
+        profile["notes"].insert(0, f"This site is expected to use {provider_display_name(provider_name)} SSO.")
+    return profile
 
 
 def state_from_profile(site: str) -> str:
@@ -548,6 +613,14 @@ def provider_type(profile: dict[str, Any]) -> str:
     return str(provider.get("type") or "generic").strip().lower()
 
 
+def provider_refresh_config(profile: dict[str, Any]) -> dict[str, Any]:
+    provider = profile.get("provider") or {}
+    refresh = provider.get("refresh") or {}
+    if isinstance(refresh, dict):
+        return refresh
+    return {}
+
+
 def wait_for_settle() -> None:
     try:
         run_browse("wait", "--stable")
@@ -693,6 +766,104 @@ def run_site_login_adapter(profile: dict[str, Any], username: str, password: str
     return login_with_generic(profile, username, password, totp_secret)
 
 
+def ensure_provider_state(provider_site: str, profile: dict[str, Any], *, name: str = "default") -> tuple[bool, list[str], str | None]:
+    if get_session_meta(provider_site, name):
+        try:
+            load_saved_session(provider_site, name=name)
+            validation = apply_validation(provider_site, profile)
+        except Exception:
+            validation = {"ok": False}
+        if validation.get("ok"):
+            write_session_meta(
+                provider_site,
+                name,
+                {
+                    "last_strategy": "saved-session",
+                    "validated_at": now_iso(),
+                    "last_validation_ok": True,
+                    "state": "authenticated",
+                },
+            )
+            return True, [], "saved-session"
+
+    if profile.get("browser_import"):
+        try:
+            imported = browser_import(provider_site, profile, name=name)
+            validation = apply_validation(provider_site, profile)
+        except Exception:
+            validation = {"ok": False}
+        if validation.get("ok"):
+            persist_browse_alias(
+                provider_site,
+                name=name,
+                alias=imported.get("browse_session"),
+                strategy="browser-import",
+                extra={"source_browser": imported.get("source_browser")},
+            )
+            return True, [], "browser-import"
+        run_tool([*browse_cmd(), "session", "delete", browse_session_name(provider_site, name)])
+
+    if "site-creds" in list(profile.get("strategies", [])):
+        ok, missing = site_creds_login(provider_site, profile, name=name)
+        if ok:
+            return True, [], "site-creds"
+        if missing:
+            return False, missing, "site-creds"
+
+    return False, [], None
+
+
+def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "default") -> tuple[bool, list[str], str | None]:
+    provider_name = provider_type(profile)
+    if provider_name not in {"github", "google"}:
+        return False, [], None
+
+    provider_profile = load_profile(provider_name) or default_profile(provider_name)
+    provider_ok, missing, provider_strategy = ensure_provider_state(provider_name, provider_profile, name="default")
+    if not provider_ok:
+        return False, missing, provider_strategy
+
+    if site_slug(site) == provider_name:
+        return True, [], provider_strategy
+
+    login_url = profile.get("login_url")
+    if login_url:
+        run_browse("open", str(login_url))
+
+    refresh_cfg = provider_refresh_config(profile)
+    sso_selectors = list(refresh_cfg.get("sso_selectors") or provider_default_refresh(provider_name).get("sso_selectors", []))
+    consent_selectors = list(refresh_cfg.get("consent_selectors") or provider_default_refresh(provider_name).get("consent_selectors", []))
+
+    if sso_selectors:
+        clicked = click_first_selector(sso_selectors)
+        if not clicked:
+            return False, [], provider_strategy
+        wait_for_settle()
+
+    if consent_selectors and first_existing_selector(consent_selectors):
+        click_first_selector(consent_selectors)
+        wait_for_settle()
+
+    validation = apply_validation(site, profile)
+    if validation["ok"]:
+        save_current_session(site, name=name, strategy="provider-refresh")
+        return True, [], provider_strategy
+
+    write_session_meta(
+        site,
+        name,
+        {
+            "browse_session": browse_session_name(site, name),
+            "last_strategy": "provider-refresh",
+            "last_validation_ok": False,
+            "state": "stale",
+            "last_error": f"validation_failed_after_{provider_name}_provider_refresh",
+            "provider_strategy": provider_strategy,
+        },
+    )
+    return False, [], provider_strategy
+
+
 def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
     validation = profile.get("validation") or {}
     current_url = read_page_url().strip()
@@ -831,7 +1002,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if not site or not SITE_RE.match(site):
         return fail("site id must be kebab/underscore-safe lowercase text", json_mode=args.json, code="invalid_site")
 
-    profile = default_profile(site, domain=args.domain, login_url=args.login_url)
+    profile = default_profile(site, domain=args.domain, login_url=args.login_url, provider_override=args.provider)
     if args.browser:
         profile.setdefault("browser_import", {})["browser"] = args.browser
     if args.no_browser_import:
@@ -1114,6 +1285,10 @@ def cmd_instructions(args: argparse.Namespace) -> int:
     else:
         if "browser-import" in strategies and profile.get("browser_import"):
             guidance.append("Browser import is configured and should be attempted before site credentials.")
+        if "provider-refresh" in strategies and provider_type(profile) in {"github", "google"}:
+            guidance.append(
+                f"Provider refresh can reuse {provider_display_name(provider_type(profile))} auth to complete SSO into this site."
+            )
         if "site-creds" in strategies:
             site_creds = ((profile.get("credentials") or {}).get("site") or {})
             username_key = site_creds.get("username")
@@ -1277,6 +1452,31 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
         elif strategy == "provider-refresh":
             attempted.append(strategy)
+            ok, missing, provider_strategy = provider_refresh_login(args.site, profile, name=name)
+            if ok:
+                meta = get_session_meta(args.site, name) or {}
+                payload = {
+                    "site": args.site,
+                    "ok": True,
+                    "strategy_used": strategy,
+                    "validated": True,
+                    "provider_strategy_used": provider_strategy,
+                    "session": {"name": name, "browse_session": meta.get("browse_session")},
+                }
+                print(json.dumps(payload, indent=2) if args.json else f"{args.site}: authenticated via {strategy}")
+                return 0
+            if missing:
+                payload = {
+                    "site": args.site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": attempted,
+                    "action_required": "MISSING_CREDENTIALS",
+                    "missing": missing,
+                    "message": "Provider refresh requires additional secrets for the upstream identity provider",
+                }
+                print(json.dumps(payload, indent=2) if args.json else f"Missing credentials: {', '.join(missing)}")
+                return 1
             continue
 
         elif strategy == "interactive":
@@ -1305,6 +1505,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--domain")
     init_parser.add_argument("--login-url")
     init_parser.add_argument("--browser")
+    init_parser.add_argument("--provider", choices=["generic", "github", "google"])
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--no-browser-import", action="store_true")
     init_parser.add_argument("--no-site-creds", action="store_true")
