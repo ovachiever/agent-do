@@ -87,6 +87,7 @@ When a site needs authenticated state:
 
 ```bash
 agent-do auth init github
+agent-do creds store GITHUB_TOTP_SECRET --stdin
 agent-do auth ensure github
 agent-do auth validate github
 ```
@@ -178,14 +179,19 @@ agent-do context annotate stripe-llms "Use idempotency keys"
 
 ### `auth`
 
-Site-level authentication orchestration over encrypted auth bundles, browser import, and secure credentials.
+Site-level authentication orchestration over encrypted auth bundles, browser import, secure credentials, and provider-aware login adapters.
 
 ```bash
 agent-do auth init github
+agent-do creds store GITHUB_EMAIL --stdin
+agent-do creds store GITHUB_PASSWORD --stdin
+agent-do creds store GITHUB_TOTP_SECRET --stdin
 agent-do auth ensure github
 agent-do auth status github
 agent-do auth validate github
 ```
+
+Known profiles like GitHub and Google now use explicit login adapters before falling back to generic form fill. If a TOTP challenge appears and the provider profile declares a secret name, `agent-do auth ensure` reports the exact missing key instead of silently stalling in a partial login flow.
 
 ### `resend`
 

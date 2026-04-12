@@ -121,7 +121,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | Tool | Tech | Notes |
 |------|------|-------|
 | `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. `login <url>` opens headed browser for SSO/MFA, `login done` transfers auth to headless. `session save/load` persists and restores full auth state (cookies + localStorage injected at context creation). `capture start/stop` records API traffic, `api` replays captured skills. |
-| `agent-auth` | Python | Site-level auth orchestrator over saved browser sessions, browser import, and secure credentials. Profiles live under `~/.agent-do/auth/`, and `ensure` tries saved-session, browser-import, then site-creds before requiring a human. |
+| `agent-auth` | Python | Site-level auth orchestrator over encrypted auth bundles, browser import, and secure credentials. Profiles live under `~/.agent-do/auth/`; `ensure` tries saved-session, browser-import, then site-creds, with provider-aware GitHub/Google login handling and TOTP resolution through `agent-do creds` when configured. |
 | `agent-unbrowse/` | Node.js (Playwright) | Standalone API traffic capture → reusable curl-based skills. Launches its own headed browser. 2 files: `daemon.js` + `protocol.js`. Capture pipeline shared via `lib/capture/`. |
 | `agent-manna/` | Rust | Git-backed issue tracking with session claims. Build with `cargo build --release`. |
 | `agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |

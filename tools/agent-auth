@@ -489,6 +489,210 @@ def read_page_url() -> str:
     return str(data or "")
 
 
+def browse_count(selector: str) -> int:
+    try:
+        data = run_browse("get", "count", selector)
+    except Exception:
+        return 0
+    if isinstance(data, dict):
+        try:
+            return int(data.get("count", 0))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def selector_exists(selector: str) -> bool:
+    return browse_count(selector) > 0
+
+
+def first_existing_selector(selectors: list[str]) -> str | None:
+    for selector in selectors:
+        if selector_exists(selector):
+            return selector
+    return None
+
+
+def fill_first_selector(selectors: list[str], value: str) -> str | None:
+    selector = first_existing_selector(selectors)
+    if not selector:
+        return None
+    run_browse("fill", selector, value)
+    return selector
+
+
+def click_first_selector(selectors: list[str]) -> str | None:
+    selector = first_existing_selector(selectors)
+    if not selector:
+        return None
+    run_browse("click", selector)
+    return selector
+
+
+def wait_brief(milliseconds: int = 750) -> None:
+    try:
+        run_browse("wait", str(milliseconds))
+    except Exception:
+        pass
+
+
+def generate_totp_code(secret: str) -> str:
+    data = run_browse("auth", "totp", secret)
+    if isinstance(data, dict) and data.get("code"):
+        return str(data["code"])
+    raise RuntimeError("Could not generate TOTP code")
+
+
+def provider_type(profile: dict[str, Any]) -> str:
+    provider = profile.get("provider") or {}
+    return str(provider.get("type") or "generic").strip().lower()
+
+
+def wait_for_settle() -> None:
+    try:
+        run_browse("wait", "--stable")
+    except Exception:
+        wait_brief(1000)
+
+
+def missing_totp_keys(profile: dict[str, Any]) -> list[str]:
+    totp_secret_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
+    if totp_secret_key:
+        return [str(totp_secret_key)]
+    return ["TOTP_SECRET"]
+
+
+def complete_totp_if_present(
+    profile: dict[str, Any],
+    totp_secret: str | None,
+    *,
+    selectors: list[str],
+    submit_selectors: list[str],
+) -> list[str]:
+    selector = first_existing_selector(selectors)
+    if not selector:
+        return []
+    if not totp_secret:
+        return missing_totp_keys(profile)
+    code = generate_totp_code(totp_secret)
+    run_browse("fill", selector, code)
+    wait_brief()
+    click_first_selector(submit_selectors)
+    wait_for_settle()
+    return []
+
+
+def login_with_generic(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
+    login_url = profile.get("login_url")
+    if login_url:
+        run_browse("open", str(login_url))
+    run_browse("auth", "autofill", str(username), str(password), "--submit")
+    wait_for_settle()
+    return complete_totp_if_present(
+        profile,
+        totp_secret,
+        selectors=[
+            'input[autocomplete="one-time-code"]',
+            'input[name="otp"]',
+            'input[name="totp"]',
+            'input[name="code"]',
+        ],
+        submit_selectors=['button[type="submit"]', 'input[type="submit"]'],
+    )
+
+
+def login_with_github(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
+    login_url = profile.get("login_url")
+    if login_url:
+        run_browse("open", str(login_url))
+
+    username_selector = fill_first_selector(
+        [
+            "#login_field",
+            'input[name="login"]',
+            'input[autocomplete="username"]',
+            'input[type="email"]',
+        ],
+        username,
+    )
+    password_selector = fill_first_selector(
+        [
+            "#password",
+            'input[name="password"]',
+            'input[autocomplete="current-password"]',
+            'input[type="password"]',
+        ],
+        password,
+    )
+    if not username_selector and not password_selector:
+        return login_with_generic(profile, username, password, totp_secret)
+
+    click_first_selector(['input[name="commit"]', 'input[type="submit"]', 'button[type="submit"]'])
+    wait_for_settle()
+    return complete_totp_if_present(
+        profile,
+        totp_secret,
+        selectors=[
+            'input[name="app_otp"]',
+            'input[autocomplete="one-time-code"]',
+            '#app_totp',
+        ],
+        submit_selectors=['button[type="submit"]', 'input[type="submit"]'],
+    )
+
+
+def login_with_google(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
+    login_url = profile.get("login_url")
+    if login_url:
+        run_browse("open", str(login_url))
+
+    email_selector = fill_first_selector(
+        [
+            'input[type="email"]',
+            'input[name="identifier"]',
+            'input[autocomplete="username"]',
+        ],
+        username,
+    )
+    if not email_selector:
+        return login_with_generic(profile, username, password, totp_secret)
+
+    click_first_selector(["#identifierNext", "#identifierNext button", 'button[type="button"]'])
+    wait_for_settle()
+
+    password_selector = fill_first_selector(
+        [
+            'input[type="password"]',
+            'input[name="Passwd"]',
+            'input[autocomplete="current-password"]',
+        ],
+        password,
+    )
+    if not password_selector:
+        return []
+
+    click_first_selector(["#passwordNext", "#passwordNext button", 'button[type="button"]'])
+    wait_for_settle()
+    return complete_totp_if_present(
+        profile,
+        totp_secret,
+        selectors=[
+            'input[name="totpPin"]',
+            'input[autocomplete="one-time-code"]',
+        ],
+        submit_selectors=["#totpNext", "#totpNext button", 'button[type="button"]'],
+    )
+
+
+def run_site_login_adapter(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
+    provider = provider_type(profile)
+    if provider == "github":
+        return login_with_github(profile, username, password, totp_secret)
+    if provider == "google":
+        return login_with_google(profile, username, password, totp_secret)
+    return login_with_generic(profile, username, password, totp_secret)
+
+
 def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
     validation = profile.get("validation") or {}
     current_url = read_page_url().strip()
@@ -586,11 +790,14 @@ def browser_import(site: str, profile: dict[str, Any], *, name: str = "default")
 
 def site_creds_login(site: str, profile: dict[str, Any], *, name: str = "default") -> tuple[bool, list[str]]:
     creds = ((profile.get("credentials") or {}).get("site") or {})
+    totp_creds = ((profile.get("credentials") or {}).get("totp") or {})
     username_key = creds.get("username")
     password_key = creds.get("password")
+    totp_key = totp_creds.get("secret")
     missing: list[str] = []
     username = resolve_secret(str(username_key) if username_key else None)
     password = resolve_secret(str(password_key) if password_key else None)
+    totp_secret = resolve_secret(str(totp_key) if totp_key else None)
     if not username and username_key:
         missing.append(str(username_key))
     if not password and password_key:
@@ -598,14 +805,9 @@ def site_creds_login(site: str, profile: dict[str, Any], *, name: str = "default
     if missing:
         return False, missing
 
-    login_url = profile.get("login_url")
-    if login_url:
-        run_browse("open", str(login_url))
-    run_browse("auth", "autofill", str(username), str(password), "--submit")
-    try:
-        run_browse("wait", "--stable")
-    except Exception:
-        pass
+    adapter_missing = run_site_login_adapter(profile, str(username), str(password), totp_secret)
+    if adapter_missing:
+        return False, adapter_missing
     validation = apply_validation(site, profile)
     if validation["ok"]:
         save_current_session(site, name=name, strategy="site-creds")
@@ -920,6 +1122,11 @@ def cmd_instructions(args: argparse.Namespace) -> int:
                 missing.append(str(username_key))
             if password_key and not resolve_secret(str(password_key)):
                 missing.append(str(password_key))
+            totp_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
+            if totp_key and not resolve_secret(str(totp_key)):
+                guidance.append(
+                    f"TOTP is configured for this provider. Store {totp_key} if the site prompts for one-time codes."
+                )
             if not missing:
                 guidance.append("Site credentials are available for automated form login if session reuse fails.")
 

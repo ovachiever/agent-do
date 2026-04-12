@@ -67,6 +67,7 @@ check_output "pattern matcher JSON uses iOS tool" '"tool": "ios"' "$SCRIPT_DIR/b
 check_cmd "v1.1 routing foundation tests" python3 "$SCRIPT_DIR/tests/test_v11_routing.py"
 check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
 check_cmd "auth tests" python3 "$SCRIPT_DIR/tests/test_auth.py"
+check_cmd "auth adapter tests" python3 "$SCRIPT_DIR/tests/test_auth_adapters.py"
 check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"
 check_cmd "resend tests" python3 "$SCRIPT_DIR/tests/test_resend.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
