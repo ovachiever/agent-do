@@ -466,14 +466,24 @@ build_get_cmd() {
     local extra="${3:-}"
     
     case "$what" in
-        text|html|value)
+        text)
             cat << EOF
-{"id":"$(cmd_id)","action":"get${what^}","selector":"$selector"}
+{"id":"$(cmd_id)","action":"gettext","selector":"$selector"}
+EOF
+            ;;
+        html)
+            cat << EOF
+{"id":"$(cmd_id)","action":"innerhtml","selector":"$selector"}
+EOF
+            ;;
+        value)
+            cat << EOF
+{"id":"$(cmd_id)","action":"inputvalue","selector":"$selector"}
 EOF
             ;;
         attr)
             cat << EOF
-{"id":"$(cmd_id)","action":"getAttribute","selector":"$extra","attribute":"$selector"}
+{"id":"$(cmd_id)","action":"getattribute","selector":"$extra","attribute":"$selector"}
 EOF
             ;;
         title)

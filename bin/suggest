@@ -63,6 +63,8 @@ def infer_project_signals(project_root: Path) -> list[str]:
         signals.update({"zpc", "memory", "lessons"})
     if (project_root / ".manna").exists() or ".manna" in docs or "agent-do manna" in docs:
         signals.update({"infra"})
+    if (project_root / "agent-do-spec").exists() or "agent-do spec" in docs:
+        signals.update({"spec", "planning", "docs"})
     if "agent-do context" in docs or "documentation" in docs or "llms.txt" in docs:
         signals.update({"docs", "knowledge"})
     if "agent-do browse" in docs:

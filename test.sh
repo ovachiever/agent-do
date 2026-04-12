@@ -55,6 +55,7 @@ echo
 
 check_cmd "--help works" "$AGENT_DO" --help
 check_cmd "--list works" "$AGENT_DO" --list
+check_cmd "creds help works" "$AGENT_DO" creds --help
 check_cmd "nudges stats works" "$AGENT_DO" nudges stats
 check_cmd "bootstrap --help works" "$AGENT_DO" bootstrap --help
 check_output "--status works in isolated home" "No active sessions." "$AGENT_DO" --status
@@ -64,6 +65,9 @@ check_output "--offline routes iOS screenshot intent" "agent-ios screenshot" "$A
 check_output "--offline routes network scan intent" "agent-network scan --port 3000" "$AGENT_DO" --offline "what's using port 3000"
 check_output "pattern matcher JSON uses iOS tool" '"tool": "ios"' "$SCRIPT_DIR/bin/pattern-matcher" --json "screenshot the iOS simulator"
 check_cmd "v1.1 routing foundation tests" python3 "$SCRIPT_DIR/tests/test_v11_routing.py"
+check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
+check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"
+check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
 
 BOOTSTRAP_PROJECT="$TEST_HOME/bootstrap-project"
 mkdir -p "$BOOTSTRAP_PROJECT"

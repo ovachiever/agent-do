@@ -5,10 +5,11 @@
 agent-do is a universal automation layer that works with any AI coding agent. It provides:
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
-2. **Natural Language Mode** — LLM-routed for human users
-3. **Discovery + nudge layer** — task suggestions, project-scoped tool ranking, and hook nudges
-4. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
-5. **80 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+2. **Credential resolution layer** — secure-store and env-var loading for API-oriented tools
+3. **Natural Language Mode** — LLM-routed for human users
+4. **Discovery + nudge layer** — task suggestions, project-scoped tool ranking, and hook nudges
+5. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
+6. **82 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -30,6 +31,9 @@ agent-do is a universal automation layer that works with any AI coding agent. It
                └───────────────┼───────────────┘
                                │
                                ▼
+                      credential preload
+                               │
+                               ▼
                        tools/agent-<name>
 ```
 
@@ -40,12 +44,22 @@ The bash entry point checks the first argument:
 | First Arg | Mode | Path |
 |-----------|------|------|
 | Known tool name | Structured API | `exec_tool()` → `tools/agent-<name>` |
+| `creds` | Secure credential management | `tools/agent-creds` |
 | `suggest` / `find` / `nudges` | Discovery + telemetry | `bin/suggest`, `bin/nudges` |
 | `bootstrap` | Project setup | `bin/bootstrap` |
 | `-n` / `--natural` | Natural language | `bin/intent-router` (Claude API) |
 | `--offline` | Offline NL | `bin/pattern-matcher` (regex) |
 | `--dry-run` | Dry run | `bin/intent-router --dry-run` |
 | `--how` | Explain | `bin/intent-router --explain` |
+
+### Credential Resolution
+
+Before running a tool, `agent-do` loads any declared secret env vars from:
+
+1. the current process environment
+2. the OS secure credential store via `tools/agent-creds`
+
+The same registry-driven metadata is used by the bash dispatcher, `bin/intent-router`, and `bin/health`, so structured execution, natural-language execution, and readiness checks agree on what a tool needs.
 
 ### Natural Language Fallback Chain
 
@@ -95,7 +109,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
 │       ├── auth.js         # Auth extraction from captured headers/cookies
 │       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
-├── tools/agent-*           # 80 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 82 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -109,6 +123,7 @@ The master catalog defines all tools with:
 - `commands` — subcommands with descriptions
 - `examples` — intent → command mappings (used by LLM router and pattern matcher)
 - `routing` — optional discovery metadata: keywords, regexes, raw CLI equivalents, readiness hints, and project signals
+- `credentials` — optional secret env vars a tool can resolve from env or secure storage
 
 ### Registry Loading Order (lib/registry.py)
 
@@ -158,10 +173,21 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 # AGENT_DO_PERSISTENT=1       # CI/CD mode: retry 429/5xx indefinitely
 ```
 
-**`bin/health`** — Per-tool dependency checking:
+**`bin/health`** — Per-tool dependency and credential checking:
 - Verifies tool exists and `--help` works
-- Checks tool-specific dependencies (node for browse, docker daemon, env vars for Slack/Notion)
-- Reports: OK, WARN (missing dependency), CONF (needs env var), MISS (tool not found)
+- Checks tool-specific dependencies plus declared credential metadata from `registry.yaml`
+- Reports: OK, WARN (missing dependency), CONF (needs config or credentials), MISS (tool not found)
+
+**`tools/agent-creds` + `lib/creds-helper.sh`** — Secure credential layer:
+- `agent-do creds store <KEY> --stdin` stores a secret in the OS secure store
+- `agent-do creds check --tool <tool>` verifies declared credentials for a tool
+- `agent-do creds export --tool <tool>` emits resolved export lines for debugging
+- Backends: macOS Keychain, Linux Secret Service, Windows DPAPI-backed per-user store
+
+**`tools/agent-spec`** — Repo-local intended behavior and change artifacts:
+- stores canonical specs plus active changes under `agent-do-spec/`
+- derives status from proposal/design/tasks/delta files instead of hidden mutable state
+- provides `init`, `new`, `list`, `show`, and `status` for a minimal git-visible spec workflow
 
 **`bin/bootstrap`** — Idempotent setup for stateful tools:
 - Detects project-local signals in `CLAUDE.md`, `AGENTS.md`, and the repo root

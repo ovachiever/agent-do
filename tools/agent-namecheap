@@ -339,7 +339,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-renew = root.find('.//nc:DomainRenewResult', ns) or root.find('.//DomainRenewResult')
+renew = root.find('.//nc:DomainRenewResult', ns)
+if renew is None:
+    renew = root.find('.//DomainRenewResult')
 if renew is None:
     print('Renewal response not found')
     sys.exit(1)
@@ -422,7 +424,9 @@ if not hosts:
     hosts = root.findall('.//host')
 
 # Also get EmailType
-result_elem = root.find('.//nc:DomainDNSGetHostsResult', ns) or root.find('.//DomainDNSGetHostsResult')
+result_elem = root.find('.//nc:DomainDNSGetHostsResult', ns)
+if result_elem is None:
+    result_elem = root.find('.//DomainDNSGetHostsResult')
 email_type = result_elem.get('EmailType', 'NONE') if result_elem is not None else 'NONE'
 
 records = []
@@ -527,9 +531,11 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+res = root.find('.//nc:DomainDNSSetHostsResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSSetHostsResult')
 if res is not None and res.get('IsSuccess', '').lower() == 'true':
-    print(f'Added: ${rtype^^} {host} → ${addr}  (TTL: ${ttl})')
+    print(f'Added: ${rtype^^} ${host} → ${addr}  (TTL: ${ttl})')
 else:
     print('Failed to set DNS records', file=sys.stderr)
     sys.exit(1)
@@ -594,7 +600,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+res = root.find('.//nc:DomainDNSSetHostsResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSSetHostsResult')
 if res is not None and res.get('IsSuccess', '').lower() == 'true':
     print(f'Updated: ${rtype^^} ${host} → ${addr}')
 else:
@@ -646,7 +654,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+res = root.find('.//nc:DomainDNSSetHostsResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSSetHostsResult')
 if res is not None and res.get('IsSuccess', '').lower() == 'true':
     print(f'Deleted $removed_count record(s) for host ${host}')
 else:
@@ -677,7 +687,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSSetHostsResult', ns) or root.find('.//DomainDNSSetHostsResult')
+res = root.find('.//nc:DomainDNSSetHostsResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSSetHostsResult')
 if res is not None and res.get('IsSuccess', '').lower() == 'true':
     print(f'All DNS records replaced for $domain')
 else:
@@ -707,7 +719,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSGetListResult', ns) or root.find('.//DomainDNSGetListResult')
+res = root.find('.//nc:DomainDNSGetListResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSGetListResult')
 if res is None:
     print('No nameserver info')
     sys.exit(1)
@@ -740,7 +754,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSSetCustomResult', ns) or root.find('.//DomainDNSSetCustomResult')
+res = root.find('.//nc:DomainDNSSetCustomResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSSetCustomResult')
 if res is not None and res.get('Update', '').lower() == 'true':
     print(f'Nameservers updated for $domain: $ns_list')
 else:
@@ -768,7 +784,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-res = root.find('.//nc:DomainDNSSetDefaultResult', ns) or root.find('.//DomainDNSSetDefaultResult')
+res = root.find('.//nc:DomainDNSSetDefaultResult', ns)
+if res is None:
+    res = root.find('.//DomainDNSSetDefaultResult')
 if res is not None and res.get('Updated', '').lower() == 'true':
     print(f'Nameservers reset to Namecheap defaults for $domain')
 else:
@@ -820,7 +838,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-info = root.find('.//nc:SSLGetInfoResult', ns) or root.find('.//SSLGetInfoResult')
+info = root.find('.//nc:SSLGetInfoResult', ns)
+if info is None:
+    info = root.find('.//SSLGetInfoResult')
 if info is None:
     print('Certificate not found')
     sys.exit(1)
@@ -847,7 +867,9 @@ import sys, xml.etree.ElementTree as ET
 raw = sys.stdin.read()
 root = ET.fromstring(raw)
 ns = {'nc': 'http://api.namecheap.com/xml.response'}
-bal = root.find('.//nc:UserGetBalancesResult', ns) or root.find('.//UserGetBalancesResult')
+bal = root.find('.//nc:UserGetBalancesResult', ns)
+if bal is None:
+    bal = root.find('.//UserGetBalancesResult')
 if bal is not None:
     print(f\"Account:         ${NAMECHEAP_API_USER:-}\")
     print(f\"Balance:         \${bal.get('AvailableBalance', '?')}\")

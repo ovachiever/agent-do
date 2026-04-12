@@ -123,6 +123,37 @@ def get_tool_readiness(info: dict) -> dict:
     return get_tool_routing(info).get('readiness') or {}
 
 
+def get_tool_credentials(info: dict) -> dict:
+    """Return credential metadata for a tool."""
+    credentials = info.get('credentials') or {}
+    return {
+        'required': [item for item in credentials.get('required', []) if item],
+        'optional': [item for item in credentials.get('optional', []) if item],
+        'one_of': [
+            [entry for entry in group if entry]
+            for group in credentials.get('one_of', [])
+            if group
+        ],
+    }
+
+
+def get_tool_secret_envs(info: dict) -> list[str]:
+    """Return all environment-variable names a tool may resolve from secure storage."""
+    credentials = get_tool_credentials(info)
+    envs: list[str] = []
+    for key in credentials.get('required', []):
+        if key not in envs:
+            envs.append(key)
+    for key in credentials.get('optional', []):
+        if key not in envs:
+            envs.append(key)
+    for group in credentials.get('one_of', []):
+        for key in group:
+            if key not in envs:
+                envs.append(key)
+    return envs
+
+
 def get_recommended_entrypoints(info: dict) -> list[str]:
     """Return the recommended entrypoints for a tool."""
     entrypoints = get_tool_routing(info).get('recommended_entrypoints') or []

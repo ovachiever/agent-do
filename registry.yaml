@@ -75,6 +75,109 @@ tools:
         fix: agent-do context init
         note: Global context storage may need initialization
     concurrency: read
+  creds:
+    description: Secure credential storage and resolution for agent-do tools
+    capabilities:
+    - store secrets in the OS secure credential store
+    - resolve tool credentials from env vars or secure storage
+    - check which credentials a tool needs
+    - export resolved credentials for debugging
+    - list and delete stored secrets
+    commands:
+      store: 'Store a secret: store <KEY> [VALUE] [--stdin]'
+      get: 'Show secret status: get <KEY> [--reveal|--source]'
+      delete: 'Delete a secret: delete <KEY>'
+      list: List stored secret keys
+      check: 'Check secrets: check <KEY...> | --tool <tool>'
+      required: 'Show declared tool credentials: required <tool>'
+      export: 'Print export lines: export <KEY...> | --tool <tool>'
+      platform: Show detected secure-store backend
+    examples:
+    - intent: store a render API key securely
+      command: agent-creds store RENDER_API_KEY --stdin
+    - intent: check what namecheap needs
+      command: agent-creds required namecheap
+    - intent: verify vercel credentials
+      command: agent-creds check --tool vercel
+    routing:
+      discover_keywords:
+      - credentials
+      - api key
+      - access token
+      - secret key
+      - env var
+      - keychain
+      prompt_patterns:
+      - \bcredentials?\b
+      - \bapi key\b
+      - \baccess token\b
+      - \bsecret key\b
+      - \bkeychain\b
+      recommended_entrypoints:
+      - agent-do creds check --tool <tool>
+      - agent-do creds required <tool>
+      - agent-do creds store <ENV_VAR> --stdin
+      default_command: check
+      raw_cli_equivalents:
+      - pattern: \bsecurity\s+add-generic-password\b
+        replacement: agent-do creds
+        example: agent-do creds store RENDER_API_KEY --stdin
+        reason: agent-do creds uses the same secure store without requiring raw keychain commands
+      - pattern: \bexport\s+[A-Z0-9_]*(TOKEN|API_KEY|SECRET|ACCESS_TOKEN)=
+        replacement: agent-do creds
+        example: agent-do creds store RENDER_API_KEY --stdin
+        reason: agent-do creds keeps secrets out of shell history and centralizes resolution
+    concurrency: read
+  spec:
+    description: Repo-local specifications and change artifacts for intended behavior, change deltas, and archive readiness
+    capabilities:
+    - initialize repo-local spec storage under agent-do-spec/
+    - create structured change packages with proposal, design, tasks, and deltas
+    - list canonical specs, active changes, and archived changes
+    - show one spec or one change package in human or JSON form
+    - derive change status from repo files instead of hidden state
+    commands:
+      init: 'Initialize storage: init [--force]'
+      list: 'List specs or changes: list [--specs|--changes|--archived]'
+      show: 'Show one spec or change: show <name> [--type spec|change]'
+      new: 'Create a change package: new <change-id> [--title T] [--spec S]'
+      status: 'Summarize progress: status [--change <id>]'
+    examples:
+    - intent: initialize repo-local specs
+      command: agent-spec init
+    - intent: create a new change proposal
+      command: agent-spec new add-oauth-device-flow --spec auth
+    - intent: show what changes exist
+      command: agent-spec list --changes
+    - intent: inspect one change package
+      command: agent-spec show add-oauth-device-flow --type change
+    - intent: see what artifacts are missing before implementation
+      command: agent-spec status --change add-oauth-device-flow
+    routing:
+      discover_keywords:
+      - change proposal
+      - behavior spec
+      - spec package
+      - change delta
+      - archive readiness
+      - implementation artifacts
+      prompt_patterns:
+      - \bwrite a spec\b
+      - \bspec (this|that|the) (feature|change)\b
+      - \bchange proposal\b
+      - \bpropose this change\b
+      - \bartifacts? (are )?missing before implementation\b
+      - \barchive this completed change\b
+      recommended_entrypoints:
+      - agent-do spec list
+      - agent-do spec new <change-id>
+      - agent-do spec status --change <change-id>
+      default_command: list
+      project_signals:
+      - spec
+      - planning
+      - docs
+    concurrency: mixed
   zpc:
     description: Experience journal — structured lessons, decisions, patterns per project. Complementary to context (knowledge
       library).
@@ -789,6 +892,11 @@ tools:
       command: agent-slack send '#engineering' 'deploy complete'
     - intent: 'read #general'
       command: agent-slack read '#general'
+    credentials:
+      required:
+      - SLACK_TOKEN
+      optional:
+      - SLACK_WEBHOOK_URL
     concurrency: mixed
   discord:
     description: Control Discord
@@ -803,6 +911,11 @@ tools:
     examples:
     - intent: 'send hello to #general'
       command: agent-discord send '#general' 'hello'
+    credentials:
+      required:
+      - DISCORD_TOKEN
+      optional:
+      - DISCORD_WEBHOOK_URL
     concurrency: mixed
   email:
     description: Control email
@@ -850,6 +963,9 @@ tools:
     examples:
     - intent: create a new page
       command: agent-notion create 'New Page'
+    credentials:
+      required:
+      - NOTION_TOKEN
     concurrency: mixed
   linear:
     description: Control Linear
@@ -866,6 +982,9 @@ tools:
       command: agent-linear create --type bug
     - intent: list my issues
       command: agent-linear list --mine
+    credentials:
+      required:
+      - LINEAR_API_KEY
     concurrency: mixed
   figma:
     description: Control Figma
@@ -880,6 +999,9 @@ tools:
     examples:
     - intent: export icons from design
       command: agent-figma export --icons
+    credentials:
+      required:
+      - FIGMA_TOKEN
     concurrency: read
   sheets:
     description: Control Google Sheets
@@ -1078,6 +1200,11 @@ tools:
       command: agent-cloudflare dns-add recognitionoracle.com CNAME www target.example.com
     - intent: cloudflare account overview
       command: agent-cloudflare snapshot
+    credentials:
+      one_of:
+      - - CLOUDFLARE_API_TOKEN
+      - - CLOUDFLARE_EMAIL
+        - CLOUDFLARE_API_KEY
     concurrency: mixed
   clerk:
     description: Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates,
@@ -1119,6 +1246,9 @@ tools:
       command: agent-clerk oauth-app-create "My App" --callback "http://localhost:3000/callback"
     - intent: Clerk instance overview
       command: agent-clerk snapshot
+    credentials:
+      required:
+      - CLERK_SECRET_KEY
     concurrency: mixed
   ci:
     description: Control CI/CD pipelines
@@ -1870,6 +2000,10 @@ tools:
       command: agent-namecheap dns-add example.com A www 1.2.3.4
     - intent: domain expiry dates
       command: agent-namecheap domains --expiring
+    credentials:
+      required:
+      - NAMECHEAP_API_USER
+      - NAMECHEAP_API_KEY
     concurrency: write
   okta:
     description: Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, authorization servers,
@@ -1912,6 +2046,9 @@ tools:
       command: agent-okta logs --since 1h
     - intent: Okta tenant overview
       command: agent-okta snapshot
+    credentials:
+      required:
+      - OKTA_API_TOKEN
     concurrency: mixed
   render:
     description: Control Render.com services, deploys, databases, and env vars
@@ -1955,6 +2092,9 @@ tools:
       command: agent-render db list
     - intent: get render account snapshot
       command: agent-render snapshot
+    credentials:
+      required:
+      - RENDER_API_KEY
     routing:
       discover_keywords:
       - render
@@ -1986,8 +2126,8 @@ tools:
       - infra
       readiness:
         check: agent-do render services
-        fix: export RENDER_API_KEY=...
-        note: Requires Render API credentials
+        fix: agent-do creds store RENDER_API_KEY --stdin
+        note: Requires a Render API key; agent-do will resolve it from env or secure storage
     concurrency: write
   vercel:
     description: Control Vercel projects, deployments, domains, and env vars
@@ -2028,6 +2168,9 @@ tools:
       command: agent-vercel domains my-app
     - intent: get vercel account snapshot
       command: agent-vercel snapshot
+    credentials:
+      required:
+      - VERCEL_ACCESS_TOKEN
     routing:
       discover_keywords:
       - vercel
@@ -2063,8 +2206,8 @@ tools:
       - deploy
       readiness:
         check: agent-do vercel projects
-        fix: export VERCEL_ACCESS_TOKEN=...
-        note: Requires Vercel API credentials
+        fix: agent-do creds store VERCEL_ACCESS_TOKEN --stdin
+        note: Requires a Vercel access token; agent-do will resolve it from env or secure storage
     concurrency: write
   tail:
     description: Wrap dev commands, capture output to log files for AI agents
@@ -2178,6 +2321,11 @@ tools:
       command: agent-supabase orgs
     - intent: get supabase account snapshot
       command: agent-supabase snapshot
+    credentials:
+      required:
+      - SUPABASE_ACCESS_TOKEN
+      optional:
+      - SUPABASE_DB_PASSWORD
     routing:
       discover_keywords:
       - supabase
@@ -2213,8 +2361,8 @@ tools:
       - backend
       readiness:
         check: agent-do supabase projects
-        fix: export SUPABASE_ACCESS_TOKEN=...
-        note: Requires Supabase API credentials
+        fix: agent-do creds store SUPABASE_ACCESS_TOKEN --stdin
+        note: Requires a Supabase access token; agent-do will resolve it from env or secure storage
     concurrency: write
   sessions:
     description: Search and retrieve AI coding session history

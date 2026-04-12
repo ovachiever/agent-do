@@ -22,6 +22,11 @@ mkdir -p "$AGENT_DO_HOME"
 # Ensure tools directory is in PATH for this script
 export PATH="$SCRIPT_DIR/tools:$PATH"
 
+if [[ -f "$SCRIPT_DIR/lib/creds-helper.sh" ]]; then
+    # shellcheck source=lib/creds-helper.sh
+    source "$SCRIPT_DIR/lib/creds-helper.sh"
+fi
+
 show_help() {
     cat << 'EOF'
 agent-do - Automation CLI
@@ -53,6 +58,7 @@ OPTIONS:
   find           Search tools by keyword
   nudges         Inspect local nudge telemetry
   bootstrap      Initialize stateful tools for the current project
+  creds          Store and resolve tool credentials securely
   --status       Show active sessions and state
   --health       Check tool dependencies and readiness
   --how          Explain how to do something (uses LLM)
@@ -70,8 +76,44 @@ EXIT CODES:
 
 ENVIRONMENT:
   AGENT_DO_HOME      Config/state directory (default: ~/.agent-do)
-  ANTHROPIC_API_KEY  Required for natural language mode
+    ANTHROPIC_API_KEY  Required for natural language mode
 EOF
+}
+
+get_tool_secret_envs() {
+    local tool="$1"
+    python3 - "$tool" "$SCRIPT_DIR" <<'PY' 2>/dev/null || true
+import sys
+from pathlib import Path
+
+tool = sys.argv[1]
+script_dir = Path(sys.argv[2])
+sys.path.insert(0, str(script_dir / "lib"))
+
+from registry import load_registry, get_tool_info, get_tool_secret_envs  # noqa: E402
+
+registry = load_registry()
+info = get_tool_info(registry, tool) or {}
+for key in get_tool_secret_envs(info):
+    print(key)
+PY
+}
+
+load_tool_credentials() {
+    local tool="$1"
+    [[ "$tool" == "creds" ]] && return 0
+    declare -F creds_get_from_store >/dev/null 2>&1 || return 0
+
+    local key value
+    while IFS= read -r key; do
+        [[ -n "$key" ]] || continue
+        [[ -n "${!key:-}" ]] && continue
+        value="$(creds_get_from_store "$key" 2>/dev/null || true)"
+        if [[ -n "$value" ]]; then
+            printf -v "$key" '%s' "$value"
+            export "$key"
+        fi
+    done < <(get_tool_secret_envs "$tool")
 }
 
 resolve_tool_exec() {
@@ -130,6 +172,7 @@ exec_tool() {
         exit 1
     fi
 
+    load_tool_credentials "$tool"
     exec "$tool_exec" "$@"
 }
 

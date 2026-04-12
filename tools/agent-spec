@@ -1,0 +1,716 @@
+#!/usr/bin/env python3
+"""agent-spec - agent-facing repo-local specification and change artifact manager."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+STORAGE_DIR = "agent-do-spec"
+CONFIG_FILE = "config.yaml"
+CHANGE_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def error(message: str, *, json_mode: bool = False, code: str = "error", exit_code: int = 1) -> int:
+    if json_mode:
+        print(json.dumps({"ok": False, "error": code, "message": message}, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    return exit_code
+
+
+def find_storage_root(start: Path) -> Path | None:
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        root = candidate / STORAGE_DIR
+        if root.is_dir():
+            return root
+    return None
+
+
+def require_storage_root(*, json_mode: bool = False) -> Path:
+    root = find_storage_root(Path.cwd())
+    if root is None:
+        raise SystemExit(
+            error(
+                f"No {STORAGE_DIR}/ found. Run 'agent-do spec init' from the repo root first.",
+                json_mode=json_mode,
+                code="not_initialized",
+            )
+        )
+    return root
+
+
+def relpath(path: Path, storage_root: Path) -> str:
+    return path.relative_to(storage_root.parent).as_posix()
+
+
+def storage_paths(storage_root: Path) -> dict[str, Path]:
+    return {
+        "root": storage_root,
+        "config": storage_root / CONFIG_FILE,
+        "specs": storage_root / "specs",
+        "changes": storage_root / "changes",
+        "archive": storage_root / "archive",
+    }
+
+
+def parse_frontmatter(text: str) -> dict[str, str]:
+    if not text.startswith("---\n"):
+        return {}
+
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}
+
+    data: dict[str, str] = {}
+    for raw_line in text[4:end].splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("-") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        data[key.strip()] = value.strip().strip('"').strip("'")
+    return data
+
+
+def first_heading(text: str) -> str | None:
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return None
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def humanize_change_id(change_id: str) -> str:
+    return " ".join(part.capitalize() for part in change_id.split("-"))
+
+
+def parse_tasks(path: Path) -> tuple[int, int]:
+    if not path.exists():
+        return 0, 0
+
+    total = 0
+    done = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^\s*-\s+\[( |x|X)\]\s+", line)
+        if not match:
+            continue
+        total += 1
+        if match.group(1).lower() == "x":
+            done += 1
+    return total, done
+
+
+def spec_record(path: Path, storage_root: Path) -> dict[str, str]:
+    text = read_text(path)
+    frontmatter = parse_frontmatter(text)
+    return {
+        "name": frontmatter.get("name") or path.stem,
+        "title": frontmatter.get("title") or first_heading(text) or humanize_change_id(path.stem),
+        "path": relpath(path, storage_root),
+    }
+
+
+def change_artifacts(change_dir: Path, storage_root: Path) -> dict:
+    proposal = change_dir / "proposal.md"
+    design = change_dir / "design.md"
+    tasks = change_dir / "tasks.md"
+    deltas_dir = change_dir / "deltas"
+    deltas = sorted(deltas_dir.glob("*.md")) if deltas_dir.exists() else []
+    total, done = parse_tasks(tasks)
+
+    return {
+        "proposal": proposal.exists(),
+        "design": design.exists(),
+        "tasks": tasks.exists(),
+        "deltas": [delta.stem for delta in deltas],
+        "paths": {
+            "proposal": relpath(proposal, storage_root),
+            "design": relpath(design, storage_root),
+            "tasks": relpath(tasks, storage_root),
+            "deltas_dir": relpath(deltas_dir, storage_root),
+        },
+        "task_counts": {"total": total, "done": done},
+    }
+
+
+def derive_status(artifacts: dict) -> str:
+    if not artifacts["proposal"]:
+        return "missing"
+    if artifacts["task_counts"]["total"] > 0 and artifacts["task_counts"]["done"] == artifacts["task_counts"]["total"] and artifacts["deltas"]:
+        return "ready-to-archive"
+    if artifacts["tasks"]:
+        return "planned"
+    if artifacts["design"]:
+        return "designed"
+    if artifacts["deltas"]:
+        return "defined"
+    return "draft"
+
+
+def change_missing(artifacts: dict) -> list[str]:
+    missing: list[str] = []
+    if not artifacts["proposal"]:
+        missing.append("proposal.md")
+    if not artifacts["deltas"]:
+        missing.append("at least one delta file in deltas/")
+    if not artifacts["design"]:
+        missing.append("design.md")
+    if not artifacts["tasks"]:
+        missing.append("tasks.md")
+    return missing
+
+
+def change_next(change_id: str, artifacts: dict) -> list[str]:
+    next_steps: list[str] = []
+    if not artifacts["proposal"]:
+        next_steps.append(f"Write proposal.md for {change_id}")
+    if not artifacts["deltas"]:
+        next_steps.append("Add at least one delta file under deltas/")
+    if not artifacts["design"]:
+        next_steps.append("Write design.md if the change needs technical design")
+    if not artifacts["tasks"]:
+        next_steps.append("Write tasks.md before implementation")
+
+    total = artifacts["task_counts"]["total"]
+    done = artifacts["task_counts"]["done"]
+    if total > 0 and done < total:
+        next_steps.append("Finish remaining tasks in tasks.md")
+    if total > 0 and done == total and artifacts["deltas"]:
+        next_steps.append(f"Change is structurally ready to archive when canonical specs are updated")
+    if not next_steps:
+        next_steps.append(f"Run agent-do spec show {change_id} to review the change package")
+    return next_steps
+
+
+def change_record(change_dir: Path, storage_root: Path) -> dict:
+    artifacts = change_artifacts(change_dir, storage_root)
+    return {
+        "id": change_dir.name,
+        "status": derive_status(artifacts),
+        "path": relpath(change_dir, storage_root),
+        "artifacts": {
+            "proposal": artifacts["proposal"],
+            "design": artifacts["design"],
+            "tasks": artifacts["tasks"],
+            "deltas": artifacts["deltas"],
+        },
+        "tasks": artifacts["task_counts"],
+        "missing": change_missing(artifacts),
+        "next": change_next(change_dir.name, artifacts),
+        "_paths": artifacts["paths"],
+    }
+
+
+def archive_record(path: Path, storage_root: Path) -> dict[str, str]:
+    return {
+        "id": path.name,
+        "status": "archived",
+        "path": relpath(path, storage_root),
+    }
+
+
+def list_specs(storage_root: Path) -> list[dict]:
+    return [spec_record(path, storage_root) for path in sorted((storage_root / "specs").glob("*.md"))]
+
+
+def list_changes(storage_root: Path) -> list[dict]:
+    return [change_record(path, storage_root) for path in sorted((storage_root / "changes").iterdir()) if path.is_dir()]
+
+
+def list_archived(storage_root: Path) -> list[dict]:
+    archive_dir = storage_root / "archive"
+    return [archive_record(path, storage_root) for path in sorted(archive_dir.iterdir()) if path.is_dir()]
+
+
+def proposal_template(change_id: str, title: str, impacted_spec: str | None) -> str:
+    impacted = impacted_spec or "TBD"
+    return f"""# Change Proposal: {change_id}
+
+## Why
+Describe the problem or opportunity this change addresses.
+
+## What
+- describe the intended behavior change
+
+## Out of Scope
+- list explicit non-goals
+
+## Impacted Specs
+- {impacted}
+"""
+
+
+def design_template(change_id: str, title: str) -> str:
+    return f"""# Design: {change_id}
+
+## Current State
+...
+
+## Proposed Design
+...
+
+## Risks
+...
+
+## Rollout
+...
+"""
+
+
+def tasks_template(change_id: str, title: str) -> str:
+    return f"""# Tasks: {change_id}
+
+- [ ] define the impacted behavior clearly
+- [ ] implement the change
+- [ ] validate the change
+"""
+
+
+def delta_template(spec_name: str) -> str:
+    title = humanize_change_id(spec_name)
+    return f"""# Delta: {spec_name}
+
+## Add
+
+## Change
+
+## Remove
+"""
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    existing = find_storage_root(Path.cwd())
+    target = Path.cwd() / STORAGE_DIR
+
+    if existing is not None and existing != target:
+        return error(
+            f"{STORAGE_DIR}/ already exists at {existing.parent}. Use that root instead of nesting another one.",
+            json_mode=args.json,
+            code="already_initialized",
+        )
+
+    paths = storage_paths(target)
+    created: list[str] = []
+
+    if target.exists() and not args.force:
+        return error(
+            f"{STORAGE_DIR}/ already exists in this repo. Use --force to ensure the structure is present.",
+            json_mode=args.json,
+            code="already_initialized",
+        )
+
+    for key in ("root", "specs", "changes", "archive"):
+        path = paths[key]
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+            created.append(path.name if key == "root" else relpath(path, target))
+
+    if not paths["config"].exists():
+        paths["config"].write_text(
+            "version: 1\n"
+            f"storage_root: {STORAGE_DIR}\n"
+            f"created_at: {datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}\n",
+            encoding="utf-8",
+        )
+        created.append(relpath(paths["config"], target))
+
+    payload = {
+        "ok": True,
+        "path": relpath(target, target),
+        "root": str(target),
+        "created": created,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Initialized {STORAGE_DIR} at {target}")
+        if created:
+            print("Created:")
+            for item in created:
+                print(f"  - {item}")
+    return 0
+
+
+def cmd_new(args: argparse.Namespace) -> int:
+    if not CHANGE_ID_RE.match(args.change_id):
+        return error(
+            f"Invalid change id '{args.change_id}'. Use kebab-case like add-oauth-device-flow.",
+            json_mode=args.json,
+            code="invalid_change_id",
+        )
+
+    storage_root = require_storage_root(json_mode=args.json)
+    if args.spec:
+        spec_path = storage_root / "specs" / f"{args.spec}.md"
+        if not spec_path.exists():
+            return error(
+                f"Spec '{args.spec}' does not exist at {relpath(spec_path, storage_root)}.",
+                json_mode=args.json,
+                code="unknown_spec",
+            )
+
+    change_dir = storage_root / "changes" / args.change_id
+    if change_dir.exists():
+        return error(
+            f"Change '{args.change_id}' already exists.",
+            json_mode=args.json,
+            code="already_exists",
+        )
+
+    title = args.title or humanize_change_id(args.change_id)
+    delta_dir = change_dir / "deltas"
+    change_dir.mkdir(parents=True, exist_ok=True)
+    delta_dir.mkdir(parents=True, exist_ok=True)
+
+    created: list[Path] = []
+    files = {
+        change_dir / "proposal.md": proposal_template(args.change_id, title, args.spec),
+        change_dir / "design.md": design_template(args.change_id, title),
+        change_dir / "tasks.md": tasks_template(args.change_id, title),
+    }
+    for path, content in files.items():
+        path.write_text(content, encoding="utf-8")
+        created.append(path)
+
+    if args.spec:
+        delta_path = delta_dir / f"{args.spec}.md"
+        delta_path.write_text(delta_template(args.spec), encoding="utf-8")
+        created.append(delta_path)
+
+    record = change_record(change_dir, storage_root)
+    payload = {
+        "ok": True,
+        "change": record["id"],
+        "status": record["status"],
+        "path": record["path"],
+        "created": [relpath(path, storage_root) for path in created],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Created change {args.change_id}")
+        print(f"Path: {record['path']}")
+        print(f"Status: {record['status']}")
+        if created:
+            print("Artifacts:")
+            for item in payload["created"]:
+                print(f"  - {item}")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    storage_root = require_storage_root(json_mode=args.json)
+    include_specs = args.specs or not (args.specs or args.changes or args.archived)
+    include_changes = args.changes or not (args.specs or args.changes or args.archived)
+    include_archived = args.archived
+
+    payload = {
+        "specs": list_specs(storage_root) if include_specs else [],
+        "changes": list_changes(storage_root) if include_changes else [],
+        "archived": list_archived(storage_root) if include_archived else [],
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if include_specs:
+        print("Specs:")
+        if payload["specs"]:
+            for item in payload["specs"]:
+                print(f"  - {item['name']}: {item['title']}")
+        else:
+            print("  (none)")
+
+    if include_changes:
+        if include_specs:
+            print()
+        print("Changes:")
+        if payload["changes"]:
+            for item in payload["changes"]:
+                print(f"  - {item['id']} [{item['status']}]")
+        else:
+            print("  (none)")
+
+    if include_archived:
+        print()
+        print("Archived:")
+        if payload["archived"]:
+            for item in payload["archived"]:
+                print(f"  - {item['id']}")
+        else:
+            print("  (none)")
+    return 0
+
+
+def show_spec(path: Path, storage_root: Path, *, json_mode: bool) -> int:
+    record = spec_record(path, storage_root)
+    content = read_text(path)
+    payload = {
+        "type": "spec",
+        "name": record["name"],
+        "title": record["title"],
+        "path": record["path"],
+        "content": content,
+    }
+    if json_mode:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"spec: {record['name']}")
+        print(f"title: {record['title']}")
+        print(f"path: {record['path']}")
+        print()
+        print(content.rstrip())
+    return 0
+
+
+def show_change(path: Path, storage_root: Path, *, json_mode: bool) -> int:
+    record = change_record(path, storage_root)
+    proposal = path / "proposal.md"
+    design = path / "design.md"
+    tasks = path / "tasks.md"
+    delta_files = sorted((path / "deltas").glob("*.md"))
+
+    payload = {
+        "type": "change",
+        "id": record["id"],
+        "status": record["status"],
+        "path": record["path"],
+        "artifacts": {
+            "proposal": {
+                "exists": proposal.exists(),
+                "path": relpath(proposal, storage_root),
+                "content": read_text(proposal),
+            },
+            "design": {
+                "exists": design.exists(),
+                "path": relpath(design, storage_root),
+                "content": read_text(design),
+            },
+            "tasks": {
+                "exists": tasks.exists(),
+                "path": relpath(tasks, storage_root),
+                "content": read_text(tasks),
+            },
+            "deltas": [
+                {
+                    "name": delta.stem,
+                    "path": relpath(delta, storage_root),
+                    "content": read_text(delta),
+                }
+                for delta in delta_files
+            ],
+        },
+        "missing": record["missing"],
+        "next": record["next"],
+    }
+
+    if json_mode:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"change: {record['id']}")
+    print(f"status: {record['status']}")
+    print(f"path: {record['path']}")
+    if record["missing"]:
+        print("missing:")
+        for item in record["missing"]:
+            print(f"  - {item}")
+    print()
+    for label, artifact_path in (
+        ("proposal.md", proposal),
+        ("design.md", design),
+        ("tasks.md", tasks),
+    ):
+        if artifact_path.exists():
+            print(f"--- {label} ---")
+            print(read_text(artifact_path).rstrip())
+            print()
+    for delta in delta_files:
+        print(f"--- deltas/{delta.name} ---")
+        print(read_text(delta).rstrip())
+        print()
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    storage_root = require_storage_root(json_mode=args.json)
+
+    spec_path = storage_root / "specs" / f"{args.name}.md"
+    change_path = storage_root / "changes" / args.name
+
+    target_type = args.type
+    if target_type is None:
+        if spec_path.exists() and not change_path.exists():
+            target_type = "spec"
+        elif change_path.exists() and not spec_path.exists():
+            target_type = "change"
+        elif spec_path.exists() and change_path.exists():
+            return error(
+                f"'{args.name}' matches both a spec and a change. Re-run with --type spec|change.",
+                json_mode=args.json,
+                code="ambiguous_target",
+            )
+        else:
+            return error(
+                f"No spec or change named '{args.name}' was found.",
+                json_mode=args.json,
+                code="not_found",
+            )
+
+    if target_type == "spec":
+        if not spec_path.exists():
+            return error(
+                f"Spec '{args.name}' does not exist.",
+                json_mode=args.json,
+                code="not_found",
+            )
+        return show_spec(spec_path, storage_root, json_mode=args.json)
+
+    if not change_path.exists():
+        return error(
+            f"Change '{args.name}' does not exist.",
+            json_mode=args.json,
+            code="not_found",
+        )
+    return show_change(change_path, storage_root, json_mode=args.json)
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    storage_root = require_storage_root(json_mode=args.json)
+
+    if args.change:
+        change_path = storage_root / "changes" / args.change
+        if not change_path.exists():
+            return error(
+                f"Change '{args.change}' does not exist.",
+                json_mode=args.json,
+                code="not_found",
+            )
+        record = change_record(change_path, storage_root)
+        payload = {
+            "change": record["id"],
+            "status": record["status"],
+            "artifacts": record["artifacts"],
+            "tasks": record["tasks"],
+            "missing": record["missing"],
+            "next": record["next"],
+            "path": record["path"],
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"change: {payload['change']}")
+            print(f"status: {payload['status']}")
+            print(f"path: {payload['path']}")
+            print("artifacts:")
+            print(f"  proposal: {'yes' if payload['artifacts']['proposal'] else 'no'}")
+            print(f"  design: {'yes' if payload['artifacts']['design'] else 'no'}")
+            print(f"  tasks: {'yes' if payload['artifacts']['tasks'] else 'no'}")
+            print(f"  deltas: {', '.join(payload['artifacts']['deltas']) if payload['artifacts']['deltas'] else '(none)'}")
+            print(f"tasks: {payload['tasks']['done']}/{payload['tasks']['total']}")
+            if payload["missing"]:
+                print("missing:")
+                for item in payload["missing"]:
+                    print(f"  - {item}")
+            if payload["next"]:
+                print("next:")
+                for item in payload["next"]:
+                    print(f"  - {item}")
+        return 0
+
+    specs = list_specs(storage_root)
+    changes = list_changes(storage_root)
+    archived = list_archived(storage_root)
+    payload = {
+        "root": relpath(storage_root, storage_root),
+        "counts": {
+            "specs": len(specs),
+            "changes": len(changes),
+            "archived": len(archived),
+        },
+        "changes": [
+            {
+                "id": item["id"],
+                "status": item["status"],
+                "tasks": item["tasks"],
+                "missing": item["missing"],
+                "path": item["path"],
+            }
+            for item in changes
+        ],
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"root: {payload['root']}")
+    print(f"specs: {payload['counts']['specs']}")
+    print(f"changes: {payload['counts']['changes']}")
+    print(f"archived: {payload['counts']['archived']}")
+    if changes:
+        print()
+        print("active changes:")
+        for item in changes:
+            print(f"  - {item['id']} [{item['status']}] tasks {item['tasks']['done']}/{item['tasks']['total']}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Agent-facing repo-local specs and change artifacts for agent-do")
+    subparsers = parser.add_subparsers(dest="command")
+
+    init_parser = subparsers.add_parser("init", help="Initialize agent-do-spec storage")
+    init_parser.add_argument("--force", action="store_true", help="Ensure the storage structure exists")
+    init_parser.add_argument("--json", action="store_true", help="Output JSON")
+    init_parser.set_defaults(func=cmd_init)
+
+    list_parser = subparsers.add_parser("list", help="List specs, changes, or archive entries")
+    list_parser.add_argument("--specs", action="store_true", help="List canonical specs only")
+    list_parser.add_argument("--changes", action="store_true", help="List active changes only")
+    list_parser.add_argument("--archived", action="store_true", help="List archived changes only")
+    list_parser.add_argument("--json", action="store_true", help="Output JSON")
+    list_parser.set_defaults(func=cmd_list)
+
+    show_parser = subparsers.add_parser("show", help="Show one spec or one change")
+    show_parser.add_argument("name", help="Spec name or change id")
+    show_parser.add_argument("--type", choices=["spec", "change"], help="Disambiguate the target type")
+    show_parser.add_argument("--json", action="store_true", help="Output JSON")
+    show_parser.set_defaults(func=cmd_show)
+
+    new_parser = subparsers.add_parser("new", help="Create a new change package")
+    new_parser.add_argument("change_id", help="Kebab-case change id")
+    new_parser.add_argument("--title", help="Human-readable change title")
+    new_parser.add_argument("--spec", help="Precreate a delta for an existing canonical spec")
+    new_parser.add_argument("--json", action="store_true", help="Output JSON")
+    new_parser.set_defaults(func=cmd_new)
+
+    status_parser = subparsers.add_parser("status", help="Summarize spec/change progress")
+    status_parser.add_argument("--change", help="Show detailed status for one change")
+    status_parser.add_argument("--json", action="store_true", help="Output JSON")
+    status_parser.set_defaults(func=cmd_status)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    if not getattr(args, "command", None):
+        parser.print_help()
+        return 1
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

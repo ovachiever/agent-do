@@ -1,0 +1,492 @@
+#!/usr/bin/env bash
+# agent-creds - Secure credential storage and resolution for agent-do
+
+set -euo pipefail
+
+_source="${BASH_SOURCE[0]}"
+if [ -L "$_source" ]; then
+    _target="$(readlink "$_source")"
+    case "$_target" in
+        /*) _source="$_target" ;;
+        *)  _source="$(dirname "$_source")/$_target" ;;
+    esac
+fi
+SCRIPT_DIR="$(cd "$(dirname "$_source")/.." && pwd)"
+
+# shellcheck source=lib/creds-helper.sh
+source "$SCRIPT_DIR/lib/creds-helper.sh"
+
+registry_credentials_json() {
+    local tool="$1"
+    python3 - "$tool" "$SCRIPT_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+tool = sys.argv[1]
+script_dir = Path(sys.argv[2])
+sys.path.insert(0, str(script_dir / "lib"))
+
+from registry import load_registry, get_tool_info, get_tool_credentials, get_tool_secret_envs  # noqa: E402
+
+registry = load_registry()
+info = get_tool_info(registry, tool)
+if not info:
+    print(json.dumps({"error": f"unknown tool: {tool}"}))
+    raise SystemExit(2)
+
+print(json.dumps({
+    "tool": tool,
+    "credentials": get_tool_credentials(info),
+    "keys": get_tool_secret_envs(info),
+}))
+PY
+}
+
+registry_credentials_lines() {
+    local tool="$1"
+    local payload
+    payload="$(registry_credentials_json "$tool")"
+    python3 -c "
+import json, sys
+data = json.loads(sys.argv[1])
+if data.get('error'):
+    print(f\"error|{data['error']}\")
+    raise SystemExit(0)
+creds = data.get('credentials', {})
+for key in creds.get('required', []):
+    print(f'required|{key}')
+for key in creds.get('optional', []):
+    print(f'optional|{key}')
+for idx, group in enumerate(creds.get('one_of', []), start=1):
+    for key in group:
+        print(f'one_of_{idx}|{key}')
+" "$payload"
+}
+
+show_help() {
+    cat <<'EOF'
+agent-creds - Secure credential storage and resolution for agent-do
+
+Commands:
+  store <KEY> [VALUE]         Store a secret securely
+    --stdin                   Read VALUE from stdin instead of argv
+  get <KEY>                   Show secret status
+    --reveal                  Print the raw secret value
+    --source                  Print only the source: env or store
+  delete <KEY>                Delete a stored secret
+  list                        List stored secret keys
+  check <KEY...>              Check whether secret keys resolve
+    --tool <tool>             Check the secrets declared for a tool
+  required <tool>             List secrets declared for a tool
+  export <KEY...>             Print export lines for resolved secrets
+    --tool <tool>             Export all declared secrets for a tool
+  platform                    Show detected credential backend platform
+
+Behavior:
+  Resolution order is:
+    1. environment variable
+    2. secure credential store
+
+Notes:
+  - store/get/delete/list operate on the secure store
+  - get without --reveal does not print secret values
+  - export is explicit and intended for debugging or shell handoff
+
+Examples:
+  agent-do creds store NAMECHEAP_API_KEY --stdin
+  agent-do creds check --tool namecheap
+  agent-do creds required render
+  agent-do creds export --tool vercel
+EOF
+}
+
+render_key_status_text() {
+    local key="$1"
+    local present="missing"
+    local source="none"
+    if creds_has "$key"; then
+        present="present"
+        source="$(creds_get_source "$key" 2>/dev/null || echo "unknown")"
+    fi
+    printf '%s|%s|%s\n' "$key" "$present" "$source"
+}
+
+cmd_store() {
+    local use_stdin="false"
+    local key=""
+    local value=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --stdin) use_stdin="true"; shift ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                elif [[ -z "$value" ]]; then
+                    value="$1"
+                else
+                    echo "Usage: agent-creds store <KEY> [VALUE] [--stdin]" >&2
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    [[ -n "$key" ]] || { echo "Usage: agent-creds store <KEY> [VALUE] [--stdin]" >&2; return 1; }
+
+    if [[ "$use_stdin" == "true" ]]; then
+        value="$(cat)"
+    elif [[ -z "$value" ]] && [[ ! -t 0 ]]; then
+        value="$(cat)"
+    fi
+
+    [[ -n "$value" ]] || { echo "Error: secret value required" >&2; return 1; }
+    creds_store "$key" "$value"
+    echo "Stored ${key} in ${AGENT_DO_CREDS_PLATFORM} secure storage"
+}
+
+cmd_get() {
+    local reveal="false" source_only="false" json="false"
+    local key=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --reveal) reveal="true"; shift ;;
+            --source) source_only="true"; shift ;;
+            --json) json="true"; shift ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                    shift
+                else
+                    echo "Usage: agent-creds get <KEY> [--reveal|--source|--json]" >&2
+                    return 1
+                fi
+                ;;
+        esac
+    done
+
+    [[ -n "$key" ]] || { echo "Usage: agent-creds get <KEY> [--reveal|--source|--json]" >&2; return 1; }
+
+    if ! creds_has "$key"; then
+        if [[ "$json" == "true" ]]; then
+            printf '{"key":"%s","present":false}\n' "$key"
+        else
+            echo "$key: missing"
+        fi
+        return 1
+    fi
+
+    local source value
+    source="$(creds_get_source "$key" 2>/dev/null || echo "unknown")"
+
+    if [[ "$source_only" == "true" ]]; then
+        echo "$source"
+        return 0
+    fi
+
+    if [[ "$reveal" == "true" ]]; then
+        creds_get "$key"
+        printf '\n'
+        return 0
+    fi
+
+    if [[ "$json" == "true" ]]; then
+        printf '{"key":"%s","present":true,"source":"%s"}\n' "$key" "$source"
+    else
+        echo "$key: present ($source)"
+    fi
+}
+
+cmd_delete() {
+    local key="${1:-}"
+    [[ -n "$key" ]] || { echo "Usage: agent-creds delete <KEY>" >&2; return 1; }
+    creds_delete "$key"
+    echo "Deleted ${key} from secure storage"
+}
+
+cmd_list() {
+    local json="false"
+    [[ "${1:-}" == "--json" ]] && { json="true"; shift; }
+
+    mapfile -t keys < <(creds_list_store 2>/dev/null || true)
+    if [[ "$json" == "true" ]]; then
+        python3 -c "
+import json, sys
+print(json.dumps({'keys': sys.argv[1:]}, indent=2))
+" "${keys[@]}"
+    else
+        if [[ ${#keys[@]} -eq 0 ]]; then
+            echo "No stored secrets."
+            return 0
+        fi
+        printf '%s\n' "${keys[@]}"
+    fi
+}
+
+cmd_required() {
+    local json="false"
+    local tool=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) json="true"; shift ;;
+            *)
+                if [[ -z "$tool" ]]; then
+                    tool="$1"
+                    shift
+                else
+                    echo "Usage: agent-creds required <tool> [--json]" >&2
+                    return 1
+                fi
+                ;;
+        esac
+    done
+    [[ -n "$tool" ]] || { echo "Usage: agent-creds required <tool> [--json]" >&2; return 1; }
+
+    local payload
+    payload="$(registry_credentials_json "$tool")" || return 1
+    if echo "$payload" | grep -q '"error"'; then
+        echo "$payload" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['error'])" >&2
+        return 1
+    fi
+
+    if [[ "$json" == "true" ]]; then
+        echo "$payload" | python3 -c "import json,sys; data=json.load(sys.stdin); print(json.dumps({'tool': data['tool'], **data['credentials']}, indent=2))"
+        return 0
+    fi
+
+    echo "agent-do creds required $tool"
+    echo "$payload" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+creds = data.get('credentials', {})
+required = creds.get('required', [])
+optional = creds.get('optional', [])
+one_of = creds.get('one_of', [])
+if required:
+    print('  required:')
+    for key in required:
+        print(f'    - {key}')
+if optional:
+    print('  optional:')
+    for key in optional:
+        print(f'    - {key}')
+if one_of:
+    print('  one_of:')
+    for group in one_of:
+        print('    - ' + ' | '.join(group))
+if not any([required, optional, one_of]):
+    print('  no credential metadata declared')
+"
+}
+
+cmd_check() {
+    local json="false"
+    local tool=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) json="true"; shift ;;
+            --tool) tool="$2"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+
+    local lines=()
+    local target_label=""
+    if [[ -n "$tool" ]]; then
+        target_label="$tool"
+        mapfile -t lines < <(registry_credentials_lines "$tool")
+        if [[ ${#lines[@]} -gt 0 && "${lines[0]}" == error\|* ]]; then
+            echo "${lines[0]#error|}" >&2
+            return 1
+        fi
+    else
+        [[ $# -gt 0 ]] || { echo "Usage: agent-creds check <KEY...> [--json] | --tool <tool> [--json]" >&2; return 1; }
+        target_label="keys"
+        for key in "$@"; do
+            lines+=("required|$key")
+        done
+    fi
+
+    local status_lines=() missing_required=() missing_groups=()
+    declare -A one_of_seen=()
+    declare -A one_of_ok=()
+
+    local kind key source present group_id
+    for entry in "${lines[@]}"; do
+        kind="${entry%%|*}"
+        key="${entry#*|}"
+        present="missing"
+        source="none"
+        if creds_has "$key"; then
+            present="present"
+            source="$(creds_get_source "$key" 2>/dev/null || echo "unknown")"
+        fi
+        status_lines+=("$kind|$key|$present|$source")
+        if [[ "$kind" == required && "$present" != present ]]; then
+            missing_required+=("$key")
+        fi
+        if [[ "$kind" == one_of_* ]]; then
+            group_id="$kind"
+            one_of_seen["$group_id"]=1
+            if [[ "$present" == present ]]; then
+                one_of_ok["$group_id"]=1
+            fi
+        fi
+    done
+
+    for group_id in "${!one_of_seen[@]}"; do
+        if [[ -z "${one_of_ok[$group_id]:-}" ]]; then
+            missing_groups+=("$group_id")
+        fi
+    done
+
+    local ok="true"
+    [[ ${#missing_required[@]} -gt 0 || ${#missing_groups[@]} -gt 0 ]] && ok="false"
+
+    if [[ "$json" == "true" ]]; then
+        printf '%s\n' "${status_lines[@]}" | python3 -c "
+import json, sys
+from collections import defaultdict
+
+target = sys.argv[1]
+ok = sys.argv[2] == 'true'
+items = []
+groups = defaultdict(list)
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    kind, key, present, source = line.split('|', 3)
+    item = {
+        'kind': kind,
+        'key': key,
+        'present': present == 'present',
+        'source': source,
+    }
+    items.append(item)
+    if kind.startswith('one_of_'):
+        groups[kind].append(item)
+
+missing_required = [item['key'] for item in items if item['kind'] == 'required' and not item['present']]
+missing_one_of = []
+for kind, group in sorted(groups.items()):
+    if not any(item['present'] for item in group):
+        missing_one_of.append([item['key'] for item in group])
+
+print(json.dumps({
+    'target': target,
+    'ok': ok,
+    'items': items,
+    'missing_required': missing_required,
+    'missing_one_of': missing_one_of,
+}, indent=2))
+" "$target_label" "$ok"
+        return $([[ "$ok" == "true" ]] && echo 0 || echo 1)
+    fi
+
+    echo "agent-do creds check $target_label"
+    for entry in "${status_lines[@]}"; do
+        IFS='|' read -r kind key present source <<<"$entry"
+        local label="$kind"
+        [[ "$kind" == one_of_* ]] && label="one_of"
+        printf '  %-8s %-24s %s' "$label" "$key" "$present"
+        [[ "$present" == present ]] && printf ' (%s)' "$source"
+        printf '\n'
+    done
+
+    if [[ "$ok" == "true" ]]; then
+        echo "  status   ready"
+        return 0
+    fi
+
+    if [[ ${#missing_required[@]} -gt 0 ]]; then
+        echo "  missing  ${missing_required[*]}"
+    fi
+    if [[ ${#missing_groups[@]} -gt 0 ]]; then
+        echo "  missing  at least one secret from each one_of group"
+    fi
+    echo "  status   missing"
+    return 1
+}
+
+cmd_export() {
+    local tool=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --tool) tool="$2"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+
+    local keys=()
+    if [[ -n "$tool" ]]; then
+        mapfile -t keys < <(registry_credentials_json "$tool" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if data.get('error'):
+    raise SystemExit(1)
+for key in data.get('keys', []):
+    print(key)
+" 2>/dev/null)
+        [[ ${#keys[@]} -gt 0 ]] || return 1
+    else
+        [[ $# -gt 0 ]] || { echo "Usage: agent-creds export <KEY...> | --tool <tool>" >&2; return 1; }
+        keys=("$@")
+    fi
+
+    local had_error="false"
+    local key
+    for key in "${keys[@]}"; do
+        if creds_has "$key"; then
+            creds_export_line "$key"
+        else
+            echo "# missing: $key" >&2
+            had_error="true"
+        fi
+    done
+
+    [[ "$had_error" == "false" ]]
+}
+
+case "${1:-help}" in
+    store)
+        shift
+        cmd_store "$@"
+        ;;
+    get)
+        shift
+        cmd_get "$@"
+        ;;
+    delete|del|rm)
+        shift
+        cmd_delete "$@"
+        ;;
+    list|ls)
+        shift
+        cmd_list "$@"
+        ;;
+    check)
+        shift
+        cmd_check "$@"
+        ;;
+    required)
+        shift
+        cmd_required "$@"
+        ;;
+    export)
+        shift
+        cmd_export "$@"
+        ;;
+    platform)
+        echo "$AGENT_DO_CREDS_PLATFORM"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: ${1:-}" >&2
+        echo "Try: agent-creds --help" >&2
+        exit 1
+        ;;
+esac

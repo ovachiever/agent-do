@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
+- `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.
+- `lib/creds-helper.sh` as a shared secure-store backend for macOS Keychain, Linux Secret Service, and a Windows DPAPI-backed per-user store.
+- Registry-level `credentials` metadata so tools can declare which secret env vars they need.
+
+### Changed
+- Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
+- `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
+- Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
+- Docs and smoke tests now cover the new credential workflow.
+
 ## v1.1 — 2026-04-11
 
 ### Added

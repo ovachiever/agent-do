@@ -6,21 +6,112 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOLS_DIR="$SCRIPT_DIR/../tools"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TOOLS_DIR="$ROOT_DIR/tools"
+CREDS_TOOL="$TOOLS_DIR/agent-creds"
+
+resolve_tool_path() {
+    local name="$1"
+
+    if [[ -d "$TOOLS_DIR/agent-$name" && -x "$TOOLS_DIR/agent-$name/agent-$name" ]]; then
+        echo "$TOOLS_DIR/agent-$name/agent-$name"
+        return 0
+    fi
+
+    if [[ -f "$TOOLS_DIR/agent-$name" && -x "$TOOLS_DIR/agent-$name" ]]; then
+        echo "$TOOLS_DIR/agent-$name"
+        return 0
+    fi
+
+    return 1
+}
+
+credential_check() {
+    local name="$1"
+    [[ -x "$CREDS_TOOL" ]] || return 0
+
+    local payload
+    payload=$("$CREDS_TOOL" check --tool "$name" --json 2>/dev/null || true)
+    [[ -n "$payload" ]] || return 0
+
+    python3 - "$payload" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+items = payload.get("items") or []
+if not items:
+    print("SKIP|")
+    raise SystemExit(0)
+
+if payload.get("ok"):
+    sources = sorted({item.get("source") for item in items if item.get("present") and item.get("source")})
+    note = "credentials configured"
+    if sources:
+        note = f"credentials from {', '.join(sources)}"
+    print(f"OK|{note}")
+    raise SystemExit(0)
+
+parts = []
+missing_required = payload.get("missing_required") or []
+missing_one_of = payload.get("missing_one_of") or []
+if missing_required:
+    parts.append("missing " + ", ".join(missing_required))
+for group in missing_one_of:
+    parts.append("need one of: " + " | ".join(group))
+
+print("CONF|" + "; ".join(parts))
+PY
+}
+
+merge_credential_status() {
+    local current_status="$1"
+    local current_note="$2"
+    local credential_result="$3"
+
+    [[ -n "$credential_result" ]] || {
+        printf '%s|%s\n' "$current_status" "$current_note"
+        return 0
+    }
+
+    local credential_status="${credential_result%%|*}"
+    local credential_note="${credential_result#*|}"
+
+    if [[ "$credential_status" == "SKIP" ]]; then
+        printf '%s|%s\n' "$current_status" "$current_note"
+        return 0
+    fi
+
+    if [[ "$current_status" == "WARN" || "$current_status" == "MISS" ]]; then
+        printf '%s|%s\n' "$current_status" "$current_note"
+        return 0
+    fi
+
+    if [[ "$credential_status" == "CONF" ]]; then
+        local merged_note="$credential_note"
+        if [[ -n "$current_note" && "$current_note" != "$credential_note" ]]; then
+            merged_note="$current_note; $credential_note"
+        elif [[ -n "$current_note" ]]; then
+            merged_note="$current_note"
+        fi
+        printf 'CONF|%s\n' "$merged_note"
+        return 0
+    fi
+
+    if [[ -z "$current_note" && -n "$credential_note" ]]; then
+        printf '%s|%s\n' "$current_status" "$credential_note"
+    else
+        printf '%s|%s\n' "$current_status" "$current_note"
+    fi
+}
 
 check_tool() {
     local name="$1"
     local tool_path=""
 
     # Find tool
-    if [[ -d "$TOOLS_DIR/agent-$name" ]]; then
-        tool_path="$TOOLS_DIR/agent-$name/agent-$name"
-    elif [[ -f "$TOOLS_DIR/agent-$name" ]]; then
-        tool_path="$TOOLS_DIR/agent-$name"
-    fi
-
-    if [[ -z "$tool_path" ]] || [[ ! -x "$tool_path" ]]; then
-        echo "  MISS  $name  (not found)"
+    if ! tool_path="$(resolve_tool_path "$name")"; then
+        echo "  ✗  MISS  $name  (not found)"
         return 1
     fi
 
@@ -77,17 +168,10 @@ check_tool() {
                     status="WARN"; note="kubectl not found"
                 fi
                 ;;
-            slack)
-                [[ -n "${SLACK_TOKEN:-}" ]] && { status="OK"; note="token set"; } || { status="CONF"; note="SLACK_TOKEN not set"; }
-                ;;
-            notion)
-                [[ -n "${NOTION_TOKEN:-}" ]] && { status="OK"; note="token set"; } || { status="CONF"; note="NOTION_TOKEN not set"; }
-                ;;
-            linear)
-                [[ -n "${LINEAR_API_KEY:-}" ]] && { status="OK"; note="key set"; } || { status="CONF"; note="LINEAR_API_KEY not set"; }
-                ;;
-            discord)
-                [[ -n "${DISCORD_TOKEN:-}" ]] && { status="OK"; note="token set"; } || { status="CONF"; note="DISCORD_TOKEN not set"; }
+            okta)
+                if [[ -z "${OKTA_DOMAIN:-}" ]]; then
+                    status="CONF"; note="OKTA_DOMAIN not set"
+                fi
                 ;;
             tui)
                 command -v tmux &>/dev/null && { status="OK"; } || { status="WARN"; note="tmux not found"; }
@@ -102,6 +186,12 @@ check_tool() {
                 status="OK"
                 ;;
         esac
+
+        local credential_result merged
+        credential_result="$(credential_check "$name" 2>/dev/null || true)"
+        merged="$(merge_credential_status "$status" "$note" "$credential_result")"
+        status="${merged%%|*}"
+        note="${merged#*|}"
 
         local icon="✓"
         [[ "$status" == "WARN" ]] && icon="⚠"
@@ -142,7 +232,8 @@ main() {
     local ok=0 warn=0 conf=0 miss=0
 
     for name in $(echo "${tools[@]}" | tr ' ' '\n' | sort -u); do
-        result=$(check_tool "$name" 2>/dev/null || echo "  ✗  MISS  $name")
+        result="$(check_tool "$name" 2>/dev/null || true)"
+        [[ -n "$result" ]] || result="  ✗  MISS  $name"
         echo "$result"
         case "$result" in
             *"OK"*) ok=$((ok + 1)) ;;
@@ -155,7 +246,7 @@ main() {
     echo ""
     echo "Summary: $ok ready, $warn warnings, $conf need config, $miss missing"
     echo ""
-    echo "Legend: ✓ OK = ready  ⚠ WARN = missing dependency  ○ CONF = needs env var"
+    echo "Legend: ✓ OK = ready  ⚠ WARN = missing dependency  ○ CONF = needs config or credentials"
 }
 
 main "$@"

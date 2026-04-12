@@ -155,10 +155,14 @@ CHECK if agent-do has a tool:
     agent-do suggest "task"               # likely tool/command for a task
     agent-do suggest --project            # likely tools for this repo
     agent-do find <keyword>               # keyword search across tools
+    agent-do creds check --tool <tool>    # check declared tool credentials
+    agent-do creds store <ENV_VAR> --stdin # store a secret in the secure store
+    agent-do spec list                    # list repo-local specs and changes
+    agent-do spec status --change <id>    # inspect one change package
     agent-do --health                     # Dependency readiness
     agent-do bootstrap --recommend        # Detect pending project setup
     agent-do nudges stats                 # summary of hook nudges on this machine
-    agent-do --list                       # List all 80 tools
+    agent-do --list                       # List all 82 tools
     agent-do <tool> --help                # Per-tool help
 
 Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,

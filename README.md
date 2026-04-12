@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 80 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 82 tools.
 
 ## Why It Exists
 
@@ -73,6 +73,22 @@ agent-do --health
 agent-do bootstrap --recommend
 agent-do bootstrap
 agent-do nudges stats
+```
+
+When a tool needs secrets:
+
+```bash
+agent-do creds required render
+agent-do creds store RENDER_API_KEY --stdin
+agent-do creds check --tool render
+```
+
+When the repo needs durable behavior specs and change artifacts:
+
+```bash
+agent-do spec init
+agent-do spec new add-oauth-device-flow --spec auth
+agent-do spec status --change add-oauth-device-flow
 ```
 
 When a human wants natural language routing:
@@ -155,14 +171,28 @@ agent-do manna claim mn-a1b2c3
 agent-do manna done mn-a1b2c3
 ```
 
+### `spec`
+
+Agent-facing, repo-local intended-behavior specs and change packages that stay visible in git.
+
+```bash
+agent-do spec init
+agent-do spec new add-oauth-device-flow --spec auth
+agent-do spec list --changes
+agent-do spec show add-oauth-device-flow --type change
+agent-do spec status --change add-oauth-device-flow
+```
+
 ## Tool Surface
 
-There are 80 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 82 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
 | Browser | `browse`, `unbrowse` | Browser automation, session capture, API extraction |
 | Context | `context` | Docs ingestion, search, token budgeting, annotations |
+| Credentials | `creds` | Secure secret storage and tool credential checks |
+| Specification | `spec` | Repo-local intended behavior specs and change packages |
 | Memory | `zpc` | Lessons, decisions, patterns, checkpointing |
 | Design | `dpt` | UI scoring and design critique |
 | Tracking | `manna` | Git-backed issue tracking and coordination |
@@ -251,6 +281,32 @@ agent-do bootstrap
 
 If the SessionStart hook is installed, Claude asks once at session start when bootstrap work is pending.
 
+## Credentials
+
+API-oriented tools can now resolve secrets from either:
+
+- environment variables
+- the OS secure credential store through `agent-do creds`
+
+Preferred flow:
+
+```bash
+agent-do creds required namecheap
+agent-do creds store NAMECHEAP_API_USER --stdin
+agent-do creds store NAMECHEAP_API_KEY --stdin
+agent-do creds check --tool namecheap
+```
+
+For token-based tools:
+
+```bash
+agent-do creds store RENDER_API_KEY --stdin
+agent-do creds store VERCEL_ACCESS_TOKEN --stdin
+agent-do creds store SUPABASE_ACCESS_TOKEN --stdin
+```
+
+Once stored, `agent-do` preloads those secrets before executing the matching tool, including natural-language routed runs.
+
 ## Architecture
 
 At runtime, the system is intentionally plain:
@@ -265,6 +321,7 @@ tools/agent-<name>
 The richer layers sit beside that core:
 
 - `registry.yaml` defines the catalog, examples, and shared routing metadata
+- `tools/agent-creds` and `lib/creds-helper.sh` resolve secrets from env vars or the secure store
 - `bin/intent-router` handles natural-language routing
 - `bin/pattern-matcher` handles offline matching
 - `bin/suggest` and `bin/nudges` handle discovery and local telemetry
@@ -287,9 +344,9 @@ That architecture is simple on purpose. The point is not to hide the tool surfac
 ```bash
 AGENT_DO_HOME         # Config and state directory, default: ~/.agent-do
 ANTHROPIC_API_KEY     # Required for natural-language mode
-RENDER_API_KEY        # Render
-VERCEL_ACCESS_TOKEN   # Vercel
-SUPABASE_ACCESS_TOKEN # Supabase
+RENDER_API_KEY        # Render, or store with: agent-do creds store RENDER_API_KEY --stdin
+VERCEL_ACCESS_TOKEN   # Vercel, or store with: agent-do creds store VERCEL_ACCESS_TOKEN --stdin
+SUPABASE_ACCESS_TOKEN # Supabase, or store with: agent-do creds store SUPABASE_ACCESS_TOKEN --stdin
 GCP_SERVICE_ACCOUNT   # Google Cloud
 ```
 

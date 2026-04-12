@@ -72,6 +72,16 @@ def main() -> int:
     dpt_context = dpt_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do dpt score" in dpt_context, f"expected DPT routing context, got: {dpt_context}")
 
+    spec_prompt_result = run(
+        "python3",
+        "hooks/agent-do-prompt-router.py",
+        input_text='{"prompt":"write a change proposal and spec package for this feature"}',
+    )
+    require(spec_prompt_result.returncode == 0, f"spec prompt-router failed: {spec_prompt_result.stderr}")
+    spec_prompt_payload = json.loads(spec_prompt_result.stdout)
+    spec_prompt_context = spec_prompt_payload["hookSpecificOutput"]["additionalContext"]
+    require("agent-do spec" in spec_prompt_context, f"expected spec routing context, got: {spec_prompt_context}")
+
     playwright_nudge = run(
         "python3",
         "hooks/agent-do-pretooluse-check.py",

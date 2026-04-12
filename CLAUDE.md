@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 80 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 82 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
 - **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
 
@@ -16,6 +16,10 @@ agent-do is a universal automation CLI for AI agents with 80 specialized tools. 
 ./agent-do suggest "task"              # Recommend a likely tool/command
 ./agent-do suggest --project           # Recommend likely tools for this repo
 ./agent-do find playwright             # Search tools by keyword
+./agent-do creds check --tool render   # Check a tool's declared credentials
+./agent-do creds required namecheap    # Show which secrets a tool expects
+./agent-do spec init                   # Initialize repo-local spec storage
+./agent-do spec status --change id     # Check one change package
 ./agent-do nudges stats                # Local nudge telemetry summary
 ./agent-do <tool> --help               # Tool-specific help
 ./agent-do --status                    # Active sessions and state
@@ -95,7 +99,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 80 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 82 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
 ```
 
@@ -185,9 +189,9 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `AGENT_DO_HOME`: Config/state directory (default: `~/.agent-do`)
 - `ANTHROPIC_API_KEY`: Required for natural language mode and `--dry-run`/`--how`
 - `MANNA_SESSION_ID`: Override session ID for agent-manna
-- `RENDER_API_KEY`: API key for agent-render (Render.com)
-- `VERCEL_ACCESS_TOKEN`: API token for agent-vercel (Vercel)
-- `SUPABASE_ACCESS_TOKEN`: API token for agent-supabase (Supabase)
+- `RENDER_API_KEY`: API key for agent-render (Render.com), or store with `agent-do creds store RENDER_API_KEY --stdin`
+- `VERCEL_ACCESS_TOKEN`: API token for agent-vercel (Vercel), or store with `agent-do creds store VERCEL_ACCESS_TOKEN --stdin`
+- `SUPABASE_ACCESS_TOKEN`: API token for agent-supabase (Supabase), or store with `agent-do creds store SUPABASE_ACCESS_TOKEN --stdin`
 - `GCP_SERVICE_ACCOUNT`: Path to service account JSON key for agent-gcp
 - `GCP_ACCESS_TOKEN`: Bearer token for agent-gcp (alternative to service account)
 - `GCP_PROJECT`: Default GCP project ID for agent-gcp
@@ -199,3 +203,5 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 - `NAMECHEAP_API_USER`: API username for agent-namecheap
 - `NAMECHEAP_API_KEY`: API key for agent-namecheap
 - `NAMECHEAP_CLIENT_IP`: Whitelisted IP for agent-namecheap (auto-detected if not set)
+
+Prefer `agent-do creds` for secret material when possible. The dispatcher, intent router, and health checker resolve declared tool secrets from the secure store automatically.
