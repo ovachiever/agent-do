@@ -99,6 +99,13 @@ agent-do auth init widgethub --domain app.example.com --login-url https://app.ex
 agent-do auth ensure widgethub --strategy provider-refresh
 ```
 
+When a site emails a verification code or magic link:
+
+```bash
+agent-do auth init widgethub --domain app.example.com --login-url https://app.example.com/login --email-code --email-from WidgetHub --email-subject "verification code"
+agent-do auth ensure widgethub
+```
+
 When the repo needs durable behavior specs and change artifacts:
 
 ```bash
@@ -201,6 +208,19 @@ agent-do auth validate github
 Known profiles like GitHub and Google now use explicit login adapters before falling back to generic form fill. If a TOTP challenge appears and the provider profile declares a secret name, `agent-do auth ensure` reports the exact missing key instead of silently stalling in a partial login flow.
 
 Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in.
+
+Profiles can also declare mailbox-driven challenges with `--email-code` or `--magic-link`. In that mode `agent-do auth` uses `agent-do email` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw mailbox scraping.
+
+### `email`
+
+Inbox querying for agent workflows, including verification code and magic link extraction.
+
+```bash
+agent-do email snapshot --json
+agent-do email latest --from WidgetHub --json
+agent-do email code --from WidgetHub --subject "verification code"
+agent-do email link --from WidgetHub --domain app.example.com
+```
 
 ### `resend`
 

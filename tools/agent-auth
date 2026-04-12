@@ -34,6 +34,13 @@ CONFIG_PATH = AUTH_ROOT / "config.yaml"
 SITE_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 AUTH_MASTER_KEY_NAME = "AUTH_SESSION_MASTER_KEY_V1"
 
+
+class ActionRequiredError(RuntimeError):
+    def __init__(self, action_required: str, message: str, *, missing: list[str] | None = None):
+        super().__init__(message)
+        self.action_required = action_required
+        self.missing = missing or []
+
 KNOWN_PROFILES: dict[str, dict[str, Any]] = {
     "github": {
         "id": "github",
@@ -421,6 +428,11 @@ def creds_cmd() -> list[str]:
     return tool_cmd_from_env("AGENT_DO_AUTH_CREDS_CMD", default)
 
 
+def email_cmd() -> list[str]:
+    default = [str(ROOT / "tools" / "agent-email")]
+    return tool_cmd_from_env("AGENT_DO_AUTH_EMAIL_CMD", default)
+
+
 def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, text=True, capture_output=True, check=False)
 
@@ -434,6 +446,17 @@ def run_browse(*args: str) -> dict[str, Any]:
         message = payload.get("error") or payload.get("message") or json.dumps(payload)
         raise RuntimeError(str(message))
     return payload.get("data") or payload.get("result") or payload
+
+
+def run_email_json(*args: str) -> dict[str, Any]:
+    proc = run_tool([*email_cmd(), "--json", *args])
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"email failed: {' '.join(args)}"
+        raise RuntimeError(detail)
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("ok") is False:
+        raise RuntimeError(payload.get("message") or "email command failed")
+    return payload
 
 
 def resolve_secret(key: str | None) -> str | None:
@@ -621,6 +644,13 @@ def provider_refresh_config(profile: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def email_challenge_config(profile: dict[str, Any]) -> dict[str, Any]:
+    config = profile.get("email_challenge") or {}
+    if isinstance(config, dict):
+        return config
+    return {}
+
+
 def wait_for_settle() -> None:
     try:
         run_browse("wait", "--stable")
@@ -655,23 +685,104 @@ def complete_totp_if_present(
     return []
 
 
+def complete_email_challenge_if_present(profile: dict[str, Any]) -> list[str]:
+    challenge = email_challenge_config(profile)
+    if not challenge:
+        return []
+
+    challenge_type = str(challenge.get("type") or "code").strip().lower()
+    timeout_seconds = int(challenge.get("timeout_seconds") or 120)
+    poll_seconds = int(challenge.get("poll_interval_seconds") or 5)
+    from_filter = str(challenge.get("from_contains") or "").strip()
+    subject_filter = str(challenge.get("subject_contains") or "").strip()
+    contains_filter = str(challenge.get("contains") or "").strip()
+    unread_only = bool(challenge.get("unread", True))
+
+    common_args: list[str] = []
+    if from_filter:
+        common_args.extend(["--from", from_filter])
+    if subject_filter:
+        common_args.extend(["--subject", subject_filter])
+    if contains_filter:
+        common_args.extend(["--contains", contains_filter])
+    if unread_only:
+        common_args.append("--unread")
+    common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
+
+    try:
+        if challenge_type == "link":
+            link_args = ["link", *common_args]
+            domain = str(challenge.get("domain") or "").strip()
+            if domain:
+                link_args.extend(["--domain", domain])
+            payload = run_email_json(*link_args)
+            link = str(payload.get("link") or "")
+            if not link:
+                raise RuntimeError("No magic link returned from email lookup")
+            run_browse("open", link)
+            wait_for_settle()
+            return []
+
+        input_selectors = list(
+            challenge.get("input_selectors")
+            or [
+                'input[autocomplete="one-time-code"]',
+                'input[name="code"]',
+                'input[id*="code"]',
+                'input[name*="code"]',
+            ]
+        )
+        submit_selectors = list(
+            challenge.get("submit_selectors")
+            or ['button[type="submit"]', 'input[type="submit"]', 'button[type="button"]']
+        )
+        selector = first_existing_selector(input_selectors)
+        if not selector:
+            raise ActionRequiredError(
+                "EMAIL_CHALLENGE_FIELD_MISSING",
+                "Email challenge is configured but no verification code field is visible on the page",
+            )
+        code_args = ["code", *common_args]
+        code_regex = str(challenge.get("code_regex") or "").strip()
+        code_length = challenge.get("code_length")
+        if code_regex:
+            code_args.extend(["--regex", code_regex])
+        elif code_length:
+            code_args.extend(["--length", str(code_length)])
+        payload = run_email_json(*code_args)
+        code = str(payload.get("code") or "")
+        if not code:
+            raise RuntimeError("No verification code returned from email lookup")
+        run_browse("fill", selector, code)
+        wait_brief()
+        click_first_selector(submit_selectors)
+        wait_for_settle()
+        return []
+    except ActionRequiredError:
+        raise
+    except RuntimeError as exc:
+        raise ActionRequiredError("EMAIL_CHALLENGE_TIMEOUT", str(exc))
+
+
 def login_with_generic(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
     login_url = profile.get("login_url")
     if login_url:
         run_browse("open", str(login_url))
     run_browse("auth", "autofill", str(username), str(password), "--submit")
     wait_for_settle()
-    return complete_totp_if_present(
+    missing = complete_totp_if_present(
         profile,
         totp_secret,
         selectors=[
             'input[autocomplete="one-time-code"]',
             'input[name="otp"]',
             'input[name="totp"]',
-            'input[name="code"]',
         ],
         submit_selectors=['button[type="submit"]', 'input[type="submit"]'],
     )
+    if missing:
+        return missing
+    return complete_email_challenge_if_present(profile)
 
 
 def login_with_github(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -702,7 +813,7 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
 
     click_first_selector(['input[name="commit"]', 'input[type="submit"]', 'button[type="submit"]'])
     wait_for_settle()
-    return complete_totp_if_present(
+    missing = complete_totp_if_present(
         profile,
         totp_secret,
         selectors=[
@@ -712,6 +823,9 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
         ],
         submit_selectors=['button[type="submit"]', 'input[type="submit"]'],
     )
+    if missing:
+        return missing
+    return complete_email_challenge_if_present(profile)
 
 
 def login_with_google(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -746,7 +860,7 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
 
     click_first_selector(["#passwordNext", "#passwordNext button", 'button[type="button"]'])
     wait_for_settle()
-    return complete_totp_if_present(
+    missing = complete_totp_if_present(
         profile,
         totp_secret,
         selectors=[
@@ -755,6 +869,9 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
         ],
         submit_selectors=["#totpNext", "#totpNext button", 'button[type="button"]'],
     )
+    if missing:
+        return missing
+    return complete_email_challenge_if_present(profile)
 
 
 def run_site_login_adapter(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -843,6 +960,8 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
     if consent_selectors and first_existing_selector(consent_selectors):
         click_first_selector(consent_selectors)
         wait_for_settle()
+
+    complete_email_challenge_if_present(profile)
 
     validation = apply_validation(site, profile)
     if validation["ok"]:
@@ -1011,6 +1130,27 @@ def cmd_init(args: argparse.Namespace) -> int:
     if args.no_site_creds:
         profile["strategies"] = [entry for entry in profile.get("strategies", []) if entry != "site-creds"]
         profile.get("credentials", {}).pop("site", None)
+    if args.email_code or args.magic_link:
+        challenge_type = "link" if args.magic_link else "code"
+        challenge: dict[str, Any] = {
+            "type": challenge_type,
+            "unread": True,
+            "timeout_seconds": int(args.email_timeout),
+            "poll_interval_seconds": int(args.email_interval),
+        }
+        if args.email_from:
+            challenge["from_contains"] = args.email_from
+        if args.email_subject:
+            challenge["subject_contains"] = args.email_subject
+        if args.email_contains:
+            challenge["contains"] = args.email_contains
+        if args.email_domain and challenge_type == "link":
+            challenge["domain"] = args.email_domain
+        if args.email_code_length and challenge_type == "code":
+            challenge["code_length"] = int(args.email_code_length)
+        if args.email_code_regex and challenge_type == "code":
+            challenge["code_regex"] = args.email_code_regex
+        profile["email_challenge"] = challenge
     try:
         path = write_profile(profile, force=args.force)
     except FileExistsError as exc:
@@ -1289,6 +1429,12 @@ def cmd_instructions(args: argparse.Namespace) -> int:
             guidance.append(
                 f"Provider refresh can reuse {provider_display_name(provider_type(profile))} auth to complete SSO into this site."
             )
+        if email_challenge_config(profile):
+            challenge = email_challenge_config(profile)
+            challenge_type = str(challenge.get("type") or "code")
+            guidance.append(
+                f"Email challenge is configured ({challenge_type}). agent-do auth will use agent-do email to wait for the matching message."
+            )
         if "site-creds" in strategies:
             site_creds = ((profile.get("credentials") or {}).get("site") or {})
             username_key = site_creds.get("username")
@@ -1425,7 +1571,20 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
         elif strategy == "site-creds":
             attempted.append(strategy)
-            ok, missing = site_creds_login(args.site, profile, name=name)
+            try:
+                ok, missing = site_creds_login(args.site, profile, name=name)
+            except ActionRequiredError as exc:
+                payload = {
+                    "site": args.site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": attempted,
+                    "action_required": exc.action_required,
+                    "missing": exc.missing,
+                    "message": str(exc),
+                }
+                print(json.dumps(payload, indent=2) if args.json else payload["message"])
+                return 1
             if ok:
                 meta = get_session_meta(args.site, name) or {}
                 payload = {
@@ -1452,7 +1611,20 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
         elif strategy == "provider-refresh":
             attempted.append(strategy)
-            ok, missing, provider_strategy = provider_refresh_login(args.site, profile, name=name)
+            try:
+                ok, missing, provider_strategy = provider_refresh_login(args.site, profile, name=name)
+            except ActionRequiredError as exc:
+                payload = {
+                    "site": args.site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": attempted,
+                    "action_required": exc.action_required,
+                    "missing": exc.missing,
+                    "message": str(exc),
+                }
+                print(json.dumps(payload, indent=2) if args.json else payload["message"])
+                return 1
             if ok:
                 meta = get_session_meta(args.site, name) or {}
                 payload = {
@@ -1506,6 +1678,16 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--login-url")
     init_parser.add_argument("--browser")
     init_parser.add_argument("--provider", choices=["generic", "github", "google"])
+    init_parser.add_argument("--email-code", action="store_true")
+    init_parser.add_argument("--magic-link", action="store_true")
+    init_parser.add_argument("--email-from")
+    init_parser.add_argument("--email-subject")
+    init_parser.add_argument("--email-contains")
+    init_parser.add_argument("--email-domain")
+    init_parser.add_argument("--email-timeout", type=int, default=120)
+    init_parser.add_argument("--email-interval", type=int, default=5)
+    init_parser.add_argument("--email-code-length", type=int)
+    init_parser.add_argument("--email-code-regex")
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--no-browser-import", action="store_true")
     init_parser.add_argument("--no-site-creds", action="store_true")

@@ -13,6 +13,10 @@ Commands:
   search <query>             Search emails
   count                      Count unread emails
   snapshot                   Inbox state as JSON (accounts, unread, recent messages)
+  latest                     Show latest matching message
+  wait                       Wait for a matching message
+  code                       Extract verification code from latest/waited message
+  link                       Extract magic link from latest/waited message
 
 Options:
   --body <text>              Email body
@@ -21,6 +25,16 @@ Options:
   --cc <email>               CC recipient
   --bcc <email>              BCC recipient
   --from <email>             From address (if supported)
+  --subject <text>           Subject contains filter
+  --contains <text>          Body or subject contains filter
+  --unread                   Only consider unread messages
+  --limit <n>                Maximum messages to inspect
+  --timeout <seconds>        Wait timeout for wait/code/link
+  --interval <seconds>       Poll interval for wait/code/link
+  --length <n>               Preferred verification code length
+  --regex <pattern>          Explicit regex for verification code extraction
+  --domain <host>            Restrict extracted link to a domain
+  --json                     Output JSON for query commands
 
 Environment:
   SMTP_HOST                  SMTP server
@@ -28,12 +42,15 @@ Environment:
   SMTP_USER                  SMTP username
   SMTP_PASS                  SMTP password
   EMAIL_FROM                 Default from address
+  AGENT_EMAIL_FIXTURE        JSON fixture file for tests or offline development
 
 Examples:
   agent-email send user@example.com "Hello" --body "Hi there!"
   agent-email send user@example.com "Report" --file report.txt --attach data.csv
   agent-email read
   agent-email search "invoice"
+  agent-email code --from login@example.com --subject "verification code"
+  agent-email link --from auth@example.com --domain app.example.com
 EOF
 }
 
@@ -239,90 +256,379 @@ cmd_count() {
 }
 
 cmd_snapshot() {
-    if [[ "$(uname)" == "Darwin" ]]; then
-        python3 -c "
-import subprocess, json
-
-def osascript(script):
-    r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=10)
-    return r.stdout.strip()
-
-try:
-    # Get unread count
-    unread = osascript('tell application \"Mail\" to return unread count of inbox')
-    unread = int(unread) if unread.isdigit() else 0
-
-    # Get mailbox counts
-    mailbox_script = '''
-    tell application \"Mail\"
-        set output to \"\"
-        repeat with acct in accounts
-            set acctName to name of acct
-            set acctType to account type of acct as string
-            set output to output & acctName & \"\t\" & acctType & \"\n\"
-        end repeat
-        return output
-    end tell
-    '''
-    acct_raw = osascript(mailbox_script)
-    accounts = []
-    for line in acct_raw.strip().split('\n'):
-        if not line.strip():
-            continue
-        parts = line.split('\t')
-        accounts.append({
-            'name': parts[0] if parts else '',
-            'type': parts[1] if len(parts) > 1 else '',
-        })
-
-    # Get recent messages from inbox (last 10)
-    recent_script = '''
-    tell application \"Mail\"
-        set msgs to messages 1 thru (minimum of {10, count of messages of inbox}) of inbox
-        set output to \"\"
-        repeat with m in msgs
-            set subj to subject of m
-            set sndr to extract name from sender of m
-            set isRead to read status of m
-            set dt to date received of m
-            set readStr to \"read\"
-            if not isRead then set readStr to \"unread\"
-            set output to output & subj & \"\t\" & sndr & \"\t\" & readStr & \"\t\" & (dt as string) & \"\n\"
-        end repeat
-        return output
-    end tell
-    '''
-    recent_raw = osascript(recent_script)
-    recent = []
-    for line in recent_raw.strip().split('\n'):
-        if not line.strip():
-            continue
-        parts = line.split('\t')
-        recent.append({
-            'subject': parts[0] if parts else '',
-            'from': parts[1] if len(parts) > 1 else '',
-            'status': parts[2] if len(parts) > 2 else '',
-            'date': parts[3] if len(parts) > 3 else '',
-        })
-
-    snapshot = {
-        'platform': 'macOS Mail.app',
-        'accounts': {'count': len(accounts), 'items': accounts},
-        'inbox_unread': unread,
-        'recent_messages': {'count': len(recent), 'items': recent},
-    }
-    print(json.dumps(snapshot, indent=2))
-
-except subprocess.TimeoutExpired:
-    print(json.dumps({'error': 'Mail.app timed out - may not be running'}))
-except Exception as e:
-    print(json.dumps({'error': str(e)}))
-"
-    else
-        echo '{"error": "Email snapshot requires macOS Mail.app. Configure IMAP for cross-platform support."}'
-        return 1
-    fi
+    mail_query_python snapshot "$@"
 }
+
+mail_query_python() {
+    python3 - "$@" <<'PYTHON'
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+OUTPUT_JSON = os.environ.get("AGENT_EMAIL_OUTPUT_JSON") == "1"
+FIXTURE_PATH = os.environ.get("AGENT_EMAIL_FIXTURE")
+
+
+def emit(payload, *, raw=None):
+    if OUTPUT_JSON:
+        print(json.dumps(payload, indent=2))
+        return
+    if raw is not None:
+        print(raw)
+    else:
+        print(json.dumps(payload, indent=2))
+
+
+def fail(message: str, *, code: int = 1, extra=None):
+    payload = {"ok": False, "message": message}
+    if extra:
+        payload.update(extra)
+    if OUTPUT_JSON:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_fixture():
+    if not FIXTURE_PATH:
+        return None
+    path = Path(FIXTURE_PATH)
+    if not path.exists():
+        fail(f"fixture not found: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {"messages": payload}
+    fail("fixture payload must be a JSON object or array")
+
+
+def run_osascript(script: str, timeout: int = 15) -> str:
+    proc = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "osascript failed")
+    return proc.stdout.strip()
+
+
+def fetch_mail_data(limit: int = 20):
+    fixture = load_fixture()
+    if fixture is not None:
+        messages = fixture.get("messages", [])
+        unread = fixture.get("inbox_unread")
+        if unread is None:
+            unread = sum(1 for item in messages if str(item.get("status", "")).lower() == "unread" or item.get("read") is False)
+        return {
+            "platform": fixture.get("platform", "fixture"),
+            "accounts": fixture.get("accounts", {"count": 0, "items": []}),
+            "inbox_unread": unread,
+            "messages": normalize_messages(messages)[:limit],
+        }
+
+    if sys.platform != "darwin":
+        fail("Email querying currently requires macOS Mail.app or AGENT_EMAIL_FIXTURE")
+
+    field_sep = chr(31)
+    record_sep = chr(30)
+    unread_raw = run_osascript('tell application "Mail" to return unread count of inbox')
+    unread = int(unread_raw) if unread_raw.isdigit() else 0
+
+    accounts_script = f'''
+    tell application "Mail"
+        set fieldSep to ASCII character 31
+        set recordSep to ASCII character 30
+        set output to ""
+        repeat with acct in accounts
+            set output to output & (name of acct as string) & fieldSep & (account type of acct as string) & recordSep
+        end repeat
+        return output
+    end tell
+    '''
+    accounts_raw = run_osascript(accounts_script, timeout=10)
+    accounts = []
+    for row in [item for item in accounts_raw.split(record_sep) if item]:
+        parts = row.split(field_sep)
+        accounts.append({"name": parts[0] if len(parts) > 0 else "", "type": parts[1] if len(parts) > 1 else ""})
+
+    messages_script = f'''
+    tell application "Mail"
+        set fieldSep to ASCII character 31
+        set recordSep to ASCII character 30
+        set maxCount to {max(1, int(limit))}
+        set inboxCount to count of messages of inbox
+        if inboxCount is 0 then return ""
+        set msgCount to maxCount
+        if inboxCount < maxCount then set msgCount to inboxCount
+        set msgs to messages 1 thru msgCount of inbox
+        set output to ""
+        repeat with m in msgs
+            set msgId to ""
+            try
+                set msgId to message id of m as string
+            end try
+            set subj to subject of m as string
+            set sndr to sender of m as string
+            set isRead to read status of m as string
+            set dt to date received of m as string
+            set bodyText to content of m as string
+            set output to output & msgId & fieldSep & subj & fieldSep & sndr & fieldSep & isRead & fieldSep & dt & fieldSep & bodyText & recordSep
+        end repeat
+        return output
+    end tell
+    '''
+    messages_raw = run_osascript(messages_script, timeout=25)
+    messages = []
+    for row in [item for item in messages_raw.split(record_sep) if item]:
+        parts = row.split(field_sep)
+        messages.append(
+            {
+                "id": parts[0] if len(parts) > 0 else "",
+                "subject": parts[1] if len(parts) > 1 else "",
+                "from": parts[2] if len(parts) > 2 else "",
+                "status": "read" if (parts[3] if len(parts) > 3 else "").lower() == "true" else "unread",
+                "date": parts[4] if len(parts) > 4 else "",
+                "body": parts[5] if len(parts) > 5 else "",
+            }
+        )
+
+    return {
+        "platform": "macOS Mail.app",
+        "accounts": {"count": len(accounts), "items": accounts},
+        "inbox_unread": unread,
+        "messages": normalize_messages(messages),
+    }
+
+
+def normalize_messages(messages):
+    normalized = []
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "")).lower()
+        read_value = item.get("read")
+        if read_value is True:
+            status = "read"
+        elif read_value is False:
+            status = "unread"
+        elif status not in {"read", "unread"}:
+            status = "read"
+        normalized.append(
+            {
+                "id": str(item.get("id") or item.get("message_id") or f"message-{index+1}"),
+                "subject": str(item.get("subject", "")),
+                "from": str(item.get("from") or item.get("sender") or ""),
+                "status": status,
+                "date": str(item.get("date", "")),
+                "body": str(item.get("body") or item.get("content") or ""),
+            }
+        )
+    return normalized
+
+
+def matches(message, args):
+    subject = message.get("subject", "").lower()
+    sender = message.get("from", "").lower()
+    body = message.get("body", "").lower()
+    text = f"{subject}\n{body}"
+    if args.from_filter and args.from_filter.lower() not in sender:
+        return False
+    if args.subject_filter and args.subject_filter.lower() not in subject:
+        return False
+    if args.contains and args.contains.lower() not in text:
+        return False
+    if args.unread and message.get("status") != "unread":
+        return False
+    return True
+
+
+def filtered_messages(args):
+    data = fetch_mail_data(limit=args.limit)
+    matches_list = [item for item in data["messages"] if matches(item, args)]
+    return data, matches_list
+
+
+def extract_code(message, args):
+    text = f"{message.get('subject', '')}\n{message.get('body', '')}"
+    if args.regex:
+        pattern = re.compile(args.regex)
+    else:
+        if args.length:
+            pattern = re.compile(rf"(?<!\d)(\d{{{args.length}}})(?!\d)")
+        else:
+            pattern = re.compile(r"(?<!\d)(\d{6,8})(?!\d)")
+    match = pattern.search(text)
+    if not match:
+        fail("No verification code found in matching email", extra={"message_id": message.get("id")})
+    return match.group(1) if match.groups() else match.group(0)
+
+
+def extract_link(message, args):
+    text = f"{message.get('subject', '')}\n{message.get('body', '')}"
+    links = re.findall(r"https?://[^\s<>\")']+", text)
+    if args.domain:
+        links = [item for item in links if args.domain.lower() in item.lower()]
+    if not links:
+        fail("No matching link found in email", extra={"message_id": message.get("id")})
+    return links[0]
+
+
+def wait_for_message(args):
+    deadline = time.time() + max(1, args.timeout)
+    last_count = 0
+    while True:
+        data, matches_list = filtered_messages(args)
+        last_count = len(matches_list)
+        if matches_list:
+            return data, matches_list[0]
+        if time.time() >= deadline:
+            fail(
+                "Timed out waiting for matching email",
+                extra={
+                    "timeout_seconds": args.timeout,
+                    "matched_count": last_count,
+                },
+            )
+        time.sleep(max(1, args.interval))
+
+
+def handle_snapshot(args):
+    data = fetch_mail_data(limit=args.limit)
+    payload = {
+        "ok": True,
+        "platform": data["platform"],
+        "accounts": data["accounts"],
+        "inbox_unread": data["inbox_unread"],
+        "recent_messages": {"count": len(data["messages"]), "items": data["messages"]},
+    }
+    emit(payload)
+
+
+def handle_latest(args):
+    _, matches_list = filtered_messages(args)
+    if not matches_list:
+        fail("No matching email found")
+    payload = {"ok": True, "message": matches_list[0]}
+    emit(payload, raw=json.dumps(matches_list[0], indent=2))
+
+
+def handle_wait(args):
+    _, message = wait_for_message(args)
+    payload = {"ok": True, "message": message}
+    emit(payload, raw=json.dumps(message, indent=2))
+
+
+def handle_code(args):
+    _, message = wait_for_message(args)
+    code = extract_code(message, args)
+    payload = {"ok": True, "code": code, "message": message}
+    emit(payload, raw=code)
+
+
+def handle_link(args):
+    _, message = wait_for_message(args)
+    link = extract_link(message, args)
+    payload = {"ok": True, "link": link, "message": message}
+    emit(payload, raw=link)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(add_help=False)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_filter_args(subparser):
+        subparser.add_argument("--from", dest="from_filter")
+        subparser.add_argument("--subject", dest="subject_filter")
+        subparser.add_argument("--contains")
+        subparser.add_argument("--unread", action="store_true")
+        subparser.add_argument("--limit", type=int, default=20)
+
+    snapshot = sub.add_parser("snapshot")
+    snapshot.add_argument("--limit", type=int, default=10)
+
+    latest = sub.add_parser("latest")
+    add_filter_args(latest)
+
+    wait = sub.add_parser("wait")
+    add_filter_args(wait)
+    wait.add_argument("--timeout", type=int, default=60)
+    wait.add_argument("--interval", type=int, default=5)
+
+    code = sub.add_parser("code")
+    add_filter_args(code)
+    code.add_argument("--timeout", type=int, default=120)
+    code.add_argument("--interval", type=int, default=5)
+    code.add_argument("--length", type=int)
+    code.add_argument("--regex")
+
+    link = sub.add_parser("link")
+    add_filter_args(link)
+    link.add_argument("--timeout", type=int, default=120)
+    link.add_argument("--interval", type=int, default=5)
+    link.add_argument("--domain")
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:])
+    if args.command == "snapshot":
+        handle_snapshot(args)
+    elif args.command == "latest":
+        handle_latest(args)
+    elif args.command == "wait":
+        handle_wait(args)
+    elif args.command == "code":
+        handle_code(args)
+    elif args.command == "link":
+        handle_link(args)
+    else:
+        fail("unknown command")
+
+
+if __name__ == "__main__":
+    main()
+PYTHON
+}
+
+cmd_latest() {
+    mail_query_python latest "$@"
+}
+
+cmd_wait() {
+    mail_query_python wait "$@"
+}
+
+cmd_code() {
+    mail_query_python code "$@"
+}
+
+cmd_link() {
+    mail_query_python link "$@"
+}
+
+OUTPUT_JSON=0
+FILTERED_ARGS=()
+for arg in "$@"; do
+    if [[ "$arg" == "--json" ]]; then
+        OUTPUT_JSON=1
+    else
+        FILTERED_ARGS+=("$arg")
+    fi
+done
+set -- "${FILTERED_ARGS[@]}"
+export AGENT_EMAIL_OUTPUT_JSON="$OUTPUT_JSON"
 
 # Main
 case "${1:-help}" in
@@ -342,7 +648,24 @@ case "${1:-help}" in
         cmd_count
         ;;
     snapshot|snap)
-        cmd_snapshot
+        shift || true
+        cmd_snapshot "$@"
+        ;;
+    latest)
+        shift
+        cmd_latest "$@"
+        ;;
+    wait)
+        shift
+        cmd_wait "$@"
+        ;;
+    code)
+        shift
+        cmd_code "$@"
+        ;;
+    link)
+        shift
+        cmd_link "$@"
         ;;
     help|--help|-h)
         show_help

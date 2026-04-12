@@ -137,11 +137,12 @@ tools:
     - drive provider-aware site login with secrets resolved from env or agent-do creds
     - handle GitHub and Google login shapes before falling back to generic form fill
     - resolve TOTP secrets from agent-do creds when login flows require one-time codes
+    - wait for mailbox-delivered verification codes or magic links through agent-do email
     - validate whether saved authenticated state is still usable
     - return next-step auth guidance for agents
     - reuse upstream GitHub or Google auth to complete SSO into another site
     commands:
-      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL] [--provider generic|github|google]'
+      init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL] [--provider generic|github|google] [--email-code|--magic-link]'
       list: 'List configured auth profiles: list'
       show: 'Show one auth profile: show <site>'
       status: 'Show auth state: status <site> [--name default]'
@@ -161,6 +162,8 @@ tools:
       command: agent-auth ensure github
     - intent: reuse github auth to sign into another app
       command: agent-auth ensure widgethub --strategy provider-refresh
+    - intent: initialize a site that sends email verification codes
+      command: agent-auth init widgethub --domain app.example.com --email-code --email-from WidgetHub --email-subject "verification code"
     - intent: log into github with saved creds and totp
       command: agent-auth ensure github --strategy site-creds
     - intent: log into google with saved creds and totp
@@ -994,16 +997,27 @@ tools:
     - send emails
     - read inbox
     - search messages
-    - manage folders
+    - wait for matching messages
+    - extract verification codes
+    - extract magic links
     commands:
       send: Send email
       read: Read inbox
       search: Search emails
+      snapshot: Snapshot inbox state as JSON
+      latest: Show latest matching message
+      wait: Wait for a matching message
+      code: Extract verification code from matching email
+      link: Extract magic link from matching email
     examples:
     - intent: send email to john@example.com
       command: agent-email send john@example.com
     - intent: read my inbox
       command: agent-email read
+    - intent: wait for a verification code email
+      command: agent-email code --from auth@example.com --subject "verification code"
+    - intent: get the latest magic link
+      command: agent-email link --from login@example.com --domain app.example.com
     concurrency: mixed
   calendar:
     description: Control calendar
