@@ -17,6 +17,7 @@
 - `agent-do auth` now uses provider-aware GitHub and Google login adapters for `site-creds`, with TOTP secrets resolved through `agent-do creds` when those flows require one-time codes.
 - `agent-do auth init --provider github|google` now creates SSO-first site profiles, and `provider-refresh` can reuse upstream provider auth to complete cross-site sign-in.
 - `agent-do auth` can now continue mailbox-driven login flows through `agent-do email` when a site profile declares an email code or magic-link challenge.
+- `provider-refresh` now handles provider account choosers and consent checkpoints, and stores those checkpoint selectors in auth session metadata for later inspection.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.

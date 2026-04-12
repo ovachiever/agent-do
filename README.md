@@ -207,7 +207,7 @@ agent-do auth validate github
 
 Known profiles like GitHub and Google now use explicit login adapters before falling back to generic form fill. If a TOTP challenge appears and the provider profile declares a secret name, `agent-do auth ensure` reports the exact missing key instead of silently stalling in a partial login flow.
 
-Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in.
+Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in, including account chooser and consent checkpoints when those pages appear.
 
 Profiles can also declare mailbox-driven challenges with `--email-code` or `--magic-link`. In that mode `agent-do auth` uses `agent-do email` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw mailbox scraping.
 

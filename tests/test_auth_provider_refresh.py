@@ -186,6 +186,30 @@ if command == "click":
     if page == "app_login" and selector == "text=Continue with GitHub":
         if "github" not in providers:
             fail("github session missing")
+        if os.environ.get("FAKE_GITHUB_ACCOUNT_CHOOSER", "0") == "1":
+            account_email = os.environ.get("GITHUB_EMAIL", "agent@example.com")
+            current = {
+                "page": "github_account_chooser",
+                "url": "https://github.com/account/choose",
+                "text": "Choose an account",
+                "selectors": [f"text={account_email}", f"text={account_email.split('@')[0]}"],
+                "fields": {},
+                "providers": providers,
+            }
+            save_current(current)
+            success({"clicked": True})
+        current = {
+            "page": "github_authorize",
+            "url": "https://github.com/login/oauth/authorize",
+            "text": "Authorize WidgetHub",
+            "selectors": ["text=Authorize"],
+            "fields": {},
+            "providers": providers,
+        }
+        save_current(current)
+        success({"clicked": True})
+
+    if page == "github_account_chooser" and selector in set(current.get("selectors", [])):
         current = {
             "page": "github_authorize",
             "url": "https://github.com/login/oauth/authorize",
@@ -355,6 +379,46 @@ def main() -> int:
         ensure_creds_payload = json.loads(ensure_creds.stdout)
         require(ensure_creds_payload["strategy_used"] == "provider-refresh", f"unexpected provider creds payload: {ensure_creds_payload}")
         require(ensure_creds_payload["provider_strategy_used"] == "site-creds", f"expected provider site-creds fallback: {ensure_creds_payload}")
+
+        chooser_env = base_env(tmp / "provider-chooser-case", fake_browse)
+        chooser_env["GITHUB_EMAIL"] = "agent@example.com"
+        chooser_env["FAKE_GITHUB_ACCOUNT_CHOOSER"] = "1"
+
+        init_chooser = run(
+            str(AGENT_DO),
+            "auth",
+            "init",
+            "widgethub-chooser",
+            "--domain",
+            "app.example.com",
+            "--login-url",
+            "https://app.example.com/login",
+            "--provider",
+            "github",
+            "--json",
+            cwd=ROOT,
+            env=chooser_env,
+        )
+        require(init_chooser.returncode == 0, f"widgethub-chooser init failed: {init_chooser.stderr}")
+
+        ensure_chooser = run(str(AGENT_DO), "auth", "ensure", "widgethub-chooser", "--json", cwd=ROOT, env=chooser_env)
+        require(ensure_chooser.returncode == 0, f"widgethub-chooser ensure failed: {ensure_chooser.stderr}")
+        ensure_chooser_payload = json.loads(ensure_chooser.stdout)
+        require(ensure_chooser_payload["strategy_used"] == "provider-refresh", f"unexpected provider chooser payload: {ensure_chooser_payload}")
+
+        show_chooser = run(str(AGENT_DO), "auth", "show", "widgethub-chooser", "--json", cwd=ROOT, env=chooser_env)
+        require(show_chooser.returncode == 0, f"widgethub-chooser show failed: {show_chooser.stderr}")
+        show_chooser_payload = json.loads(show_chooser.stdout)
+        require(show_chooser_payload["sessions"], f"expected chooser session metadata: {show_chooser_payload}")
+        latest_session = show_chooser_payload["sessions"][0]
+        require(
+            latest_session.get("provider_checkpoint", {}).get("account_selector") == "text=agent@example.com",
+            f"expected stored provider checkpoint selector: {latest_session}",
+        )
+        require(
+            latest_session.get("provider_checkpoint", {}).get("consent_selector") == "text=Authorize",
+            f"expected stored consent checkpoint selector: {latest_session}",
+        )
 
     print("auth provider refresh tests passed")
     return 0

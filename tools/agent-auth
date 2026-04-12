@@ -302,6 +302,12 @@ def provider_default_refresh(provider: str) -> dict[str, Any]:
                 'text=Sign in with GitHub',
                 'text=GitHub',
             ],
+            "account_selectors": [
+                '[data-login="{local_part}"]',
+                '[data-email="{username}"]',
+                'text={username}',
+                'text={local_part}',
+            ],
             "consent_selectors": [
                 'button[name="authorize"]',
                 'input[name="authorize"]',
@@ -319,6 +325,12 @@ def provider_default_refresh(provider: str) -> dict[str, Any]:
                 'text=Continue with Google',
                 'text=Sign in with Google',
                 'text=Google',
+            ],
+            "account_selectors": [
+                '[data-email="{username}"]',
+                '[data-identifier="{username}"]',
+                'text={username}',
+                'text={local_part}',
             ],
             "consent_selectors": [
                 '#submit_approve_access',
@@ -658,6 +670,78 @@ def wait_for_settle() -> None:
         wait_brief(1000)
 
 
+def dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            output.append(item)
+    return output
+
+
+def identity_values(identity: str | None) -> dict[str, str]:
+    username = (identity or "").strip()
+    local_part = username.split("@", 1)[0] if "@" in username else username
+    return {
+        "username": username,
+        "value": username,
+        "local_part": local_part,
+    }
+
+
+def expand_selector_patterns(patterns: list[str], identity: str | None = None) -> list[str]:
+    values = identity_values(identity)
+    expanded: list[str] = []
+    for pattern in patterns:
+        if not pattern:
+            continue
+        if "{" in pattern and "}" in pattern:
+            try:
+                expanded.append(pattern.format(**values))
+            except KeyError:
+                continue
+        else:
+            expanded.append(pattern)
+    return dedupe_preserve_order(expanded)
+
+
+def click_matching_identity(patterns: list[str], identity: str | None) -> str | None:
+    if not identity:
+        return None
+    selectors = expand_selector_patterns(patterns, identity)
+    return click_first_selector(selectors)
+
+
+def resolve_profile_username(profile: dict[str, Any]) -> str | None:
+    creds = ((profile.get("credentials") or {}).get("site") or {})
+    username_key = creds.get("username")
+    if not username_key:
+        return None
+    return resolve_secret(str(username_key))
+
+
+def provider_checkpoint_state(profile: dict[str, Any], provider_name: str, provider_username: str | None) -> dict[str, str | None]:
+    refresh_cfg = provider_refresh_config(profile)
+    defaults = provider_default_refresh(provider_name)
+    account_selectors = list(refresh_cfg.get("account_selectors") or defaults.get("account_selectors", []))
+    consent_selectors = list(refresh_cfg.get("consent_selectors") or defaults.get("consent_selectors", []))
+
+    clicked_account = click_matching_identity(account_selectors, provider_username)
+    if clicked_account:
+        wait_for_settle()
+
+    clicked_consent = None
+    if consent_selectors and first_existing_selector(consent_selectors):
+        clicked_consent = click_first_selector(consent_selectors)
+        wait_for_settle()
+
+    return {
+        "account_selector": clicked_account,
+        "consent_selector": clicked_consent,
+    }
+
+
 def missing_totp_keys(profile: dict[str, Any]) -> list[str]:
     totp_secret_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
     if totp_secret_key:
@@ -939,6 +1023,7 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
     provider_ok, missing, provider_strategy = ensure_provider_state(provider_name, provider_profile, name="default")
     if not provider_ok:
         return False, missing, provider_strategy
+    provider_username = resolve_profile_username(provider_profile)
 
     if site_slug(site) == provider_name:
         return True, [], provider_strategy
@@ -948,8 +1033,8 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
         run_browse("open", str(login_url))
 
     refresh_cfg = provider_refresh_config(profile)
-    sso_selectors = list(refresh_cfg.get("sso_selectors") or provider_default_refresh(provider_name).get("sso_selectors", []))
-    consent_selectors = list(refresh_cfg.get("consent_selectors") or provider_default_refresh(provider_name).get("consent_selectors", []))
+    defaults = provider_default_refresh(provider_name)
+    sso_selectors = list(refresh_cfg.get("sso_selectors") or defaults.get("sso_selectors", []))
 
     if sso_selectors:
         clicked = click_first_selector(sso_selectors)
@@ -957,15 +1042,21 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
             return False, [], provider_strategy
         wait_for_settle()
 
-    if consent_selectors and first_existing_selector(consent_selectors):
-        click_first_selector(consent_selectors)
-        wait_for_settle()
+    checkpoint_state = provider_checkpoint_state(profile, provider_name, provider_username)
 
     complete_email_challenge_if_present(profile)
 
     validation = apply_validation(site, profile)
     if validation["ok"]:
         save_current_session(site, name=name, strategy="provider-refresh")
+        write_session_meta(
+            site,
+            name,
+            {
+                "provider_strategy": provider_strategy,
+                "provider_checkpoint": checkpoint_state,
+            },
+        )
         return True, [], provider_strategy
 
     write_session_meta(
@@ -978,6 +1069,7 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
             "state": "stale",
             "last_error": f"validation_failed_after_{provider_name}_provider_refresh",
             "provider_strategy": provider_strategy,
+            "provider_checkpoint": checkpoint_state,
         },
     )
     return False, [], provider_strategy
