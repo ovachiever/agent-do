@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
-from cache import check_cache, cache_result, fuzzy_match
+from cache import check_cache, cache_result, fuzzy_match, note_route_outcome, infer_project_scope
 
 
 def resolve_tool_executable(tool_name: str) -> Path | None:
@@ -61,19 +61,20 @@ def route_intent(
     intent: str,
     registry_context: str,
     state_context: str,
+    project_scope: str = "",
     dry_run: bool = False,
     explain: bool = False,
 ) -> dict:
     """Route intent to tool command using Claude."""
 
     # Try cache first
-    cached = check_cache(intent)
+    cached = check_cache(intent, project_scope=project_scope)
     if cached and route_is_supported(cached) and not explain:
         cached['from_cache'] = True
         return cached
 
     # Try fuzzy match if cache miss
-    fuzzy = fuzzy_match(intent)
+    fuzzy = fuzzy_match(intent, project_scope=project_scope)
     if fuzzy and route_is_supported(fuzzy) and not explain:
         fuzzy['from_fuzzy'] = True
         return fuzzy
@@ -135,7 +136,7 @@ Rules:
 
     # Cache successful routing
     if result.get('tool') and not result.get('clarification_needed'):
-        cache_result(intent, result)
+        cache_result(intent, result, project_scope=project_scope, route_source="llm")
 
     return result
 
@@ -152,7 +153,13 @@ def build_command(result: dict) -> list[str]:
     return cmd
 
 
-def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> int:
+def execute(
+    result: dict,
+    dry_run: bool = False,
+    json_output: bool = False,
+    intent: str = "",
+    project_scope: str = "",
+) -> int:
     """Execute the routed command."""
 
     if result.get('clarification_needed'):
@@ -224,6 +231,14 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
 
     tool_path = resolve_tool_executable(result["tool"])
     if tool_path is None:
+        if intent:
+            note_route_outcome(
+                intent,
+                result,
+                success=False,
+                project_scope=project_scope,
+                route_source=route_source_label(result),
+            )
         if json_output:
             output = {
                 "status": "error",
@@ -240,6 +255,14 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
 
     try:
         proc = subprocess.run(cmd, capture_output=json_output, text=True)
+        if intent:
+            note_route_outcome(
+                intent,
+                result,
+                success=(proc.returncode == 0),
+                project_scope=project_scope,
+                route_source=route_source_label(result),
+            )
         if json_output:
             output = {
                 "status": "success" if proc.returncode == 0 else "tool_error",
@@ -252,6 +275,14 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
             print(json.dumps(output))
         return proc.returncode
     except FileNotFoundError:
+        if intent:
+            note_route_outcome(
+                intent,
+                result,
+                success=False,
+                project_scope=project_scope,
+                route_source=route_source_label(result),
+            )
         if json_output:
             output = {
                 "status": "error",
@@ -263,6 +294,17 @@ def execute(result: dict, dry_run: bool = False, json_output: bool = False) -> i
         else:
             print(f"Error: Tool 'agent-{result['tool']}' not found.")
         return 1
+
+
+def route_source_label(result: dict) -> str:
+    """Return a compact source label for routing memory."""
+    if result.get("from_cache"):
+        return "cache"
+    if result.get("from_fuzzy"):
+        return "fuzzy"
+    if result.get("from_registry_routing"):
+        return "registry"
+    return "llm"
 
 
 def main():
@@ -288,6 +330,7 @@ def main():
         intent = f"{intent}. Additional context: {args.context}"
 
     try:
+        project_scope = infer_project_scope()
         try:
             from state import load_state, build_state_context
             state_context = build_state_context(load_state())
@@ -312,8 +355,15 @@ def main():
                 print(message)
             return 1
 
-        result = route_intent(intent, registry_context, state_context, args.dry_run, args.explain)
-        return execute(result, args.dry_run, args.json)
+        result = route_intent(
+            intent,
+            registry_context,
+            state_context,
+            project_scope=project_scope,
+            dry_run=args.dry_run,
+            explain=args.explain,
+        )
+        return execute(result, args.dry_run, args.json, intent=intent, project_scope=project_scope)
     except json.JSONDecodeError as e:
         if args.json:
             print(json.dumps({"status": "error", "error": "json_parse_error", "message": str(e)}))
@@ -330,11 +380,12 @@ def main():
             print(f"{prefix}: {e}")
 
         # Try fuzzy match as fallback
-        fuzzy = fuzzy_match(intent, threshold=0.4)
+        fuzzy = fuzzy_match(intent, threshold=0.4, project_scope=project_scope)
         if fuzzy and route_is_supported(fuzzy):
             if not args.json:
                 print("Falling back to fuzzy match...")
-            return execute(fuzzy, args.dry_run, args.json)
+            fuzzy["from_fuzzy"] = True
+            return execute(fuzzy, args.dry_run, args.json, intent=intent, project_scope=project_scope)
         return 1
 
 

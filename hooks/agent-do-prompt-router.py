@@ -10,6 +10,29 @@ Non-blocking — injects additionalContext only, never denies.
 import json
 import sys
 import re
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+
+try:
+    from registry import (
+        load_registry,
+        match_prompt_tools,
+        get_default_command,
+        get_recommended_entrypoints,
+        get_tool_readiness,
+    )
+except ModuleNotFoundError:
+    load_registry = None
+    match_prompt_tools = None
+    get_default_command = None
+    get_recommended_entrypoints = None
+    get_tool_readiness = None
+
+try:
+    from telemetry import record_nudge_event
+except ModuleNotFoundError:
+    record_nudge_event = None
 
 # Keywords/phrases that map to agent-do tools
 PROMPT_ROUTES = {
@@ -256,18 +279,69 @@ Never ship UI changes without this verification loop.
 """
 
 
-def analyze_prompt(prompt: str) -> list[tuple[str, str]]:
-    """Analyze prompt and return list of (tool, suggestion) tuples."""
+def analyze_prompt(prompt: str, skip_tools: set[str] | None = None) -> list[tuple[str, str]]:
+    """Analyze prompt with the legacy route table."""
     prompt_lower = prompt.lower()
     matches = []
+    skip_tools = skip_tools or set()
 
     for tool, config in PROMPT_ROUTES.items():
+        if tool in skip_tools:
+            continue
         for pattern in config['patterns']:
             if re.search(pattern, prompt_lower):
                 matches.append((tool, config['suggestion']))
                 break  # Only match each tool once
 
     return matches
+
+
+def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
+    """Analyze prompt using shared routing metadata from the registry."""
+    if load_registry is None or match_prompt_tools is None:
+        return []
+
+    registry = load_registry()
+    matches = match_prompt_tools(registry, prompt, limit=5)
+    suggestions = []
+
+    for match in matches:
+        tool = match['tool']
+        info = match['info']
+        commands = list(info.get('commands', {}).keys())
+        entrypoints = get_recommended_entrypoints(info) if get_recommended_entrypoints else []
+        readiness = get_tool_readiness(info) if get_tool_readiness else {}
+
+        primary = None
+        for command in commands:
+            if command.lower() in prompt.lower():
+                primary = f"agent-do {tool} {command}"
+                break
+
+        if primary is None and get_default_command is not None:
+            default_command = get_default_command(info)
+            if default_command:
+                primary = f"agent-do {tool} {default_command}"
+
+        if primary is None:
+            primary = entrypoints[0] if entrypoints else f"agent-do {tool} --help"
+
+        extra = entrypoints[1] if len(entrypoints) > 1 else None
+
+        suggestion = f"Start with `{primary}`."
+        if extra:
+            suggestion += f" Next likely step: `{extra}`."
+
+        fix = readiness.get('fix')
+        note = readiness.get('note')
+        if fix and note:
+            suggestion += f" If setup is missing: `{fix}`. {note}"
+        elif note:
+            suggestion += f" {note}"
+
+        suggestions.append((tool, suggestion))
+
+    return suggestions
 
 
 def detect_frontend_design(prompt: str) -> bool:
@@ -296,7 +370,8 @@ def main():
     if not prompt:
         sys.exit(0)
 
-    matches = analyze_prompt(prompt)
+    shared_matches = analyze_registry_prompt(prompt)
+    matches = shared_matches + analyze_prompt(prompt, skip_tools={tool for tool, _ in shared_matches})
     is_design = detect_frontend_design(prompt)
 
     if matches or is_design:
@@ -306,10 +381,30 @@ def main():
             context += "## agent-do Tool Suggestion\n\nBased on your request, consider using agent-do tools:\n\n"
             for tool, suggestion in matches:
                 context += f"**{tool}**: {suggestion}\n\n"
-            context += "Reference: `agent-do --list` (all tools) | `agent-do <tool> --help` (per-tool)\n"
+            context += "Reference: `agent-do suggest \"task\"` | `agent-do suggest --project` | `agent-do find <keyword>` | `agent-do --list` | `agent-do <tool> --help`\n"
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "prompt_tool_suggestion",
+                        "prompt_router",
+                        tools=[tool for tool, _ in matches],
+                        prompt=prompt[:240],
+                    )
+                except Exception:
+                    pass
 
         if is_design:
             context += "\n" + DESIGN_TOOLKIT_CONTEXT
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "prompt_design_toolkit",
+                        "prompt_router",
+                        tools=["browse", "dpt"],
+                        prompt=prompt[:240],
+                    )
+                except Exception:
+                    pass
 
         output = {
             "hookSpecificOutput": {

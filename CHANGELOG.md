@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1 — 2026-04-11
+
+### Added
+- `agent-do suggest "<task>"`, `agent-do suggest --project`, and `agent-do find <keyword>` for non-LLM discovery on top of shared registry routing metadata.
+- `agent-do nudges stats|recent|clear` for local hook telemetry under `~/.agent-do/telemetry/`.
+- Shared `routing` metadata in `registry.yaml` for the first high-value tool set, including discover keywords, raw CLI equivalents, readiness hints, and project signals.
+
+### Changed
+- SessionStart hook context is now project-aware and can recommend likely tools for the current repo instead of only a static key-tool list.
+- Prompt-submit and PreToolUse hooks now use shared registry routing metadata for more exact hard nudges and concrete replacement commands.
+- Offline matching now consumes shared registry routing metadata before falling back to legacy regex patterns.
+- Natural-language cache memory is now project-scoped and weighted by route success/failure instead of treating all prior matches equally.
+
 ## v1 — 2026-04-10
 
 ### Fixed

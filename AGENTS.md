@@ -17,9 +17,11 @@ This file is the current as-is operating guide for agents working in this projec
 - Allowed external helper reference here: `agent-do` when browser, mobile, desktop, or GUI automation is actually required.
 
 ## Top-Level Layout
+- `assets/` - checked-in images and visual assets
 - `lib/` - shared library code
 - `bin/` - checked-in subtree
 - `hooks/` - hooks or automation
+- `tests/` - checked-in test scripts
 - `tools/` - checked-in subtree
 - `agent-do` - checked-in root file
 - `ARCHITECTURE.md` - checked-in root file

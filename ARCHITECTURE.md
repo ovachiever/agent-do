@@ -6,8 +6,9 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 
 1. **Structured CLI API** — Direct tool invocation without LLM overhead
 2. **Natural Language Mode** — LLM-routed for human users
-3. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
-4. **80 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+3. **Discovery + nudge layer** — task suggestions, project-scoped tool ranking, and hook nudges
+4. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
+5. **80 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -39,6 +40,7 @@ The bash entry point checks the first argument:
 | First Arg | Mode | Path |
 |-----------|------|------|
 | Known tool name | Structured API | `exec_tool()` → `tools/agent-<name>` |
+| `suggest` / `find` / `nudges` | Discovery + telemetry | `bin/suggest`, `bin/nudges` |
 | `bootstrap` | Project setup | `bin/bootstrap` |
 | `-n` / `--natural` | Natural language | `bin/intent-router` (Claude API) |
 | `--offline` | Offline NL | `bin/pattern-matcher` (regex) |
@@ -49,15 +51,15 @@ The bash entry point checks the first argument:
 
 `bin/intent-router` tries three strategies in order:
 
-1. **SQLite cache** (`lib/cache.py:check_cache`) — exact match on normalized intent
-2. **Fuzzy match** (`lib/cache.py:fuzzy_match`) — Jaccard similarity against cached intents (threshold 0.6)
+1. **SQLite route memory** (`lib/cache.py:check_cache`) — exact match on normalized intent, preferring project-scoped history
+2. **Weighted fuzzy match** (`lib/cache.py:fuzzy_match`) — Jaccard similarity ranked by project scope and past route success
 3. **Claude API** — full LLM call with registry + session state in context
 
-Successful routes are cached for future use. At 100 requests/day, LLM cost is ~$0.20/day.
+Successful routes are cached and then scored by later outcomes, so the router can prefer the route that actually works in the current repo. At 100 requests/day, LLM cost is still around ~$0.20/day, but cache quality improves over time.
 
 ### Offline Pattern Matching
 
-`bin/pattern-matcher` uses regex patterns and keyword matching against the registry. No API key needed. Handles common intents like "screenshot iOS", "list docker containers", etc.
+`bin/pattern-matcher` now uses shared routing metadata from `registry.yaml` before falling back to legacy regex patterns. No API key needed. Handles common intents like "screenshot iOS", "list docker containers", and migrated discovery cases like "deploy this on vercel".
 
 ## Tool Resolution
 
@@ -75,14 +77,17 @@ Most tools are standalone bash scripts. Some are directory-based with Python or 
 agent-do                    # Main entry (bash) — mode selection + tool dispatch
 ├── bin/
 │   ├── intent-router       # LLM router (Python) — 3-tier fallback
-│   ├── pattern-matcher     # Offline router (Python) — regex + keywords
+│   ├── pattern-matcher     # Offline router (Python) — shared registry routing + regex fallbacks
+│   ├── suggest             # Discovery CLI — task/project → likely tools
+│   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── bootstrap           # Stateful-tool bootstrap recommender/executor
 │   ├── health              # Dependency checker (bash) — per-tool health status
 │   └── status              # Session status display (bash + Python)
 ├── lib/
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
-│   ├── registry.py         # Registry loader (merges user/bundled/plugin)
-│   ├── cache.py            # SQLite pattern cache + fuzzy matching
+│   ├── registry.py         # Registry loader + shared routing helpers
+│   ├── cache.py            # Project-aware route memory + fuzzy matching
+│   ├── telemetry.py        # JSONL telemetry for suggestions and hard nudges
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
 │   ├── json-output.sh      # Shared --json flag support for bash tools
 │   └── capture/            # Shared capture pipeline (browse + unbrowse)
@@ -103,6 +108,7 @@ The master catalog defines all tools with:
 - `capabilities` — list of actions it supports
 - `commands` — subcommands with descriptions
 - `examples` — intent → command mappings (used by LLM router and pattern matcher)
+- `routing` — optional discovery metadata: keywords, regexes, raw CLI equivalents, readiness hints, and project signals
 
 ### Registry Loading Order (lib/registry.py)
 
@@ -162,6 +168,16 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 - Initializes `context` globally and `zpc` / `manna` locally when the project actually uses them
 - Powers the SessionStart bootstrap prompt injected by the Claude Code hook
 
+**`bin/suggest`** — Discovery CLI:
+- `agent-do suggest "<task>"` picks likely tools and concrete commands
+- `agent-do suggest --project` ranks likely tools for the current repo
+- `agent-do find <keyword>` searches the tool surface without an LLM call
+
+**`bin/nudges`** — Local telemetry viewer:
+- `agent-do nudges stats` summarizes prompt and PreToolUse nudges
+- `agent-do nudges recent` shows recent local events from the live hook stack
+- Uses JSONL under `~/.agent-do/telemetry/`
+
 ### Tool Concurrency Classification
 
 Every tool in `registry.yaml` declares `concurrency: read|write|mixed`:
@@ -206,7 +222,7 @@ agent-do works with any AI coding assistant that can execute shell commands:
 ### Integration Pattern
 
 1. **Document the API** in the harness's instruction file (CLAUDE.md, .cursorrules, etc.)
-2. **Enforce with hooks** when available (suggest agent-do when raw commands detected)
+2. **Enforce with hooks** when available (hard-nudge agent-do when raw commands detected)
 3. **Create subagents/skills** for specialized workflows
 
 ### Hook Example (PreToolUse)

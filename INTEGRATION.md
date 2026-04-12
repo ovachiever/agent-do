@@ -22,7 +22,7 @@ The installer:
 
 Runs once per Claude Code session. Two jobs:
 - **Adds agent-do to PATH** via `CLAUDE_ENV_FILE` so all `Bash` tool calls can find it
-- **Injects a tooling reminder** into Claude's context listing key tools and the `agent-do` pattern
+- **Injects a tooling reminder** into Claude's context with the `agent-do` pattern and project-scoped likely tools
 - **Prompts for project bootstrap when needed** by telling Claude to ask once on the first reply if project-local setup like `zpc` or `manna` is missing
 
 SessionStart itself is not an interactive prompt surface. The hook can add context, but the actual yes/no question must be asked by Claude in the normal conversation flow.
@@ -36,7 +36,9 @@ Path auto-detection chain (no hardcoded paths):
 
 **File:** `hooks/agent-do-prompt-router.py`
 
-Analyzes every user prompt and suggests relevant agent-do tools. Covers 17 tool categories:
+Analyzes every user prompt and suggests relevant agent-do tools. It now uses shared routing metadata from `registry.yaml`, so prompt nudges, PreToolUse nudges, and offline matching can converge on the same native suggestions instead of drifting.
+
+It still has broad fallback coverage across these categories:
 
 | Category | Trigger Examples |
 |----------|-----------------|
@@ -64,9 +66,14 @@ Analyzes every user prompt and suggests relevant agent-do tools. Covers 17 tool 
 
 **File:** `hooks/agent-do-pretooluse-check.py`
 
-Watches every `Bash` tool call. When Claude tries to run a raw command that has an agent-do equivalent (e.g., `xcrun simctl`, `vercel deploy`, `kubectl`), it injects a friendly reminder.
+Watches every `Bash` tool call. When Claude tries to run a raw command that has an agent-do equivalent (e.g., `xcrun simctl`, `vercel deploy`, `kubectl`), it injects a hard nudge with the closest native replacement command and any relevant setup hint.
 
 **Nudge mode (default):** Adds `additionalContext` — Claude sees the reminder but the command still runs.
+
+Examples:
+- `npx playwright test` → `agent-do browse ...` + browser-install hint when relevant
+- `xcrun simctl io booted screenshot` → `agent-do ios screenshot`
+- `psql ...` → `agent-do db ...`
 
 **Block mode (opt-in):** Change `additionalContext` to `permissionDecision: "deny"` in the hook output to block raw commands entirely. See the comment at the top of the hook file.
 
@@ -145,8 +152,12 @@ CHECK if agent-do has a tool:
 
     agent-do <tool> <command> [args...]   # Structured API (AI/scripts)
     agent-do -n "what you want"           # Natural language (humans)
+    agent-do suggest "task"               # likely tool/command for a task
+    agent-do suggest --project            # likely tools for this repo
+    agent-do find <keyword>               # keyword search across tools
     agent-do --health                     # Dependency readiness
     agent-do bootstrap --recommend        # Detect pending project setup
+    agent-do nudges stats                 # summary of hook nudges on this machine
     agent-do --list                       # List all 80 tools
     agent-do <tool> --help                # Per-tool help
 
@@ -156,11 +167,17 @@ docker, k8s, cloud, ssh, excel, slack, image, video, audio, zpc
 
 ## Nudge vs Block Mode
 
-By default, all hooks use **nudge mode** — they add context reminders but never prevent Claude from running commands. This is the recommended approach because:
+By default, all hooks use **nudge mode** — they add context reminders but never prevent Claude from running commands. This is still the recommended approach because:
 
 - Claude learns the pattern over a session (the reminder accumulates)
 - No false positives blocking legitimate commands
 - Users can override when agent-do isn't appropriate
+
+The difference in `v1.1` is that the nudges are now more exact:
+- prompt-time suggestions can name a concrete `agent-do <tool> <command>`
+- PreToolUse nudges can point at the closest raw-command replacement
+- SessionStart can suggest likely tools for the current repo instead of a generic static list
+- local telemetry is available through `agent-do nudges stats|recent`
 
 To switch to **block mode**, edit `hooks/agent-do-pretooluse-check.py` and change the output from `additionalContext` to `permissionDecision: "deny"`. See the docstring at the top of that file.
 
@@ -170,13 +187,13 @@ To switch to **block mode**, edit `hooks/agent-do-pretooluse-check.py` and chang
 Claude Code Session
     │
     ├─ SessionStart ──→ agent-do-session-start.sh
-    │   └─ Adds agent-do to PATH + injects tool reminder
+    │   └─ Adds agent-do to PATH + injects project-aware tool reminder
     │
     ├─ UserPromptSubmit ──→ agent-do-prompt-router.py
-    │   └─ Suggests agent-do tools based on prompt keywords
+    │   └─ Suggests agent-do tools from shared routing metadata + fallbacks
     │
     └─ PreToolUse (Bash) ──→ agent-do-pretooluse-check.py
-        └─ Nudges when raw CLI commands have agent-do equivalents
+        └─ Hard-nudges when raw CLI commands have agent-do equivalents
 ```
 
 All three hooks work independently. You can install any subset.

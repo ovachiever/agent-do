@@ -48,6 +48,32 @@ tools:
       command: agent-context fetch-repo vercel/next.js docs/README.md
     - intent: add a note to a doc
       command: agent-context annotate stripe-llms 'Use idempotency keys for POST'
+    routing:
+      discover_keywords:
+      - docs
+      - documentation
+      - llms.txt
+      - reference docs
+      - knowledge library
+      - indexed content
+      prompt_patterns:
+      - \bdocs?\b
+      - \bdocumentation\b
+      - \bllms\.txt\b
+      - \breference docs?\b
+      - \bknowledge library\b
+      recommended_entrypoints:
+      - agent-do context search authentication
+      - agent-do context fetch-llms stripe.com
+      - agent-do context status
+      default_command: search
+      project_signals:
+      - docs
+      - knowledge
+      readiness:
+        check: agent-do context status
+        fix: agent-do context init
+        note: Global context storage may need initialization
     concurrency: read
   zpc:
     description: Experience journal — structured lessons, decisions, patterns per project. Complementary to context (knowledge
@@ -97,6 +123,34 @@ tools:
       command: agent-zpc query --tag docker
     - intent: set up zpc in this project
       command: agent-zpc init
+    routing:
+      discover_keywords:
+      - zpc
+      - project memory
+      - lessons learned
+      - decisions log
+      - patterns
+      - experience journal
+      prompt_patterns:
+      - \bzpc\b
+      - \bproject memory\b
+      - \blessons?\s+(log|capture|record)\b
+      - \bdecisions?\s+(log|record|track)\b
+      - \bpatterns?\s+(harvest|extract|consolidat)\w*\b
+      - \.zpc\b
+      recommended_entrypoints:
+      - agent-do zpc status
+      - agent-do zpc patterns
+      - agent-do zpc init
+      default_command: status
+      project_signals:
+      - zpc
+      - memory
+      - lessons
+      readiness:
+        check: agent-do zpc status
+        fix: agent-do zpc init
+        note: ZPC is project-local and may need initialization in this repo
     concurrency: mixed
   tui:
     description: Control any terminal/TUI application via tmux
@@ -156,6 +210,44 @@ tools:
       command: agent-ios boot 'iPhone 15 Pro'
     - intent: shutdown the simulator
       command: agent-ios shutdown
+    routing:
+      discover_keywords:
+      - ios simulator
+      - iphone simulator
+      - ipad simulator
+      - simctl
+      - xcode simulator
+      prompt_patterns:
+      - \b(ios|iphone|ipad)\s+(sim|simulator)\b
+      - \bsimctl\b
+      - \bxcrun\s+simctl\b
+      - \bscreenshot\b.*\b(ios|iphone|ipad|simulator)\b
+      recommended_entrypoints:
+      - agent-do ios screenshot
+      - agent-do ios status
+      - agent-do ios tree
+      default_command: screenshot
+      raw_cli_equivalents:
+      - pattern: \bxcrun\s+simctl\b.*\b(io|screenshot)\b
+        replacement: agent-do ios screenshot
+        example: agent-do ios screenshot
+        reason: Structured simulator capture is easier for Claude to inspect and reuse
+      - pattern: \bxcrun\s+simctl\b.*\bboot\b
+        replacement: agent-do ios boot
+        example: agent-do ios boot
+        reason: agent-do wraps simulator lifecycle with a stable CLI contract
+      - pattern: \bxcrun\s+simctl\b
+        replacement: agent-do ios
+        example: agent-do ios status
+        reason: agent-do exposes the common simulator actions without raw simctl syntax
+      project_signals:
+      - ios
+      - mobile
+      - xcode
+      readiness:
+        check: agent-do ios status
+        fix: agent-do ios status
+        note: Requires Xcode Simulator tooling and a booted simulator for some commands
     concurrency: mixed
   macos:
     description: Control native macOS desktop applications via accessibility APIs
@@ -178,6 +270,41 @@ tools:
       command: agent-macos type --role textfield hello
     - intent: get the UI tree of Finder
       command: agent-macos tree Finder
+    routing:
+      discover_keywords:
+      - macos automation
+      - desktop automation
+      - osascript
+      - accessibility
+      - native app ui
+      prompt_patterns:
+      - \b(macos|mac\s*os)\s+(automation|app)\b
+      - \bdesktop automation\b
+      - \bosascript\b
+      - \bui element\b
+      - \bmenu item\b
+      recommended_entrypoints:
+      - agent-do macos tree Finder
+      - agent-do macos focus Finder
+      - agent-do macos find Finder Save
+      default_command: tree
+      raw_cli_equivalents:
+      - pattern: \bosascript\b
+        replacement: agent-do macos
+        example: agent-do macos tree Finder
+        reason: agent-do exposes structured desktop snapshots instead of opaque AppleScript output
+      - pattern: \bautomator\b
+        replacement: agent-do macos
+        example: agent-do macos tree Finder
+        reason: agent-do is purpose-built for agent-friendly macOS automation
+      project_signals:
+      - desktop
+      - macos
+      - native
+      readiness:
+        check: agent-do macos permissions
+        fix: agent-do macos permissions
+        note: Accessibility permission is required for desktop automation
     concurrency: mixed
   repl:
     description: Control interactive REPLs (Python, Node, psql, etc.)
@@ -222,6 +349,47 @@ tools:
       command: agent-docker logs postgres
     - intent: run bash in my-container
       command: agent-docker shell my-container
+    routing:
+      discover_keywords:
+      - docker
+      - container logs
+      - docker compose
+      - docker exec
+      - running containers
+      prompt_patterns:
+      - \bdocker\b
+      - \bcontainers?\b.*\b(logs|start|stop|exec)\b
+      - \bdocker compose\b
+      recommended_entrypoints:
+      - agent-do docker ps
+      - agent-do docker logs <container>
+      - agent-do docker compose
+      default_command: ps
+      raw_cli_equivalents:
+      - pattern: \bdocker\s+ps\b
+        replacement: agent-do docker ps
+        example: agent-do docker ps
+        reason: agent-do returns a stable container listing without raw CLI parsing
+      - pattern: \bdocker\s+logs\b
+        replacement: agent-do docker logs
+        example: agent-do docker logs <container>
+        reason: agent-do keeps log access in the same structured tool surface
+      - pattern: \bdocker\s+exec\b
+        replacement: agent-do docker exec
+        example: agent-do docker exec <container> <cmd>
+        reason: agent-do preserves container execution behind one consistent interface
+      - pattern: \bdocker\s+compose\b
+        replacement: agent-do docker compose
+        example: agent-do docker compose ps
+        reason: agent-do avoids switching back to raw Docker compose syntax
+      project_signals:
+      - docker
+      - containers
+      - infra
+      readiness:
+        check: agent-do docker ps
+        fix: agent-do docker ps
+        note: Docker Desktop or the Docker daemon must be running
     concurrency: write
   ide:
     description: Control VS Code/Cursor editor
@@ -281,6 +449,48 @@ tools:
       command: agent-android screenshot
     - intent: launch Chrome on Android
       command: agent-android launch com.android.chrome
+    routing:
+      discover_keywords:
+      - android emulator
+      - adb
+      - android screenshot
+      - android app
+      - avd
+      prompt_patterns:
+      - \bandroid\s+(emulator|device|app)\b
+      - \badb\b
+      - \bavd\b
+      - \bscreenshot\b.*\bandroid\b
+      recommended_entrypoints:
+      - agent-do android screenshot
+      - agent-do android launch com.android.chrome
+      - agent-do android shell getprop
+      default_command: screenshot
+      raw_cli_equivalents:
+      - pattern: \badb\s+shell\b
+        replacement: agent-do android shell
+        example: agent-do android shell getprop
+        reason: agent-do keeps Android shell access inside the same emulator tool surface
+      - pattern: \badb\s+install\b
+        replacement: agent-do android install
+        example: agent-do android install app.apk
+        reason: agent-do wraps common ADB install flows behind a stable command
+      - pattern: \badb\s+logcat\b
+        replacement: agent-do android shell
+        example: agent-do android shell logcat
+        reason: agent-do can run device shell commands without dropping to raw adb
+      - pattern: \bemulator\b
+        replacement: agent-do android
+        example: agent-do android screenshot
+        reason: agent-do exposes the common emulator actions directly
+      project_signals:
+      - android
+      - mobile
+      - emulator
+      readiness:
+        check: agent-do android screenshot
+        fix: agent-do android screenshot
+        note: Requires Android SDK emulator tooling and a running device for most commands
     concurrency: mixed
   db:
     description: Control database clients
@@ -300,6 +510,41 @@ tools:
       command: agent-db tables --db postgres
     - intent: run SELECT * FROM users
       command: agent-db query 'SELECT * FROM users'
+    routing:
+      discover_keywords:
+      - sql
+      - database query
+      - postgres
+      - mysql
+      - sqlite
+      - schema
+      prompt_patterns:
+      - \b(database|db)\s+(query|schema|table|tables)\b
+      - \bsql\b
+      - \b(postgres|postgresql|mysql|sqlite)\b
+      recommended_entrypoints:
+      - agent-do db tables
+      - agent-do db describe users
+      - agent-do db query 'SELECT * FROM users'
+      default_command: query
+      raw_cli_equivalents:
+      - pattern: \bpsql\b
+        replacement: agent-do db
+        example: agent-do db query 'SELECT * FROM users'
+        reason: agent-do keeps SQL work in a structured, snapshot-friendly database surface
+      - pattern: \bmysql\b
+        replacement: agent-do db
+        example: agent-do db tables
+        reason: agent-do avoids raw database shell flows when a tool surface already exists
+      project_signals:
+      - database
+      - sql
+      - postgres
+      - mysql
+      readiness:
+        check: agent-do db --help
+        fix: agent-do db connect <profile>
+        note: Database commands may require a configured profile or connection
     concurrency: mixed
   k8s:
     description: Control Kubernetes clusters
@@ -319,6 +564,49 @@ tools:
       command: agent-k8s pods
     - intent: view logs for api pod
       command: agent-k8s logs api
+    routing:
+      discover_keywords:
+      - kubernetes
+      - k8s
+      - kubectl
+      - pods
+      - deployments
+      prompt_patterns:
+      - \bkubernetes\b
+      - \bk8s\b
+      - \bkubectl\b
+      - \bpods?\b
+      - \bdeployments?\b.*\b(scale|rollout|logs)\b
+      recommended_entrypoints:
+      - agent-do k8s pods
+      - agent-do k8s logs <pod>
+      - agent-do k8s apply <file>
+      default_command: pods
+      raw_cli_equivalents:
+      - pattern: \bkubectl\s+logs\b
+        replacement: agent-do k8s logs
+        example: agent-do k8s logs <pod>
+        reason: agent-do keeps common cluster inspection behind one stable tool surface
+      - pattern: \bkubectl\s+exec\b
+        replacement: agent-do k8s exec
+        example: agent-do k8s exec <pod> -- <cmd>
+        reason: agent-do exposes pod exec without forcing raw kubectl syntax
+      - pattern: \bkubectl\s+apply\b
+        replacement: agent-do k8s apply
+        example: agent-do k8s apply deployment.yaml
+        reason: agent-do can apply manifests directly while preserving a consistent interface
+      - pattern: \bkubectl\b
+        replacement: agent-do k8s
+        example: agent-do k8s pods
+        reason: agent-do covers the common cluster actions Claude reaches for most often
+      project_signals:
+      - kubernetes
+      - k8s
+      - infra
+      readiness:
+        check: agent-do k8s pods
+        fix: agent-do k8s pods
+        note: Requires kubectl access and a configured current context
     concurrency: write
   git:
     description: Enhanced git operations
@@ -1165,6 +1453,53 @@ tools:
       command: agent-browse capture start
     - intent: wait for page to load
       command: agent-browse wait --stable
+    routing:
+      discover_keywords:
+      - browser automation
+      - playwright
+      - puppeteer
+      - selenium
+      - web scraping
+      - screenshot website
+      - capture api traffic
+      prompt_patterns:
+      - \bplaywright\b
+      - \bpuppeteer\b
+      - \bselenium\b
+      - \bweb\s+(scrape|scraping|automation)\b
+      - \bbrowser automation\b
+      - \bopen\b.*\b(website|web|page|url)\b
+      recommended_entrypoints:
+      - agent-do browse open https://example.com
+      - agent-do browse snapshot -i
+      - agent-do browse screenshot /tmp/page.png
+      default_command: open
+      raw_cli_equivalents:
+      - pattern: \bnpx\s+playwright\b
+        replacement: agent-do browse
+        example: agent-do browse open https://example.com
+        reason: agent-do browse is purpose-built for AI browser automation with snapshots and persistent sessions
+      - pattern: \bplaywright\b
+        replacement: agent-do browse
+        example: agent-do browse snapshot -i
+        reason: agent-do browse gives Claude structured page state instead of raw test tooling
+      - pattern: \bpuppeteer\b
+        replacement: agent-do browse
+        example: agent-do browse open https://example.com
+        reason: agent-do browse keeps browser state and interactions in an agent-friendly CLI
+      - pattern: \bselenium\b
+        replacement: agent-do browse
+        example: agent-do browse open https://example.com
+        reason: agent-do browse is the repo-native browser automation path
+      project_signals:
+      - frontend
+      - e2e
+      - web
+      - browser
+      readiness:
+        check: agent-do browse status
+        fix: agent-do browse install
+        note: Playwright browser binaries may need installation before first use
     concurrency: mixed
   burp:
     description: Burp Suite automation
@@ -1620,6 +1955,39 @@ tools:
       command: agent-render db list
     - intent: get render account snapshot
       command: agent-render snapshot
+    routing:
+      discover_keywords:
+      - render
+      - render.com
+      - render deploy
+      - render logs
+      - render service
+      prompt_patterns:
+      - \brender\.com\b
+      - \brender\b
+      - \bdeploy\b.*\brender\b
+      recommended_entrypoints:
+      - agent-do render services
+      - agent-do render logs <service>
+      - agent-do render deploy <service>
+      default_command: services
+      raw_cli_equivalents:
+      - pattern: \brender\s+(services|deploys?|logs|env)\b
+        replacement: agent-do render
+        example: agent-do render services
+        reason: agent-do render avoids falling back to ad hoc Render API calls
+      - pattern: \bcurl\b.*\bapi\.render\.com\b
+        replacement: agent-do render
+        example: agent-do render snapshot
+        reason: agent-do render already wraps the Render API with a stable contract
+      project_signals:
+      - render
+      - deploy
+      - infra
+      readiness:
+        check: agent-do render services
+        fix: export RENDER_API_KEY=...
+        note: Requires Render API credentials
     concurrency: write
   vercel:
     description: Control Vercel projects, deployments, domains, and env vars
@@ -1660,6 +2028,43 @@ tools:
       command: agent-vercel domains my-app
     - intent: get vercel account snapshot
       command: agent-vercel snapshot
+    routing:
+      discover_keywords:
+      - vercel
+      - vercel deploy
+      - vercel logs
+      - vercel env
+      - deployment preview
+      prompt_patterns:
+      - \bvercel\b
+      - \bdeploy\b.*\bvercel\b
+      - \bpreview deployment\b
+      recommended_entrypoints:
+      - agent-do vercel projects
+      - agent-do vercel deployments
+      - agent-do vercel deploy <project>
+      default_command: projects
+      raw_cli_equivalents:
+      - pattern: \bnpx\s+vercel\b
+        replacement: agent-do vercel
+        example: agent-do vercel projects
+        reason: agent-do vercel is the repo-native Vercel surface for Claude
+      - pattern: \bvercel\b
+        replacement: agent-do vercel
+        example: agent-do vercel deploy <project>
+        reason: agent-do vercel keeps deployment work inside one structured tool surface
+      - pattern: \bcurl\b.*\bapi\.vercel\.com\b
+        replacement: agent-do vercel
+        example: agent-do vercel snapshot
+        reason: agent-do vercel already wraps the common Vercel API calls
+      project_signals:
+      - vercel
+      - frontend
+      - deploy
+      readiness:
+        check: agent-do vercel projects
+        fix: export VERCEL_ACCESS_TOKEN=...
+        note: Requires Vercel API credentials
     concurrency: write
   tail:
     description: Wrap dev commands, capture output to log files for AI agents
@@ -1773,6 +2178,43 @@ tools:
       command: agent-supabase orgs
     - intent: get supabase account snapshot
       command: agent-supabase snapshot
+    routing:
+      discover_keywords:
+      - supabase
+      - postgrest
+      - edge functions
+      - supabase sql
+      - supabase auth
+      prompt_patterns:
+      - \bsupabase\b
+      - \bpostgrest\b
+      - \bedge functions?\b.*\bsupabase\b
+      recommended_entrypoints:
+      - agent-do supabase projects
+      - agent-do supabase health <ref>
+      - agent-do supabase rest <ref> users --select id,email
+      default_command: projects
+      raw_cli_equivalents:
+      - pattern: \bnpx\s+supabase\b
+        replacement: agent-do supabase
+        example: agent-do supabase projects
+        reason: agent-do supabase is the repo-native surface for project and data operations
+      - pattern: \bsupabase\b
+        replacement: agent-do supabase
+        example: agent-do supabase health <ref>
+        reason: agent-do supabase avoids dropping to raw CLI calls when an integrated tool exists
+      - pattern: \bcurl\b.*\bsupabase\.(co|com|io)\b
+        replacement: agent-do supabase
+        example: agent-do supabase snapshot
+        reason: agent-do supabase already wraps the common API interactions
+      project_signals:
+      - supabase
+      - database
+      - backend
+      readiness:
+        check: agent-do supabase projects
+        fix: export SUPABASE_ACCESS_TOKEN=...
+        note: Requires Supabase API credentials
     concurrency: write
   sessions:
     description: Search and retrieve AI coding session history
@@ -1840,4 +2282,30 @@ tools:
       command: agent-dpt baseline
     - intent: did my changes improve the design
       command: agent-dpt diff
+    routing:
+      discover_keywords:
+      - dpt
+      - design score
+      - design audit
+      - ui critique
+      - visual quality
+      - spacing issues
+      prompt_patterns:
+      - \bdpt\b
+      - \bdesign\s+(score|audit|quality|critique|review)\b
+      - \bui\s+(score|audit|quality|review)\b
+      - \bvisual quality\b
+      recommended_entrypoints:
+      - agent-do dpt score
+      - agent-do dpt violations
+      - agent-do dpt diff
+      default_command: score
+      project_signals:
+      - frontend
+      - design
+      - ui
+      readiness:
+        check: agent-do dpt score
+        fix: agent-do dpt build
+        note: DPT depends on the browse screenshot workflow and a built scoring engine
     concurrency: read

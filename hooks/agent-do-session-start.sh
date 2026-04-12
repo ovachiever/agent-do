@@ -79,7 +79,54 @@ Planned bootstrap:
 $commands
 \`\`\`
 
-If the user says no, continue normally and do not ask again in this session."
+    If the user says no, continue normally and do not ask again in this session."
+}
+
+append_project_tooling() {
+    local suggest_json project_root signals tools_block
+
+    [ -n "$AGENT_DO_DIR" ] || return 0
+    [ -n "$CWD" ] || return 0
+    [ -x "$AGENT_DO_DIR/agent-do" ] || return 0
+
+    suggest_json=$("$AGENT_DO_DIR/agent-do" suggest --project --json --cwd "$CWD" --limit 5 2>/dev/null || true)
+    [ -n "$suggest_json" ] || return 0
+
+    project_root=$(echo "$suggest_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('project',''))" 2>/dev/null || true)
+    tools_block=$(echo "$suggest_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+lines = []
+for item in data.get('results', []):
+    lines.append(f\"- {item.get('tool')}: start with `{item.get('primary')}`\")
+    readiness = item.get('readiness') or {}
+    fix = readiness.get('fix')
+    note = readiness.get('note')
+    if fix and note:
+        lines.append(f\"  setup: `{fix}` ({note})\")
+print('\\n'.join(lines))
+" 2>/dev/null || true)
+    signals=$(echo "$suggest_json" | python3 -c "import json,sys; data=json.load(sys.stdin); print(', '.join(data.get('signals', [])))" 2>/dev/null || true)
+
+    [ -n "$tools_block" ] || return 0
+
+    CONTEXT="$CONTEXT
+
+---
+
+## Project-Scoped agent-do Tools
+
+Current project root:
+\`$project_root\`
+
+Detected signals:
+\`${signals:-general}\`
+
+Top likely agent-do tools for this repo:
+$tools_block
+
+Refresh this list any time with:
+\`agent-do suggest --project\`"
 }
 
 # --- Inject tooling reminder ---
@@ -93,21 +140,7 @@ agent-do -n \"natural language description of what you want\"
 agent-do --how \"...\"     # Explain without executing
 \`\`\`
 
-Discovery: agent-do --list (all tools) | agent-do <tool> --help (per-tool)
-
-KEY TOOLS:
-- vercel: Vercel operations (NOT vercel CLI or curl to api.vercel.com)
-- render: Render.com operations (NOT curl to api.render.com)
-- supabase: Supabase operations (NOT supabase CLI or curl to supabase.co)
-- browse: Browser automation (NOT playwright, puppeteer, or selenium)
-- ios: iOS Simulator (NOT xcrun simctl)
-- android: Android Emulator (NOT adb directly)
-- macos: macOS desktop automation (NOT osascript)
-- gcp: Google Cloud Platform (NOT gcloud CLI or curl to googleapis.com)
-- tui: Terminal UI automation (NOT raw expect/tmux)
-- db: Database queries (NOT psql/mysql directly)
-- docker/k8s/cloud/ssh: Infrastructure tools
-- zpc: Structured project memory (NOT manual JSONL writes)
+Discovery: agent-do suggest "<task>" | agent-do suggest --project | agent-do find <keyword> | agent-do --list | agent-do <tool> --help
 
 Prefer agent-do over raw CLI commands when a tool exists.
 Use agent-do <tool> --help to see available commands."
@@ -218,6 +251,7 @@ agent-do zpc patterns    # Established conventions — read before coding
 Log lessons and decisions as you work. Run \`agent-do zpc harvest\` after significant work."
 fi
 
+append_project_tooling
 append_bootstrap_prompt
 
 ESCAPED=$(echo "$CONTEXT" | jq -Rs .)

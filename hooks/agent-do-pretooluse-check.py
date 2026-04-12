@@ -14,6 +14,21 @@ to:
 import json
 import sys
 import re
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+
+try:
+    from registry import load_registry, find_raw_cli_equivalent, get_tool_readiness
+except ModuleNotFoundError:
+    load_registry = None
+    find_raw_cli_equivalent = None
+    get_tool_readiness = None
+
+try:
+    from telemetry import record_nudge_event
+except ModuleNotFoundError:
+    record_nudge_event = None
 
 # Patterns that have agent-do equivalents — grouped by tool
 AGENT_DO_PATTERNS = {
@@ -116,6 +131,48 @@ def main():
             sys.exit(0)
 
     # Check for agent-do matches
+    if load_registry is not None and find_raw_cli_equivalent is not None:
+        registry = load_registry()
+        shared_match = find_raw_cli_equivalent(registry, command)
+        if shared_match:
+            readiness = get_tool_readiness(shared_match['info']) if get_tool_readiness else {}
+            replacement = shared_match['replacement']
+            example = shared_match.get('example') or replacement
+            reason = shared_match.get('reason') or "agent-do already exposes this workflow with structured output."
+            fix = readiness.get('fix')
+            note = readiness.get('note')
+
+            nudge = (
+                f"HARD NUDGE: `{replacement}` is the native agent-do path for this command family. "
+                f"Closest replacement: `{example}`. "
+                f"{reason} "
+            )
+            if fix and note:
+                nudge += f"If setup is missing: `{fix}`. {note} "
+            elif note:
+                nudge += f"{note} "
+            nudge += "Proceeding with your raw command is allowed, but agent-do should be the default choice here."
+
+            output = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": nudge
+                }
+            }
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "pretool_hard_nudge",
+                        "pretool",
+                        tool=shared_match["tool"],
+                        replacement=replacement,
+                        command=command[:240],
+                    )
+                except Exception:
+                    pass
+            print(json.dumps(output))
+            sys.exit(0)
+
     for pattern, (tool, hint) in AGENT_DO_PATTERNS.items():
         if re.search(pattern, command, re.IGNORECASE):
             nudge = (
@@ -130,6 +187,17 @@ def main():
                     "additionalContext": nudge
                 }
             }
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "pretool_legacy_nudge",
+                        "pretool",
+                        tool=tool,
+                        replacement=hint,
+                        command=command[:240],
+                    )
+                except Exception:
+                    pass
             print(json.dumps(output))
             sys.exit(0)
 

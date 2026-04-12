@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Inspect local nudge telemetry."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+
+from telemetry import summarize_nudges, recent_nudges, clear_nudges  # noqa: E402
+
+
+def render_stats(summary: dict) -> None:
+    print("agent-do nudges")
+    print(f"  Total events: {summary['total_events']}")
+
+    if summary["sources"]:
+        print("  Sources:")
+        for source, count in summary["sources"].items():
+            print(f"    - {source}: {count}")
+
+    if summary["event_types"]:
+        print("  Event types:")
+        for event_type, count in summary["event_types"].items():
+            print(f"    - {event_type}: {count}")
+
+    if summary["tools"]:
+        print("  Tools:")
+        for tool, count in list(summary["tools"].items())[:10]:
+            print(f"    - {tool}: {count}")
+
+
+def render_recent(events: list[dict]) -> None:
+    print("agent-do nudges recent")
+    if not events:
+        print("  No events recorded.")
+        return
+
+    for event in events:
+        tool = event.get("tool")
+        tools = ",".join(event.get("tools", [])) if event.get("tools") else ""
+        subject = tool or tools or "-"
+        print(f"  - {event.get('timestamp')} {event.get('source')} {event.get('event_type')} {subject}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Inspect local nudge telemetry")
+    parser.add_argument("command", choices=["stats", "recent", "clear"])
+    parser.add_argument("--json", action="store_true", help="Output JSON")
+    parser.add_argument("--limit", type=int, default=20, help="Number of recent events to show")
+    args = parser.parse_args()
+
+    if args.command == "clear":
+        clear_nudges()
+        if args.json:
+            print(json.dumps({"cleared": True}))
+        else:
+            print("Cleared local nudge telemetry.")
+        return 0
+
+    if args.command == "stats":
+        summary = summarize_nudges()
+        if args.json:
+            print(json.dumps(summary, indent=2))
+        else:
+            render_stats(summary)
+        return 0
+
+    recent = recent_nudges(args.limit)
+    if args.json:
+        print(json.dumps({"events": recent}, indent=2))
+    else:
+        render_recent(recent)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

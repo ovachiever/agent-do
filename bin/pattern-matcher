@@ -14,11 +14,13 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
 try:
-    from registry import load_registry, search_tools
+    from registry import load_registry, search_tools, match_prompt_tools, get_default_command
 except ModuleNotFoundError as e:
     if e.name == "yaml":
         load_registry = None
         search_tools = None
+        match_prompt_tools = None
+        get_default_command = None
     else:
         raise
 
@@ -160,8 +162,52 @@ def keyword_match(intent: str, registry: dict) -> Optional[dict]:
     }
 
 
+def registry_prompt_match(intent: str, registry: dict) -> Optional[dict]:
+    """Try shared routing metadata from the registry before legacy fallbacks."""
+    if registry is None or match_prompt_tools is None or get_default_command is None:
+        return None
+
+    matches = match_prompt_tools(registry, intent, limit=3)
+    if not matches:
+        return None
+
+    top = matches[0]
+    tool = top['tool']
+    info = top['info']
+    commands = list(info.get('commands', {}).keys())
+    intent_lower = intent.lower()
+
+    best_cmd = get_default_command(info)
+    if not best_cmd and commands:
+        best_cmd = commands[0]
+
+    for cmd in commands:
+        if cmd.lower() in intent_lower:
+            best_cmd = cmd
+            break
+
+    if not best_cmd:
+        return None
+
+    clarification = None
+    if not any(cmd.lower() in intent_lower for cmd in commands):
+        clarification = f"Did you want to use {tool} {best_cmd}? Add more detail if you need a different {tool} command."
+
+    return {
+        'tool': tool,
+        'command': best_cmd,
+        'args': [],
+        'flags': {},
+        'confidence': min(0.8, 0.45 + (top['score'] * 0.05)),
+        'explanation': f"Shared registry routing matched {tool} ({top['score']})",
+        'clarification_needed': clarification,
+    }
+
+
 def match_intent(intent: str) -> dict:
     """Try all matching strategies."""
+
+    registry = load_registry() if load_registry is not None else None
 
     # 1. Try cache/fuzzy match
     fuzzy = fuzzy_match(intent)
@@ -169,18 +215,23 @@ def match_intent(intent: str) -> dict:
         fuzzy['from_fuzzy'] = True
         return fuzzy
 
-    # 2. Try pattern matching
+    # 2. Try shared registry routing metadata
+    registry_match = registry_prompt_match(intent, registry)
+    if registry_match and route_has_valid_tool(registry_match):
+        registry_match['from_registry_routing'] = True
+        return registry_match
+
+    # 3. Try legacy pattern matching
     pattern_match = match_patterns(intent)
     if pattern_match:
         return pattern_match
 
-    # 3. Try keyword matching
-    registry = load_registry() if load_registry is not None else None
+    # 4. Try keyword matching
     keyword = keyword_match(intent, registry)
     if keyword:
         return keyword
 
-    # 4. No match
+    # 5. No match
     return {
         'tool': None,
         'command': None,

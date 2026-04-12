@@ -13,6 +13,10 @@ agent-do is a universal automation CLI for AI agents with 80 specialized tools. 
 ```bash
 ./test.sh                              # Run all tests
 ./agent-do --list                      # List available tools
+./agent-do suggest "task"              # Recommend a likely tool/command
+./agent-do suggest --project           # Recommend likely tools for this repo
+./agent-do find playwright             # Search tools by keyword
+./agent-do nudges stats                # Local nudge telemetry summary
 ./agent-do <tool> --help               # Tool-specific help
 ./agent-do --status                    # Active sessions and state
 ./agent-do --health                    # Check tool dependencies
@@ -49,8 +53,8 @@ The main `agent-do` script (bash) decides mode based on first argument:
 
 1. **Structured API**: `agent-do ios screenshot` → `is_tool()` matches → `exec_tool()` dispatches to `tools/agent-ios`
 2. **Natural Language** (`-n` flag): 3-tier fallback chain:
-   - `lib/cache.py:check_cache()` — SQLite pattern cache (`~/.agent-do/cache/patterns.db`)
-   - `lib/cache.py:fuzzy_match()` — Jaccard similarity against cached intents (threshold 0.6)
+   - `lib/cache.py:check_cache()` — project-aware exact route memory (`~/.agent-do/cache/patterns.db`)
+   - `lib/cache.py:fuzzy_match()` — Jaccard similarity weighted by project scope and past route success
    - `bin/intent-router` — Claude API call
 3. **Offline** (`--offline`): `bin/pattern-matcher` — regex patterns + keyword matching, no LLM
 
@@ -75,12 +79,15 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 ├── bin/
 │   ├── intent-router       # LLM router (Python) — cache → fuzzy → Claude API
 │   ├── pattern-matcher     # Offline router (Python) — regex + keyword matching
+│   ├── suggest             # Discovery CLI — task → likely tools/commands
+│   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── health              # Tool dependency checker (bash)
 │   └── status              # Session status display (bash + inline Python)
 ├── lib/
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
 │   ├── registry.py         # Tool registry loader (merges user/bundled/plugin registries)
-│   ├── cache.py            # SQLite pattern cache + fuzzy matching
+│   ├── cache.py            # Project-aware route memory + fuzzy matching
+│   ├── telemetry.py        # JSONL telemetry for nudges/suggestions
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   ├── json-output.sh      # Shared --json flag and structured output for tools
 │   └── capture/            # Shared capture pipeline (used by browse + unbrowse)
@@ -162,6 +169,7 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 
 1. Create executable at `tools/agent-<name>` (must support `--help` flag)
 2. Add entry to `registry.yaml` with `description`, `capabilities`, `commands`, `examples`
+   - add `routing` metadata for discovery keywords, raw CLI equivalents, readiness hints, and project signals when the tool should participate in `suggest`, prompt nudges, or PreToolUse hard nudges
 3. `--list` auto-discovers tools via filesystem scan of `tools/agent-*`
 
 ## Dependencies

@@ -49,6 +49,9 @@ NATURAL LANGUAGE (for humans - uses LLM routing):
 OPTIONS:
   --help, -h     Show this help
   --list, -l     List available tools
+  suggest        Recommend likely tools/commands for a task
+  find           Search tools by keyword
+  nudges         Inspect local nudge telemetry
   bootstrap      Initialize stateful tools for the current project
   --status       Show active sessions and state
   --health       Check tool dependencies and readiness
@@ -162,6 +165,18 @@ case "${1:-}" in
         ;;
     --list|-l)
         list_tools
+        ;;
+    suggest)
+        shift || true
+        exec "$SCRIPT_DIR/bin/suggest" suggest "$@"
+        ;;
+    find)
+        shift || true
+        exec "$SCRIPT_DIR/bin/suggest" find "$@"
+        ;;
+    nudges)
+        shift || true
+        exec "$SCRIPT_DIR/bin/nudges" "$@"
         ;;
     bootstrap)
         shift || true
