@@ -151,6 +151,7 @@ tools:
       show: 'Show one auth profile: show <site>'
       status: 'Show auth state: status <site> [--name default]'
       probe: 'Inspect the current auth checkpoint branch: probe <site> [--load]'
+      advance: 'Advance one safe checkpoint step and re-probe: advance <site> [--action ACTION] [--timeout 60]'
       ensure: 'Run the strategy ladder: ensure <site> [--strategy saved-session|browser-import|site-creds]'
       save: 'Save current authenticated browser state: save <site> [--name default]'
       load: 'Load saved browser auth state: load <site> [--name default]'
@@ -183,13 +184,19 @@ tools:
       command: agent-auth status github
     - intent: inspect the current auth checkpoint
       command: agent-auth probe github
+    - intent: advance a live auth checkpoint
+      command: agent-auth advance github
     routing:
       discover_keywords:
       - auth session
       - login state
       - auth checkpoint
+      - auth advance
       - passkey prompt
       - device approval
+      - approve sign in
+      - choose an account
+      - consent screen
       - signed in
       - sso reuse
       - browser cookies
@@ -198,8 +205,11 @@ tools:
       prompt_patterns:
       - \blog into this site\b
       - \b(auth|login) checkpoint\b
+      - \badvance (the )?(auth|login)\b
       - \bpasskey\b
       - \bcheck your phone\b
+      - \bchoose an account\b
+      - \bconsent screen\b
       - \breuse .* auth\b
       - \b(load|reuse) the saved .* session\b
       - \bcheck if (we|i) (am|are) signed in\b
@@ -208,6 +218,7 @@ tools:
       recommended_entrypoints:
       - agent-do auth ensure <site>
       - agent-do auth probe <site>
+      - agent-do auth advance <site>
       - agent-do auth status <site>
       - agent-do auth validate <site>
       default_command: list

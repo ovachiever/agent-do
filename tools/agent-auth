@@ -15,6 +15,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -537,6 +538,31 @@ def capture_phone_baseline(profile: dict[str, Any], *, limit: int = 25) -> list[
             if message_id:
                 baseline_ids.append(message_id)
     return baseline_ids
+
+
+def normalize_baseline_ids(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    output: list[str] = []
+    for item in values:
+        value = str(item or "").strip()
+        if value:
+            output.append(value)
+    return output
+
+
+def capture_challenge_baselines(site: str, name: str, profile: dict[str, Any]) -> dict[str, Any]:
+    email_ids = capture_email_baseline(profile)
+    phone_ids = capture_phone_baseline(profile)
+    return write_session_meta(
+        site,
+        name,
+        {
+            "email_baseline_ids": email_ids,
+            "phone_baseline_ids": phone_ids,
+            "challenge_baselines_captured_at": now_iso(),
+        },
+    )
 
 
 def resolve_secret(key: str | None) -> str | None:
@@ -1085,7 +1111,7 @@ def detect_checkpoints(profile: dict[str, Any]) -> list[dict[str, Any]]:
 
     consent_markers = match_text_markers(
         text,
-        ["authorize", "grant access", "allow access", "continue", "wants to access your"],
+        ["authorize", "grant access", "allow access", "approve access", "wants to access your"],
     )
     consent_selectors = list(
         provider_refresh_config(profile).get("consent_selectors")
@@ -1149,6 +1175,7 @@ def probe_state(site: str, profile: dict[str, Any], *, name: str = "default", lo
         recommended.append(f"agent-do auth save {site}")
         guidance.append("The current page satisfies the profile validation markers.")
     if checkpoints:
+        recommended.append(f"agent-do auth advance {site}")
         recommended.append(f"agent-do auth probe {site}")
     for checkpoint in checkpoints:
         action = checkpoint.get("action_required")
@@ -1228,6 +1255,95 @@ def dedupe_preserve_order(items: list[str]) -> list[str]:
             seen.add(item)
             output.append(item)
     return output
+
+
+CHECKPOINT_PRIORITY = {
+    "ACCOUNT_CHOOSER_REQUIRED": 10,
+    "CONSENT_REQUIRED": 20,
+    "EMAIL_CHALLENGE_PENDING": 30,
+    "PHONE_CHALLENGE_PENDING": 40,
+    "TOTP_REQUIRED": 50,
+    "PASSKEY_CHALLENGE_REQUIRED": 60,
+    "DEVICE_APPROVAL_REQUIRED": 70,
+    "CAPTCHA_REQUIRED": 80,
+}
+
+
+def sort_checkpoints(checkpoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        checkpoints,
+        key=lambda item: CHECKPOINT_PRIORITY.get(str(item.get("action_required") or ""), 999),
+    )
+
+
+def checkpoint_from_probe(payload: dict[str, Any], action_required: str | None = None) -> dict[str, Any] | None:
+    checkpoints = sort_checkpoints(list(payload.get("checkpoints") or []))
+    if action_required:
+        for checkpoint in checkpoints:
+            if str(checkpoint.get("action_required") or "") == action_required:
+                return checkpoint
+    return checkpoints[0] if checkpoints else None
+
+
+def provider_identity_for_checkpoint(profile: dict[str, Any]) -> str | None:
+    provider_name = provider_type(profile)
+    if provider_name in {"github", "google"}:
+        provider_profile = load_profile(provider_name) or default_profile(provider_name)
+        identity = resolve_profile_username(provider_profile)
+        if identity:
+            return identity
+    return resolve_profile_username(profile)
+
+
+def account_chooser_selectors(profile: dict[str, Any]) -> list[str]:
+    provider_name = provider_type(profile)
+    refresh_cfg = provider_refresh_config(profile)
+    defaults = provider_default_refresh(provider_name)
+    identity = provider_identity_for_checkpoint(profile)
+    return expand_selector_patterns(list(refresh_cfg.get("account_selectors") or defaults.get("account_selectors", [])), identity)
+
+
+def consent_action_selectors(profile: dict[str, Any]) -> list[str]:
+    provider_name = provider_type(profile)
+    refresh_cfg = provider_refresh_config(profile)
+    defaults = provider_default_refresh(provider_name)
+    return list(refresh_cfg.get("consent_selectors") or defaults.get("consent_selectors", []))
+
+
+def totp_input_selectors(profile: dict[str, Any]) -> list[str]:
+    return list(
+        ((profile.get("credentials") or {}).get("totp") or {}).get("input_selectors")
+        or [
+            'input[name="app_otp"]',
+            'input[name="otp"]',
+            'input[name="totp"]',
+            'input[name="totpPin"]',
+            'input[autocomplete="one-time-code"]',
+            '#app_totp',
+        ]
+    )
+
+
+def totp_submit_selectors(profile: dict[str, Any]) -> list[str]:
+    return list(
+        ((profile.get("credentials") or {}).get("totp") or {}).get("submit_selectors")
+        or ['button[type="submit"]', 'input[type="submit"]', 'button[type="button"]']
+    )
+
+
+def wait_for_validation(site: str, profile: dict[str, Any], *, timeout_seconds: int, interval_seconds: int) -> dict[str, Any]:
+    deadline = time.monotonic() + max(timeout_seconds, 1)
+    interval_ms = max(interval_seconds, 1) * 1000
+    last_validation = apply_validation(site, profile)
+    while time.monotonic() < deadline:
+        if last_validation.get("ok"):
+            return last_validation
+        try:
+            run_browse("wait", str(interval_ms))
+        except Exception:
+            time.sleep(max(interval_seconds, 1))
+        last_validation = apply_validation(site, profile)
+    return last_validation
 
 
 def identity_values(identity: str | None) -> dict[str, str]:
@@ -2022,7 +2138,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "validated_at": meta.get("validated_at"),
             "updated_at": meta.get("updated_at"),
         },
-        "next": [] if meta.get("last_validation_ok") else [f"agent-do auth ensure {args.site}", f"agent-do auth probe {args.site}"],
+        "next": [] if meta.get("last_validation_ok") else [f"agent-do auth ensure {args.site}", f"agent-do auth probe {args.site}", f"agent-do auth advance {args.site}"],
     }
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -2212,6 +2328,234 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_advance(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+
+    initial = probe_state(args.site, profile, name=args.name, load_saved=args.load)
+    validation = initial.get("validation") or {}
+    if validation.get("ok"):
+        payload = {
+            "ok": True,
+            "advanced": False,
+            "validated": True,
+            "site": args.site,
+            "state": initial.get("state"),
+            "message": "The current page is already authenticated.",
+            "after": initial,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"{args.site}: already authenticated")
+        return 0
+
+    checkpoint = checkpoint_from_probe(initial, args.action)
+    if checkpoint is None:
+        return fail(
+            "No actionable auth checkpoint detected on the current page",
+            json_mode=args.json,
+            code="no_checkpoint",
+            extra={
+                "site": args.site,
+                "state": initial.get("state"),
+                "probe": initial,
+                "recommended": initial.get("recommended") or [f"agent-do auth ensure {args.site}"],
+            },
+        )
+
+    meta = get_session_meta(args.site, args.name) or {}
+    action_required = str(checkpoint.get("action_required") or "")
+    action_taken: dict[str, Any] = {
+        "action_required": action_required,
+        "checkpoint_type": checkpoint.get("type"),
+    }
+
+    try:
+        if action_required == "ACCOUNT_CHOOSER_REQUIRED":
+            identity = provider_identity_for_checkpoint(profile)
+            selectors = account_chooser_selectors(profile)
+            clicked = click_matching_identity(selectors, identity) if identity else None
+            if not clicked:
+                raise ActionRequiredError(
+                    action_required,
+                    "Account chooser is visible but no matching account selector was clickable",
+                )
+            wait_for_settle()
+            action_taken.update({"selector": clicked, "identity": identity})
+
+        elif action_required == "CONSENT_REQUIRED":
+            selectors = consent_action_selectors(profile)
+            clicked = click_first_selector(selectors)
+            if not clicked:
+                raise ActionRequiredError(
+                    action_required,
+                    "Consent screen is visible but no configured consent selector was clickable",
+                )
+            wait_for_settle()
+            action_taken.update({"selector": clicked})
+
+        elif action_required == "EMAIL_CHALLENGE_PENDING":
+            baseline_ids = normalize_baseline_ids(meta.get("email_baseline_ids"))
+            complete_email_challenge_with_baseline(profile, baseline_ids=baseline_ids)
+            action_taken.update({"baseline_count": len(baseline_ids)})
+
+        elif action_required == "PHONE_CHALLENGE_PENDING":
+            baseline_ids = normalize_baseline_ids(meta.get("phone_baseline_ids"))
+            complete_phone_challenge_with_baseline(profile, baseline_ids=baseline_ids)
+            action_taken.update({"baseline_count": len(baseline_ids)})
+
+        elif action_required == "TOTP_REQUIRED":
+            totp_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
+            totp_secret = resolve_secret(str(totp_key) if totp_key else None)
+            missing = complete_totp_if_present(
+                profile,
+                totp_secret,
+                selectors=totp_input_selectors(profile),
+                submit_selectors=totp_submit_selectors(profile),
+            )
+            if missing:
+                raise ActionRequiredError(
+                    "MISSING_CREDENTIALS",
+                    "TOTP checkpoint is visible but the configured secret is missing",
+                    missing=missing,
+                )
+            action_taken.update({"totp_secret": str(totp_key or "")})
+
+        elif action_required == "PASSKEY_CHALLENGE_REQUIRED":
+            dialog = safe_macos_dialog_probe()
+            if not dialog or not dialog.get("type"):
+                raise ActionRequiredError(
+                    action_required,
+                    "Passkey checkpoint is active but no actionable macOS dialog is available",
+                )
+            run_macos_json("dialog", "click", "--default")
+            wait_for_settle()
+            action_taken.update({"dialog": dialog, "clicked": "--default"})
+
+        elif action_required == "DEVICE_APPROVAL_REQUIRED":
+            waited = wait_for_validation(
+                args.site,
+                profile,
+                timeout_seconds=args.timeout,
+                interval_seconds=args.interval,
+            )
+            action_taken.update(
+                {
+                    "timeout_seconds": args.timeout,
+                    "interval_seconds": args.interval,
+                    "validation": waited,
+                }
+            )
+            if not waited.get("ok"):
+                updated = probe_state(args.site, profile, name=args.name, load_saved=False)
+                write_session_meta(
+                    args.site,
+                    args.name,
+                    {
+                        "last_strategy": "checkpoint-advance",
+                        "last_validation_ok": False,
+                        "state": "checkpoint",
+                        "last_action_required": "DEVICE_APPROVAL_REQUIRED",
+                        "last_error": f"Timed out waiting {args.timeout}s for device approval",
+                    },
+                )
+                return fail(
+                    f"Timed out waiting {args.timeout}s for device approval",
+                    json_mode=args.json,
+                    code="action_required",
+                    extra={
+                        "site": args.site,
+                        "state": "action-required",
+                        "action_required": "DEVICE_APPROVAL_REQUIRED",
+                        "advanced": False,
+                        "probe": updated,
+                        "recommended": updated.get("recommended") or [f"agent-do auth probe {args.site}"],
+                    },
+                )
+
+        elif action_required == "CAPTCHA_REQUIRED":
+            raise ActionRequiredError(action_required, "CAPTCHA is visible and cannot be advanced safely")
+
+        else:
+            raise ActionRequiredError(action_required or "UNSUPPORTED_CHECKPOINT", "No safe automation path exists for this checkpoint")
+
+    except ActionRequiredError as exc:
+        write_session_meta(
+            args.site,
+            args.name,
+            {
+                "last_strategy": "checkpoint-advance",
+                "last_validation_ok": False,
+                "state": "checkpoint",
+                "last_action_required": exc.action_required,
+                "last_error": str(exc),
+            },
+        )
+        return fail(
+            str(exc),
+            json_mode=args.json,
+            code="action_required",
+            extra={
+                "site": args.site,
+                "state": "action-required",
+                "action_required": exc.action_required,
+                "missing": exc.missing,
+                "advanced": False,
+                "recommended": [f"agent-do auth probe {args.site}"],
+            },
+        )
+
+    updated = probe_state(args.site, profile, name=args.name, load_saved=False)
+    updated_validation = updated.get("validation") or {}
+    if updated_validation.get("ok"):
+        meta = save_current_session(args.site, name=args.name, strategy="checkpoint-advance")
+        payload = {
+            "ok": True,
+            "advanced": True,
+            "validated": True,
+            "site": args.site,
+            "state": "authenticated",
+            "action_taken": action_taken,
+            "after": updated,
+            "session": {"name": args.name, "browse_session": meta.get("browse_session")},
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"{args.site}: authenticated via checkpoint-advance")
+        return 0
+
+    next_checkpoint = checkpoint_from_probe(updated)
+    write_session_meta(
+        args.site,
+        args.name,
+        {
+            "last_strategy": "checkpoint-advance",
+            "last_validation_ok": False,
+            "state": "checkpoint" if updated.get("checkpoints") else str(updated.get("state") or "stale"),
+            "last_action_required": next_checkpoint.get("action_required") if next_checkpoint else None,
+            "last_error": None,
+        },
+    )
+    payload = {
+        "ok": True,
+        "advanced": True,
+        "validated": False,
+        "site": args.site,
+        "state": updated.get("state"),
+        "action_taken": action_taken,
+        "after": updated,
+        "recommended": updated.get("recommended") or [f"agent-do auth probe {args.site}"],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"{args.site}: advanced checkpoint, current state is {updated.get('state')}")
+    return 0
+
+
 def cmd_instructions(args: argparse.Namespace) -> int:
     profile = load_profile(args.site)
     if profile is None:
@@ -2241,6 +2585,7 @@ def cmd_instructions(args: argparse.Namespace) -> int:
     else:
         if state == "checkpoint" or meta.get("last_action_required"):
             recommended.insert(0, f"agent-do auth probe {args.site}")
+            recommended.insert(1, f"agent-do auth advance {args.site}")
             guidance.append("A prior auth run stopped at a checkpoint. Probe the current branch before retrying.")
         if "browser-import" in strategies and profile.get("browser_import"):
             guidance.append("Browser import is configured and should be attempted before site credentials.")
@@ -2275,6 +2620,9 @@ def cmd_instructions(args: argparse.Namespace) -> int:
                 )
             if not missing:
                 guidance.append("Site credentials are available for automated form login if session reuse fails.")
+
+    recommended = dedupe_preserve_order(recommended)
+    guidance = dedupe_preserve_order(guidance)
 
     payload = {
         "site": args.site,
@@ -2398,6 +2746,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
         elif strategy == "site-creds":
             attempted.append(strategy)
+            capture_challenge_baselines(args.site, name, profile)
             try:
                 ok, missing = site_creds_login(args.site, profile, name=name)
             except ActionRequiredError as exc:
@@ -2450,6 +2799,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
         elif strategy == "provider-refresh":
             attempted.append(strategy)
+            capture_challenge_baselines(args.site, name, profile)
             try:
                 ok, missing, provider_strategy = provider_refresh_login(args.site, profile, name=name)
             except ActionRequiredError as exc:
@@ -2566,6 +2916,26 @@ def build_parser() -> argparse.ArgumentParser:
     probe_parser.add_argument("--name", default="default")
     probe_parser.add_argument("--load", action="store_true")
 
+    advance_parser = sub.add_parser("advance", help="Advance one safe auth checkpoint step")
+    advance_parser.add_argument("site")
+    advance_parser.add_argument("--name", default="default")
+    advance_parser.add_argument("--load", action="store_true")
+    advance_parser.add_argument(
+        "--action",
+        choices=[
+            "ACCOUNT_CHOOSER_REQUIRED",
+            "CONSENT_REQUIRED",
+            "EMAIL_CHALLENGE_PENDING",
+            "PHONE_CHALLENGE_PENDING",
+            "TOTP_REQUIRED",
+            "PASSKEY_CHALLENGE_REQUIRED",
+            "DEVICE_APPROVAL_REQUIRED",
+            "CAPTCHA_REQUIRED",
+        ],
+    )
+    advance_parser.add_argument("--timeout", type=int, default=60)
+    advance_parser.add_argument("--interval", type=int, default=5)
+
     ensure_parser = sub.add_parser("ensure", help="Ensure authenticated state using the strategy ladder")
     ensure_parser.add_argument("site")
     ensure_parser.add_argument("--name", default="default")
@@ -2627,6 +2997,8 @@ def main() -> int:
             return cmd_status(args)
         if args.command == "probe":
             return cmd_probe(args)
+        if args.command == "advance":
+            return cmd_advance(args)
         if args.command == "ensure":
             return cmd_ensure(args)
         if args.command == "save":

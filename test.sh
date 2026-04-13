@@ -73,6 +73,7 @@ check_cmd "auth email challenge tests" python3 "$SCRIPT_DIR/tests/test_auth_emai
 check_cmd "auth phone challenge tests" python3 "$SCRIPT_DIR/tests/test_auth_phone_challenge.py"
 check_cmd "auth passkey tests" python3 "$SCRIPT_DIR/tests/test_auth_passkey.py"
 check_cmd "auth probe tests" python3 "$SCRIPT_DIR/tests/test_auth_probe.py"
+check_cmd "auth advance tests" python3 "$SCRIPT_DIR/tests/test_auth_advance.py"
 check_cmd "email tests" python3 "$SCRIPT_DIR/tests/test_email.py"
 check_cmd "sms tests" python3 "$SCRIPT_DIR/tests/test_sms.py"
 check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"

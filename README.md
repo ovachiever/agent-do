@@ -90,6 +90,7 @@ agent-do auth init github
 agent-do creds store GITHUB_TOTP_SECRET --stdin
 agent-do auth ensure github
 agent-do auth probe github
+agent-do auth advance github
 agent-do auth validate github
 ```
 
@@ -222,6 +223,8 @@ Profiles can also declare mailbox-driven challenges with `--email-code`, `--magi
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
 
 When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspects the current page, classifies the checkpoint, checks for a frontmost macOS dialog when available, and returns exact next-step commands instead of leaving the agent to infer what happened.
+
+`agent-do auth advance <site>` takes the next safe step on that checkpoint branch, then immediately re-probes the page and returns the new state. It can continue chooser, consent, mailbox, SMS, TOTP, passkey-dialog, and passive device-approval branches without forcing the agent to reconstruct those flows by hand.
 
 ### `email`
 

@@ -13,6 +13,7 @@
 - `agent-do email latest|wait|code|link` for inbox polling, verification code extraction, and magic-link extraction.
 - `agent-do sms snapshot|latest|wait|code|link` for message polling, verification code extraction, and link extraction.
 - `agent-do auth probe` for classifying the live auth checkpoint branch and optional frontmost macOS dialog state.
+- `agent-do auth advance` for executing one safe checkpoint step, then returning the updated auth branch state.
 
 ### Changed
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
@@ -23,6 +24,7 @@
 - `agent-do auth` can now continue SMS-driven login flows through `agent-do sms`, and it correlates email/SMS challenges against a pre-login mailbox baseline so stale unread messages are ignored.
 - `agent-do auth` now surfaces passkey or security-key checkpoints as explicit action-required states instead of flattening them into a later validation failure.
 - `agent-do auth` now surfaces device-approval, consent, chooser, and CAPTCHA checkpoints as structured states, and `status`/`instructions` preserve that checkpoint context instead of dropping back to a generic configured state.
+- `agent-do auth ensure` now stores pre-login email/SMS baselines in session metadata so later checkpoint retries can ignore stale unread challenges, and `advance` can safely continue chooser, consent, mailbox, TOTP, passkey-dialog, and passive device-approval branches.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
