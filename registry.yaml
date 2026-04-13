@@ -140,6 +140,7 @@ tools:
     - wait for mailbox-delivered verification codes or magic links through agent-do email
     - wait for SMS-delivered verification codes or magic links through agent-do sms
     - validate whether saved authenticated state is still usable
+    - inspect the live auth branch and classify checkpoints before retrying
     - return next-step auth guidance for agents
     - reuse upstream GitHub or Google auth to complete SSO into another site
     - step through provider account choosers and consent screens with persisted checkpoint metadata
@@ -149,6 +150,7 @@ tools:
       list: 'List configured auth profiles: list'
       show: 'Show one auth profile: show <site>'
       status: 'Show auth state: status <site> [--name default]'
+      probe: 'Inspect the current auth checkpoint branch: probe <site> [--load]'
       ensure: 'Run the strategy ladder: ensure <site> [--strategy saved-session|browser-import|site-creds]'
       save: 'Save current authenticated browser state: save <site> [--name default]'
       load: 'Load saved browser auth state: load <site> [--name default]'
@@ -179,10 +181,15 @@ tools:
       command: agent-auth validate github
     - intent: inspect auth state for a site
       command: agent-auth status github
+    - intent: inspect the current auth checkpoint
+      command: agent-auth probe github
     routing:
       discover_keywords:
       - auth session
       - login state
+      - auth checkpoint
+      - passkey prompt
+      - device approval
       - signed in
       - sso reuse
       - browser cookies
@@ -190,6 +197,9 @@ tools:
       - google auth
       prompt_patterns:
       - \blog into this site\b
+      - \b(auth|login) checkpoint\b
+      - \bpasskey\b
+      - \bcheck your phone\b
       - \breuse .* auth\b
       - \b(load|reuse) the saved .* session\b
       - \bcheck if (we|i) (am|are) signed in\b
@@ -197,6 +207,7 @@ tools:
       - \bsso\b
       recommended_entrypoints:
       - agent-do auth ensure <site>
+      - agent-do auth probe <site>
       - agent-do auth status <site>
       - agent-do auth validate <site>
       default_command: list

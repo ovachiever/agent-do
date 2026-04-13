@@ -416,6 +416,8 @@ def state_from_profile(site: str) -> str:
     if profile is None:
         return "unconfigured"
     meta = get_session_meta(site)
+    if meta and meta.get("state") == "checkpoint":
+        return "checkpoint"
     if not meta or (not session_bundle_exists(site) and not meta.get("browse_session")):
         return "configured"
     if meta.get("state") == "authenticated" and meta.get("last_validation_ok") is True:
@@ -448,6 +450,11 @@ def email_cmd() -> list[str]:
 def sms_cmd() -> list[str]:
     default = [str(ROOT / "tools" / "agent-sms")]
     return tool_cmd_from_env("AGENT_DO_AUTH_SMS_CMD", default)
+
+
+def macos_cmd() -> list[str]:
+    default = [str(ROOT / "tools" / "agent-macos" / "agent-macos")]
+    return tool_cmd_from_env("AGENT_DO_AUTH_MACOS_CMD", default)
 
 
 def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -484,6 +491,17 @@ def run_sms_json(*args: str) -> dict[str, Any]:
     payload = json.loads(proc.stdout or "{}")
     if payload.get("ok") is False:
         raise RuntimeError(payload.get("message") or "sms command failed")
+    return payload
+
+
+def run_macos_json(*args: str) -> dict[str, Any]:
+    proc = run_tool([*macos_cmd(), *args])
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"macos failed: {' '.join(args)}"
+        raise RuntimeError(detail)
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("error"):
+        raise RuntimeError(str(payload.get("error")))
     return payload
 
 
@@ -743,8 +761,6 @@ def passkey_challenge_details() -> dict[str, Any] | None:
         "use your passkey",
         "touch your security key",
         "security key",
-        "check your device",
-        "use your phone or tablet",
     ]
     matched = [marker for marker in markers if marker in lowered]
     if not visible and not matched:
@@ -760,6 +776,448 @@ def raise_if_passkey_challenge_visible() -> None:
     if details.get("markers"):
         message = f"{message}: {', '.join(details['markers'])}"
     raise ActionRequiredError("PASSKEY_CHALLENGE_REQUIRED", message)
+
+
+def match_text_markers(text: str, markers: list[str]) -> list[str]:
+    lowered = text.lower()
+    return [marker for marker in markers if marker in lowered]
+
+
+def current_page_text() -> str:
+    try:
+        return read_page_text()
+    except Exception:
+        return ""
+
+
+def current_page_url() -> str:
+    try:
+        return read_page_url().strip()
+    except Exception:
+        return ""
+
+
+def detect_login_form_result() -> dict[str, Any]:
+    try:
+        data = run_browse("auth", "detect-login")
+        return data if isinstance(data, dict) else {"found": False}
+    except Exception:
+        return {"found": False}
+
+
+def detect_captcha_result() -> dict[str, Any]:
+    try:
+        data = run_browse("auth", "detect-captcha")
+        return data if isinstance(data, dict) else {"hasCaptcha": False, "types": []}
+    except Exception:
+        return {"hasCaptcha": False, "types": []}
+
+
+def safe_macos_dialog_probe() -> dict[str, Any] | None:
+    try:
+        permissions = run_macos_json("permissions")
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+    if not permissions.get("granted"):
+        return {
+            "available": False,
+            "granted": False,
+            "message": permissions.get("message"),
+        }
+    try:
+        frontmost = run_macos_json("frontmost")
+    except Exception:
+        frontmost = None
+    try:
+        dialog = run_macos_json("dialog", "detect")
+    except Exception as exc:
+        return {
+            "available": True,
+            "granted": True,
+            "frontmost": frontmost,
+            "error": str(exc),
+        }
+    if dialog.get("type"):
+        dialog["available"] = True
+        dialog["granted"] = True
+        dialog["frontmost"] = frontmost
+        return dialog
+    return {
+        "available": True,
+        "granted": True,
+        "frontmost": frontmost,
+        "type": None,
+        "message": dialog.get("message", "No dialog detected"),
+    }
+
+
+def email_code_input_selectors(challenge: dict[str, Any]) -> list[str]:
+    return list(
+        challenge.get("input_selectors")
+        or [
+            'input[autocomplete="one-time-code"]',
+            'input[name="code"]',
+            'input[id*="code"]',
+            'input[name*="code"]',
+        ]
+    )
+
+
+def phone_code_input_selectors(challenge: dict[str, Any]) -> list[str]:
+    return list(
+        challenge.get("input_selectors")
+        or [
+            'input[autocomplete="one-time-code"]',
+            'input[name="code"]',
+            'input[id*="code"]',
+            'input[name*="code"]',
+        ]
+    )
+
+
+def build_email_probe_command(challenge: dict[str, Any]) -> str:
+    challenge_type = str(challenge.get("type") or "code").strip().lower()
+    command = ["agent-do", "email", "link" if challenge_type == "link" else "code"]
+    from_filter = str(challenge.get("from_contains") or "").strip()
+    subject_filter = str(challenge.get("subject_contains") or "").strip()
+    contains = str(challenge.get("contains") or "").strip()
+    domain = str(challenge.get("domain") or "").strip()
+    code_length = challenge.get("code_length")
+    code_regex = str(challenge.get("code_regex") or "").strip()
+    if from_filter:
+        command.extend(["--from", from_filter])
+    if subject_filter:
+        command.extend(["--subject", subject_filter])
+    if contains:
+        command.extend(["--contains", contains])
+    if domain and challenge_type == "link":
+        command.extend(["--domain", domain])
+    if code_regex and challenge_type == "code":
+        command.extend(["--regex", code_regex])
+    elif code_length and challenge_type == "code":
+        command.extend(["--length", str(code_length)])
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def build_phone_probe_command(challenge: dict[str, Any]) -> str:
+    challenge_type = str(challenge.get("type") or "code").strip().lower()
+    command = ["agent-do", "sms", "link" if challenge_type == "link" else "code"]
+    contact_filter = str(challenge.get("contact_contains") or challenge.get("from_contains") or "").strip()
+    contains = str(challenge.get("contains") or "").strip()
+    domain = str(challenge.get("domain") or "").strip()
+    code_length = challenge.get("code_length")
+    code_regex = str(challenge.get("code_regex") or "").strip()
+    if contact_filter:
+        command.extend(["--from", contact_filter])
+    if contains:
+        command.extend(["--contains", contains])
+    if domain and challenge_type == "link":
+        command.extend(["--domain", domain])
+    if code_regex and challenge_type == "code":
+        command.extend(["--regex", code_regex])
+    elif code_length and challenge_type == "code":
+        command.extend(["--length", str(code_length)])
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def detect_checkpoints(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    text = current_page_text()
+    lowered = text.lower()
+    checkpoints: list[dict[str, Any]] = []
+
+    captcha = detect_captcha_result()
+    if captcha.get("hasCaptcha"):
+        checkpoints.append(
+            {
+                "type": "captcha",
+                "action_required": "CAPTCHA_REQUIRED",
+                "source": "browser",
+                "details": {"types": captcha.get("types", [])},
+            }
+        )
+
+    passkey = passkey_challenge_details()
+    if passkey:
+        checkpoints.append(
+            {
+                "type": "passkey",
+                "action_required": "PASSKEY_CHALLENGE_REQUIRED",
+                "source": "browser",
+                "details": passkey,
+            }
+        )
+
+    email_challenge = email_challenge_config(profile)
+    challenge_active = False
+    if email_challenge:
+        challenge_type = str(email_challenge.get("type") or "code").strip().lower()
+        email_wait_markers = match_text_markers(
+            text,
+            [
+                "check your email",
+                "we emailed you",
+                "verification code we emailed",
+                "magic link",
+            ],
+        )
+        if challenge_type == "link" and email_wait_markers:
+            challenge_active = True
+            checkpoints.append(
+                {
+                    "type": "email-link",
+                    "action_required": "EMAIL_CHALLENGE_PENDING",
+                    "source": "email",
+                    "details": {"markers": email_wait_markers, "command": build_email_probe_command(email_challenge)},
+                }
+            )
+        elif challenge_type == "code" and first_existing_selector(email_code_input_selectors(email_challenge)):
+            challenge_active = True
+            checkpoints.append(
+                {
+                    "type": "email-code",
+                    "action_required": "EMAIL_CHALLENGE_PENDING",
+                    "source": "email",
+                    "details": {"command": build_email_probe_command(email_challenge)},
+                }
+            )
+
+    phone_challenge = phone_challenge_config(profile)
+    if phone_challenge:
+        challenge_type = str(phone_challenge.get("type") or "code").strip().lower()
+        phone_wait_markers = match_text_markers(
+            text,
+            [
+                "check your phone",
+                "we texted you",
+                "texted you a code",
+                "check your messages",
+                "sign-in link",
+                "sms",
+            ],
+        )
+        if challenge_type == "link" and phone_wait_markers:
+            challenge_active = True
+            checkpoints.append(
+                {
+                    "type": "sms-link",
+                    "action_required": "PHONE_CHALLENGE_PENDING",
+                    "source": "sms",
+                    "details": {"markers": phone_wait_markers, "command": build_phone_probe_command(phone_challenge)},
+                }
+            )
+        elif challenge_type == "code" and first_existing_selector(phone_code_input_selectors(phone_challenge)):
+            challenge_active = True
+            checkpoints.append(
+                {
+                    "type": "sms-code",
+                    "action_required": "PHONE_CHALLENGE_PENDING",
+                    "source": "sms",
+                    "details": {"command": build_phone_probe_command(phone_challenge)},
+                }
+            )
+
+    device_markers = match_text_markers(
+        text,
+        [
+            "check your phone",
+            "approve sign in",
+            "approve the sign in",
+            "approve this sign-in",
+            "tap yes on your phone",
+            "notification sent to your phone",
+            "open the app on your device",
+            "review the sign-in request",
+            "use your phone or tablet",
+            "check your device",
+        ],
+    )
+    if device_markers and not challenge_active:
+        checkpoints.append(
+            {
+                "type": "device-approval",
+                "action_required": "DEVICE_APPROVAL_REQUIRED",
+                "source": "browser",
+                "details": {"markers": device_markers},
+            }
+        )
+
+    totp_markers = match_text_markers(
+        text,
+        [
+            "two-factor",
+            "two factor",
+            "authenticator",
+            "one-time code",
+            "verification code",
+            "enter the code from your app",
+        ],
+    )
+    if not email_challenge and not phone_challenge and first_existing_selector(
+        ['input[name="app_otp"]', 'input[name="otp"]', 'input[name="totp"]', 'input[name="totpPin"]', 'input[autocomplete="one-time-code"]']
+    ):
+        checkpoints.append(
+            {
+                "type": "totp",
+                "action_required": "TOTP_REQUIRED",
+                "source": "browser",
+                "details": {"markers": totp_markers},
+            }
+        )
+
+    account_markers = match_text_markers(
+        text,
+        ["choose an account", "select an account", "pick an account", "continue as"],
+    )
+    provider_name = provider_type(profile)
+    chooser_selectors = expand_selector_patterns(
+        list(provider_refresh_config(profile).get("account_selectors") or provider_default_refresh(provider_name).get("account_selectors", [])),
+        resolve_profile_username(load_profile(provider_name) or default_profile(provider_name)) if provider_name in {"github", "google"} else None,
+    )
+    if account_markers or first_existing_selector(chooser_selectors):
+        checkpoints.append(
+            {
+                "type": "account-chooser",
+                "action_required": "ACCOUNT_CHOOSER_REQUIRED",
+                "source": "browser",
+                "details": {"markers": account_markers, "selectors": chooser_selectors[:4]},
+            }
+        )
+
+    consent_markers = match_text_markers(
+        text,
+        ["authorize", "grant access", "allow access", "continue", "wants to access your"],
+    )
+    consent_selectors = list(
+        provider_refresh_config(profile).get("consent_selectors")
+        or provider_default_refresh(provider_name).get("consent_selectors", [])
+    )
+    if consent_markers or first_existing_selector(consent_selectors):
+        checkpoints.append(
+            {
+                "type": "consent",
+                "action_required": "CONSENT_REQUIRED",
+                "source": "browser",
+                "details": {"markers": consent_markers, "selectors": consent_selectors[:4]},
+            }
+        )
+
+    seen_actions: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for checkpoint in checkpoints:
+        action = str(checkpoint.get("action_required") or "")
+        key = f"{action}:{checkpoint.get('type')}"
+        if key in seen_actions:
+            continue
+        seen_actions.add(key)
+        unique.append(checkpoint)
+    return unique
+
+
+def probe_state(site: str, profile: dict[str, Any], *, name: str = "default", load_saved: bool = False) -> dict[str, Any]:
+    meta = get_session_meta(site, name) or {}
+    if load_saved and (not current_page_url() or current_page_url() == "about:blank") and meta:
+        try:
+            load_saved_session(site, name=name)
+        except Exception:
+            pass
+
+    url = current_page_url()
+    login_form = detect_login_form_result()
+    captcha = detect_captcha_result()
+    checkpoints = detect_checkpoints(profile)
+    macos_dialog = safe_macos_dialog_probe()
+
+    validation = None
+    try:
+        validation = apply_validation(site, profile)
+    except Exception:
+        validation = None
+
+    state = "unknown"
+    if validation and validation.get("ok"):
+        state = "authenticated"
+    elif checkpoints:
+        state = "checkpoint"
+    elif login_form.get("found"):
+        state = "signed-out"
+    elif url and url != "about:blank":
+        state = "in-flight"
+
+    recommended: list[str] = []
+    guidance: list[str] = []
+    if state == "authenticated":
+        recommended.append(f"agent-do auth save {site}")
+        guidance.append("The current page satisfies the profile validation markers.")
+    if checkpoints:
+        recommended.append(f"agent-do auth probe {site}")
+    for checkpoint in checkpoints:
+        action = checkpoint.get("action_required")
+        details = checkpoint.get("details") or {}
+        if action == "EMAIL_CHALLENGE_PENDING" and details.get("command"):
+            recommended.append(str(details["command"]))
+            guidance.append("Email challenge is active on the current login branch.")
+        elif action == "PHONE_CHALLENGE_PENDING" and details.get("command"):
+            recommended.append(str(details["command"]))
+            guidance.append("Phone/SMS challenge is active on the current login branch.")
+        elif action == "PASSKEY_CHALLENGE_REQUIRED":
+            guidance.append("A passkey or security-key step is blocking browser-only continuation.")
+            if macos_dialog and macos_dialog.get("type") and macos_dialog.get("buttons"):
+                recommended.append("agent-do macos dialog detect")
+                recommended.append("agent-do macos dialog click --default")
+        elif action == "DEVICE_APPROVAL_REQUIRED":
+            guidance.append("Another trusted device must approve this sign-in unless an alternate auth path is chosen.")
+        elif action == "ACCOUNT_CHOOSER_REQUIRED":
+            guidance.append("The provider is waiting for an account choice before auth can continue.")
+        elif action == "CONSENT_REQUIRED":
+            guidance.append("The provider consent screen is visible and needs approval to proceed.")
+        elif action == "CAPTCHA_REQUIRED":
+            guidance.append("CAPTCHA is visible and blocks zero-touch continuation for this branch.")
+        elif action == "TOTP_REQUIRED":
+            guidance.append("A TOTP/app code field is visible on the current page.")
+
+    if not checkpoints and login_form.get("found"):
+        recommended.append(f"agent-do auth ensure {site}")
+        guidance.append("A login form is visible and no higher-order checkpoint is currently detected.")
+
+    recommended = dedupe_preserve_order(recommended)
+    guidance = dedupe_preserve_order(guidance)
+
+    return {
+        "site": site,
+        "state": state,
+        "url": url,
+        "validation": validation,
+        "login_form": login_form,
+        "captcha": captcha,
+        "checkpoints": checkpoints,
+        "desktop_dialog": macos_dialog,
+        "recommended": recommended,
+        "guidance": guidance,
+        "session": {
+            "name": name,
+            "meta": meta,
+        },
+    }
+
+
+def raise_if_manual_checkpoint_visible(profile: dict[str, Any]) -> None:
+    checkpoints = detect_checkpoints(profile)
+    for checkpoint in checkpoints:
+        action = str(checkpoint.get("action_required") or "")
+        if action in {
+            "PASSKEY_CHALLENGE_REQUIRED",
+            "DEVICE_APPROVAL_REQUIRED",
+            "CAPTCHA_REQUIRED",
+            "ACCOUNT_CHOOSER_REQUIRED",
+            "CONSENT_REQUIRED",
+        }:
+            details = checkpoint.get("details") or {}
+            message = checkpoint.get("type", "checkpoint").replace("-", " ")
+            if isinstance(details, dict):
+                markers = details.get("markers") or []
+                if markers:
+                    message = f"{message}: {', '.join(markers)}"
+            raise ActionRequiredError(action, str(message))
 
 
 def dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -1056,7 +1514,11 @@ def login_with_generic(profile: dict[str, Any], username: str, password: str, to
     missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     if missing:
         return missing
-    return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    missing = complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    if missing:
+        return missing
+    raise_if_manual_checkpoint_visible(profile)
+    return []
 
 
 def login_with_github(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -1105,7 +1567,11 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
     missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     if missing:
         return missing
-    return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    missing = complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    if missing:
+        return missing
+    raise_if_manual_checkpoint_visible(profile)
+    return []
 
 
 def login_with_google(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -1157,7 +1623,11 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
     missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     if missing:
         return missing
-    return complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    missing = complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    if missing:
+        return missing
+    raise_if_manual_checkpoint_visible(profile)
+    return []
 
 
 def run_site_login_adapter(profile: dict[str, Any], username: str, password: str, totp_secret: str | None) -> list[str]:
@@ -1185,6 +1655,8 @@ def ensure_provider_state(provider_site: str, profile: dict[str, Any], *, name: 
                     "validated_at": now_iso(),
                     "last_validation_ok": True,
                     "state": "authenticated",
+                    "last_action_required": None,
+                    "last_error": None,
                 },
             )
             return True, [], "saved-session"
@@ -1251,6 +1723,7 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
     complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
     raise_if_passkey_challenge_visible()
+    raise_if_manual_checkpoint_visible(profile)
 
     validation = apply_validation(site, profile)
     if validation["ok"]:
@@ -1339,6 +1812,8 @@ def persist_browse_alias(site: str, *, name: str = "default", alias: str | None 
         "validated_at": now_iso(),
         "last_validation_ok": True,
         "state": "authenticated",
+        "last_action_required": None,
+        "last_error": None,
     }
     if extra:
         payload.update(extra)
@@ -1538,6 +2013,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         "site": args.site,
         "state": state_from_profile(args.site),
         "last_strategy": meta.get("last_strategy"),
+        "last_action_required": meta.get("last_action_required"),
         "session": {
             "name": args.name,
             "browse_session": meta.get("browse_session"),
@@ -1546,7 +2022,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "validated_at": meta.get("validated_at"),
             "updated_at": meta.get("updated_at"),
         },
-        "next": [] if meta.get("last_validation_ok") else [f"agent-do auth ensure {args.site}"],
+        "next": [] if meta.get("last_validation_ok") else [f"agent-do auth ensure {args.site}", f"agent-do auth probe {args.site}"],
     }
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -1703,6 +2179,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
             "last_validation_ok": validation["ok"],
             "validated_at": now_iso(),
             "state": validation["state"],
+            "last_action_required": None if validation["ok"] else (meta.get("last_action_required") if meta else None),
             "last_error": None if validation["ok"] else "validation_markers_not_satisfied",
         },
     )
@@ -1713,6 +2190,26 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"{args.site}: {'authenticated' if validation['ok'] else 'not authenticated'}")
         print(validation["url"])
     return 0 if validation["ok"] else 1
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    profile = load_profile(args.site)
+    if profile is None:
+        return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
+
+    payload = probe_state(args.site, profile, name=args.name, load_saved=args.load)
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Site: {args.site}")
+        print(f"State: {payload['state']}")
+        print(f"URL: {payload.get('url') or '-'}")
+        if payload.get("checkpoints"):
+            for checkpoint in payload["checkpoints"]:
+                print(f"Checkpoint: {checkpoint['action_required']} ({checkpoint['type']})")
+        else:
+            print("Checkpoint: none")
+    return 0
 
 
 def cmd_instructions(args: argparse.Namespace) -> int:
@@ -1731,6 +2228,7 @@ def cmd_instructions(args: argparse.Namespace) -> int:
             print(f"Create a profile first: agent-do auth init {args.site}")
         return 0
 
+    meta = get_session_meta(args.site) or {}
     state = state_from_profile(args.site)
     recommended = [f"agent-do auth ensure {args.site}"]
     missing: list[str] = []
@@ -1741,6 +2239,9 @@ def cmd_instructions(args: argparse.Namespace) -> int:
         recommended = [f"agent-do auth load {args.site}", f"agent-do auth validate {args.site}"]
         guidance.append("Saved authenticated state exists. Reuse it before trying a fresh login.")
     else:
+        if state == "checkpoint" or meta.get("last_action_required"):
+            recommended.insert(0, f"agent-do auth probe {args.site}")
+            guidance.append("A prior auth run stopped at a checkpoint. Probe the current branch before retrying.")
         if "browser-import" in strategies and profile.get("browser_import"):
             guidance.append("Browser import is configured and should be attempted before site credentials.")
         if "provider-refresh" in strategies and provider_type(profile) in {"github", "google"}:
@@ -1853,6 +2354,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                         "validated_at": now_iso(),
                         "last_validation_ok": True,
                         "state": "authenticated",
+                        "last_action_required": None,
+                        "last_error": None,
                     },
                 )
                 payload = {
@@ -1898,6 +2401,17 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             try:
                 ok, missing = site_creds_login(args.site, profile, name=name)
             except ActionRequiredError as exc:
+                write_session_meta(
+                    args.site,
+                    name,
+                    {
+                        "last_strategy": strategy,
+                        "last_validation_ok": False,
+                        "state": "checkpoint",
+                        "last_error": str(exc),
+                        "last_action_required": exc.action_required,
+                    },
+                )
                 payload = {
                     "site": args.site,
                     "ok": False,
@@ -1906,6 +2420,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                     "action_required": exc.action_required,
                     "missing": exc.missing,
                     "message": str(exc),
+                    "recommended": [f"agent-do auth probe {args.site}"],
                 }
                 print(json.dumps(payload, indent=2) if args.json else payload["message"])
                 return 1
@@ -1938,6 +2453,17 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             try:
                 ok, missing, provider_strategy = provider_refresh_login(args.site, profile, name=name)
             except ActionRequiredError as exc:
+                write_session_meta(
+                    args.site,
+                    name,
+                    {
+                        "last_strategy": strategy,
+                        "last_validation_ok": False,
+                        "state": "checkpoint",
+                        "last_error": str(exc),
+                        "last_action_required": exc.action_required,
+                    },
+                )
                 payload = {
                     "site": args.site,
                     "ok": False,
@@ -1946,6 +2472,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                     "action_required": exc.action_required,
                     "missing": exc.missing,
                     "message": str(exc),
+                    "recommended": [f"agent-do auth probe {args.site}"],
                 }
                 print(json.dumps(payload, indent=2) if args.json else payload["message"])
                 return 1
@@ -2034,6 +2561,11 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("site")
     status_parser.add_argument("--name", default="default")
 
+    probe_parser = sub.add_parser("probe", help="Inspect the current auth checkpoint state")
+    probe_parser.add_argument("site")
+    probe_parser.add_argument("--name", default="default")
+    probe_parser.add_argument("--load", action="store_true")
+
     ensure_parser = sub.add_parser("ensure", help="Ensure authenticated state using the strategy ladder")
     ensure_parser.add_argument("site")
     ensure_parser.add_argument("--name", default="default")
@@ -2093,6 +2625,8 @@ def main() -> int:
             return cmd_show(args)
         if args.command == "status":
             return cmd_status(args)
+        if args.command == "probe":
+            return cmd_probe(args)
         if args.command == "ensure":
             return cmd_ensure(args)
         if args.command == "save":

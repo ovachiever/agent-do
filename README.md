@@ -89,6 +89,7 @@ When a site needs authenticated state:
 agent-do auth init github
 agent-do creds store GITHUB_TOTP_SECRET --stdin
 agent-do auth ensure github
+agent-do auth probe github
 agent-do auth validate github
 ```
 
@@ -219,6 +220,8 @@ Custom site profiles can also declare `--provider github|google`. Those profiles
 Profiles can also declare mailbox-driven challenges with `--email-code`, `--magic-link`, `--sms-code`, or `--sms-link`. In that mode `agent-do auth` uses `agent-do email` or `agent-do sms` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw scraping.
 
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
+
+When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspects the current page, classifies the checkpoint, checks for a frontmost macOS dialog when available, and returns exact next-step commands instead of leaving the agent to infer what happened.
 
 ### `email`
 
