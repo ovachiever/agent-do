@@ -154,6 +154,14 @@ if command == "click":
                 "selectors": [],
                 "fields": fields,
             }
+        elif mode == "backup":
+            current = {
+                "page": "backup",
+                "url": "https://app.example.com/recovery",
+                "text": "Use a recovery code",
+                "selectors": ['input[name="recovery_code"]', 'button[type="submit"]'],
+                "fields": fields,
+            }
         elif mode == "device":
             current = {
                 "page": "device-approval",
@@ -194,6 +202,12 @@ if command == "click":
             save_current(current)
             success({"clicked": True, "selector": selector})
         fail("wrong email code")
+    if page == "backup" and selector == "button[type=\\"submit\\"]":
+        if any(value for key, value in fields.items() if "recovery" in key or "backup" in key):
+            current = dashboard()
+            save_current(current)
+            success({"clicked": True, "selector": selector})
+        fail("wrong backup code")
     if page == "chooser" and selector == "[data-login=\\"agent\\"]":
         current = {
             "page": "consent",
@@ -239,6 +253,14 @@ if command == "auth" and args[1] == "autofill":
                     "url": "https://app.example.com/passkey",
                     "text": "Use a passkey to continue",
                     "selectors": [],
+                    "fields": fields,
+                }
+            elif mode == "backup":
+                current = {
+                    "page": "backup",
+                    "url": "https://app.example.com/recovery",
+                    "text": "Use a recovery code",
+                    "selectors": ['input[name="recovery_code"]', 'button[type="submit"]'],
                     "fields": fields,
                 }
             elif mode == "device":

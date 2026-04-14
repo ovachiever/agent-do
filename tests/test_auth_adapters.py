@@ -98,6 +98,10 @@ def maybe_require_totp(provider):
     return os.environ.get(f"FAKE_{provider.upper()}_REQUIRE_TOTP", "0") == "1"
 
 
+def maybe_require_backup(provider):
+    return os.environ.get(f"FAKE_{provider.upper()}_REQUIRE_BACKUP", "0") == "1"
+
+
 args = sys.argv[1:]
 if args and args[0] == "--json":
     args = args[1:]
@@ -172,6 +176,14 @@ if command == "click":
                 "selectors": ["input[name=\\"app_otp\\"]", "button[type=\\"submit\\"]"],
                 "fields": fields,
             }
+        elif maybe_require_backup("github"):
+            current = {
+                "page": "github_backup",
+                "url": "https://github.com/sessions/recovery",
+                "text": "Use a recovery code",
+                "selectors": ["input[name=\\"recovery_code\\"]", "button[type=\\"submit\\"]"],
+                "fields": fields,
+            }
         else:
             current = github_success()
         save_current(current)
@@ -183,6 +195,13 @@ if command == "click":
             save_current(current)
             success({"clicked": True})
         fail("missing github totp code")
+
+    if page == "github_backup" and selector in {"button[type=\\"submit\\"]", "input[type=\\"submit\\"]"}:
+        if any(value for key, value in fields.items() if "recovery" in key or "backup" in key):
+            current = github_success()
+            save_current(current)
+            success({"clicked": True})
+        fail("missing github backup code")
 
     if page == "google_email" and selector in {"#identifierNext", "#identifierNext button", "button[type=\\"button\\"]"}:
         current = {
@@ -204,6 +223,14 @@ if command == "click":
                 "selectors": ["input[name=\\"totpPin\\"]", "#totpNext"],
                 "fields": fields,
             }
+        elif maybe_require_backup("google"):
+            current = {
+                "page": "google_backup",
+                "url": "https://accounts.google.com/v3/signin/challenge/backup",
+                "text": "Enter one of your 8-digit backup codes",
+                "selectors": ["input[name=\\"backupCode\\"]", "button[type=\\"button\\"]"],
+                "fields": fields,
+            }
         else:
             current = google_success()
         save_current(current)
@@ -215,6 +242,13 @@ if command == "click":
             save_current(current)
             success({"clicked": True})
         fail("missing google totp code")
+
+    if page == "google_backup" and selector in {"button[type=\\"button\\"]", "button[type=\\"submit\\"]", "input[type=\\"submit\\"]"}:
+        if any(value for key, value in fields.items() if "backup" in key or "recovery" in key):
+            current = google_success()
+            save_current(current)
+            success({"clicked": True})
+        fail("missing google backup code")
 
     if page == "generic_login" and selector in {"button[type=\\"submit\\"]", "input[type=\\"submit\\"]"}:
         current = {
@@ -347,26 +381,99 @@ def main() -> int:
         ensure_google_payload = json.loads(ensure_google.stdout)
         require(ensure_google_payload["strategy_used"] == "site-creds", f"unexpected google ensure payload: {ensure_google_payload}")
 
+        github_backup_env = base_env(tmp / "github-backup", fake_browse)
+        github_backup_env["GITHUB_EMAIL"] = "agent@example.com"
+        github_backup_env["GITHUB_PASSWORD"] = "super-secret"
+        github_backup_env["GITHUB_BACKUP_CODES"] = "backup-one backup-two"
+        github_backup_env["FAKE_GITHUB_REQUIRE_BACKUP"] = "1"
+
+        init_github_backup = run(str(AGENT_DO), "auth", "init", "github", "--no-browser-import", "--json", cwd=ROOT, env=github_backup_env)
+        require(init_github_backup.returncode == 0, f"github backup init failed: {init_github_backup.stderr}")
+
+        ensure_github_backup = run(str(AGENT_DO), "auth", "ensure", "github", "--json", cwd=ROOT, env=github_backup_env)
+        require(ensure_github_backup.returncode == 0, f"github backup ensure failed: {ensure_github_backup.stdout} {ensure_github_backup.stderr}")
+        ensure_github_backup_payload = json.loads(ensure_github_backup.stdout)
+        require(ensure_github_backup_payload["strategy_used"] == "site-creds", f"unexpected github backup payload: {ensure_github_backup_payload}")
+
+        backup_state_path = Path(github_backup_env["AGENT_DO_HOME"]) / "auth" / "backup-codes.json"
+        backup_state = json.loads(backup_state_path.read_text())
+        require(len((backup_state.get("GITHUB_BACKUP_CODES") or {}).get("used", [])) == 1, f"expected one used github backup code: {backup_state}")
+
+        clear_github_backup = run(str(AGENT_DO), "auth", "clear", "github", "--json", cwd=ROOT, env=github_backup_env)
+        require(clear_github_backup.returncode == 0, f"github backup clear failed: {clear_github_backup.stderr}")
+        ensure_github_backup_second = run(str(AGENT_DO), "auth", "ensure", "github", "--json", cwd=ROOT, env=github_backup_env)
+        require(ensure_github_backup_second.returncode == 0, f"github second backup ensure failed: {ensure_github_backup_second.stdout} {ensure_github_backup_second.stderr}")
+        backup_state_second = json.loads(backup_state_path.read_text())
+        require(len((backup_state_second.get("GITHUB_BACKUP_CODES") or {}).get("used", [])) == 2, f"expected two used github backup codes: {backup_state_second}")
+
+        google_backup_env = base_env(tmp / "google-backup", fake_browse)
+        google_backup_env["GOOGLE_EMAIL"] = "agent@example.com"
+        google_backup_env["GOOGLE_PASSWORD"] = "super-secret"
+        google_backup_env["GOOGLE_BACKUP_CODES"] = "12345678 87654321"
+        google_backup_env["FAKE_GOOGLE_REQUIRE_BACKUP"] = "1"
+
+        init_google_backup = run(str(AGENT_DO), "auth", "init", "google", "--no-browser-import", "--json", cwd=ROOT, env=google_backup_env)
+        require(init_google_backup.returncode == 0, f"google backup init failed: {init_google_backup.stderr}")
+
+        ensure_google_backup = run(str(AGENT_DO), "auth", "ensure", "google", "--json", cwd=ROOT, env=google_backup_env)
+        require(ensure_google_backup.returncode == 0, f"google backup ensure failed: {ensure_google_backup.stdout} {ensure_google_backup.stderr}")
+        ensure_google_backup_payload = json.loads(ensure_google_backup.stdout)
+        require(ensure_google_backup_payload["strategy_used"] == "site-creds", f"unexpected google backup payload: {ensure_google_backup_payload}")
+
         missing_totp_env = base_env(tmp / "github-missing-totp", fake_browse)
         missing_totp_env["GITHUB_EMAIL"] = "agent@example.com"
         missing_totp_env["GITHUB_PASSWORD"] = "super-secret"
         missing_totp_env["FAKE_GITHUB_REQUIRE_TOTP"] = "1"
+        missing_totp_env.pop("GITHUB_TOTP_SECRET", None)
 
         init_missing = run(str(AGENT_DO), "auth", "init", "github", "--no-browser-import", "--json", cwd=ROOT, env=missing_totp_env)
         require(init_missing.returncode == 0, f"github missing-totp init failed: {init_missing.stderr}")
+        missing_totp_profile = Path(missing_totp_env["AGENT_DO_HOME"]) / "auth" / "profiles" / "github.yaml"
+        missing_totp_profile.write_text(
+            missing_totp_profile.read_text(encoding="utf-8").replace("GITHUB_TOTP_SECRET", "TEST_GITHUB_TOTP_SECRET_MISSING"),
+            encoding="utf-8",
+        )
 
         ensure_missing = run(str(AGENT_DO), "auth", "ensure", "github", "--json", cwd=ROOT, env=missing_totp_env)
         require(ensure_missing.returncode == 1, f"github missing-totp ensure should fail: {ensure_missing.stdout} {ensure_missing.stderr}")
         ensure_missing_payload = json.loads(ensure_missing.stdout)
         require(ensure_missing_payload["action_required"] == "MISSING_CREDENTIALS", f"unexpected missing-totp payload: {ensure_missing_payload}")
-        require("GITHUB_TOTP_SECRET" in ensure_missing_payload["missing"], f"expected missing github totp secret: {ensure_missing_payload}")
+        require("TEST_GITHUB_TOTP_SECRET_MISSING" in ensure_missing_payload["missing"], f"expected missing github totp secret: {ensure_missing_payload}")
 
         instructions = run(str(AGENT_DO), "auth", "instructions", "github", "--json", cwd=ROOT, env=missing_totp_env)
         require(instructions.returncode == 0, f"github instructions failed: {instructions.stderr}")
         instructions_payload = json.loads(instructions.stdout)
         require(
-            any("GITHUB_TOTP_SECRET" in item for item in instructions_payload["guidance"]),
+            any("TEST_GITHUB_TOTP_SECRET_MISSING" in item for item in instructions_payload["guidance"]),
             f"expected TOTP guidance in instructions: {instructions_payload}",
+        )
+
+        missing_backup_env = base_env(tmp / "github-missing-backup", fake_browse)
+        missing_backup_env["GITHUB_EMAIL"] = "agent@example.com"
+        missing_backup_env["GITHUB_PASSWORD"] = "super-secret"
+        missing_backup_env["FAKE_GITHUB_REQUIRE_BACKUP"] = "1"
+        missing_backup_env.pop("GITHUB_BACKUP_CODES", None)
+
+        init_missing_backup = run(str(AGENT_DO), "auth", "init", "github", "--no-browser-import", "--json", cwd=ROOT, env=missing_backup_env)
+        require(init_missing_backup.returncode == 0, f"github missing-backup init failed: {init_missing_backup.stderr}")
+        missing_backup_profile = Path(missing_backup_env["AGENT_DO_HOME"]) / "auth" / "profiles" / "github.yaml"
+        missing_backup_profile.write_text(
+            missing_backup_profile.read_text(encoding="utf-8").replace("GITHUB_BACKUP_CODES", "TEST_GITHUB_BACKUP_CODES_MISSING"),
+            encoding="utf-8",
+        )
+
+        ensure_missing_backup = run(str(AGENT_DO), "auth", "ensure", "github", "--json", cwd=ROOT, env=missing_backup_env)
+        require(ensure_missing_backup.returncode == 1, f"github missing-backup ensure should fail: {ensure_missing_backup.stdout} {ensure_missing_backup.stderr}")
+        ensure_missing_backup_payload = json.loads(ensure_missing_backup.stdout)
+        require(ensure_missing_backup_payload["action_required"] == "MISSING_CREDENTIALS", f"unexpected missing-backup payload: {ensure_missing_backup_payload}")
+        require("TEST_GITHUB_BACKUP_CODES_MISSING" in ensure_missing_backup_payload["missing"], f"expected missing github backup codes: {ensure_missing_backup_payload}")
+
+        instructions_backup = run(str(AGENT_DO), "auth", "instructions", "github", "--json", cwd=ROOT, env=missing_backup_env)
+        require(instructions_backup.returncode == 0, f"github backup instructions failed: {instructions_backup.stderr}")
+        instructions_backup_payload = json.loads(instructions_backup.stdout)
+        require(
+            any("TEST_GITHUB_BACKUP_CODES_MISSING" in item for item in instructions_backup_payload["guidance"]),
+            f"expected backup-code guidance in instructions: {instructions_backup_payload}",
         )
 
     print("auth adapter tests passed")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,7 @@ AUTH_ROOT = AGENT_DO_HOME / "auth"
 PROFILES_DIR = AUTH_ROOT / "profiles"
 SESSIONS_DIR = AUTH_ROOT / "sessions"
 CONFIG_PATH = AUTH_ROOT / "config.yaml"
+BACKUP_CODE_STATE_PATH = AUTH_ROOT / "backup-codes.json"
 SITE_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 AUTH_MASTER_KEY_NAME = "AUTH_SESSION_MASTER_KEY_V1"
 
@@ -61,6 +63,7 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
                 "password": "GITHUB_PASSWORD",
             },
             "totp": {"secret": "GITHUB_TOTP_SECRET"},
+            "backup_codes": {"secret": "GITHUB_BACKUP_CODES"},
         },
         "browser_import": {"browser": "arc", "domains": [".github.com"]},
         "notes": ["Prefer saved-session reuse before browser import or fresh login."],
@@ -83,6 +86,7 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
                 "password": "GOOGLE_PASSWORD",
             },
             "totp": {"secret": "GOOGLE_TOTP_SECRET"},
+            "backup_codes": {"secret": "GOOGLE_BACKUP_CODES"},
         },
         "browser_import": {"browser": "arc", "domains": [".google.com"]},
         "notes": ["Fresh Google SSO often requires human approval. Reuse authenticated state first."],
@@ -226,6 +230,15 @@ def read_json(path: Path) -> dict[str, Any]:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def read_backup_code_state() -> dict[str, Any]:
+    data = read_json(BACKUP_CODE_STATE_PATH)
+    return data if isinstance(data, dict) else {}
+
+
+def write_backup_code_state(payload: dict[str, Any]) -> None:
+    write_json(BACKUP_CODE_STATE_PATH, payload)
 
 
 def load_profile(site: str) -> dict[str, Any] | None:
@@ -577,6 +590,51 @@ def capture_challenge_baselines(site: str, name: str, profile: dict[str, Any]) -
     )
 
 
+def parse_backup_codes(raw_value: str) -> list[str]:
+    text = (raw_value or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+    tokens = re.split(r"[\s,]+", text)
+    return [token.strip() for token in tokens if token.strip()]
+
+
+def backup_code_digest(secret_name: str, code: str) -> str:
+    return hashlib.sha256(f"{secret_name}:{code}".encode("utf-8")).hexdigest()
+
+
+def available_backup_codes(secret_name: str) -> tuple[str | None, list[str]]:
+    raw_value = resolve_secret(secret_name)
+    if not raw_value:
+        return None, []
+    candidates = parse_backup_codes(raw_value)
+    if not candidates:
+        return raw_value, []
+    state = read_backup_code_state()
+    used_hashes = set(((state.get(secret_name) or {}).get("used") or []))
+    remaining = [code for code in candidates if backup_code_digest(secret_name, code) not in used_hashes]
+    return raw_value, remaining
+
+
+def mark_backup_code_used(secret_name: str, code: str) -> None:
+    state = read_backup_code_state()
+    secret_state = state.get(secret_name) or {}
+    used = list(secret_state.get("used") or [])
+    digest = backup_code_digest(secret_name, code)
+    if digest not in used:
+        used.append(digest)
+    secret_state["used"] = used
+    secret_state["updated_at"] = now_iso()
+    state[secret_name] = secret_state
+    write_backup_code_state(state)
+
+
 def resolve_secret(key: str | None) -> str | None:
     if not key:
         return None
@@ -776,6 +834,13 @@ def phone_challenge_config(profile: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def backup_code_config(profile: dict[str, Any]) -> dict[str, Any]:
+    config = ((profile.get("credentials") or {}).get("backup_codes") or {})
+    if isinstance(config, dict):
+        return config
+    return {}
+
+
 def wait_for_settle() -> None:
     try:
         run_browse("wait", "--stable")
@@ -804,6 +869,85 @@ def passkey_challenge_details() -> dict[str, Any] | None:
     if not visible and not matched:
         return None
     return {"selectors": visible, "markers": matched, "url": read_page_url().strip()}
+
+
+def backup_code_input_selectors(profile: dict[str, Any]) -> list[str]:
+    provider = provider_type(profile)
+    configured = list(backup_code_config(profile).get("input_selectors") or [])
+    defaults: list[str] = []
+    if provider == "github":
+        defaults = [
+            'input[name="recovery_code"]',
+            'input[name="recoveryCode"]',
+            'input[id="recovery_code"]',
+        ]
+    elif provider == "google":
+        defaults = [
+            'input[name="knowledgePreregisteredEmailResponse"]',
+            'input[name="recoveryCode"]',
+            'input[name="backupCode"]',
+            'input[type="tel"]',
+        ]
+    defaults.extend(
+        [
+            'input[name="backup_code"]',
+            'input[name="backupCode"]',
+            'input[name="recovery_code"]',
+            'input[name="recoveryCode"]',
+        ]
+    )
+    return dedupe_preserve_order(configured + defaults)
+
+
+def backup_code_submit_selectors(profile: dict[str, Any]) -> list[str]:
+    configured = list(backup_code_config(profile).get("submit_selectors") or [])
+    return dedupe_preserve_order(
+        configured + ['button[type="submit"]', 'input[type="submit"]', 'button[type="button"]']
+    )
+
+
+def backup_code_secret_name(profile: dict[str, Any]) -> str | None:
+    value = backup_code_config(profile).get("secret")
+    if value:
+        return str(value)
+    return None
+
+
+def backup_code_markers(profile: dict[str, Any]) -> list[str]:
+    provider = provider_type(profile)
+    markers = [
+        "backup code",
+        "backup codes",
+        "recovery code",
+        "recovery codes",
+        "one of your recovery codes",
+        "one of your backup codes",
+    ]
+    if provider == "github":
+        markers.extend(["recovery authentication code", "use a recovery code"])
+    if provider == "google":
+        markers.extend(["enter one of your 8-digit backup codes", "backup codes"])
+    return dedupe_preserve_order(markers)
+
+
+def backup_code_challenge_details(profile: dict[str, Any]) -> dict[str, Any] | None:
+    selectors = [selector for selector in backup_code_input_selectors(profile) if selector_exists(selector)]
+    text = read_page_text()
+    matched = match_text_markers(text, backup_code_markers(profile))
+    if not selectors and not matched:
+        return None
+    secret_name = backup_code_secret_name(profile)
+    remaining = None
+    if secret_name:
+        _, codes = available_backup_codes(secret_name)
+        remaining = len(codes)
+    return {
+        "selectors": selectors,
+        "markers": matched,
+        "secret_name": secret_name,
+        "remaining_codes": remaining,
+        "url": read_page_url().strip(),
+    }
 
 
 def raise_if_passkey_challenge_visible() -> None:
@@ -974,21 +1118,6 @@ def detect_checkpoints(profile: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    passkey = passkey_challenge_details()
-    if passkey:
-        alternate_selector = first_alternate_method_selector(profile)
-        if alternate_selector:
-            passkey = dict(passkey)
-            passkey["alternate_selector"] = alternate_selector
-        checkpoints.append(
-            {
-                "type": "passkey",
-                "action_required": "PASSKEY_CHALLENGE_REQUIRED",
-                "source": "browser",
-                "details": passkey,
-            }
-        )
-
     email_challenge = email_challenge_config(profile)
     challenge_active = False
     if email_challenge:
@@ -1110,6 +1239,32 @@ def detect_checkpoints(profile: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
+    backup_code = backup_code_challenge_details(profile)
+    if backup_code:
+        checkpoints.append(
+            {
+                "type": "backup-code",
+                "action_required": "BACKUP_CODE_REQUIRED",
+                "source": "browser",
+                "details": backup_code,
+            }
+        )
+
+    passkey = passkey_challenge_details()
+    if passkey:
+        alternate_selector = first_alternate_method_selector(profile)
+        if alternate_selector:
+            passkey = dict(passkey)
+            passkey["alternate_selector"] = alternate_selector
+        checkpoints.append(
+            {
+                "type": "passkey",
+                "action_required": "PASSKEY_CHALLENGE_REQUIRED",
+                "source": "browser",
+                "details": passkey,
+            }
+        )
+
     account_markers = match_text_markers(
         text,
         ["choose an account", "select an account", "pick an account", "continue as"],
@@ -1225,6 +1380,13 @@ def probe_state(site: str, profile: dict[str, Any], *, name: str = "default", lo
             guidance.append("CAPTCHA is visible and blocks zero-touch continuation for this branch.")
         elif action == "TOTP_REQUIRED":
             guidance.append("A TOTP/app code field is visible on the current page.")
+        elif action == "BACKUP_CODE_REQUIRED":
+            if isinstance(details, dict) and details.get("secret_name"):
+                guidance.append(
+                    f"A backup/recovery code field is visible. agent-do auth can use the next unused code from {details['secret_name']}."
+                )
+            else:
+                guidance.append("A backup/recovery code field is visible on the current page.")
 
     if not checkpoints and login_form.get("found"):
         recommended.append(f"agent-do auth ensure {site}")
@@ -1287,6 +1449,7 @@ CHECKPOINT_PRIORITY = {
     "EMAIL_CHALLENGE_PENDING": 30,
     "PHONE_CHALLENGE_PENDING": 40,
     "TOTP_REQUIRED": 50,
+    "BACKUP_CODE_REQUIRED": 55,
     "PASSKEY_CHALLENGE_REQUIRED": 60,
     "DEVICE_APPROVAL_REQUIRED": 70,
     "CAPTCHA_REQUIRED": 80,
@@ -1493,6 +1656,47 @@ def complete_totp_if_present(
     return []
 
 
+def missing_backup_code_keys(profile: dict[str, Any]) -> list[str]:
+    secret_name = backup_code_secret_name(profile)
+    if secret_name:
+        return [secret_name]
+    return ["BACKUP_CODES"]
+
+
+def complete_backup_code_if_present(profile: dict[str, Any]) -> tuple[list[str], tuple[str, str] | None]:
+    selector = first_existing_selector(backup_code_input_selectors(profile))
+    details = backup_code_challenge_details(profile)
+    if not selector and not details:
+        return [], None
+    if not selector:
+        raise ActionRequiredError(
+            "BACKUP_CODE_FIELD_MISSING",
+            "Backup-code challenge is visible but no input field selector is configured for this page",
+        )
+
+    secret_name = backup_code_secret_name(profile)
+    if not secret_name:
+        return missing_backup_code_keys(profile), None
+
+    raw_value, codes = available_backup_codes(secret_name)
+    if raw_value is None:
+        return missing_backup_code_keys(profile), None
+    if not codes:
+        raise ActionRequiredError(
+            "BACKUP_CODES_EXHAUSTED",
+            f"No unused backup codes remain in {secret_name}",
+        )
+
+    code = codes[0]
+    run_browse("fill", selector, code)
+    wait_brief()
+    click_first_selector(backup_code_submit_selectors(profile))
+    wait_for_settle()
+    if not first_existing_selector(backup_code_input_selectors(profile)):
+        mark_backup_code_used(secret_name, code)
+    return [], (secret_name, code)
+
+
 def complete_email_challenge_if_present(profile: dict[str, Any]) -> list[str]:
     return complete_email_challenge_with_baseline(profile, baseline_ids=[])
 
@@ -1685,6 +1889,9 @@ def login_with_generic(profile: dict[str, Any], username: str, password: str, to
     )
     if missing:
         return missing
+    missing, _ = complete_backup_code_if_present(profile)
+    if missing:
+        return missing
     missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
     if missing:
         return missing
@@ -1736,6 +1943,9 @@ def login_with_github(profile: dict[str, Any], username: str, password: str, tot
         ],
         submit_selectors=['button[type="submit"]', 'input[type="submit"]'],
     )
+    if missing:
+        return missing
+    missing, _ = complete_backup_code_if_present(profile)
     if missing:
         return missing
     missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
@@ -1792,6 +2002,9 @@ def login_with_google(profile: dict[str, Any], username: str, password: str, tot
         ],
         submit_selectors=["#totpNext", "#totpNext button", 'button[type="button"]'],
     )
+    if missing:
+        return missing
+    missing, _ = complete_backup_code_if_present(profile)
     if missing:
         return missing
     missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
@@ -1894,8 +2107,15 @@ def provider_refresh_login(site: str, profile: dict[str, Any], *, name: str = "d
 
     checkpoint_state = provider_checkpoint_state(profile, provider_name, provider_username)
 
-    complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
-    complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    missing = complete_phone_challenge_with_baseline(profile, baseline_ids=phone_baseline)
+    if missing:
+        return False, missing, provider_strategy
+    missing = complete_email_challenge_with_baseline(profile, baseline_ids=email_baseline)
+    if missing:
+        return False, missing, provider_strategy
+    missing, _ = complete_backup_code_if_present(profile)
+    if missing:
+        return False, missing, provider_strategy
     raise_if_passkey_challenge_visible()
     raise_if_manual_checkpoint_visible(profile)
 
@@ -2481,6 +2701,22 @@ def cmd_advance(args: argparse.Namespace) -> int:
                 )
             action_taken.update({"totp_secret": str(totp_key or "")})
 
+        elif action_required == "BACKUP_CODE_REQUIRED":
+            missing, backup_code_used = complete_backup_code_if_present(profile)
+            if missing:
+                raise ActionRequiredError(
+                    "MISSING_CREDENTIALS",
+                    "Backup-code checkpoint is visible but no backup codes are configured",
+                    missing=missing,
+                )
+            if backup_code_used:
+                action_taken.update(
+                    {
+                        "backup_code_secret": backup_code_used[0],
+                        "backup_code_used": True,
+                    }
+                )
+
         elif action_required == "PASSKEY_CHALLENGE_REQUIRED":
             alternate_selector = click_alternate_method(profile)
             if alternate_selector:
@@ -2683,6 +2919,11 @@ def cmd_instructions(args: argparse.Namespace) -> int:
             if totp_key and not resolve_secret(str(totp_key)):
                 guidance.append(
                     f"TOTP is configured for this provider. Store {totp_key} if the site prompts for one-time codes."
+                )
+            backup_key = (((profile.get("credentials") or {}).get("backup_codes") or {}).get("secret"))
+            if backup_key and not resolve_secret(str(backup_key)):
+                guidance.append(
+                    f"Backup codes are configured for this provider. Store {backup_key} if the site offers recovery-code fallback."
                 )
             if not missing:
                 guidance.append("Site credentials are available for automated form login if session reuse fails.")
@@ -2994,6 +3235,7 @@ def build_parser() -> argparse.ArgumentParser:
             "EMAIL_CHALLENGE_PENDING",
             "PHONE_CHALLENGE_PENDING",
             "TOTP_REQUIRED",
+            "BACKUP_CODE_REQUIRED",
             "PASSKEY_CHALLENGE_REQUIRED",
             "DEVICE_APPROVAL_REQUIRED",
             "CAPTCHA_REQUIRED",

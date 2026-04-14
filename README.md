@@ -88,6 +88,7 @@ When a site needs authenticated state:
 ```bash
 agent-do auth init github
 agent-do creds store GITHUB_TOTP_SECRET --stdin
+agent-do creds store GITHUB_BACKUP_CODES --stdin
 agent-do auth ensure github
 agent-do auth probe github
 agent-do auth advance github
@@ -215,6 +216,8 @@ agent-do auth validate github
 ```
 
 Known profiles like GitHub and Google now use explicit login adapters before falling back to generic form fill. If a TOTP challenge appears and the provider profile declares a secret name, `agent-do auth ensure` reports the exact missing key instead of silently stalling in a partial login flow.
+
+Those provider profiles can also declare recovery-code secrets like `GITHUB_BACKUP_CODES` or `GOOGLE_BACKUP_CODES`. `agent-do auth` treats those as a finite pool, uses the next unused code when a recovery-code branch appears, and records consumed codes locally so it does not keep replaying the same fallback code forever.
 
 Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in, including account chooser and consent checkpoints when those pages appear.
 

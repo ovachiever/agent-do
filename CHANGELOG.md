@@ -26,6 +26,7 @@
 - `agent-do auth` now surfaces device-approval, consent, chooser, and CAPTCHA checkpoints as structured states, and `status`/`instructions` preserve that checkpoint context instead of dropping back to a generic configured state.
 - `agent-do auth ensure` now stores pre-login email/SMS baselines in session metadata so later checkpoint retries can ignore stale unread challenges, and `advance` can safely continue chooser, consent, mailbox, TOTP, passkey-dialog, and passive device-approval branches.
 - `agent-do auth advance` now prefers visible in-browser alternate auth methods like “Try another way” on passkey or device-approval branches before falling back to dialog clicks or passive waiting.
+- `agent-do auth` now understands provider recovery-code branches, can consume the next unused backup code from secure storage for GitHub and Google flows, and records consumed codes locally so they are treated as finite credentials instead of endlessly replayed secrets.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
