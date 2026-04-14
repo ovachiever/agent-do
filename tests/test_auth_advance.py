@@ -190,8 +190,32 @@ if command == "click":
         }
         save_current(current)
         success({"clicked": True, "selector": selector})
+    if page == "device-approval" and selector in {"text=Use a verification code", "text=Use an authentication code", "text=Authenticator app"}:
+        current = {
+            "page": "totp",
+            "url": "https://app.example.com/totp",
+            "text": "Enter the code from your authenticator app",
+            "selectors": ["input[name=\\"app_otp\\"]", "button[type=\\"submit\\"]"],
+            "fields": fields,
+        }
+        save_current(current)
+        success({"clicked": True, "selector": selector})
+    if page == "device-approval" and selector in {"text=Use a recovery code", "text=Recovery code", "text=Use backup code", "text=Enter a backup code"}:
+        current = {
+            "page": "backup",
+            "url": "https://app.example.com/recovery",
+            "text": "Use a recovery code",
+            "selectors": ['input[name="recovery_code"]', 'button[type="submit"]'],
+            "fields": fields,
+        }
+        save_current(current)
+        success({"clicked": True, "selector": selector})
     if page == "totp" and selector == "button[type=\\"submit\\"]":
-        if fields.get("input[name=\\"app_otp\\"]") == "123456":
+        if any(
+            value == "123456"
+            for key, value in fields.items()
+            if "otp" in key.lower() or "totp" in key.lower() or "one-time-code" in key.lower()
+        ):
             current = dashboard()
             save_current(current)
             success({"clicked": True, "selector": selector})
@@ -704,6 +728,152 @@ def main() -> int:
         advance_consent_payload = json.loads(advance_consent.stdout)
         require(advance_consent_payload["validated"] is True, f"consent advance did not validate: {advance_consent_payload}")
         require(advance_consent_payload["action_taken"]["action_required"] == "CONSENT_REQUIRED", f"unexpected consent action: {advance_consent_payload}")
+
+        provider_totp_env = base_env(tmp, "provider-totp-home", "provider")
+        provider_totp_env["GITHUB_TOTP_SECRET"] = "dummy-secret"
+        provider_totp_home = Path(provider_totp_env["AGENT_DO_HOME"])
+        seed_profile(
+            provider_totp_home,
+            "github",
+            """
+            id: github
+            title: GitHub
+            domains:
+              - github.com
+            login_url: https://github.com/login
+            validation:
+              url_patterns:
+                - https://github.com/*
+              signed_out_markers:
+                - Sign in to GitHub
+              signed_in_markers:
+                - View profile and more
+            strategies:
+              - site-creds
+            provider:
+              type: github
+            credentials:
+              totp:
+                secret: GITHUB_TOTP_SECRET
+            """,
+        )
+        seed_profile(
+            provider_totp_home,
+            "cloudflare-github-totp",
+            """
+            id: cloudflare-github-totp
+            title: Cloudflare via GitHub
+            domains:
+              - dash.cloudflare.com
+            login_url: https://dash.cloudflare.com/login
+            validation:
+              url_patterns:
+                - https://app.example.com/dashboard*
+              signed_out_markers:
+                - Sign in
+              signed_in_markers:
+                - Dashboard
+            strategies:
+              - provider-refresh
+            provider:
+              type: github
+            """,
+        )
+        provider_totp_root = Path(provider_totp_env["FAKE_BROWSE_ROOT"])
+        provider_totp_root.mkdir(parents=True, exist_ok=True)
+        seed_current(
+            provider_totp_root,
+            {
+                "page": "totp",
+                "url": "https://github.com/sessions/two-factor/app",
+                "text": "Enter the code from your authenticator app",
+                "selectors": ['input[name="app_otp"]', 'button[type="submit"]'],
+                "fields": {},
+            },
+        )
+        advance_provider_totp = run(str(AGENT_DO), "auth", "advance", "cloudflare-github-totp", "--json", cwd=ROOT, env=provider_totp_env)
+        require(advance_provider_totp.returncode == 0, f"provider totp advance failed: {advance_provider_totp.stdout} {advance_provider_totp.stderr}")
+        advance_provider_totp_payload = json.loads(advance_provider_totp.stdout)
+        require(advance_provider_totp_payload["validated"] is True, f"provider totp advance did not validate: {advance_provider_totp_payload}")
+        require(advance_provider_totp_payload["action_taken"]["totp_secret"] == "GITHUB_TOTP_SECRET", f"provider totp secret was not inherited: {advance_provider_totp_payload}")
+
+        provider_backup_env = base_env(tmp, "provider-backup-home", "provider")
+        provider_backup_env["GITHUB_BACKUP_CODES"] = "backup-one backup-two"
+        provider_backup_home = Path(provider_backup_env["AGENT_DO_HOME"])
+        seed_profile(
+            provider_backup_home,
+            "github",
+            """
+            id: github
+            title: GitHub
+            domains:
+              - github.com
+            login_url: https://github.com/login
+            validation:
+              url_patterns:
+                - https://github.com/*
+              signed_out_markers:
+                - Sign in to GitHub
+              signed_in_markers:
+                - View profile and more
+            strategies:
+              - site-creds
+            provider:
+              type: github
+            credentials:
+              backup_codes:
+                secret: GITHUB_BACKUP_CODES
+            """,
+        )
+        seed_profile(
+            provider_backup_home,
+            "cloudflare-github-backup",
+            """
+            id: cloudflare-github-backup
+            title: Cloudflare via GitHub Backup
+            domains:
+              - dash.cloudflare.com
+            login_url: https://dash.cloudflare.com/login
+            validation:
+              url_patterns:
+                - https://app.example.com/dashboard*
+              signed_out_markers:
+                - Sign in
+              signed_in_markers:
+                - Dashboard
+            strategies:
+              - provider-refresh
+            provider:
+              type: github
+            """,
+        )
+        provider_backup_root = Path(provider_backup_env["FAKE_BROWSE_ROOT"])
+        provider_backup_root.mkdir(parents=True, exist_ok=True)
+        seed_current(
+            provider_backup_root,
+            {
+                "page": "device-approval",
+                "url": "https://github.com/sessions/verified-device",
+                "text": "Check your phone to approve sign in",
+                "selectors": ['text=Try another way', 'text=Use a recovery code'],
+                "fields": {},
+            },
+        )
+        advance_provider_backup = run(str(AGENT_DO), "auth", "advance", "cloudflare-github-backup", "--json", cwd=ROOT, env=provider_backup_env)
+        require(advance_provider_backup.returncode == 0, f"provider backup alternate advance failed: {advance_provider_backup.stdout} {advance_provider_backup.stderr}")
+        advance_provider_backup_payload = json.loads(advance_provider_backup.stdout)
+        require(advance_provider_backup_payload["validated"] is False, f"provider backup alternate should still be on challenge branch: {advance_provider_backup_payload}")
+        require(advance_provider_backup_payload["action_taken"]["alternate_selector"] == "text=Use a recovery code", f"expected provider recovery selector preference: {advance_provider_backup_payload}")
+        require(advance_provider_backup_payload["action_taken"]["alternate_kind"] == "backup-code", f"expected backup alternate kind: {advance_provider_backup_payload}")
+        require(
+            any(item["action_required"] == "BACKUP_CODE_REQUIRED" for item in advance_provider_backup_payload["after"]["checkpoints"]),
+            f"provider backup alternate should surface recovery-code challenge: {advance_provider_backup_payload}",
+        )
+        advance_provider_backup_submit = run(str(AGENT_DO), "auth", "advance", "cloudflare-github-backup", "--json", cwd=ROOT, env=provider_backup_env)
+        require(advance_provider_backup_submit.returncode == 0, f"provider backup submit advance failed: {advance_provider_backup_submit.stdout} {advance_provider_backup_submit.stderr}")
+        advance_provider_backup_submit_payload = json.loads(advance_provider_backup_submit.stdout)
+        require(advance_provider_backup_submit_payload["validated"] is True, f"provider backup submit did not validate: {advance_provider_backup_submit_payload}")
+        require(advance_provider_backup_submit_payload["action_taken"]["backup_code_secret"] == "GITHUB_BACKUP_CODES", f"provider backup secret was not inherited: {advance_provider_backup_submit_payload}")
 
     print("auth advance tests passed")
     return 0

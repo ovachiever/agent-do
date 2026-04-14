@@ -332,6 +332,10 @@ def provider_default_refresh(provider: str) -> dict[str, Any]:
             ],
             "alternate_selectors": [
                 'text=Try another way',
+                'text=Use a recovery code',
+                'text=Recovery code',
+                'text=Use an authentication code',
+                'text=Authenticator app',
                 'text=Use your password',
                 'text=Use a verification code',
                 'text=Sign in another way',
@@ -362,6 +366,9 @@ def provider_default_refresh(provider: str) -> dict[str, Any]:
             "alternate_selectors": [
                 'text=Try another way',
                 'text=Choose another option',
+                'text=Use backup code',
+                'text=Enter a backup code',
+                'text=Authenticator app',
                 'text=Use your password',
                 'text=Get a verification code',
             ],
@@ -867,6 +874,14 @@ def provider_refresh_config(profile: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def provider_source_profile(profile: dict[str, Any]) -> dict[str, Any] | None:
+    provider_name = provider_type(profile)
+    profile_id = site_slug(str(profile.get("id") or ""))
+    if provider_name in {"github", "google"} and profile_id != provider_name:
+        return load_profile(provider_name) or default_profile(provider_name)
+    return None
+
+
 def email_challenge_config(profile: dict[str, Any]) -> dict[str, Any]:
     config = profile.get("email_challenge") or {}
     if isinstance(config, dict):
@@ -881,11 +896,25 @@ def phone_challenge_config(profile: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def merged_credential_config(profile: dict[str, Any], section: str) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    source_profile = provider_source_profile(profile)
+    if source_profile is not None:
+        source_config = ((source_profile.get("credentials") or {}).get(section) or {})
+        if isinstance(source_config, dict):
+            merged.update(copy.deepcopy(source_config))
+    local_config = ((profile.get("credentials") or {}).get(section) or {})
+    if isinstance(local_config, dict):
+        merged.update(copy.deepcopy(local_config))
+    return merged
+
+
+def totp_config(profile: dict[str, Any]) -> dict[str, Any]:
+    return merged_credential_config(profile, "totp")
+
+
 def backup_code_config(profile: dict[str, Any]) -> dict[str, Any]:
-    config = ((profile.get("credentials") or {}).get("backup_codes") or {})
-    if isinstance(config, dict):
-        return config
-    return {}
+    return merged_credential_config(profile, "backup_codes")
 
 
 def wait_for_settle() -> None:
@@ -1559,28 +1588,101 @@ def alternate_method_selectors(profile: dict[str, Any]) -> list[str]:
             'text=Use your password',
             'text=Use a verification code',
             'text=Use backup code',
+            'text=Use a recovery code',
+            'text=Recovery code',
+            'text=Enter a backup code',
+            'text=Authenticator app',
+            'text=Use an authentication code',
             'text=Sign in another way',
         ]
     )
     return dedupe_preserve_order(selectors)
 
 
-def first_alternate_method_selector(profile: dict[str, Any]) -> str | None:
-    return first_existing_selector(alternate_method_selectors(profile))
+def alternate_method_kind(selector: str) -> str:
+    lowered = selector.lower()
+    if "backup code" in lowered or "recovery code" in lowered:
+        return "backup-code"
+    if "verification code" in lowered or "authentication code" in lowered or "authenticator" in lowered:
+        return "totp"
+    if "password" in lowered:
+        return "password"
+    return "generic"
 
 
-def click_alternate_method(profile: dict[str, Any]) -> str | None:
-    selector = first_alternate_method_selector(profile)
-    if not selector:
+def alternate_password_available(profile: dict[str, Any]) -> bool:
+    source_profile = provider_source_profile(profile)
+    credentials_profile = source_profile or profile
+    creds = ((credentials_profile.get("credentials") or {}).get("site") or {})
+    username_key = creds.get("username")
+    password_key = creds.get("password")
+    username = resolve_secret(str(username_key) if username_key else None)
+    password = resolve_secret(str(password_key) if password_key else None)
+    return bool(username and password)
+
+
+def alternate_totp_available(profile: dict[str, Any]) -> bool:
+    secret_name = str(totp_config(profile).get("secret") or "").strip()
+    return bool(secret_name and resolve_secret(secret_name))
+
+
+def alternate_backup_available(profile: dict[str, Any]) -> bool:
+    secret_name = backup_code_secret_name(profile)
+    if not secret_name:
+        return False
+    raw_value, codes = available_backup_codes(secret_name)
+    return raw_value is not None and bool(codes)
+
+
+def preferred_alternate_method_order(profile: dict[str, Any]) -> list[str]:
+    order: list[str] = []
+    if alternate_totp_available(profile):
+        order.append("totp")
+    if alternate_password_available(profile):
+        order.append("password")
+    if alternate_backup_available(profile):
+        order.append("backup-code")
+    order.append("generic")
+    return dedupe_preserve_order(order)
+
+
+def visible_alternate_methods(profile: dict[str, Any]) -> list[dict[str, str]]:
+    visible: list[dict[str, str]] = []
+    for selector in alternate_method_selectors(profile):
+        if selector_exists(selector):
+            visible.append({"selector": selector, "kind": alternate_method_kind(selector)})
+    return visible
+
+
+def preferred_alternate_method(profile: dict[str, Any]) -> dict[str, str] | None:
+    visible = visible_alternate_methods(profile)
+    if not visible:
         return None
-    run_browse("click", selector)
+    order = preferred_alternate_method_order(profile)
+    for kind in order:
+        for candidate in visible:
+            if candidate["kind"] == kind:
+                return candidate
+    return visible[0]
+
+
+def first_alternate_method_selector(profile: dict[str, Any]) -> str | None:
+    candidate = preferred_alternate_method(profile)
+    return candidate["selector"] if candidate else None
+
+
+def click_alternate_method(profile: dict[str, Any]) -> dict[str, str] | None:
+    candidate = preferred_alternate_method(profile)
+    if not candidate:
+        return None
+    run_browse("click", candidate["selector"])
     wait_for_settle()
-    return selector
+    return candidate
 
 
 def totp_input_selectors(profile: dict[str, Any]) -> list[str]:
     return list(
-        ((profile.get("credentials") or {}).get("totp") or {}).get("input_selectors")
+        totp_config(profile).get("input_selectors")
         or [
             'input[name="app_otp"]',
             'input[name="otp"]',
@@ -1594,7 +1696,7 @@ def totp_input_selectors(profile: dict[str, Any]) -> list[str]:
 
 def totp_submit_selectors(profile: dict[str, Any]) -> list[str]:
     return list(
-        ((profile.get("credentials") or {}).get("totp") or {}).get("submit_selectors")
+        totp_config(profile).get("submit_selectors")
         or ['button[type="submit"]', 'input[type="submit"]', 'button[type="button"]']
     )
 
@@ -1677,7 +1779,7 @@ def provider_checkpoint_state(profile: dict[str, Any], provider_name: str, provi
 
 
 def missing_totp_keys(profile: dict[str, Any]) -> list[str]:
-    totp_secret_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
+    totp_secret_key = totp_config(profile).get("secret")
     if totp_secret_key:
         return [str(totp_secret_key)]
     return ["TOTP_SECRET"]
@@ -2880,7 +2982,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
             action_taken.update({"baseline_count": len(baseline_ids)})
 
         elif action_required == "TOTP_REQUIRED":
-            totp_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
+            totp_key = totp_config(profile).get("secret")
             totp_secret = resolve_secret(str(totp_key) if totp_key else None)
             missing = complete_totp_if_present(
                 profile,
@@ -2913,9 +3015,9 @@ def cmd_advance(args: argparse.Namespace) -> int:
                 )
 
         elif action_required == "PASSKEY_CHALLENGE_REQUIRED":
-            alternate_selector = click_alternate_method(profile)
-            if alternate_selector:
-                action_taken.update({"alternate_selector": alternate_selector})
+            alternate = click_alternate_method(profile)
+            if alternate:
+                action_taken.update({"alternate_selector": alternate["selector"], "alternate_kind": alternate["kind"]})
             else:
                 dialog = safe_macos_dialog_probe()
                 if not dialog or not dialog.get("type"):
@@ -2928,9 +3030,9 @@ def cmd_advance(args: argparse.Namespace) -> int:
                 action_taken.update({"dialog": dialog, "clicked": "--default"})
 
         elif action_required == "DEVICE_APPROVAL_REQUIRED":
-            alternate_selector = click_alternate_method(profile)
-            if alternate_selector:
-                action_taken.update({"alternate_selector": alternate_selector})
+            alternate = click_alternate_method(profile)
+            if alternate:
+                action_taken.update({"alternate_selector": alternate["selector"], "alternate_kind": alternate["kind"]})
             else:
                 waited = wait_for_validation(
                     args.site,
@@ -3114,12 +3216,12 @@ def cmd_instructions(args: argparse.Namespace) -> int:
                 missing.append(str(username_key))
             if password_key and not resolve_secret(str(password_key)):
                 missing.append(str(password_key))
-            totp_key = (((profile.get("credentials") or {}).get("totp") or {}).get("secret"))
+            totp_key = totp_config(profile).get("secret")
             if totp_key and not resolve_secret(str(totp_key)):
                 guidance.append(
                     f"TOTP is configured for this provider. Store {totp_key} if the site prompts for one-time codes."
                 )
-            backup_key = (((profile.get("credentials") or {}).get("backup_codes") or {}).get("secret"))
+            backup_key = backup_code_config(profile).get("secret")
             if backup_key and not resolve_secret(str(backup_key)):
                 guidance.append(
                     f"Backup codes are configured for this provider. Store {backup_key} if the site offers recovery-code fallback."
