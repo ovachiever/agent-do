@@ -28,6 +28,7 @@
 - `agent-do auth advance` now prefers visible in-browser alternate auth methods like “Try another way” on passkey or device-approval branches before falling back to dialog clicks or passive waiting.
 - `agent-do auth` now understands provider recovery-code branches, can consume the next unused backup code from secure storage for GitHub and Google flows, and records consumed codes locally so they are treated as finite credentials instead of endlessly replayed secrets.
 - `agent-do auth ensure --strategy interactive` now opens a real system browser for human-visible or anti-bot login flows, then polls browser import and persists the imported state back into encrypted auth storage when validation succeeds or when the imported page lands on a live checkpoint branch that `probe` and `advance` can continue.
+- Provider-backed site profiles now inherit upstream GitHub or Google TOTP and backup-code config for live checkpoint handling, and alternate-method selection prefers visible branches that match available credentials instead of clicking the first generic fallback.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.

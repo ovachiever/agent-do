@@ -228,6 +228,8 @@ Those provider profiles can also declare recovery-code secrets like `GITHUB_BACK
 
 Custom site profiles can also declare `--provider github|google`. Those profiles default to SSO-first strategy order and can use `provider-refresh` to reuse upstream provider auth for cross-site sign-in, including account chooser and consent checkpoints when those pages appear.
 
+Provider-backed site profiles now inherit the upstream provider’s TOTP and backup-code configuration for checkpoint handling, so a target app like Cloudflare can continue GitHub or Google recovery branches without copying those secrets into the target site profile. Alternate-method selection on passkey or device-approval branches is also credential-aware now: auth prefers visible methods it can actually complete, instead of clicking the first generic fallback.
+
 Profiles can also declare mailbox-driven challenges with `--email-code`, `--magic-link`, `--sms-code`, or `--sms-link`. In that mode `agent-do auth` uses `agent-do email` or `agent-do sms` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw scraping.
 
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
