@@ -224,7 +224,7 @@ If a site escalates into a passkey or security-key checkpoint, `agent-do auth en
 
 When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspects the current page, classifies the checkpoint, checks for a frontmost macOS dialog when available, and returns exact next-step commands instead of leaving the agent to infer what happened.
 
-`agent-do auth advance <site>` takes the next safe step on that checkpoint branch, then immediately re-probes the page and returns the new state. It can continue chooser, consent, mailbox, SMS, TOTP, passkey-dialog, and passive device-approval branches without forcing the agent to reconstruct those flows by hand.
+`agent-do auth advance <site>` takes the next safe step on that checkpoint branch, then immediately re-probes the page and returns the new state. It can continue chooser, consent, mailbox, SMS, TOTP, passkey-dialog, and passive device-approval branches without forcing the agent to reconstruct those flows by hand. When passkey or device-approval pages expose an in-browser fallback like “Try another way”, `advance` now prefers that branch before waiting on an out-of-band approval.
 
 ### `email`
 

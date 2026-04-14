@@ -162,8 +162,32 @@ if command == "click":
                 "selectors": [],
                 "fields": fields,
             }
+        elif mode == "device-alt":
+            current = {
+                "page": "device-approval",
+                "url": "https://app.example.com/device",
+                "text": "Check your phone to approve sign in",
+                "selectors": ['text=Try another way'],
+                "fields": fields,
+            }
         save_current(current)
         success({"clicked": True, "selector": selector})
+    if page == "device-approval" and selector == "text=Try another way":
+        current = {
+            "page": "totp",
+            "url": "https://app.example.com/totp",
+            "text": "Enter the code from your authenticator app",
+            "selectors": ["input[name=\\"app_otp\\"]", "button[type=\\"submit\\"]"],
+            "fields": fields,
+        }
+        save_current(current)
+        success({"clicked": True, "selector": selector})
+    if page == "totp" and selector == "button[type=\\"submit\\"]":
+        if fields.get("input[name=\\"app_otp\\"]") == "123456":
+            current = dashboard()
+            save_current(current)
+            success({"clicked": True, "selector": selector})
+        fail("wrong totp code")
     if page == "email_code" and selector == "button[type=\\"submit\\"]":
         if fields.get("input[name=\\"code\\"]") == "731902":
             current = dashboard()
@@ -223,6 +247,14 @@ if command == "auth" and args[1] == "autofill":
                     "url": "https://app.example.com/device",
                     "text": "Check your phone to approve sign in",
                     "selectors": [],
+                    "fields": fields,
+                }
+            elif mode == "device-alt":
+                current = {
+                    "page": "device-approval",
+                    "url": "https://app.example.com/device",
+                    "text": "Check your phone to approve sign in",
+                    "selectors": ['text=Try another way'],
                     "fields": fields,
                 }
             save_current(current)
@@ -541,6 +573,57 @@ def main() -> int:
         advance_device_payload = json.loads(advance_device.stdout)
         require(advance_device_payload["validated"] is True, f"device advance did not validate: {advance_device_payload}")
         require(advance_device_payload["action_taken"]["action_required"] == "DEVICE_APPROVAL_REQUIRED", f"unexpected device action: {advance_device_payload}")
+
+        device_alt_env = base_env(tmp, "device-alt-home", "device-alt")
+        device_alt_env["APP_DEVICE_ALT_EMAIL"] = "agent@example.com"
+        device_alt_env["APP_DEVICE_ALT_PASSWORD"] = "super-secret"
+        device_alt_env["APP_DEVICE_ALT_TOTP_SECRET"] = "dummy-secret"
+        device_alt_home = Path(device_alt_env["AGENT_DO_HOME"])
+        seed_profile(
+            device_alt_home,
+            "app-device-alt",
+            """
+            id: app-device-alt
+            title: Device Alternate
+            domains:
+              - app.example.com
+            login_url: https://app.example.com/login
+            validation:
+              url_patterns:
+                - https://app.example.com/dashboard*
+              signed_out_markers:
+                - Sign in
+              signed_in_markers:
+                - Dashboard
+            strategies:
+              - site-creds
+            provider:
+              type: generic
+            credentials:
+              site:
+                username: APP_DEVICE_ALT_EMAIL
+                password: APP_DEVICE_ALT_PASSWORD
+              totp:
+                secret: APP_DEVICE_ALT_TOTP_SECRET
+            """,
+        )
+        ensure_device_alt = run(str(AGENT_DO), "auth", "ensure", "app-device-alt", "--json", cwd=ROOT, env=device_alt_env)
+        require(ensure_device_alt.returncode == 1, f"device-alt ensure should stop at checkpoint: {ensure_device_alt.stdout} {ensure_device_alt.stderr}")
+        ensure_device_alt_payload = json.loads(ensure_device_alt.stdout)
+        require(ensure_device_alt_payload["action_required"] == "DEVICE_APPROVAL_REQUIRED", f"unexpected device-alt ensure payload: {ensure_device_alt_payload}")
+        advance_device_alt = run(str(AGENT_DO), "auth", "advance", "app-device-alt", "--json", cwd=ROOT, env=device_alt_env)
+        require(advance_device_alt.returncode == 0, f"device-alt advance failed: {advance_device_alt.stdout} {advance_device_alt.stderr}")
+        advance_device_alt_payload = json.loads(advance_device_alt.stdout)
+        require(advance_device_alt_payload["validated"] is False, f"device-alt advance should still be on a challenge branch: {advance_device_alt_payload}")
+        require(advance_device_alt_payload["action_taken"]["alternate_selector"] == "text=Try another way", f"expected alternate method click: {advance_device_alt_payload}")
+        require(
+            any(item["action_required"] == "TOTP_REQUIRED" for item in advance_device_alt_payload["after"]["checkpoints"]),
+            f"device-alt advance should shift to TOTP challenge: {advance_device_alt_payload}",
+        )
+        advance_device_alt_totp = run(str(AGENT_DO), "auth", "advance", "app-device-alt", "--json", cwd=ROOT, env=device_alt_env)
+        require(advance_device_alt_totp.returncode == 0, f"device-alt totp advance failed: {advance_device_alt_totp.stdout} {advance_device_alt_totp.stderr}")
+        advance_device_alt_totp_payload = json.loads(advance_device_alt_totp.stdout)
+        require(advance_device_alt_totp_payload["validated"] is True, f"device-alt totp advance did not validate: {advance_device_alt_totp_payload}")
 
         chooser_env = base_env(tmp, "chooser-home", "chooser")
         chooser_env["GITHUB_EMAIL"] = "agent@example.com"

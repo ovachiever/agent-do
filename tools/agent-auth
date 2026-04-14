@@ -317,6 +317,12 @@ def provider_default_refresh(provider: str) -> dict[str, Any]:
                 'text=Authorize',
                 'text=Continue',
             ],
+            "alternate_selectors": [
+                'text=Try another way',
+                'text=Use your password',
+                'text=Use a verification code',
+                'text=Sign in another way',
+            ],
         }
     if provider == "google":
         return {
@@ -339,6 +345,12 @@ def provider_default_refresh(provider: str) -> dict[str, Any]:
                 'input[type="submit"]',
                 'text=Continue',
                 'text=Allow',
+            ],
+            "alternate_selectors": [
+                'text=Try another way',
+                'text=Choose another option',
+                'text=Use your password',
+                'text=Get a verification code',
             ],
         }
     return {}
@@ -964,6 +976,10 @@ def detect_checkpoints(profile: dict[str, Any]) -> list[dict[str, Any]]:
 
     passkey = passkey_challenge_details()
     if passkey:
+        alternate_selector = first_alternate_method_selector(profile)
+        if alternate_selector:
+            passkey = dict(passkey)
+            passkey["alternate_selector"] = alternate_selector
         checkpoints.append(
             {
                 "type": "passkey",
@@ -1058,12 +1074,16 @@ def detect_checkpoints(profile: dict[str, Any]) -> list[dict[str, Any]]:
         ],
     )
     if device_markers and not challenge_active:
+        details = {"markers": device_markers}
+        alternate_selector = first_alternate_method_selector(profile)
+        if alternate_selector:
+            details["alternate_selector"] = alternate_selector
         checkpoints.append(
             {
                 "type": "device-approval",
                 "action_required": "DEVICE_APPROVAL_REQUIRED",
                 "source": "browser",
-                "details": {"markers": device_markers},
+                "details": details,
             }
         )
 
@@ -1188,11 +1208,15 @@ def probe_state(site: str, profile: dict[str, Any], *, name: str = "default", lo
             guidance.append("Phone/SMS challenge is active on the current login branch.")
         elif action == "PASSKEY_CHALLENGE_REQUIRED":
             guidance.append("A passkey or security-key step is blocking browser-only continuation.")
+            if isinstance(details, dict) and details.get("alternate_selector"):
+                guidance.append("An in-browser alternate auth method is visible on this branch.")
             if macos_dialog and macos_dialog.get("type") and macos_dialog.get("buttons"):
                 recommended.append("agent-do macos dialog detect")
                 recommended.append("agent-do macos dialog click --default")
         elif action == "DEVICE_APPROVAL_REQUIRED":
             guidance.append("Another trusted device must approve this sign-in unless an alternate auth path is chosen.")
+            if isinstance(details, dict) and details.get("alternate_selector"):
+                guidance.append("An in-browser alternate auth method is visible on this branch.")
         elif action == "ACCOUNT_CHOOSER_REQUIRED":
             guidance.append("The provider is waiting for an account choice before auth can continue.")
         elif action == "CONSENT_REQUIRED":
@@ -1308,6 +1332,40 @@ def consent_action_selectors(profile: dict[str, Any]) -> list[str]:
     refresh_cfg = provider_refresh_config(profile)
     defaults = provider_default_refresh(provider_name)
     return list(refresh_cfg.get("consent_selectors") or defaults.get("consent_selectors", []))
+
+
+def alternate_method_selectors(profile: dict[str, Any]) -> list[str]:
+    provider_name = provider_type(profile)
+    refresh_cfg = provider_refresh_config(profile)
+    defaults = provider_default_refresh(provider_name)
+    selectors = list(refresh_cfg.get("alternate_selectors") or defaults.get("alternate_selectors", []))
+    selectors.extend(
+        [
+            'text=Try another way',
+            'text=Use another method',
+            'text=Choose a different method',
+            'text=Choose another option',
+            'text=Other options',
+            'text=Use your password',
+            'text=Use a verification code',
+            'text=Use backup code',
+            'text=Sign in another way',
+        ]
+    )
+    return dedupe_preserve_order(selectors)
+
+
+def first_alternate_method_selector(profile: dict[str, Any]) -> str | None:
+    return first_existing_selector(alternate_method_selectors(profile))
+
+
+def click_alternate_method(profile: dict[str, Any]) -> str | None:
+    selector = first_alternate_method_selector(profile)
+    if not selector:
+        return None
+    run_browse("click", selector)
+    wait_for_settle()
+    return selector
 
 
 def totp_input_selectors(profile: dict[str, Any]) -> list[str]:
@@ -2424,56 +2482,64 @@ def cmd_advance(args: argparse.Namespace) -> int:
             action_taken.update({"totp_secret": str(totp_key or "")})
 
         elif action_required == "PASSKEY_CHALLENGE_REQUIRED":
-            dialog = safe_macos_dialog_probe()
-            if not dialog or not dialog.get("type"):
-                raise ActionRequiredError(
-                    action_required,
-                    "Passkey checkpoint is active but no actionable macOS dialog is available",
-                )
-            run_macos_json("dialog", "click", "--default")
-            wait_for_settle()
-            action_taken.update({"dialog": dialog, "clicked": "--default"})
+            alternate_selector = click_alternate_method(profile)
+            if alternate_selector:
+                action_taken.update({"alternate_selector": alternate_selector})
+            else:
+                dialog = safe_macos_dialog_probe()
+                if not dialog or not dialog.get("type"):
+                    raise ActionRequiredError(
+                        action_required,
+                        "Passkey checkpoint is active but no alternate method or actionable macOS dialog is available",
+                    )
+                run_macos_json("dialog", "click", "--default")
+                wait_for_settle()
+                action_taken.update({"dialog": dialog, "clicked": "--default"})
 
         elif action_required == "DEVICE_APPROVAL_REQUIRED":
-            waited = wait_for_validation(
-                args.site,
-                profile,
-                timeout_seconds=args.timeout,
-                interval_seconds=args.interval,
-            )
-            action_taken.update(
-                {
-                    "timeout_seconds": args.timeout,
-                    "interval_seconds": args.interval,
-                    "validation": waited,
-                }
-            )
-            if not waited.get("ok"):
-                updated = probe_state(args.site, profile, name=args.name, load_saved=False)
-                write_session_meta(
+            alternate_selector = click_alternate_method(profile)
+            if alternate_selector:
+                action_taken.update({"alternate_selector": alternate_selector})
+            else:
+                waited = wait_for_validation(
                     args.site,
-                    args.name,
+                    profile,
+                    timeout_seconds=args.timeout,
+                    interval_seconds=args.interval,
+                )
+                action_taken.update(
                     {
-                        "last_strategy": "checkpoint-advance",
-                        "last_validation_ok": False,
-                        "state": "checkpoint",
-                        "last_action_required": "DEVICE_APPROVAL_REQUIRED",
-                        "last_error": f"Timed out waiting {args.timeout}s for device approval",
-                    },
+                        "timeout_seconds": args.timeout,
+                        "interval_seconds": args.interval,
+                        "validation": waited,
+                    }
                 )
-                return fail(
-                    f"Timed out waiting {args.timeout}s for device approval",
-                    json_mode=args.json,
-                    code="action_required",
-                    extra={
-                        "site": args.site,
-                        "state": "action-required",
-                        "action_required": "DEVICE_APPROVAL_REQUIRED",
-                        "advanced": False,
-                        "probe": updated,
-                        "recommended": updated.get("recommended") or [f"agent-do auth probe {args.site}"],
-                    },
-                )
+                if not waited.get("ok"):
+                    updated = probe_state(args.site, profile, name=args.name, load_saved=False)
+                    write_session_meta(
+                        args.site,
+                        args.name,
+                        {
+                            "last_strategy": "checkpoint-advance",
+                            "last_validation_ok": False,
+                            "state": "checkpoint",
+                            "last_action_required": "DEVICE_APPROVAL_REQUIRED",
+                            "last_error": f"Timed out waiting {args.timeout}s for device approval",
+                        },
+                    )
+                    return fail(
+                        f"Timed out waiting {args.timeout}s for device approval",
+                        json_mode=args.json,
+                        code="action_required",
+                        extra={
+                            "site": args.site,
+                            "state": "action-required",
+                            "action_required": "DEVICE_APPROVAL_REQUIRED",
+                            "advanced": False,
+                            "probe": updated,
+                            "recommended": updated.get("recommended") or [f"agent-do auth probe {args.site}"],
+                        },
+                    )
 
         elif action_required == "CAPTCHA_REQUIRED":
             raise ActionRequiredError(action_required, "CAPTCHA is visible and cannot be advanced safely")
