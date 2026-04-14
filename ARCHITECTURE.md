@@ -4,12 +4,12 @@
 
 agent-do is a universal automation layer that works with any AI coding agent. It provides:
 
-1. **Structured CLI API** — Direct tool invocation without LLM overhead
-2. **Credential resolution layer** — secure-store and env-var loading for API-oriented tools
-3. **Natural Language Mode** — LLM-routed for human users
-4. **Discovery + nudge layer** — task suggestions, project-scoped tool ranking, and hook nudges
-5. **Bootstrap + health flow** — explicit setup path for stateful tools and dependency checks
-6. **84 specialized tools** — browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+1. **Structured CLI API**: direct tool invocation without LLM overhead
+2. **Credential resolution layer**: secure-store and env-var loading for API-oriented tools
+3. **Natural Language Mode**: LLM-routed for human users
+4. **Discovery + nudge layer**: task suggestions, project-scoped tool ranking, and hook nudges
+5. **Bootstrap + health flow**: explicit setup path for stateful tools and dependency checks
+6. **84 specialized tools**: browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -65,9 +65,9 @@ The same registry-driven metadata is used by the bash dispatcher, `bin/intent-ro
 
 `bin/intent-router` tries three strategies in order:
 
-1. **SQLite route memory** (`lib/cache.py:check_cache`) — exact match on normalized intent, preferring project-scoped history
-2. **Weighted fuzzy match** (`lib/cache.py:fuzzy_match`) — Jaccard similarity ranked by project scope and past route success
-3. **Claude API** — full LLM call with registry + session state in context
+1. **SQLite route memory** (`lib/cache.py:check_cache`): exact match on normalized intent, preferring project-scoped history
+2. **Weighted fuzzy match** (`lib/cache.py:fuzzy_match`): Jaccard similarity ranked by project scope and past route success
+3. **Claude API**: full LLM call with registry + session state in context
 
 Successful routes are cached and then scored by later outcomes, so the router can prefer the route that actually works in the current repo. At 100 requests/day, LLM cost is still around ~$0.20/day, but cache quality improves over time.
 
@@ -79,23 +79,23 @@ Successful routes are cached and then scored by later outcomes, so the router ca
 
 Tools live in `tools/agent-*`. The dispatcher (`exec_tool()`) checks in order:
 
-1. `tools/agent-<name>/agent-<name>` — directory with nested executable (e.g., agent-browse)
-2. `tools/agent-<name>` — standalone executable
-3. `agent-<name>` in `$PATH` — external tool
+1. `tools/agent-<name>/agent-<name>` (directory with nested executable, e.g., agent-browse)
+2. `tools/agent-<name>` (standalone executable)
+3. `agent-<name>` in `$PATH` (external tool)
 
 Most tools are standalone bash scripts. Some are directory-based with Python or Node.js backends.
 
 ## Key Components
 
 ```
-agent-do                    # Main entry (bash) — mode selection + tool dispatch
+agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── bin/
-│   ├── intent-router       # LLM router (Python) — 3-tier fallback
-│   ├── pattern-matcher     # Offline router (Python) — shared registry routing + regex fallbacks
-│   ├── suggest             # Discovery CLI — task/project → likely tools
+│   ├── intent-router       # LLM router (Python): 3-tier fallback
+│   ├── pattern-matcher     # Offline router (Python): shared registry routing + regex fallbacks
+│   ├── suggest             # Discovery CLI: task/project to likely tools
 │   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── bootstrap           # Stateful-tool bootstrap recommender/executor
-│   ├── health              # Dependency checker (bash) — per-tool health status
+│   ├── health              # Dependency checker (bash): per-tool health status
 │   └── status              # Session status display (bash + Python)
 ├── lib/
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
@@ -105,7 +105,7 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
 │   ├── json-output.sh      # Shared --json flag support for bash tools
 │   └── capture/            # Shared capture pipeline (browse + unbrowse)
-│       ├── capture.js      # CaptureSession — request/response correlation
+│       ├── capture.js      # CaptureSession: request/response correlation
 │       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
 │       ├── auth.js         # Auth extraction from captured headers/cookies
 │       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
@@ -118,19 +118,19 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 ### Registry (registry.yaml)
 
 The master catalog defines all tools with:
-- `description` — what the tool does
-- `capabilities` — list of actions it supports
-- `commands` — subcommands with descriptions
-- `examples` — intent → command mappings (used by LLM router and pattern matcher)
-- `routing` — optional discovery metadata: keywords, regexes, raw CLI equivalents, readiness hints, and project signals
-- `credentials` — optional secret env vars a tool can resolve from env or secure storage
+- `description`: what the tool does
+- `capabilities`: list of actions it supports
+- `commands`: subcommands with descriptions
+- `examples`: intent-to-command mappings (used by LLM router and pattern matcher)
+- `routing`: optional discovery metadata (keywords, regexes, raw CLI equivalents, readiness hints, project signals)
+- `credentials`: optional secret env vars a tool can resolve from env or secure storage
 
 ### Registry Loading Order (lib/registry.py)
 
 Registries merge in reverse priority (higher-priority wins):
-1. `~/.agent-do/registry.yaml` — user overrides (highest priority)
-2. `./registry.yaml` — bundled
-3. `~/.agent-do/plugins/*.yaml` — plugin extensions
+1. `~/.agent-do/registry.yaml` (user overrides, highest priority)
+2. `./registry.yaml` (bundled)
+3. `~/.agent-do/plugins/*.yaml` (plugin extensions)
 
 ### Session State (lib/state.py)
 
@@ -145,7 +145,7 @@ The intent router includes state in LLM context so ambiguous references ("my pyt
 
 ### Framework Libraries
 
-**`lib/snapshot.sh`** — JSON snapshot output for bash tools:
+**`lib/snapshot.sh`**: JSON snapshot output for bash tools:
 ```bash
 source lib/snapshot.sh
 snapshot_begin "tool-name"
@@ -155,7 +155,7 @@ snapshot_end
 # → {"tool": "tool-name", "timestamp": "...", "key": "value", "data": {"nested": true}}
 ```
 
-**`lib/json-output.sh`** — `--json` flag support:
+**`lib/json-output.sh`**: `--json` flag support:
 ```bash
 source lib/json-output.sh
 parse_output_format "$@"    # Detects --json flag
@@ -164,7 +164,7 @@ json_error "message"        # {"success": false, "error": "..."}
 json_result '{"key": "val"}' # Pass-through raw JSON
 ```
 
-**`lib/retry.sh`** — Shared error recovery for API tools:
+**`lib/retry.sh`**: Shared error recovery for API tools:
 ```bash
 source lib/retry.sh
 result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
@@ -173,33 +173,33 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 # AGENT_DO_PERSISTENT=1       # CI/CD mode: retry 429/5xx indefinitely
 ```
 
-**`bin/health`** — Per-tool dependency and credential checking:
+**`bin/health`**: Per-tool dependency and credential checking:
 - Verifies tool exists and `--help` works
 - Checks tool-specific dependencies plus declared credential metadata from `registry.yaml`
 - Reports: OK, WARN (missing dependency), CONF (needs config or credentials), MISS (tool not found)
 
-**`tools/agent-creds` + `lib/creds-helper.sh`** — Secure credential layer:
+**`tools/agent-creds` + `lib/creds-helper.sh`**: Secure credential layer:
 - `agent-do creds store <KEY> --stdin` stores a secret in the OS secure store
 - `agent-do creds check --tool <tool>` verifies declared credentials for a tool
 - `agent-do creds export --tool <tool>` emits resolved export lines for debugging
 - Backends: macOS Keychain, Linux Secret Service, Windows DPAPI-backed per-user store
 
-**`tools/agent-spec`** — Repo-local intended behavior and change artifacts:
+**`tools/agent-spec`**: Repo-local intended behavior and change artifacts:
 - stores canonical specs plus active changes under `agent-do-spec/`
 - derives status from proposal/design/tasks/delta files instead of hidden mutable state
 - provides `init`, `new`, `list`, `show`, and `status` for a minimal git-visible spec workflow
 
-**`bin/bootstrap`** — Idempotent setup for stateful tools:
+**`bin/bootstrap`**: Idempotent setup for stateful tools:
 - Detects project-local signals in `CLAUDE.md`, `AGENTS.md`, and the repo root
 - Initializes `context` globally and `zpc` / `manna` locally when the project actually uses them
 - Powers the SessionStart bootstrap prompt injected by the Claude Code hook
 
-**`bin/suggest`** — Discovery CLI:
+**`bin/suggest`**: Discovery CLI:
 - `agent-do suggest "<task>"` picks likely tools and concrete commands
 - `agent-do suggest --project` ranks likely tools for the current repo
 - `agent-do find <keyword>` searches the tool surface without an LLM call
 
-**`bin/nudges`** — Local telemetry viewer:
+**`bin/nudges`**: Local telemetry viewer:
 - `agent-do nudges stats` summarizes prompt and PreToolUse nudges
 - `agent-do nudges recent` shows recent local events from the live hook stack
 - Uses JSONL under `~/.agent-do/telemetry/`
@@ -207,9 +207,9 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 ### Tool Concurrency Classification
 
 Every tool in `registry.yaml` declares `concurrency: read|write|mixed`:
-- **read** (22 tools): safe to run in parallel — context, ocr, vision, metrics, dpt, etc.
-- **write** (16 tools): must run serially — render, vercel, namecheap, manna, docker, etc.
-- **mixed** (42 tools): per-command — browse snapshot is read, browse click is write
+- **read** (22 tools): safe to run in parallel (context, ocr, vision, metrics, dpt, etc.)
+- **write** (16 tools): must run serially (render, vercel, namecheap, manna, docker, etc.)
+- **mixed** (42 tools): per-command (browse snapshot is read, browse click is write)
 
 Orchestrators use this to batch parallel tool calls safely: read-only tools run concurrently, write tools run serially, mixed tools require per-command inspection.
 
@@ -230,9 +230,9 @@ Directory-based tools with complex backends:
 | `tools/agent-macos/` | Bash + Python | Desktop GUI automation via macOS accessibility APIs. Click, type, UI tree inspection. |
 | `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. |
 | `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
-| `tools/agent-cloudflare` | Bash + curl | Cloudflare management — zones, analytics (GraphQL), DNS, Workers, Pages, R2, firewall events. 23 commands. |
-| `tools/agent-clerk` | Bash + curl | Clerk auth platform — users, orgs, sessions, OAuth apps, enterprise SSO, JWT templates, roles. 55 commands. |
-| `tools/agent-okta` | Bash + curl | Okta tenant management — OIDC/SAML apps, SSO config, users, groups, auth servers, system logs. 34 commands. |
+| `tools/agent-cloudflare` | Bash + curl | Cloudflare management: zones, analytics (GraphQL), DNS, Workers, Pages, R2, firewall events. 23 commands. |
+| `tools/agent-clerk` | Bash + curl | Clerk auth platform: users, orgs, sessions, OAuth apps, enterprise SSO, JWT templates, roles. 55 commands. |
+| `tools/agent-okta` | Bash + curl | Okta tenant management: OIDC/SAML apps, SSO config, users, groups, auth servers, system logs. 34 commands. |
 | `tools/agent-namecheap` | Bash + curl | Namecheap domain and DNS management. XML API with safe GET→merge→SET writes, suspicious-value rejection, exact provider read-back verification, and optional public DNS checks. |
 | `tools/agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. |
 | `tools/agent-context/` | Bash + Python | **Knowledge library.** Fetches external docs (URLs, llms.txt, GitHub repos). SQLite FTS5 index, BM25 + trust-tier ranking, token-budgeted retrieval. Storage: `~/.agent-do/context/` (global). 22 commands. |
@@ -274,16 +274,16 @@ AGENT_DO_PATTERNS = {
 |------|---------|------|
 | `0` | Success | Command executed successfully |
 | `1` | Error | Tool error, missing dependency, invalid arguments |
-| `2` | Needs clarification | Natural language mode — ambiguous intent |
+| `2` | Needs clarification | Natural language mode: ambiguous intent |
 
 Exit code 2 signals the orchestrator to ask a follow-up question and retry with `--context`.
 
 ## Design Principles
 
-1. **Structured > Natural Language for AI** — AI agents should use `agent-do ios tap 200 400`, not `agent-do -n "tap the button"`. Natural language is a human convenience layer.
+1. **Structured > Natural Language for AI.** AI agents should use `agent-do ios tap 200 400`, not `agent-do -n "tap the button"`. Natural language is a human convenience layer.
 
-2. **Snapshot = AI Vision** — The `snapshot` command gives AI agents structured understanding of current state. Without it, agents are blind.
+2. **Snapshot = AI Vision.** The `snapshot` command gives AI agents structured understanding of current state. Without it, agents are blind.
 
-3. **Session = Memory** — Persistent sessions (database connections, browser state, TUI sessions) give agents context across commands.
+3. **Session = Memory.** Persistent sessions (database connections, browser state, TUI sessions) give agents context across commands.
 
-4. **Tools are Composable** — Each tool is standalone, callable directly or via agent-do, with the same interface for AI and humans.
+4. **Tools are Composable.** Each tool is standalone, callable directly or via agent-do, with the same interface for AI and humans.

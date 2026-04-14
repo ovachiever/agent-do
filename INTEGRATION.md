@@ -1,6 +1,6 @@
 # Claude Code Integration
 
-agent-do ships 3 hooks that teach Claude Code to prefer `agent-do` tools over raw CLI commands. The hooks use a nudge approach — they add context reminders but never block commands.
+agent-do ships 3 hooks that teach Claude Code to prefer `agent-do` tools over raw CLI commands. The hooks use a nudge approach: they add context reminders but never block commands.
 
 ## Quick Setup
 
@@ -16,7 +16,7 @@ The installer:
 
 ## The 3-Layer Hook System
 
-### Layer 1: SessionStart — PATH + Context Injection
+### Layer 1: SessionStart: PATH + Context Injection
 
 **File:** `hooks/agent-do-session-start.sh`
 
@@ -28,11 +28,11 @@ Runs once per Claude Code session. Two jobs:
 SessionStart itself is not an interactive prompt surface. The hook can add context, but the actual yes/no question must be asked by Claude in the normal conversation flow.
 
 Path auto-detection chain (no hardcoded paths):
-1. `which agent-do` — already in PATH
-2. `~/.local/bin/agent-do` — symlink from `install.sh`
-3. `~/.agent-do/install-path` — breadcrumb file
+1. `which agent-do` (already in PATH)
+2. `~/.local/bin/agent-do` (symlink from `install.sh`)
+3. `~/.agent-do/install-path` (breadcrumb file)
 
-### Layer 2: UserPromptSubmit — Prompt Routing
+### Layer 2: UserPromptSubmit: Prompt Routing
 
 **File:** `hooks/agent-do-prompt-router.py`
 
@@ -62,13 +62,13 @@ It still has broad fallback coverage across these categories:
 | render | "render.com", "render service" |
 | supabase | "supabase project", "supabase database" |
 
-### Layer 3: PreToolUse — Command Interception
+### Layer 3: PreToolUse: Command Interception
 
 **File:** `hooks/agent-do-pretooluse-check.py`
 
 Watches every `Bash` tool call. When Claude tries to run a raw command that has an agent-do equivalent (e.g., `xcrun simctl`, `vercel deploy`, `kubectl`), it injects a hard nudge with the closest native replacement command and any relevant setup hint.
 
-**Nudge mode (default):** Adds `additionalContext` — Claude sees the reminder but the command still runs.
+**Nudge mode (default):** Adds `additionalContext`. Claude sees the reminder but the command still runs.
 
 Examples:
 - `npx playwright test` → `agent-do browse ...` + browser-install hint when relevant
@@ -171,7 +171,7 @@ docker, k8s, cloud, ssh, excel, slack, image, video, audio, zpc
 
 ## Nudge vs Block Mode
 
-By default, all hooks use **nudge mode** — they add context reminders but never prevent Claude from running commands. This is still the recommended approach because:
+By default, all hooks use **nudge mode**: they add context reminders but never prevent Claude from running commands. This is still the recommended approach because:
 
 - Claude learns the pattern over a session (the reminder accumulates)
 - No false positives blocking legitimate commands

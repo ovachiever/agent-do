@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 agent-do is a universal automation CLI for AI agents with 84 specialized tools. Two modes:
-- **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` — instant, no LLM
-- **Natural Language** (humans): `agent-do -n "what you want"` — LLM-routed via Claude
+- **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` (instant, no LLM)
+- **Natural Language** (humans): `agent-do -n "what you want"` (LLM-routed via Claude)
 
 ## Commands
 
@@ -59,10 +59,10 @@ The main `agent-do` script (bash) decides mode based on first argument:
 
 1. **Structured API**: `agent-do ios screenshot` → `is_tool()` matches → `exec_tool()` dispatches to `tools/agent-ios`
 2. **Natural Language** (`-n` flag): 3-tier fallback chain:
-   - `lib/cache.py:check_cache()` — project-aware exact route memory (`~/.agent-do/cache/patterns.db`)
-   - `lib/cache.py:fuzzy_match()` — Jaccard similarity weighted by project scope and past route success
-   - `bin/intent-router` — Claude API call
-3. **Offline** (`--offline`): `bin/pattern-matcher` — regex patterns + keyword matching, no LLM
+   - `lib/cache.py:check_cache()`: project-aware exact route memory (`~/.agent-do/cache/patterns.db`)
+   - `lib/cache.py:fuzzy_match()`: Jaccard similarity weighted by project scope and past route success
+   - `bin/intent-router`: Claude API call
+3. **Offline** (`--offline`): `bin/pattern-matcher` (regex patterns + keyword matching, no LLM)
 
 ### Exit Codes (natural language mode)
 - `0` = success
@@ -81,11 +81,11 @@ Most tools are standalone bash scripts. Some are directory-based with Python or 
 ### Key Components
 
 ```
-agent-do                    # Main entry (bash) — mode selection + tool dispatch
+agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── bin/
-│   ├── intent-router       # LLM router (Python) — cache → fuzzy → Claude API
-│   ├── pattern-matcher     # Offline router (Python) — regex + keyword matching
-│   ├── suggest             # Discovery CLI — task → likely tools/commands
+│   ├── intent-router       # LLM router (Python): cache, fuzzy, Claude API
+│   ├── pattern-matcher     # Offline router (Python): regex + keyword matching
+│   ├── suggest             # Discovery CLI: task/project to likely tools/commands
 │   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── health              # Tool dependency checker (bash)
 │   └── status              # Session status display (bash + inline Python)
@@ -97,12 +97,12 @@ agent-do                    # Main entry (bash) — mode selection + tool dispat
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   ├── json-output.sh      # Shared --json flag and structured output for tools
 │   └── capture/            # Shared capture pipeline (used by browse + unbrowse)
-│       ├── capture.js      # CaptureSession class — request/response correlation
-│       ├── filter.js       # filterEntries() — removes static assets, CDN, deduplicates
-│       ├── auth.js         # extractAuth() — identifies auth patterns in captured traffic
-│       └── generator.js    # generateSkill() — writes skill package to ~/.agent-do/skills/
+│       ├── capture.js      # CaptureSession: request/response correlation
+│       ├── filter.js       # filterEntries: removes static assets, CDN, deduplicates
+│       ├── auth.js         # extractAuth: identifies auth patterns in captured traffic
+│       └── generator.js    # generateSkill: writes skill package to ~/.agent-do/skills/
 ├── tools/agent-*           # 84 tools (standalone scripts + directory-based tools)
-└── registry.yaml           # Master tool catalog — tool descriptions, commands, examples
+└── registry.yaml           # Master tool catalog: tool descriptions, commands, examples
 ```
 
 ### Registry Loading Order (registry.py)
@@ -114,7 +114,7 @@ Registries merge in reverse priority order (higher-priority wins):
 
 ### Session State
 
-`lib/state.py` manages `~/.agent-do/state.yaml` — tracks active TUI/REPL/iOS/Android/Docker/SSH/Tail sessions. The intent router includes state in LLM context so "my python session" resolves correctly.
+`lib/state.py` manages `~/.agent-do/state.yaml`, tracking active TUI/REPL/iOS/Android/Docker/SSH/Tail sessions. The intent router includes state in LLM context so "my python session" resolves correctly.
 
 ### Key Bundled Tools
 
@@ -135,12 +135,12 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-vercel` | Bash + curl | Vercel project/deployment management via REST API. Requires `VERCEL_ACCESS_TOKEN`. Optional `--team <id>`. |
 | `agent-supabase` | Bash + curl | Supabase project management + data access. REST API queries (no password) and SQL via agent-db bridge. Requires `SUPABASE_ACCESS_TOKEN`. |
 | `agent-gcp` | Bash + curl | Google Cloud Platform management via REST API + Console automation. Projects, APIs, secrets, service accounts, OAuth credential creation. |
-| `agent-cloudflare` | Bash + curl | Cloudflare management — zones, analytics (GraphQL), DNS records, Workers, Pages, R2, firewall events. 23 commands. Requires `CLOUDFLARE_API_TOKEN`. |
-| `agent-clerk` | Bash + curl | Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO (SAML/OIDC), JWT templates, roles/permissions. 55 commands. Requires `CLERK_SECRET_KEY`. |
-| `agent-okta` | Bash + curl | Okta tenant management — applications (OIDC/SAML), SSO configuration, users, groups, auth servers, system logs. 34 commands. Requires `OKTA_API_TOKEN` + `OKTA_DOMAIN`. |
+| `agent-cloudflare` | Bash + curl | Cloudflare management: zones, analytics (GraphQL), DNS records, Workers, Pages, R2, firewall events. 23 commands. Requires `CLOUDFLARE_API_TOKEN`. |
+| `agent-clerk` | Bash + curl | Clerk authentication platform: users, organizations, sessions, OAuth apps, enterprise SSO (SAML/OIDC), JWT templates, roles/permissions. 55 commands. Requires `CLERK_SECRET_KEY`. |
+| `agent-okta` | Bash + curl | Okta tenant management: applications (OIDC/SAML), SSO configuration, users, groups, auth servers, system logs. 34 commands. Requires `OKTA_API_TOKEN` + `OKTA_DOMAIN`. |
 | `agent-namecheap` | Bash + curl | Namecheap domain and DNS management. Safe GET→merge→SET writes with suspicious-value rejection, exact provider read-back verification, and optional public DNS checks. Requires `NAMECHEAP_API_USER` + `NAMECHEAP_API_KEY`. |
 | `agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. Requires `RESEND_API_KEY`. |
-| `agent-dpt` | Bash + Python | Design Perception Tensor — visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
+| `agent-dpt` | Bash + Python | Design Perception Tensor: visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring. 22 commands. Storage: `~/.agent-do/context/` (global, per-user). |
 | `agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons (context/problem/solution/takeaway), architectural decisions (options/chosen/rationale/confidence), pattern consolidation via harvest. Git history review, swarm checkpoints, lesson promotion (local → team → global). Storage: `.zpc/` (per-project). Sources `lib/json-output.sh` + `lib/snapshot.sh`. |
 | `agent-pdf2md` | Bash | PDF-to-Markdown converter. Auto-detects tabular vs prose PDFs. Uses `pdftotext -layout` for tables, `markitdown` for prose. |

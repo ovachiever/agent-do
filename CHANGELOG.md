@@ -36,7 +36,7 @@
 - `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.
 - `agent-do namecheap dns-add` no longer crashes after successful writes because of the bare `host` reference in its success path.
 
-## v1.1 — 2026-04-11
+## v1.1 (2026-04-11)
 
 ### Added
 - `agent-do suggest "<task>"`, `agent-do suggest --project`, and `agent-do find <keyword>` for non-LLM discovery on top of shared registry routing metadata.
@@ -49,7 +49,7 @@
 - Offline matching now consumes shared registry routing metadata before falling back to legacy regex patterns.
 - Natural-language cache memory is now project-scoped and weighted by route success/failure instead of treating all prior matches equally.
 
-## v1 — 2026-04-10
+## v1 (2026-04-10)
 
 ### Fixed
 - Natural-language routing now resolves directory-backed tools correctly instead of trying to execute tool directories directly.
@@ -78,26 +78,26 @@
 - `cd tools/agent-browse && npm test`
 - `bash tools/agent-manna/test/integration.sh`
 
-## v0.9 — 2026-03-17
+## v0.9 (2026-03-17)
 
 ### Added
 - **agent-context**: Curated docs and context for AI agents (tool #76), 22 commands:
-  - `fetch <url>` — Fetch markdown from any URL
-  - `fetch-llms <domain>` — Fetch llms.txt / llms-full.txt from any domain
-  - `fetch-repo <owner/repo>` — Fetch docs from GitHub via gh CLI
-  - `scan-local` — Index project context files (CLAUDE.md, .cursorrules, etc.)
-  - `scan-skills` — Index ~/.claude/skills/ as searchable context
-  - `search <query>` — FTS5 BM25 search with keyword expansion, trust-tier boosting, feedback weighting
-  - `get <id>` — Retrieve cached doc with annotations, incremental fetch (--file, --full)
-  - `list` — List all indexed packages with trust badges
-  - `budget <tokens> <query>` — Token-aware greedy knapsack context assembly
-  - `inject --max-tokens N` — Structured context blob for spawned agents
-  - `annotate <id> <note>` — Persistent notes displayed inline on future gets
-  - `feedback <id> up|down` — Ratings that influence search ranking
-  - `build <dir>` — Validate and package private content with registry.json
-  - `cache list|clear|pin|stats` — Full cache management with pinning
-  - `sources` / `add-source` / `remove-source` — Multi-source config management
-  - `status` / `init` — Storage management
+  - `fetch <url>`: fetch markdown from any URL
+  - `fetch-llms <domain>`: fetch llms.txt / llms-full.txt from any domain
+  - `fetch-repo <owner/repo>`: fetch docs from GitHub via gh CLI
+  - `scan-local`: index project context files (CLAUDE.md, .cursorrules, etc.)
+  - `scan-skills`: index ~/.claude/skills/ as searchable context
+  - `search <query>`: FTS5 BM25 search with keyword expansion, trust-tier boosting, feedback weighting
+  - `get <id>`: retrieve cached doc with annotations, incremental fetch (--file, --full)
+  - `list`: list all indexed packages with trust badges
+  - `budget <tokens> <query>`: token-aware greedy knapsack context assembly
+  - `inject --max-tokens N`: structured context blob for spawned agents
+  - `annotate <id> <note>`: persistent notes displayed inline on future gets
+  - `feedback <id> up|down`: ratings that influence search ranking
+  - `build <dir>`: validate and package private content with registry.json
+  - `cache list|clear|pin|stats`: full cache management with pinning
+  - `sources` / `add-source` / `remove-source`: multi-source config management
+  - `status` / `init`: storage management
   - Full `--json` support via `lib/json-output.sh` + `lib/snapshot.sh`
   - SQLite FTS5 index with 50-entry keyword expansion table
   - Trust tiers: official, maintainer, community, local
@@ -111,23 +111,23 @@
 
 ---
 
-## v0.8 — 2026-02-27
+## v0.8 (2026-02-27)
 
 ### Added
 - **agent-zpc**: Structured project memory for AI coding agents (tool #75), 13 commands:
-  - `learn` — Capture validated lessons with tags → `lessons.jsonl`
-  - `decide` — Log decisions with rationale, confidence, bias detection → `decisions.jsonl`
-  - `decide-batch` — Batch-log decisions from planning phase via stdin or file (pipe-delimited)
-  - `harvest` — Consolidation scan: format health, pattern drafting, auto-write for 5+ lesson tags
-  - `query` — Search by tag, date, text, or type (lessons/decisions/all)
-  - `patterns` — View established patterns, score effectiveness
-  - `promote` — Promote lessons to team (git-tracked) or global scope with dedup
-  - `inject` — Emit agent context blob for spawned agents (baseline counts for self-report grounding)
-  - `init` — Initialize `.zpc/` with stack auto-detection and platform-specific instructions
-  - `status` — Memory snapshot with health check (human + JSON output)
-  - `checkpoint` — Swarm phase boundary: memory inventory, agent compliance, format health, consolidation gaps
-  - `review` — Post-sprint lesson extraction: analyze git history, draft lessons/decisions from commits
-  - `profile` — View/update project profile, auto-detect stack
+  - `learn`: capture validated lessons with tags (writes to `lessons.jsonl`)
+  - `decide`: log decisions with rationale, confidence, bias detection (writes to `decisions.jsonl`)
+  - `decide-batch`: batch-log decisions from planning phase via stdin or file (pipe-delimited)
+  - `harvest`: consolidation scan with format health, pattern drafting, auto-write for 5+ lesson tags
+  - `query`: search by tag, date, text, or type (lessons/decisions/all)
+  - `patterns`: view established patterns, score effectiveness
+  - `promote`: promote lessons to team (git-tracked) or global scope with dedup
+  - `inject`: emit agent context blob for spawned agents (baseline counts for self-report grounding)
+  - `init`: initialize `.zpc/` with stack auto-detection and platform-specific instructions
+  - `status`: memory snapshot with health check (human + JSON output)
+  - `checkpoint`: swarm phase boundary with memory inventory, agent compliance, format health, consolidation gaps
+  - `review`: post-sprint lesson extraction from git history, draft lessons/decisions from commits
+  - `profile`: view/update project profile, auto-detect stack
   - 4 platform templates: Claude Code, Cursor, Codex, Generic
   - Full `--json` support via `lib/json-output.sh` + `lib/snapshot.sh`
   - Per-project memory (`.zpc/`) + global memory (`~/.agent-do/zpc/`)
@@ -151,7 +151,7 @@
 
 ---
 
-## v0.7 — 2026-02-06
+## v0.7 (2026-02-06)
 
 ### Added
 - **agent-sessions**: AI coding session history search with FTS5 full-text search
@@ -165,7 +165,7 @@
 
 ---
 
-## v0.6 — 2026-01-28
+## v0.6 (2026-01-28)
 
 ### Added
 - **agent-gcp**: Google Cloud Platform management (projects, APIs, secrets, service accounts, OAuth)
@@ -184,7 +184,7 @@
 
 ---
 
-## v0.5 — 2026-01-15
+## v0.5 (2026-01-15)
 
 ### Added
 - Initial public structure with 60+ tools

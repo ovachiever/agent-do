@@ -469,4 +469,4 @@ Shared helpers such as `lib/snapshot.sh` and `lib/json-output.sh` let bash tools
 
 ## License
 
-MIT
+[MIT](LICENSE)

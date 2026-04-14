@@ -2,14 +2,14 @@
 
 > **DPT does not measure taste. It measures whether the unconscious will flinch.**
 
-Browser-injectable design quality scanner. 72 rules across 5 perception layers — chromatic field, typographic skeleton, spatial rhythm, attention architecture, coherence — fused into a single 0-100 score via synthesis.
+Browser-injectable design quality scanner. 72 rules across 5 perception layers (chromatic field, typographic skeleton, spatial rhythm, attention architecture, coherence) fused into a single 0-100 score via synthesis.
 
 Runs inside a live page via `page.evaluate()`. Returns structured JSON describing design quality from measured signals: computed styles, bounding rects, DOM structure, font APIs. No network requests, no server-side data, no subjectivity.
 
 ## Install
 
 ```bash
-git clone <repo-url> dpt
+git clone https://github.com/ovachiever/agent-do.git
 cd dpt
 ./install.sh        # Sets up agent-do tool + Claude Code hook + catalog
 ```
@@ -35,7 +35,7 @@ Options:
 
 ### Requirements
 
-- [agent-do](https://github.com/...) with agent-browser daemon
+- [agent-do](https://github.com/ovachiever/agent-do) with agent-browse daemon
 - Python 3.8+
 - A running browser session: `agent-do browse open <url>`
 
@@ -101,9 +101,9 @@ install.sh                          Sets up agent-do tool + hook + catalog
 
 ## Scoring
 
-Four mechanical dimensions weighted (chromatic 20%, typography 30%, spatial 25%, attention 25%) then scaled by coherence as a multiplier — not a peer dimension.
+Four mechanical dimensions weighted (chromatic 20%, typography 30%, spatial 25%, attention 25%) then scaled by coherence as a multiplier. Coherence is not a peer dimension.
 
-- **Coherence multiplier**: Above 70 coherence, a design system exists (factor 0.95-1.0). Below 50, no real system (factor 0.55-0.75). The research basis: recognition over recall (Johnson Ch.9) — coherent systems enable pattern recognition; incoherent systems force effortful recall.
+- **Coherence multiplier**: Above 70 coherence, a design system exists (factor 0.95-1.0). Below 50, no real system (factor 0.55-0.75). The research basis: recognition over recall (Johnson Ch.9). Coherent systems enable pattern recognition; incoherent systems force effortful recall.
 - **Floor anchoring**: Overall score can't outrun the weakest dimension. Per-dimension authority: chromatic and typography anchor hard (1.0), spatial softer (0.8), attention softest (0.6).
 - **Variance penalty**: High standard deviation across dimensions = scattered passes among failures = no design intent.
 
