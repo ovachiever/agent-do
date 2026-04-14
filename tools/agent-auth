@@ -2204,6 +2204,8 @@ def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
 
     body_text = read_page_text()
     body_lower = body_text.lower()
+    login_form = detect_login_form_result()
+    checkpoints = detect_checkpoints(profile)
     signed_out_markers = [marker for marker in validation.get("signed_out_markers", []) if marker]
     signed_in_markers = [marker for marker in validation.get("signed_in_markers", []) if marker]
     url_patterns = [pattern for pattern in validation.get("url_patterns", []) if pattern]
@@ -2212,7 +2214,12 @@ def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
     matched_in = [marker for marker in signed_in_markers if marker.lower() in body_lower]
     matched_urls = [pattern for pattern in url_patterns if fnmatch.fnmatch(current_url, pattern)]
 
-    ok = not matched_out and bool(matched_in or matched_urls or (not signed_in_markers and not signed_out_markers))
+    ok = (
+        not matched_out
+        and not login_form.get("found")
+        and not checkpoints
+        and bool(matched_in or matched_urls or (not signed_in_markers and not signed_out_markers and not url_patterns))
+    )
     state = "authenticated" if ok else "stale"
 
     details = {
@@ -2220,6 +2227,8 @@ def apply_validation(site: str, profile: dict[str, Any]) -> dict[str, Any]:
         "site": site,
         "state": state,
         "url": current_url,
+        "login_form": login_form,
+        "checkpoints": checkpoints,
         "matched": {
             "signed_in_markers": matched_in,
             "signed_out_markers": matched_out,
@@ -2235,7 +2244,18 @@ def save_current_session(site: str, *, name: str = "default", strategy: str) -> 
     return persist_browse_alias(site, name=name, alias=alias, strategy=strategy)
 
 
-def persist_browse_alias(site: str, *, name: str = "default", alias: str | None = None, strategy: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+def persist_browse_alias(
+    site: str,
+    *,
+    name: str = "default",
+    alias: str | None = None,
+    strategy: str,
+    extra: dict[str, Any] | None = None,
+    state: str = "authenticated",
+    last_validation_ok: bool = True,
+    last_action_required: str | None = None,
+    last_error: str | None = None,
+) -> dict[str, Any]:
     alias = alias or browse_session_name(site, name)
     path_info = auth_paths(site, name)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -2251,10 +2271,10 @@ def persist_browse_alias(site: str, *, name: str = "default", alias: str | None 
         "bundle_path": str(path_info["state"]),
         "last_strategy": strategy,
         "validated_at": now_iso(),
-        "last_validation_ok": True,
-        "state": "authenticated",
-        "last_action_required": None,
-        "last_error": None,
+        "last_validation_ok": last_validation_ok,
+        "state": state,
+        "last_action_required": last_action_required,
+        "last_error": last_error,
     }
     if extra:
         payload.update(extra)
@@ -2349,6 +2369,38 @@ def interactive_browser_login(
                     "source_browser": imported.get("source_browser"),
                     "validation": validation,
                     "session": {"name": name, "browse_session": meta.get("browse_session")},
+                }
+            probe = probe_state(site, profile_for_import, name=name, load_saved=False)
+            checkpoint = checkpoint_from_probe(probe)
+            if checkpoint is not None:
+                checkpoint_action = str(checkpoint.get("action_required") or "INTERACTIVE_LOGIN")
+                meta = persist_browse_alias(
+                    site,
+                    name=name,
+                    alias=imported.get("browse_session"),
+                    strategy="interactive",
+                    extra={
+                        "source_browser": imported.get("source_browser"),
+                        "interactive_login_url": login_url,
+                    },
+                    state="checkpoint",
+                    last_validation_ok=False,
+                    last_action_required=checkpoint_action,
+                    last_error="interactive_import_requires_advance",
+                )
+                return {
+                    "site": site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": ["interactive"],
+                    "action_required": checkpoint_action,
+                    "message": "Imported authenticated state reached a live checkpoint branch; use probe or advance to continue from the imported session",
+                    "opened": True,
+                    "login_url": login_url,
+                    "source_browser": imported.get("source_browser"),
+                    "session": {"name": name, "browse_session": meta.get("browse_session")},
+                    "probe": probe,
+                    "recommended": [f"agent-do auth probe {site}", f"agent-do auth advance {site}"],
                 }
             last_error = "validation_failed_after_interactive_browser_import"
         except Exception as exc:

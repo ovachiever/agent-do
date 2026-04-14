@@ -232,7 +232,7 @@ Profiles can also declare mailbox-driven challenges with `--email-code`, `--magi
 
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
 
-If a site blocks Playwright or needs a browser the remote human can actually see, `agent-do auth ensure <site> --strategy interactive` now opens the real system browser, waits for authenticated browser state to become importable, and then persists the imported session back into encrypted auth storage.
+If a site blocks Playwright or needs a browser the remote human can actually see, `agent-do auth ensure <site> --strategy interactive` now opens the real system browser, waits for authenticated browser state to become importable, and then persists the imported session back into encrypted auth storage. If the imported page is still at a live checkpoint like TOTP or consent, auth keeps that imported state and hands it to `probe` and `advance` instead of discarding it.
 
 When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspects the current page, classifies the checkpoint, checks for a frontmost macOS dialog when available, and returns exact next-step commands instead of leaving the agent to infer what happened.
 

@@ -100,6 +100,11 @@ def main() -> int:
                 if command == "get" and args[1] == "url":
                     success({"url": current.get("url", "about:blank")})
 
+                if command == "get" and args[1] == "count":
+                    selector = args[2]
+                    selectors = current.get("selectors", [])
+                    success({"count": 1 if selector in selectors else 0})
+
                 if command == "eval":
                     success({"result": current.get("text", "")})
 
@@ -221,6 +226,37 @@ def main() -> int:
         require("--browser" in open_log["args"], f"missing browser flag in open args: {open_log}")
         require((fake_home / "auth" / "sessions" / "github" / "default" / "state.enc").exists(), "expected encrypted auth session bundle")
         require(not any((fake_state / "sessions").glob("*.json")), "expected transient browse session aliases to be cleaned up after interactive success")
+
+        env["FAKE_OPEN_AUTH_STATE"] = json.dumps(
+            {
+                "url": "https://github.com/sessions/two-factor/app",
+                "text": "Two-factor authentication Enter the code from your app",
+                "selectors": ['input[name="app_otp"]'],
+            }
+        )
+        ensure_checkpoint = run(
+            str(AGENT_DO),
+            "auth",
+            "ensure",
+            "github",
+            "--name",
+            "checkpoint",
+            "--strategy",
+            "interactive",
+            "--timeout",
+            "2",
+            "--interval",
+            "1",
+            "--json",
+            cwd=ROOT,
+            env=env,
+        )
+        require(ensure_checkpoint.returncode == 1, f"expected checkpoint action-required result: {ensure_checkpoint.stdout} {ensure_checkpoint.stderr}")
+        ensure_checkpoint_payload = json.loads(ensure_checkpoint.stdout)
+        require(ensure_checkpoint_payload["action_required"] == "TOTP_REQUIRED", f"unexpected checkpoint payload: {ensure_checkpoint_payload}")
+        require(ensure_checkpoint_payload["probe"]["state"] == "checkpoint", f"unexpected probe state: {ensure_checkpoint_payload}")
+        require((fake_home / "auth" / "sessions" / "github" / "checkpoint" / "state.enc").exists(), "expected encrypted checkpoint auth bundle")
+        require(not any((fake_state / "sessions").glob("*.json")), "expected transient browse session aliases to be cleaned up after interactive checkpoint persistence")
 
         env.pop("FAKE_OPEN_AUTH_STATE", None)
         Path(env["FAKE_EXTERNAL_STATE_PATH"]).unlink(missing_ok=True)
