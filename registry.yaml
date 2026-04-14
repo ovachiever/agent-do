@@ -146,6 +146,7 @@ tools:
     - reuse upstream GitHub or Google auth to complete SSO into another site
     - step through provider account choosers and consent screens with persisted checkpoint metadata
     - surface passkey or security-key checkpoints as explicit action-required states
+    - open a real system browser for anti-bot or remote human-visible login flows, then import validated state back into auth storage
     commands:
       init: 'Initialize a site profile: init <site> [--domain D] [--login-url URL] [--provider generic|github|google] [--email-code|--magic-link|--sms-code|--sms-link]'
       list: 'List configured auth profiles: list'
@@ -153,7 +154,7 @@ tools:
       status: 'Show auth state: status <site> [--name default]'
       probe: 'Inspect the current auth checkpoint branch: probe <site> [--load]'
       advance: 'Advance one safe checkpoint step and re-probe, preferring visible in-browser alternate methods: advance <site> [--action ACTION] [--timeout 60]'
-      ensure: 'Run the strategy ladder: ensure <site> [--strategy saved-session|browser-import|site-creds]'
+      ensure: 'Run the strategy ladder: ensure <site> [--strategy saved-session|browser-import|site-creds|provider-refresh|interactive] [--timeout 180]'
       save: 'Save current authenticated browser state: save <site> [--name default]'
       load: 'Load saved browser auth state: load <site> [--name default]'
       import-browser: 'Import cookies from a real browser: import-browser <site> [--browser arc] [--domain .example.com]'
@@ -169,6 +170,8 @@ tools:
       command: agent-auth ensure github
     - intent: reuse github auth to sign into another app
       command: agent-auth ensure widgethub --strategy provider-refresh
+    - intent: open the real browser for a cloudflare login and import the authenticated state
+      command: agent-auth ensure cloudflare --strategy interactive --timeout 300
     - intent: initialize a site that sends email verification codes
       command: agent-auth init widgethub --domain app.example.com --email-code --email-from WidgetHub --email-subject "verification code"
     - intent: initialize a site that texts verification codes

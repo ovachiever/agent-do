@@ -483,8 +483,55 @@ def macos_cmd() -> list[str]:
     return tool_cmd_from_env("AGENT_DO_AUTH_MACOS_CMD", default)
 
 
+def open_cmd() -> list[str]:
+    override = os.environ.get("AGENT_DO_AUTH_OPEN_CMD")
+    if override:
+        return shlex.split(override)
+    if sys.platform == "darwin":
+        return ["open"]
+    if shutil.which("xdg-open"):
+        return ["xdg-open"]
+    if os.name == "nt":
+        return ["cmd", "/c", "start", ""]
+    return ["open"]
+
+
 def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, text=True, capture_output=True, check=False)
+
+
+def browser_app_name(browser: str | None) -> str | None:
+    value = (browser or "").strip().lower()
+    if value == "arc":
+        return "Arc"
+    if value == "chrome":
+        return "Google Chrome"
+    if value == "brave":
+        return "Brave Browser"
+    if value == "edge":
+        return "Microsoft Edge"
+    if value == "safari":
+        return "Safari"
+    return None
+
+
+def open_system_browser(url: str, *, browser: str | None = None) -> None:
+    opener = open_cmd()
+    override = os.environ.get("AGENT_DO_AUTH_OPEN_CMD")
+    if override:
+        cmd = [*opener, url]
+        if browser:
+            cmd.extend(["--browser", browser])
+    else:
+        app_name = browser_app_name(browser)
+        if sys.platform == "darwin" and opener and Path(opener[0]).name == "open" and app_name:
+            cmd = [*opener, "-a", app_name, url]
+        else:
+            cmd = [*opener, url]
+    proc = run_tool(cmd)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"failed to open {url}"
+        raise RuntimeError(detail)
 
 
 def run_browse(*args: str) -> dict[str, Any]:
@@ -2245,6 +2292,102 @@ def browser_import(site: str, profile: dict[str, Any], *, name: str = "default")
     return {"browse_session": alias, "last_strategy": "browser-import", "source_browser": browser}
 
 
+def interactive_browser_login(
+    site: str,
+    profile: dict[str, Any],
+    *,
+    name: str = "default",
+    timeout_seconds: int = 180,
+    interval_seconds: int = 5,
+    browser_override: str | None = None,
+    domain_override: str | None = None,
+) -> dict[str, Any]:
+    login_url = str(profile.get("login_url") or "").strip()
+    if not login_url:
+        raise RuntimeError("Interactive auth requires a login URL")
+
+    profile_for_import = copy.deepcopy(profile)
+    import_config = profile_for_import.get("browser_import") or {}
+    browser = str(browser_override or import_config.get("browser") or "").strip()
+    domains = list(import_config.get("domains") or [])
+    import_domain = str(domain_override or (domains[0] if domains else "")).strip()
+    if browser:
+        profile_for_import.setdefault("browser_import", {})["browser"] = browser
+    if import_domain:
+        profile_for_import.setdefault("browser_import", {})["domains"] = [import_domain]
+
+    if not profile_for_import.get("browser_import"):
+        raise RuntimeError("Interactive auth requires browser_import configuration")
+
+    open_system_browser(login_url, browser=browser or None)
+    deadline = time.monotonic() + max(timeout_seconds, 1)
+    last_error = "interactive_login_pending"
+
+    while time.monotonic() < deadline:
+        alias = browse_session_name(site, name)
+        try:
+            imported = browser_import(site, profile_for_import, name=name)
+            validation = apply_validation(site, profile_for_import)
+            if validation["ok"]:
+                meta = persist_browse_alias(
+                    site,
+                    name=name,
+                    alias=imported.get("browse_session"),
+                    strategy="interactive",
+                    extra={
+                        "source_browser": imported.get("source_browser"),
+                        "interactive_login_url": login_url,
+                    },
+                )
+                return {
+                    "site": site,
+                    "ok": True,
+                    "strategy_used": "interactive",
+                    "validated": True,
+                    "opened": True,
+                    "login_url": login_url,
+                    "source_browser": imported.get("source_browser"),
+                    "validation": validation,
+                    "session": {"name": name, "browse_session": meta.get("browse_session")},
+                }
+            last_error = "validation_failed_after_interactive_browser_import"
+        except Exception as exc:
+            last_error = str(exc)
+        run_tool([*browse_cmd(), "session", "delete", alias])
+        time.sleep(max(interval_seconds, 1))
+
+    write_session_meta(
+        site,
+        name,
+        {
+            "last_strategy": "interactive",
+            "last_validation_ok": False,
+            "state": "checkpoint",
+            "last_error": last_error,
+            "last_action_required": "INTERACTIVE_LOGIN",
+            "interactive_login_url": login_url,
+            "interactive_browser": browser or None,
+            "interactive_import_domain": import_domain or None,
+        },
+    )
+    return {
+        "site": site,
+        "ok": False,
+        "state": "action-required",
+        "attempted": ["interactive"],
+        "action_required": "INTERACTIVE_LOGIN",
+        "message": "Opened a visible system browser for login, but imported authenticated state was not validated before timeout",
+        "opened": True,
+        "login_url": login_url,
+        "source_browser": browser or None,
+        "import_domain": import_domain or None,
+        "recommended": [
+            f"Finish login in the visible browser, then rerun: agent-do auth ensure {site} --strategy interactive",
+            f"Or import manually: agent-do auth import-browser {site}",
+        ],
+    }
+
+
 def site_creds_login(site: str, profile: dict[str, Any], *, name: str = "default") -> tuple[bool, list[str]]:
     creds = ((profile.get("credentials") or {}).get("site") or {})
     totp_creds = ((profile.get("credentials") or {}).get("totp") or {})
@@ -2891,6 +3034,10 @@ def cmd_instructions(args: argparse.Namespace) -> int:
             guidance.append("A prior auth run stopped at a checkpoint. Probe the current branch before retrying.")
         if "browser-import" in strategies and profile.get("browser_import"):
             guidance.append("Browser import is configured and should be attempted before site credentials.")
+        if "interactive" in strategies and profile.get("browser_import"):
+            guidance.append(
+                f"For anti-bot or human-visible login flows, use agent-do auth ensure {args.site} --strategy interactive --timeout 300."
+            )
         if "provider-refresh" in strategies and provider_type(profile) in {"github", "google"}:
             guidance.append(
                 f"Provider refresh can reuse {provider_display_name(provider_type(profile))} auth to complete SSO into this site."
@@ -3161,7 +3308,41 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
         elif strategy == "interactive":
             attempted.append(strategy)
-            break
+            try:
+                payload = interactive_browser_login(
+                    args.site,
+                    profile,
+                    name=name,
+                    timeout_seconds=int(args.timeout),
+                    interval_seconds=int(args.interval),
+                    browser_override=args.browser,
+                    domain_override=args.domain,
+                )
+            except Exception as exc:
+                write_session_meta(
+                    args.site,
+                    name,
+                    {
+                        "last_strategy": strategy,
+                        "last_validation_ok": False,
+                        "state": "checkpoint",
+                        "last_error": str(exc),
+                        "last_action_required": "INTERACTIVE_LOGIN",
+                    },
+                )
+                payload = {
+                    "site": args.site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": attempted,
+                    "action_required": "INTERACTIVE_LOGIN",
+                    "message": str(exc),
+                }
+                print(json.dumps(payload, indent=2) if args.json else payload["message"])
+                return 1
+            payload["attempted"] = attempted
+            print(json.dumps(payload, indent=2) if args.json else (f"{args.site}: authenticated via interactive" if payload.get("ok") else payload["message"]))
+            return 0 if payload.get("ok") else 1
 
     payload = {
         "site": args.site,
@@ -3248,6 +3429,10 @@ def build_parser() -> argparse.ArgumentParser:
     ensure_parser.add_argument("site")
     ensure_parser.add_argument("--name", default="default")
     ensure_parser.add_argument("--strategy", choices=["saved-session", "browser-import", "site-creds", "provider-refresh", "interactive"])
+    ensure_parser.add_argument("--timeout", type=int, default=180)
+    ensure_parser.add_argument("--interval", type=int, default=5)
+    ensure_parser.add_argument("--browser")
+    ensure_parser.add_argument("--domain")
 
     save_parser = sub.add_parser("save", help="Save current authenticated browser state")
     save_parser.add_argument("site")

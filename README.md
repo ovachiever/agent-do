@@ -102,6 +102,13 @@ agent-do auth init widgethub --domain app.example.com --login-url https://app.ex
 agent-do auth ensure widgethub --strategy provider-refresh
 ```
 
+When anti-bot or remote human-visible login requires a real system browser:
+
+```bash
+agent-do auth init cloudflare --domain dash.cloudflare.com --login-url https://dash.cloudflare.com/login --provider github
+agent-do auth ensure cloudflare --strategy interactive --timeout 300
+```
+
 When a site emails a verification code or magic link:
 
 ```bash
@@ -224,6 +231,8 @@ Custom site profiles can also declare `--provider github|google`. Those profiles
 Profiles can also declare mailbox-driven challenges with `--email-code`, `--magic-link`, `--sms-code`, or `--sms-link`. In that mode `agent-do auth` uses `agent-do email` or `agent-do sms` to wait for the matching message, extract the code or link, and continue the login flow without dropping back into raw scraping.
 
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
+
+If a site blocks Playwright or needs a browser the remote human can actually see, `agent-do auth ensure <site> --strategy interactive` now opens the real system browser, waits for authenticated browser state to become importable, and then persists the imported session back into encrypted auth storage.
 
 When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspects the current page, classifies the checkpoint, checks for a frontmost macOS dialog when available, and returns exact next-step commands instead of leaving the agent to infer what happened.
 

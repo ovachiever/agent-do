@@ -19,6 +19,7 @@ agent-do is a universal automation CLI for AI agents with 84 specialized tools. 
 ./agent-do creds check --tool render   # Check a tool's declared credentials
 ./agent-do creds required namecheap    # Show which secrets a tool expects
 ./agent-do auth ensure github          # Reuse saved auth or import browser cookies
+./agent-do auth ensure cloudflare --strategy interactive --timeout 300  # Use the visible system browser, then import authenticated state
 ./agent-do resend status example.com   # Check Resend domain DNS/verification state
 ./agent-do spec init                   # Initialize repo-local spec storage
 ./agent-do spec status --change id     # Check one change package
