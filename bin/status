@@ -5,6 +5,7 @@ set -euo pipefail
 
 AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
 STATE_FILE="$AGENT_DO_HOME/state.yaml"
+LIVE_FILE="$AGENT_DO_HOME/live/leases.json"
 
 # Colors
 GREEN='\033[0;32m'
@@ -16,7 +17,7 @@ echo -e "${BLUE}agent-do status${NC}"
 echo "───────────────────────────────────────"
 
 # Check if state file exists
-if [[ ! -f "$STATE_FILE" ]]; then
+if [[ ! -f "$STATE_FILE" && ! -f "$LIVE_FILE" ]]; then
     echo "No active sessions."
     exit 0
 fi
@@ -28,22 +29,49 @@ import sys
 from pathlib import Path
 
 state_file = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do")) / "state.yaml"
+live_file = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do")) / "live" / "leases.json"
 
-if not state_file.exists():
+if not state_file.exists() and not live_file.exists():
     print("No active sessions.")
     exit(0)
 
 try:
     import yaml
 except ModuleNotFoundError:
-    print("State file exists, but PyYAML is not installed.")
-    print("Install dependencies with: pip3 install -r requirements.txt")
-    sys.exit(1)
+    yaml = None
 
-with open(state_file) as f:
-    state = yaml.safe_load(f) or {}
+state = {}
+if state_file.exists():
+    if yaml is None:
+        print("State file exists, but PyYAML is not installed.")
+        print("Install dependencies with: pip3 install -r requirements.txt")
+        sys.exit(1)
+    with open(state_file) as f:
+        state = yaml.safe_load(f) or {}
 
-if not state:
+live_leases = []
+if live_file.exists():
+    try:
+        import json
+        from datetime import datetime, timezone
+        raw = json.loads(live_file.read_text()) or []
+        now = datetime.now(timezone.utc)
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            expires_at = item.get("expires_at")
+            if not expires_at:
+                live_leases.append(item)
+                continue
+            try:
+                if datetime.fromisoformat(expires_at) > now:
+                    live_leases.append(item)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+if not state and not live_leases:
     print("No active sessions.")
     exit(0)
 
@@ -97,6 +125,14 @@ if state.get('tail'):
     for s in state['tail']:
         svcs = ', '.join(sv.get('name', '?') for sv in s.get('services', []))
         print(f"  [{s['id']}] {svcs}  ({s.get('cwd', '?')})")
+
+if live_leases:
+    print("\033[1;33mLive Leases:\033[0m")
+    for lease in live_leases:
+        scope = lease.get('scope', 'desktop')
+        app = lease.get('app') or '*'
+        expires = lease.get('expires_at', 'command')
+        print(f"  [{lease.get('id', '?')}] scope={scope} app={app} expires={expires}")
 PYTHON
 
 echo "───────────────────────────────────────"

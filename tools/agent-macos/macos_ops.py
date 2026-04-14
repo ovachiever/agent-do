@@ -13,6 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+LIB_DIR = ROOT_DIR / "lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+from live.errors import LiveApprovalRequiredError
+from live.policy import require_live_control
+
 # macOS frameworks
 try:
     from ApplicationServices import (
@@ -48,6 +56,41 @@ AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
 SESSION_DIR = AGENT_DO_HOME / "macos"
 LEGACY_SESSION_DIR = Path.home() / ".agent-gui"
 SESSION_FILE = SESSION_DIR / "session.json"
+
+LIVE_DESKTOP_COMMANDS = {
+    "open",
+    "focus",
+    "quit",
+    "click",
+    "dblclick",
+    "rightclick",
+    "type",
+    "fill",
+    "press",
+    "keys",
+    "menu",
+    "action",
+}
+LIVE_WINDOW_ACTIONS = {"minimize", "maximize", "fullscreen", "close", "center", "move", "resize"}
+
+
+def enforce_live_for_command(cmd: str, args: list[str]) -> None:
+    scope = "desktop"
+    if cmd in LIVE_DESKTOP_COMMANDS:
+        require_live_control(scope=scope, tool="macos", argv=args, reason=f"macos:{cmd}")
+        return
+    if cmd == "window" or cmd == "win":
+        action = args[1].lower() if len(args) > 1 else ""
+        if action in LIVE_WINDOW_ACTIONS:
+            require_live_control(scope=scope, tool="macos", argv=args, reason=f"macos:window:{action}")
+            return
+    if cmd == "dialog":
+        sub = args[1].lower() if len(args) > 1 else ""
+        if sub == "click":
+            require_live_control(scope=scope, tool="macos", argv=args, reason="macos:dialog:click")
+            return
+    if cmd == "clipboard" and len(args) > 1:
+        require_live_control(scope=scope, tool="macos", argv=args, reason="macos:clipboard:set")
 
 
 def output(data: dict, exit_code: int = 0):
@@ -1177,6 +1220,10 @@ def main():
         output({"error": "No command specified", "usage": "agent-macos <command> [args]"}, EXIT_UNKNOWN)
     
     cmd = args[0].lower()
+    try:
+        enforce_live_for_command(cmd, args)
+    except LiveApprovalRequiredError as exc:
+        error(str(exc), EXIT_PERMISSION_DENIED, exc.payload())
     
     # Permission check
     if cmd == "--check-permissions" or cmd == "permissions":

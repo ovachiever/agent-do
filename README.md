@@ -16,6 +16,12 @@ agent-do <tool> <command> [args...]
 
 That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 84 tools.
 
+When a command needs permission to control the visible local machine, `agent-do` uses an explicit runtime modifier instead of a wrapper tool:
+
+```bash
+agent-do +live(scope=desktop,ttl=15m) macos click @g5
+```
+
 ## Why It Exists
 
 Most agents know how to improvise. That is useful until it is not.
@@ -93,6 +99,13 @@ agent-do auth ensure github
 agent-do auth probe github
 agent-do auth advance github
 agent-do auth validate github
+```
+
+When a command needs explicit permission to control the visible local machine:
+
+```bash
+agent-do +live(scope=desktop,ttl=15m) macos click @g5
+agent-do +live(scope=desktop,ttl=15m) screen click --text "Continue"
 ```
 
 When another site uses provider SSO:
@@ -235,6 +248,8 @@ Profiles can also declare mailbox-driven challenges with `--email-code`, `--magi
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
 
 If a site blocks Playwright or needs a browser the remote human can actually see, `agent-do auth ensure <site> --strategy interactive` now opens the real system browser, waits for authenticated browser state to become importable, and then persists the imported session back into encrypted auth storage. If the imported page is still at a live checkpoint like TOTP or consent, auth keeps that imported state and hands it to `probe` and `advance` instead of discarding it.
+
+`+live(...)` is the next trust boundary above that. It is an explicit runtime modifier for visible local-machine control, backed by a shared live-control substrate under `lib/live/`. `+live` is not a registry tool and it does not change headless `browse`; it exists so commands like `macos`, `screen`, and later live-browser auth flows can require a clear approval at the call site while still sharing one lease and policy model under the hood.
 
 When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspects the current page, classifies the checkpoint, checks for a frontmost macOS dialog when available, and returns exact next-step commands instead of leaving the agent to infer what happened.
 

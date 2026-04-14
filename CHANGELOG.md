@@ -7,6 +7,7 @@
 - `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
 - `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.
 - `agent-do resend` for exact Resend domain records, verification state, and public DNS checks without relying on UI text.
+- Internal `lib/live/` runtime substrate for explicit local-machine control approval, leases, and rerun hints behind the new `agent-do +live(...) ...` execution modifier.
 - `lib/creds-helper.sh` as a shared secure-store backend for macOS Keychain, Linux Secret Service, and a Windows DPAPI-backed per-user store.
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.
 - Browser clipboard commands through `agent-do browse clipboard read|copy|paste` for copy-first extraction flows.
@@ -16,6 +17,7 @@
 - `agent-do auth advance` for executing one safe checkpoint step, then returning the updated auth branch state.
 
 ### Changed
+- `agent-do` now recognizes `+live` and `+live(...)` as runtime modifiers before normal tool dispatch, so explicit local-control approval can live at the call site without introducing a wrapper tool in the registry.
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
 - `agent-do auth` now uses provider-aware GitHub and Google login adapters for `site-creds`, with TOTP secrets resolved through `agent-do creds` when those flows require one-time codes.
 - `agent-do auth init --provider github|google` now creates SSO-first site profiles, and `provider-refresh` can reuse upstream provider auth to complete cross-site sign-in.
@@ -34,6 +36,7 @@
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
 - Docs and smoke tests now cover the new credential workflow.
 - `agent-do namecheap dns-add` and `dns-update` now reject suspicious masked values, verify exact Namecheap read-back by default, and can optionally confirm public DNS answers.
+- `agent-do macos` and `agent-do screen` now require explicit `+live(...)` approval, or a matching active live lease, before performing direct visible-machine control actions like click, type, scroll, focus, open, or dialog clicks.
 
 ### Fixed
 - `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.

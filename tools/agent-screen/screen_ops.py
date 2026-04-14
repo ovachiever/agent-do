@@ -14,6 +14,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Tuple
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+LIB_DIR = ROOT_DIR / "lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+from live.errors import LiveApprovalRequiredError
+from live.policy import require_live_control
+
 # macOS frameworks
 try:
     import Quartz
@@ -77,6 +85,7 @@ EXIT_UNKNOWN = 8
 STATE_DIR = Path.home() / ".agent-screen"
 STATE_FILE = STATE_DIR / "state.json"
 FRAMES_DIR = STATE_DIR / "frames"
+LIVE_SCREEN_COMMANDS = {"click", "dblclick", "rightclick", "move", "type", "press", "scroll"}
 
 
 def output(data: dict, exit_code: int = 0):
@@ -835,6 +844,11 @@ def main():
         output({"error": "No command specified", "usage": "agent-screen <command> [args]"}, EXIT_UNKNOWN)
     
     cmd = args[0].lower()
+    if cmd in LIVE_SCREEN_COMMANDS:
+        try:
+            require_live_control(scope="desktop", tool="screen", argv=args, reason=f"screen:{cmd}")
+        except LiveApprovalRequiredError as exc:
+            error(str(exc), EXIT_PERMISSION_DENIED, exc.payload())
     
     # Display commands
     if cmd == "displays":

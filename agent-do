@@ -27,6 +27,11 @@ if [[ -f "$SCRIPT_DIR/lib/creds-helper.sh" ]]; then
     source "$SCRIPT_DIR/lib/creds-helper.sh"
 fi
 
+if [[ -f "$SCRIPT_DIR/lib/live.sh" ]]; then
+    # shellcheck source=lib/live.sh
+    source "$SCRIPT_DIR/lib/live.sh"
+fi
+
 show_help() {
     cat << 'EOF'
 agent-do - Automation CLI
@@ -52,6 +57,7 @@ NATURAL LANGUAGE (for humans - uses LLM routing):
     agent-do -n "post deploy complete to engineering slack"
 
 OPTIONS:
+  +live(...)     Runtime modifier for explicit live local-control approval
   --help, -h     Show this help
   --list, -l     List available tools
   suggest        Recommend likely tools/commands for a task
@@ -77,6 +83,14 @@ EXIT CODES:
 ENVIRONMENT:
   AGENT_DO_HOME      Config/state directory (default: ~/.agent-do)
     ANTHROPIC_API_KEY  Required for natural language mode
+
+RUNTIME MODIFIERS:
+  Prefix a structured command with +live to allow direct control of the
+  visible local desktop, real browser windows, or other live UI surfaces.
+
+  Examples:
+    agent-do +live macos click @g5
+    agent-do +live(scope=browser,app=Arc,ttl=15m) auth ensure cloudflare --strategy live-browser-control
 EOF
 }
 
@@ -201,6 +215,31 @@ natural_route() {
     
     exit $exit_code
 }
+
+runtime_modifiers=()
+while [[ $# -gt 0 ]]; do
+    if declare -F live_is_modifier >/dev/null 2>&1 && live_is_modifier "$1"; then
+        runtime_modifiers+=("$1")
+        shift
+        continue
+    fi
+    break
+done
+
+if [[ ${#runtime_modifiers[@]} -gt 1 ]]; then
+    echo "Only one runtime modifier is supported per command" >&2
+    exit 1
+fi
+
+if [[ ${#runtime_modifiers[@]} -eq 1 ]]; then
+    if [[ $# -eq 0 ]]; then
+        echo "Runtime modifier ${runtime_modifiers[0]} requires a tool or command" >&2
+        exit 1
+    fi
+    if declare -F live_export_context >/dev/null 2>&1; then
+        live_export_context "${runtime_modifiers[0]}" "$SCRIPT_DIR"
+    fi
+fi
 
 case "${1:-}" in
     --help|-h)
