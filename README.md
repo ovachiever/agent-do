@@ -122,6 +122,12 @@ agent-do auth init cloudflare --domain dash.cloudflare.com --login-url https://d
 agent-do auth ensure cloudflare --strategy interactive --timeout 300
 ```
 
+When the agent itself needs to keep controlling that visible real browser instead of importing back into Playwright:
+
+```bash
+agent-do +live(scope=browser,app=Arc,ttl=15m) auth ensure cloudflare --strategy live-browser-control --timeout 300
+```
+
 When a site emails a verification code or magic link:
 
 ```bash
@@ -248,6 +254,8 @@ Profiles can also declare mailbox-driven challenges with `--email-code`, `--magi
 If a site escalates into a passkey or security-key checkpoint, `agent-do auth ensure` now returns a named `PASSKEY_CHALLENGE_REQUIRED` state instead of flattening that branch into a vague validation failure.
 
 If a site blocks Playwright or needs a browser the remote human can actually see, `agent-do auth ensure <site> --strategy interactive` now opens the real system browser, waits for authenticated browser state to become importable, and then persists the imported session back into encrypted auth storage. If the imported page is still at a live checkpoint like TOTP or consent, auth keeps that imported state and hands it to `probe` and `advance` instead of discarding it.
+
+If the goal is not handoff but continued control of the real browser itself, `agent-do +live(...) auth ensure <site> --strategy live-browser-control` now uses the same auth/checkpoint model on top of explicit local-machine approval. That path keeps the agent in the visible browser and drives the flow through the existing `macos` and `screen` surfaces instead of importing cookies back into Playwright.
 
 `+live(...)` is the next trust boundary above that. It is an explicit runtime modifier for visible local-machine control, backed by a shared live-control substrate under `lib/live/`. `+live` is not a registry tool and it does not change headless `browse`; it exists so commands like `macos`, `screen`, and later live-browser auth flows can require a clear approval at the call site while still sharing one lease and policy model under the hood.
 

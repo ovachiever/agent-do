@@ -18,6 +18,7 @@
 
 ### Changed
 - `agent-do` now recognizes `+live` and `+live(...)` as runtime modifiers before normal tool dispatch, so explicit local-control approval can live at the call site without introducing a wrapper tool in the registry.
+- `agent-do auth` now supports `--strategy live-browser-control`, which keeps the agent in the visible real browser under `+live(...)` approval and runs the same checkpoint model on top of the existing `macos` and `screen` control surfaces instead of importing back into Playwright.
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
 - `agent-do auth` now uses provider-aware GitHub and Google login adapters for `site-creds`, with TOTP secrets resolved through `agent-do creds` when those flows require one-time codes.
 - `agent-do auth init --provider github|google` now creates SSO-first site profiles, and `provider-refresh` can reuse upstream provider auth to complete cross-site sign-in.

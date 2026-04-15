@@ -28,6 +28,14 @@ except ModuleNotFoundError:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LIB_DIR = ROOT / "lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+from live.errors import LiveApprovalRequiredError
+from live.parser import build_live_modifier
+from live.policy import require_live_control
+
 AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
 AUTH_ROOT = AGENT_DO_HOME / "auth"
 PROFILES_DIR = AUTH_ROOT / "profiles"
@@ -447,7 +455,8 @@ def state_from_profile(site: str) -> str:
     meta = get_session_meta(site)
     if meta and meta.get("state") == "checkpoint":
         return "checkpoint"
-    if not meta or (not session_bundle_exists(site) and not meta.get("browse_session")):
+    has_live_session = bool(meta and meta.get("storage") == "live-browser" and meta.get("live_browser_app"))
+    if not meta or (not session_bundle_exists(site) and not meta.get("browse_session") and not has_live_session):
         return "configured"
     if meta.get("state") == "authenticated" and meta.get("last_validation_ok") is True:
         return "authenticated"
@@ -484,6 +493,11 @@ def sms_cmd() -> list[str]:
 def macos_cmd() -> list[str]:
     default = [str(ROOT / "tools" / "agent-macos" / "agent-macos")]
     return tool_cmd_from_env("AGENT_DO_AUTH_MACOS_CMD", default)
+
+
+def screen_cmd() -> list[str]:
+    default = [str(ROOT / "tools" / "agent-screen" / "agent-screen")]
+    return tool_cmd_from_env("AGENT_DO_AUTH_SCREEN_CMD", default)
 
 
 def open_cmd() -> list[str]:
@@ -577,6 +591,17 @@ def run_macos_json(*args: str) -> dict[str, Any]:
         raise RuntimeError(detail)
     payload = json.loads(proc.stdout or "{}")
     if payload.get("error"):
+        raise RuntimeError(str(payload.get("error")))
+    return payload
+
+
+def run_screen_json(*args: str) -> dict[str, Any]:
+    proc = run_tool([*screen_cmd(), *args])
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"screen failed: {' '.join(args)}"
+        raise RuntimeError(detail)
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("ok") is False and payload.get("error"):
         raise RuntimeError(str(payload.get("error")))
     return payload
 
@@ -1102,6 +1127,305 @@ def safe_macos_dialog_probe() -> dict[str, Any] | None:
         "frontmost": frontmost,
         "type": None,
         "message": dialog.get("message", "No dialog detected"),
+    }
+
+
+def live_browser_details(profile: dict[str, Any], *, browser_override: str | None = None) -> dict[str, str | None]:
+    import_cfg = profile.get("browser_import") or {}
+    browser = str(browser_override or import_cfg.get("browser") or "arc").strip().lower() or "arc"
+    app = browser_app_name(browser) or browser_override or browser
+    return {"browser": browser, "app": app}
+
+
+def live_modifier_hint(site: str, profile: dict[str, Any], *, browser_override: str | None = None) -> str:
+    details = live_browser_details(profile, browser_override=browser_override)
+    return build_live_modifier(scope="browser", app=details.get("app"), reason=f"auth:{site}")
+
+
+def live_command(site: str, profile: dict[str, Any], *parts: str, browser_override: str | None = None) -> str:
+    modifier = live_modifier_hint(site, profile, browser_override=browser_override)
+    return " ".join(["agent-do", shlex.quote(modifier), "auth", *[shlex.quote(part) for part in parts]])
+
+
+def ensure_live_browser_approval(site: str, profile: dict[str, Any], *, browser_override: str | None = None) -> dict[str, Any]:
+    details = live_browser_details(profile, browser_override=browser_override)
+    return require_live_control(
+        scope="browser",
+        tool="auth",
+        argv=["ensure", site, "--strategy", "live-browser-control"],
+        app=details.get("app"),
+        reason=f"auth:{site}",
+    )
+
+
+def live_focus_browser(app_name: str | None) -> None:
+    if not app_name:
+        return
+    try:
+        run_macos_json("focus", app_name)
+    except Exception:
+        pass
+
+
+def live_screen_snapshot() -> dict[str, Any]:
+    return run_screen_json("snapshot")
+
+
+def live_screen_elements() -> list[dict[str, Any]]:
+    payload = live_screen_snapshot()
+    return [item for item in (payload.get("elements") or []) if isinstance(item, dict)]
+
+
+def live_screen_text() -> str:
+    texts: list[str] = []
+    for item in live_screen_elements():
+        text = str(item.get("text") or "").strip()
+        if text:
+            texts.append(text)
+    return "\n".join(texts)
+
+
+def live_click_text(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    try:
+        run_screen_json("click", "--text", value)
+        return True
+    except Exception:
+        return False
+
+
+def extract_text_selectors(selectors: list[str]) -> list[str]:
+    visible: list[str] = []
+    for selector in selectors:
+        text = str(selector or "").strip()
+        if not text:
+            continue
+        if text.startswith("text="):
+            visible.append(text.split("=", 1)[1].strip().strip('"').strip("'"))
+    return dedupe_preserve_order(visible)
+
+
+def live_click_first_text(options: list[str]) -> str | None:
+    for option in dedupe_preserve_order([str(item or "").strip() for item in options if str(item or "").strip()]):
+        if live_click_text(option):
+            return option
+    return None
+
+
+def live_type_text(value: str) -> None:
+    run_screen_json("type", value)
+
+
+def live_press_key(key: str) -> None:
+    run_screen_json("press", key)
+
+
+def live_wait_brief(seconds: float = 1.0) -> None:
+    time.sleep(max(seconds, 0.1))
+
+
+def live_open_browser_url(url: str, *, browser: str | None = None, app_name: str | None = None) -> None:
+    open_system_browser(url, browser=browser)
+    live_wait_brief(1.0)
+    live_focus_browser(app_name)
+
+
+def live_login_form_result(text: str) -> dict[str, Any]:
+    lowered = text.lower()
+    markers = [
+        "sign in",
+        "log in",
+        "login",
+        "email or phone",
+        "username or email",
+        "password",
+    ]
+    matched = [marker for marker in markers if marker in lowered]
+    return {"found": bool(matched), "markers": matched}
+
+
+def live_captcha_result(text: str) -> dict[str, Any]:
+    lowered = text.lower()
+    markers = [marker for marker in ["captcha", "turnstile", "verify you are human", "i am human"] if marker in lowered]
+    return {"hasCaptcha": bool(markers), "types": markers}
+
+
+def live_detect_checkpoints(profile: dict[str, Any], text: str) -> list[dict[str, Any]]:
+    lowered = text.lower()
+    checkpoints: list[dict[str, Any]] = []
+
+    captcha = live_captcha_result(text)
+    if captcha.get("hasCaptcha"):
+        checkpoints.append(
+            {
+                "type": "captcha",
+                "action_required": "CAPTCHA_REQUIRED",
+                "source": "live-browser",
+                "details": {"types": captcha.get("types", [])},
+            }
+        )
+
+    email_challenge = email_challenge_config(profile)
+    if email_challenge and any(marker in lowered for marker in ["check your email", "we emailed you", "verification code", "magic link"]):
+        checkpoints.append(
+            {
+                "type": "email-challenge",
+                "action_required": "EMAIL_CHALLENGE_PENDING",
+                "source": "email",
+                "details": {"command": build_email_probe_command(email_challenge)},
+            }
+        )
+
+    phone_challenge = phone_challenge_config(profile)
+    if phone_challenge and any(marker in lowered for marker in ["check your phone", "we texted you", "texted you a code", "sms"]):
+        checkpoints.append(
+            {
+                "type": "sms-challenge",
+                "action_required": "PHONE_CHALLENGE_PENDING",
+                "source": "sms",
+                "details": {"command": build_phone_probe_command(phone_challenge)},
+            }
+        )
+
+    device_markers = match_text_markers(
+        text,
+        [
+            "check your phone",
+            "approve sign in",
+            "approve the sign in",
+            "approve this sign-in",
+            "tap yes on your phone",
+            "notification sent to your phone",
+            "check your device",
+        ],
+    )
+    if device_markers:
+        details = {"markers": device_markers}
+        alternate = extract_text_selectors(alternate_method_selectors(profile))
+        if alternate:
+            details["alternate_texts"] = alternate
+        checkpoints.append(
+            {
+                "type": "device-approval",
+                "action_required": "DEVICE_APPROVAL_REQUIRED",
+                "source": "live-browser",
+                "details": details,
+            }
+        )
+
+    totp_markers = match_text_markers(
+        text,
+        [
+            "two-factor",
+            "two factor",
+            "authenticator",
+            "one-time code",
+            "verification code",
+            "enter the code from your app",
+        ],
+    )
+    if totp_markers:
+        checkpoints.append(
+            {
+                "type": "totp",
+                "action_required": "TOTP_REQUIRED",
+                "source": "live-browser",
+                "details": {"markers": totp_markers},
+            }
+        )
+
+    backup_markers = match_text_markers(text, backup_code_markers(profile))
+    if backup_markers:
+        checkpoints.append(
+            {
+                "type": "backup-code",
+                "action_required": "BACKUP_CODE_REQUIRED",
+                "source": "live-browser",
+                "details": {"markers": backup_markers, "secret_name": backup_code_secret_name(profile)},
+            }
+        )
+
+    passkey_markers = match_text_markers(
+        text,
+        ["use a passkey", "sign in with a passkey", "security key", "touch your security key", "passkey"],
+    )
+    if passkey_markers:
+        details = {"markers": passkey_markers}
+        alternate = extract_text_selectors(alternate_method_selectors(profile))
+        if alternate:
+            details["alternate_texts"] = alternate
+        checkpoints.append(
+            {
+                "type": "passkey",
+                "action_required": "PASSKEY_CHALLENGE_REQUIRED",
+                "source": "live-browser",
+                "details": details,
+            }
+        )
+
+    account_markers = match_text_markers(text, ["choose an account", "select an account", "pick an account", "continue as"])
+    if account_markers:
+        checkpoints.append(
+            {
+                "type": "account-chooser",
+                "action_required": "ACCOUNT_CHOOSER_REQUIRED",
+                "source": "live-browser",
+                "details": {"markers": account_markers},
+            }
+        )
+
+    consent_markers = match_text_markers(text, ["authorize", "grant access", "allow access", "approve access", "continue"])
+    if any(marker in lowered for marker in ["authorize", "grant access", "allow access", "approve access"]):
+        checkpoints.append(
+            {
+                "type": "consent",
+                "action_required": "CONSENT_REQUIRED",
+                "source": "live-browser",
+                "details": {"markers": consent_markers},
+            }
+        )
+
+    seen: set[str] = set()
+    output: list[dict[str, Any]] = []
+    for checkpoint in sort_checkpoints(checkpoints):
+        key = f"{checkpoint.get('action_required')}:{checkpoint.get('type')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(checkpoint)
+    return output
+
+
+def live_apply_validation(site: str, profile: dict[str, Any], *, browser_override: str | None = None) -> dict[str, Any]:
+    text = live_screen_text()
+    lowered = text.lower()
+    validation = profile.get("validation") or {}
+    signed_out_markers = [marker for marker in validation.get("signed_out_markers", []) if marker]
+    signed_in_markers = [marker for marker in validation.get("signed_in_markers", []) if marker]
+    matched_out = [marker for marker in signed_out_markers if marker.lower() in lowered]
+    matched_in = [marker for marker in signed_in_markers if marker.lower() in lowered]
+    login_form = live_login_form_result(text)
+    checkpoints = live_detect_checkpoints(profile, text)
+    browser_details = live_browser_details(profile, browser_override=browser_override)
+    ok = not matched_out and not login_form.get("found") and not checkpoints and (
+        bool(matched_in) or not signed_in_markers
+    )
+    return {
+        "ok": ok,
+        "site": site,
+        "state": "authenticated" if ok else "stale",
+        "url": None,
+        "window": browser_details.get("app"),
+        "login_form": login_form,
+        "checkpoints": checkpoints,
+        "matched": {
+            "signed_in_markers": matched_in,
+            "signed_out_markers": matched_out,
+            "url_patterns": [],
+        },
+        "text_excerpt": text[:2000],
     }
 
 
@@ -1751,6 +2075,26 @@ def resolve_profile_username(profile: dict[str, Any]) -> str | None:
     if not username_key:
         return None
     return resolve_secret(str(username_key))
+
+
+def credentials_profile_for_live_login(profile: dict[str, Any]) -> dict[str, Any]:
+    source_profile = provider_source_profile(profile)
+    return source_profile or profile
+
+
+def resolve_live_login_credentials(profile: dict[str, Any]) -> tuple[str | None, str | None, list[str]]:
+    credentials_profile = credentials_profile_for_live_login(profile)
+    creds = ((credentials_profile.get("credentials") or {}).get("site") or {})
+    username_key = creds.get("username")
+    password_key = creds.get("password")
+    username = resolve_secret(str(username_key) if username_key else None)
+    password = resolve_secret(str(password_key) if password_key else None)
+    missing: list[str] = []
+    if username_key and not username:
+        missing.append(str(username_key))
+    if password_key and not password:
+        missing.append(str(password_key))
+    return username, password, missing
 
 
 def provider_checkpoint_state(profile: dict[str, Any], provider_name: str, provider_username: str | None) -> dict[str, str | None]:
@@ -2410,6 +2754,569 @@ def browser_import(site: str, profile: dict[str, Any], *, name: str = "default")
     return {"browse_session": alias, "last_strategy": "browser-import", "source_browser": browser}
 
 
+def persist_live_session_meta(
+    site: str,
+    profile: dict[str, Any],
+    *,
+    name: str = "default",
+    strategy: str,
+    browser_override: str | None = None,
+    state: str,
+    last_validation_ok: bool,
+    last_action_required: str | None = None,
+    last_error: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    details = live_browser_details(profile, browser_override=browser_override)
+    payload = {
+        "storage": "live-browser",
+        "execution_backend": "live-browser",
+        "browse_session": None,
+        "bundle_path": None,
+        "live_browser": details.get("browser"),
+        "live_browser_app": details.get("app"),
+        "last_strategy": strategy,
+        "validated_at": now_iso(),
+        "last_validation_ok": last_validation_ok,
+        "state": state,
+        "last_action_required": last_action_required,
+        "last_error": last_error,
+    }
+    if extra:
+        payload.update(extra)
+    return write_session_meta(site, name, payload)
+
+
+def session_uses_live_browser(meta: dict[str, Any] | None) -> bool:
+    return bool(meta and (meta.get("storage") == "live-browser" or meta.get("execution_backend") == "live-browser"))
+
+
+def live_open_link(link: str, profile: dict[str, Any], *, browser_override: str | None = None) -> None:
+    details = live_browser_details(profile, browser_override=browser_override)
+    live_open_browser_url(link, browser=details.get("browser"), app_name=details.get("app"))
+
+
+def live_complete_totp(profile: dict[str, Any]) -> list[str]:
+    totp_key = totp_config(profile).get("secret")
+    totp_secret = resolve_secret(str(totp_key) if totp_key else None)
+    if not totp_secret:
+        return missing_totp_keys(profile)
+    field_markers = [
+        "verification code",
+        "one-time code",
+        "authenticator",
+        "authentication code",
+        "6-digit",
+        "8-digit",
+    ]
+    live_click_first_text(field_markers)
+    code = generate_totp_code(totp_secret)
+    live_type_text(code)
+    live_press_key("enter")
+    live_wait_brief(1.0)
+    return []
+
+
+def live_complete_backup_code(profile: dict[str, Any]) -> tuple[list[str], tuple[str, str] | None]:
+    secret_name = backup_code_secret_name(profile)
+    if not secret_name:
+        return missing_backup_code_keys(profile), None
+    raw_value, codes = available_backup_codes(secret_name)
+    if raw_value is None:
+        return missing_backup_code_keys(profile), None
+    if not codes:
+        raise ActionRequiredError("BACKUP_CODES_EXHAUSTED", f"No unused backup codes remain in {secret_name}")
+    live_click_first_text(["backup code", "recovery code"])
+    code = codes[0]
+    live_type_text(code)
+    live_press_key("enter")
+    live_wait_brief(1.0)
+    mark_backup_code_used(secret_name, code)
+    return [], (secret_name, code)
+
+
+def live_complete_phone_challenge(profile: dict[str, Any], *, browser_override: str | None = None, baseline_ids: list[str] | None = None) -> list[str]:
+    challenge = phone_challenge_config(profile)
+    if not challenge:
+        return []
+    challenge_type = str(challenge.get("type") or "code").strip().lower()
+    timeout_seconds = int(challenge.get("timeout_seconds") or 120)
+    poll_seconds = int(challenge.get("poll_interval_seconds") or 5)
+    contact_filter = str(challenge.get("contact_contains") or challenge.get("from_contains") or "").strip()
+    contains_filter = str(challenge.get("contains") or "").strip()
+    unread_only = bool(challenge.get("unread", True))
+
+    common_args: list[str] = []
+    if contact_filter:
+        common_args.extend(["--from", contact_filter])
+    if contains_filter:
+        common_args.extend(["--contains", contains_filter])
+    if unread_only:
+        common_args.append("--unread")
+    for message_id in baseline_ids or []:
+        common_args.extend(["--exclude-id", message_id])
+    common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
+
+    try:
+        if challenge_type == "link":
+            link_args = ["link", *common_args]
+            domain = str(challenge.get("domain") or "").strip()
+            if domain:
+                link_args.extend(["--domain", domain])
+            payload = run_sms_json(*link_args)
+            link = str(payload.get("link") or "")
+            if not link:
+                raise RuntimeError("No sign-in link returned from SMS lookup")
+            live_open_link(link, profile, browser_override=browser_override)
+            return []
+
+        code_args = ["code", *common_args]
+        code_regex = str(challenge.get("code_regex") or "").strip()
+        code_length = challenge.get("code_length")
+        if code_regex:
+            code_args.extend(["--regex", code_regex])
+        elif code_length:
+            code_args.extend(["--length", str(code_length)])
+        payload = run_sms_json(*code_args)
+        code = str(payload.get("code") or "")
+        if not code:
+            raise RuntimeError("No verification code returned from SMS lookup")
+        live_click_first_text(["verification code", "one-time code", "code"])
+        live_type_text(code)
+        live_press_key("enter")
+        live_wait_brief(1.0)
+        return []
+    except ActionRequiredError:
+        raise
+    except RuntimeError as exc:
+        raise ActionRequiredError("PHONE_CHALLENGE_TIMEOUT", str(exc))
+
+
+def live_complete_email_challenge(profile: dict[str, Any], *, browser_override: str | None = None, baseline_ids: list[str] | None = None) -> list[str]:
+    challenge = email_challenge_config(profile)
+    if not challenge:
+        return []
+    challenge_type = str(challenge.get("type") or "code").strip().lower()
+    timeout_seconds = int(challenge.get("timeout_seconds") or 120)
+    poll_seconds = int(challenge.get("poll_interval_seconds") or 5)
+    from_filter = str(challenge.get("from_contains") or "").strip()
+    subject_filter = str(challenge.get("subject_contains") or "").strip()
+    contains_filter = str(challenge.get("contains") or "").strip()
+    unread_only = bool(challenge.get("unread", True))
+
+    common_args: list[str] = []
+    if from_filter:
+        common_args.extend(["--from", from_filter])
+    if subject_filter:
+        common_args.extend(["--subject", subject_filter])
+    if contains_filter:
+        common_args.extend(["--contains", contains_filter])
+    if unread_only:
+        common_args.append("--unread")
+    for message_id in baseline_ids or []:
+        common_args.extend(["--exclude-id", message_id])
+    common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
+
+    try:
+        if challenge_type == "link":
+            link_args = ["link", *common_args]
+            domain = str(challenge.get("domain") or "").strip()
+            if domain:
+                link_args.extend(["--domain", domain])
+            payload = run_email_json(*link_args)
+            link = str(payload.get("link") or "")
+            if not link:
+                raise RuntimeError("No magic link returned from email lookup")
+            live_open_link(link, profile, browser_override=browser_override)
+            return []
+
+        code_args = ["code", *common_args]
+        code_regex = str(challenge.get("code_regex") or "").strip()
+        code_length = challenge.get("code_length")
+        if code_regex:
+            code_args.extend(["--regex", code_regex])
+        elif code_length:
+            code_args.extend(["--length", str(code_length)])
+        payload = run_email_json(*code_args)
+        code = str(payload.get("code") or "")
+        if not code:
+            raise RuntimeError("No verification code returned from email lookup")
+        live_click_first_text(["verification code", "one-time code", "code"])
+        live_type_text(code)
+        live_press_key("enter")
+        live_wait_brief(1.0)
+        return []
+    except ActionRequiredError:
+        raise
+    except RuntimeError as exc:
+        raise ActionRequiredError("EMAIL_CHALLENGE_TIMEOUT", str(exc))
+
+
+def live_click_account_choice(profile: dict[str, Any]) -> str | None:
+    identity = provider_identity_for_checkpoint(profile)
+    values = identity_values(identity)
+    options = [values.get("username"), values.get("local_part")]
+    return live_click_first_text([value for value in options if value])
+
+
+def live_click_consent(profile: dict[str, Any]) -> str | None:
+    provider_name = provider_type(profile)
+    refresh_cfg = provider_refresh_config(profile)
+    defaults = provider_default_refresh(provider_name)
+    options = extract_text_selectors(list(refresh_cfg.get("consent_selectors") or defaults.get("consent_selectors", [])))
+    options.extend(["Authorize", "Allow", "Continue", "Approve"])
+    return live_click_first_text(options)
+
+
+def live_click_alternate_method(profile: dict[str, Any]) -> str | None:
+    options = extract_text_selectors(alternate_method_selectors(profile))
+    return live_click_first_text(options)
+
+
+def live_click_provider_entry(profile: dict[str, Any]) -> str | None:
+    provider_name = provider_type(profile)
+    refresh_cfg = provider_refresh_config(profile)
+    defaults = provider_default_refresh(provider_name)
+    options = extract_text_selectors(list(refresh_cfg.get("sso_selectors") or defaults.get("sso_selectors", [])))
+    display = provider_display_name(provider_name)
+    options.extend([f"Continue with {display}", f"Sign in with {display}", display])
+    return live_click_first_text(options)
+
+
+def live_login_with_github(profile: dict[str, Any], username: str, password: str) -> None:
+    live_click_first_text(["Username or email address", "Email address", "Email", "Username"])
+    live_type_text(username)
+    live_press_key("tab")
+    live_type_text(password)
+    live_press_key("enter")
+    live_wait_brief(1.0)
+
+
+def live_login_with_google(profile: dict[str, Any], username: str, password: str, text: str) -> None:
+    lowered = text.lower()
+    if "email or phone" in lowered or "choose an account" in lowered:
+        live_click_first_text(["Email or phone", "Email"])
+        live_type_text(username)
+        live_press_key("enter")
+        live_wait_brief(1.0)
+        return
+    if "password" in lowered or "enter your password" in lowered:
+        live_click_first_text(["Enter your password", "Password"])
+        live_type_text(password)
+        live_press_key("enter")
+        live_wait_brief(1.0)
+        return
+
+
+def live_login_with_generic(profile: dict[str, Any], username: str, password: str) -> None:
+    live_click_first_text(["Email", "Username", "Email or phone", "Login", "Sign in"])
+    live_type_text(username)
+    live_press_key("tab")
+    live_type_text(password)
+    live_press_key("enter")
+    live_wait_brief(1.0)
+
+
+def live_probe_state(
+    site: str,
+    profile: dict[str, Any],
+    *,
+    name: str = "default",
+    browser_override: str | None = None,
+) -> dict[str, Any]:
+    details = live_browser_details(profile, browser_override=browser_override)
+    live_focus_browser(details.get("app"))
+    text = live_screen_text()
+    validation = live_apply_validation(site, profile, browser_override=browser_override)
+    checkpoints = validation.get("checkpoints") or []
+    login_form = validation.get("login_form") or live_login_form_result(text)
+    captcha = live_captcha_result(text)
+    meta = get_session_meta(site, name) or {}
+
+    state = "unknown"
+    if validation.get("ok"):
+        state = "authenticated"
+    elif checkpoints:
+        state = "checkpoint"
+    elif login_form.get("found"):
+        state = "signed-out"
+    elif text.strip():
+        state = "in-flight"
+
+    recommended: list[str] = []
+    guidance: list[str] = []
+    if validation.get("ok"):
+        guidance.append("Live browser text satisfies the profile validation markers.")
+    elif checkpoints:
+        recommended.append(live_command(site, profile, "advance", site, browser_override=browser_override))
+        recommended.append(live_command(site, profile, "probe", site, browser_override=browser_override))
+    elif login_form.get("found"):
+        recommended.append(live_command(site, profile, "ensure", site, "--strategy", "live-browser-control", browser_override=browser_override))
+        guidance.append("A live login form is visible in the system browser.")
+
+    recommended = dedupe_preserve_order(recommended)
+    guidance = dedupe_preserve_order(guidance)
+    return {
+        "site": site,
+        "mode": "live-browser",
+        "state": state,
+        "url": None,
+        "window": details.get("app"),
+        "validation": validation,
+        "login_form": login_form,
+        "captcha": captcha,
+        "checkpoints": checkpoints,
+        "desktop_dialog": safe_macos_dialog_probe(),
+        "recommended": recommended,
+        "guidance": guidance,
+        "session": {"name": name, "meta": meta},
+    }
+
+
+def live_advance_checkpoint(
+    site: str,
+    profile: dict[str, Any],
+    *,
+    name: str = "default",
+    action_required: str,
+    browser_override: str | None = None,
+    timeout_seconds: int = 60,
+    interval_seconds: int = 5,
+) -> dict[str, Any]:
+    meta = get_session_meta(site, name) or {}
+    action_taken: dict[str, Any] = {"action_required": action_required}
+
+    if action_required == "ACCOUNT_CHOOSER_REQUIRED":
+        clicked = live_click_account_choice(profile)
+        if not clicked:
+            raise ActionRequiredError(action_required, "Account chooser is visible but no matching account text was clickable")
+        live_wait_brief(1.0)
+        action_taken["text"] = clicked
+
+    elif action_required == "CONSENT_REQUIRED":
+        clicked = live_click_consent(profile)
+        if not clicked:
+            raise ActionRequiredError(action_required, "Consent screen is visible but no consent button text was clickable")
+        live_wait_brief(1.0)
+        action_taken["text"] = clicked
+
+    elif action_required == "EMAIL_CHALLENGE_PENDING":
+        baseline_ids = normalize_baseline_ids(meta.get("email_baseline_ids"))
+        live_complete_email_challenge(profile, browser_override=browser_override, baseline_ids=baseline_ids)
+        action_taken["baseline_count"] = len(baseline_ids)
+
+    elif action_required == "PHONE_CHALLENGE_PENDING":
+        baseline_ids = normalize_baseline_ids(meta.get("phone_baseline_ids"))
+        live_complete_phone_challenge(profile, browser_override=browser_override, baseline_ids=baseline_ids)
+        action_taken["baseline_count"] = len(baseline_ids)
+
+    elif action_required == "TOTP_REQUIRED":
+        missing = live_complete_totp(profile)
+        if missing:
+            raise ActionRequiredError("MISSING_CREDENTIALS", "TOTP checkpoint is visible but the configured secret is missing", missing=missing)
+        action_taken["totp"] = True
+
+    elif action_required == "BACKUP_CODE_REQUIRED":
+        missing, used = live_complete_backup_code(profile)
+        if missing:
+            raise ActionRequiredError("MISSING_CREDENTIALS", "Backup-code checkpoint is visible but no backup codes are configured", missing=missing)
+        if used:
+            action_taken["backup_code_secret"] = used[0]
+
+    elif action_required == "PASSKEY_CHALLENGE_REQUIRED":
+        clicked = live_click_alternate_method(profile)
+        if clicked:
+            action_taken["alternate_text"] = clicked
+        else:
+            dialog = safe_macos_dialog_probe()
+            if not dialog or not dialog.get("type"):
+                raise ActionRequiredError(action_required, "Passkey checkpoint is active but no alternate method or actionable macOS dialog is available")
+            run_macos_json("dialog", "click", "--default")
+            action_taken["dialog"] = dialog
+        live_wait_brief(1.0)
+
+    elif action_required == "DEVICE_APPROVAL_REQUIRED":
+        clicked = live_click_alternate_method(profile)
+        if clicked:
+            action_taken["alternate_text"] = clicked
+            live_wait_brief(1.0)
+        else:
+            deadline = time.monotonic() + max(timeout_seconds, 1)
+            while time.monotonic() < deadline:
+                validation = live_apply_validation(site, profile, browser_override=browser_override)
+                if validation.get("ok"):
+                    action_taken["validation"] = validation
+                    return action_taken
+                time.sleep(max(interval_seconds, 1))
+            raise ActionRequiredError(action_required, f"Timed out waiting {timeout_seconds}s for device approval")
+
+    elif action_required == "CAPTCHA_REQUIRED":
+        raise ActionRequiredError(action_required, "CAPTCHA is visible and cannot be advanced safely in live-browser control")
+
+    else:
+        raise ActionRequiredError(action_required or "UNSUPPORTED_CHECKPOINT", "No safe live-browser action exists for this checkpoint")
+
+    return action_taken
+
+
+def live_browser_control_login(
+    site: str,
+    profile: dict[str, Any],
+    *,
+    name: str = "default",
+    timeout_seconds: int = 180,
+    interval_seconds: int = 5,
+    browser_override: str | None = None,
+) -> dict[str, Any]:
+    login_url = str(profile.get("login_url") or "").strip()
+    if not login_url:
+        raise RuntimeError("Live browser control requires a login URL")
+
+    details = live_browser_details(profile, browser_override=browser_override)
+    open_browser = False
+    try:
+        ensure_live_browser_approval(site, profile, browser_override=browser_override)
+    except LiveApprovalRequiredError as exc:
+        return {
+            "site": site,
+            "ok": False,
+            "state": "action-required",
+            "action_required": "LIVE_APPROVAL_REQUIRED",
+            "message": str(exc),
+            "recommended": [exc.rerun],
+        }
+
+    capture_challenge_baselines(site, name, profile)
+    live_open_browser_url(login_url, browser=details.get("browser"), app_name=details.get("app"))
+    open_browser = True
+    if provider_type(profile) in {"github", "google"} and site_slug(site) != provider_type(profile):
+        live_click_provider_entry(profile)
+        live_wait_brief(1.0)
+
+    username, password, missing = resolve_live_login_credentials(profile)
+    provider_name = provider_type(profile)
+    deadline = time.monotonic() + max(timeout_seconds, 1)
+    last_probe: dict[str, Any] | None = None
+
+    while time.monotonic() < deadline:
+        probe = live_probe_state(site, profile, name=name, browser_override=browser_override)
+        last_probe = probe
+        validation = probe.get("validation") or {}
+        if validation.get("ok"):
+            meta = persist_live_session_meta(
+                site,
+                profile,
+                name=name,
+                strategy="live-browser-control",
+                browser_override=browser_override,
+                state="authenticated",
+                last_validation_ok=True,
+                extra={"live_login_url": login_url, "opened": open_browser},
+            )
+            return {
+                "site": site,
+                "ok": True,
+                "strategy_used": "live-browser-control",
+                "validated": True,
+                "opened": open_browser,
+                "window": details.get("app"),
+                "session": {"name": name, "storage": meta.get("storage"), "live_browser_app": meta.get("live_browser_app")},
+            }
+
+        checkpoint = checkpoint_from_probe(probe)
+        if checkpoint is not None:
+            try:
+                action_taken = live_advance_checkpoint(
+                    site,
+                    profile,
+                    name=name,
+                    action_required=str(checkpoint.get("action_required") or ""),
+                    browser_override=browser_override,
+                    timeout_seconds=interval_seconds,
+                    interval_seconds=max(1, min(interval_seconds, 2)),
+                )
+            except ActionRequiredError as exc:
+                meta = persist_live_session_meta(
+                    site,
+                    profile,
+                    name=name,
+                    strategy="live-browser-control",
+                    browser_override=browser_override,
+                    state="checkpoint",
+                    last_validation_ok=False,
+                    last_action_required=exc.action_required,
+                    last_error=str(exc),
+                    extra={"live_login_url": login_url, "opened": open_browser},
+                )
+                return {
+                    "site": site,
+                    "ok": False,
+                    "state": "action-required",
+                    "action_required": exc.action_required,
+                    "missing": exc.missing,
+                    "message": str(exc),
+                    "opened": open_browser,
+                    "window": details.get("app"),
+                    "probe": probe,
+                    "session": {"name": name, "storage": meta.get("storage"), "live_browser_app": meta.get("live_browser_app")},
+                    "recommended": [
+                        live_command(site, profile, "probe", site, browser_override=browser_override),
+                        live_command(site, profile, "advance", site, browser_override=browser_override),
+                    ],
+                }
+            time.sleep(max(interval_seconds, 1))
+            continue
+
+        if missing:
+            return {
+                "site": site,
+                "ok": False,
+                "state": "action-required",
+                "action_required": "MISSING_CREDENTIALS",
+                "missing": missing,
+                "message": "Live browser control requires additional credentials before it can complete the provider login",
+                "opened": open_browser,
+                "window": details.get("app"),
+            }
+
+        text = live_screen_text()
+        if provider_name == "github":
+            live_login_with_github(profile, str(username), str(password))
+        elif provider_name == "google":
+            live_login_with_google(profile, str(username), str(password), text)
+        else:
+            live_login_with_generic(profile, str(username), str(password))
+        time.sleep(max(interval_seconds, 1))
+
+    meta = persist_live_session_meta(
+        site,
+        profile,
+        name=name,
+        strategy="live-browser-control",
+        browser_override=browser_override,
+        state="checkpoint" if last_probe and last_probe.get("checkpoints") else "in-flight",
+        last_validation_ok=False,
+        last_action_required=(checkpoint_from_probe(last_probe or {}) or {}).get("action_required") if last_probe else None,
+        last_error="live_browser_control_timeout",
+        extra={"live_login_url": login_url, "opened": open_browser},
+    )
+    return {
+        "site": site,
+        "ok": False,
+        "state": "action-required",
+        "action_required": "LIVE_BROWSER_TIMEOUT",
+        "message": "Live browser control did not reach an authenticated state before timeout",
+        "opened": open_browser,
+        "window": details.get("app"),
+        "probe": last_probe,
+        "session": {"name": name, "storage": meta.get("storage"), "live_browser_app": meta.get("live_browser_app")},
+        "recommended": [
+            live_command(site, profile, "probe", site, browser_override=browser_override),
+            live_command(site, profile, "advance", site, browser_override=browser_override),
+        ],
+    }
+
+
 def interactive_browser_login(
     site: str,
     profile: dict[str, Any],
@@ -2706,11 +3613,18 @@ def cmd_status(args: argparse.Namespace) -> int:
             "browse_session": meta.get("browse_session"),
             "storage": meta.get("storage"),
             "bundle_path": str(path_info["state"]) if path_info["state"].exists() else None,
+            "live_browser": meta.get("live_browser"),
+            "live_browser_app": meta.get("live_browser_app"),
             "validated_at": meta.get("validated_at"),
             "updated_at": meta.get("updated_at"),
         },
         "next": [] if meta.get("last_validation_ok") else [f"agent-do auth ensure {args.site}", f"agent-do auth probe {args.site}", f"agent-do auth advance {args.site}"],
     }
+    if session_uses_live_browser(meta):
+        payload["next"] = [
+            live_command(args.site, profile, "probe", args.site, browser_override=meta.get("live_browser")),
+            live_command(args.site, profile, "advance", args.site, browser_override=meta.get("live_browser")),
+        ]
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
@@ -2830,7 +3744,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if profile is None:
         return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
     meta = get_session_meta(args.site, args.name)
-    if meta:
+    if meta and not session_uses_live_browser(meta):
         try:
             load_saved_session(args.site, name=args.name)
         except Exception as exc:
@@ -2846,7 +3760,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
             return fail(str(exc), json_mode=args.json, code="session_load_failed")
 
     try:
-        validation = apply_validation(args.site, profile)
+        if session_uses_live_browser(meta):
+            validation = live_apply_validation(args.site, profile, browser_override=meta.get("live_browser"))
+        else:
+            validation = apply_validation(args.site, profile)
     except Exception as exc:
         write_session_meta(
             args.site,
@@ -2884,7 +3801,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
     if profile is None:
         return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
 
-    payload = probe_state(args.site, profile, name=args.name, load_saved=args.load)
+    meta = get_session_meta(args.site, args.name) or {}
+    if session_uses_live_browser(meta):
+        payload = live_probe_state(args.site, profile, name=args.name, browser_override=meta.get("live_browser"))
+    else:
+        payload = probe_state(args.site, profile, name=args.name, load_saved=args.load)
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
@@ -2904,7 +3825,13 @@ def cmd_advance(args: argparse.Namespace) -> int:
     if profile is None:
         return fail(f"Unknown auth profile: {args.site}", json_mode=args.json, code="unknown_site")
 
-    initial = probe_state(args.site, profile, name=args.name, load_saved=args.load)
+    meta = get_session_meta(args.site, args.name) or {}
+    live_mode = session_uses_live_browser(meta)
+    initial = (
+        live_probe_state(args.site, profile, name=args.name, browser_override=meta.get("live_browser"))
+        if live_mode
+        else probe_state(args.site, profile, name=args.name, load_saved=args.load)
+    )
     validation = initial.get("validation") or {}
     if validation.get("ok"):
         payload = {
@@ -2943,8 +3870,35 @@ def cmd_advance(args: argparse.Namespace) -> int:
         "checkpoint_type": checkpoint.get("type"),
     }
 
+    if live_mode:
+        try:
+            ensure_live_browser_approval(args.site, profile, browser_override=meta.get("live_browser"))
+        except LiveApprovalRequiredError as exc:
+            return fail(
+                str(exc),
+                json_mode=args.json,
+                code="action_required",
+                extra={
+                    "site": args.site,
+                    "state": "action-required",
+                    "action_required": "LIVE_APPROVAL_REQUIRED",
+                    "recommended": [exc.rerun],
+                },
+            )
+
     try:
-        if action_required == "ACCOUNT_CHOOSER_REQUIRED":
+        if live_mode:
+            action_taken = live_advance_checkpoint(
+                args.site,
+                profile,
+                name=args.name,
+                action_required=action_required,
+                browser_override=meta.get("live_browser"),
+                timeout_seconds=args.timeout,
+                interval_seconds=args.interval,
+            )
+
+        elif action_required == "ACCOUNT_CHOOSER_REQUIRED":
             identity = provider_identity_for_checkpoint(profile)
             selectors = account_chooser_selectors(profile)
             clicked = click_matching_identity(selectors, identity) if identity else None
@@ -3102,10 +4056,25 @@ def cmd_advance(args: argparse.Namespace) -> int:
             },
         )
 
-    updated = probe_state(args.site, profile, name=args.name, load_saved=False)
+    updated = (
+        live_probe_state(args.site, profile, name=args.name, browser_override=meta.get("live_browser"))
+        if live_mode
+        else probe_state(args.site, profile, name=args.name, load_saved=False)
+    )
     updated_validation = updated.get("validation") or {}
     if updated_validation.get("ok"):
-        meta = save_current_session(args.site, name=args.name, strategy="checkpoint-advance")
+        if live_mode:
+            meta = persist_live_session_meta(
+                args.site,
+                profile,
+                name=args.name,
+                strategy="checkpoint-advance",
+                browser_override=meta.get("live_browser"),
+                state="authenticated",
+                last_validation_ok=True,
+            )
+        else:
+            meta = save_current_session(args.site, name=args.name, strategy="checkpoint-advance")
         payload = {
             "ok": True,
             "advanced": True,
@@ -3114,7 +4083,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
             "state": "authenticated",
             "action_taken": action_taken,
             "after": updated,
-            "session": {"name": args.name, "browse_session": meta.get("browse_session")},
+            "session": {"name": args.name, "browse_session": meta.get("browse_session"), "storage": meta.get("storage")},
         }
         if args.json:
             print(json.dumps(payload, indent=2))
@@ -3187,6 +4156,9 @@ def cmd_instructions(args: argparse.Namespace) -> int:
         if "interactive" in strategies and profile.get("browser_import"):
             guidance.append(
                 f"For anti-bot or human-visible login flows, use agent-do auth ensure {args.site} --strategy interactive --timeout 300."
+            )
+            guidance.append(
+                f"For agent-controlled real-browser flows on this machine, use {live_command(args.site, profile, 'ensure', args.site, '--strategy', 'live-browser-control')}."
             )
         if "provider-refresh" in strategies and provider_type(profile) in {"github", "google"}:
             guidance.append(
@@ -3494,6 +4466,33 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             print(json.dumps(payload, indent=2) if args.json else (f"{args.site}: authenticated via interactive" if payload.get("ok") else payload["message"]))
             return 0 if payload.get("ok") else 1
 
+        elif strategy == "live-browser-control":
+            attempted.append(strategy)
+            try:
+                payload = live_browser_control_login(
+                    args.site,
+                    profile,
+                    name=name,
+                    timeout_seconds=int(args.timeout),
+                    interval_seconds=int(args.interval),
+                    browser_override=args.browser,
+                )
+            except LiveApprovalRequiredError as exc:
+                payload = {
+                    "site": args.site,
+                    "ok": False,
+                    "state": "action-required",
+                    "attempted": attempted,
+                    "action_required": "LIVE_APPROVAL_REQUIRED",
+                    "message": str(exc),
+                    "recommended": [exc.rerun],
+                }
+                print(json.dumps(payload, indent=2) if args.json else payload["message"])
+                return 1
+            payload["attempted"] = attempted
+            print(json.dumps(payload, indent=2) if args.json else (f"{args.site}: authenticated via live-browser-control" if payload.get("ok") else payload["message"]))
+            return 0 if payload.get("ok") else 1
+
     payload = {
         "site": args.site,
         "ok": False,
@@ -3578,7 +4577,7 @@ def build_parser() -> argparse.ArgumentParser:
     ensure_parser = sub.add_parser("ensure", help="Ensure authenticated state using the strategy ladder")
     ensure_parser.add_argument("site")
     ensure_parser.add_argument("--name", default="default")
-    ensure_parser.add_argument("--strategy", choices=["saved-session", "browser-import", "site-creds", "provider-refresh", "interactive"])
+    ensure_parser.add_argument("--strategy", choices=["saved-session", "browser-import", "site-creds", "provider-refresh", "interactive", "live-browser-control"])
     ensure_parser.add_argument("--timeout", type=int, default=180)
     ensure_parser.add_argument("--interval", type=int, default=5)
     ensure_parser.add_argument("--browser")
