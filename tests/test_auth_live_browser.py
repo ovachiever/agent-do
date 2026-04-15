@@ -83,10 +83,10 @@ def main() -> int:
                     print(json.dumps({"granted": True}))
                     raise SystemExit(0)
                 if cmd == "frontmost":
-                    print(json.dumps({"app": "Arc"}))
+                    print(json.dumps({"app": "ChatGPT Atlas"}))
                     raise SystemExit(0)
                 if cmd == "focus":
-                    print(json.dumps({"focused": args[1] if len(args) > 1 else "Arc"}))
+                    print(json.dumps({"focused": args[1] if len(args) > 1 else "ChatGPT Atlas"}))
                     raise SystemExit(0)
                 if cmd == "dialog":
                     print(json.dumps({"type": None, "buttons": []}))
@@ -262,7 +262,7 @@ def main() -> int:
 
         ensure_live = run(
             str(AGENT_DO),
-            "+live(scope=browser,app=Arc,ttl=15m)",
+            "+live(scope=browser,app='ChatGPT Atlas',ttl=15m)",
             "auth",
             "ensure",
             "cloudflare",
@@ -285,7 +285,7 @@ def main() -> int:
         require(status.returncode == 0, f"auth status failed: {status.stderr}")
         status_payload = json.loads(status.stdout)
         require(status_payload["session"]["storage"] == "live-browser", f"expected live-browser storage: {status_payload}")
-        require(status_payload["session"]["live_browser_app"] == "Arc", f"unexpected live browser app: {status_payload}")
+        require(status_payload["session"]["live_browser_app"] == "ChatGPT Atlas", f"unexpected live browser app: {status_payload}")
 
         probe = run(str(AGENT_DO), "auth", "probe", "cloudflare", "--json", cwd=ROOT, env=env)
         require(probe.returncode == 0, f"auth probe failed: {probe.stderr}")

@@ -147,7 +147,7 @@ SESSIONS:
   session export <name> <file>   Export session to portable file
   session import <file> [name]   Import session from file
   session import-browser <name>  Import cookies from a real browser
-    --browser chrome|arc|edge|brave  Browser to import from (default: arc)
+    --browser atlas|chrome|arc|edge|brave  Browser to import from (default: atlas)
     --domain ".google.com"           Filter cookies by domain
   session active                 List active daemon sessions
 
@@ -900,11 +900,11 @@ main() {
                     ;;
                 import-browser)
                     # Extract cookies from a real Chromium browser and create a browse session
-                    # Usage: session import-browser <name> [--browser chrome|arc|edge|brave] [--domain ".google.com"]
+                    # Usage: session import-browser <name> [--browser atlas|chrome|arc|edge|brave] [--domain ".google.com"]
                     local sess_name="${2:-}"
-                    [[ -z "$sess_name" ]] && { echo "Usage: agent-browse session import-browser <name> [--browser chrome|arc|edge|brave] [--domain .example.com]" >&2; exit 1; }
+                    [[ -z "$sess_name" ]] && { echo "Usage: agent-browse session import-browser <name> [--browser atlas|chrome|arc|edge|brave] [--domain .example.com]" >&2; exit 1; }
                     shift 2
-                    local browser_type="arc" domain_filter=""
+                    local browser_type="atlas" domain_filter=""
                     while [[ $# -gt 0 ]]; do
                         case "$1" in
                             --browser) browser_type="$2"; shift 2 ;;
@@ -921,25 +921,30 @@ from datetime import datetime
 
 # Browser configurations
 BROWSERS = {
+    "atlas": {
+        "cookie_file": str(Path.home() / "Library/Application Support/com.openai.atlas/browser-data/host/Default/Cookies"),
+        "keychain_candidates": [
+            ("ChatGPT Atlas Safe Storage", "ChatGPT Atlas"),
+            ("Atlas Safe Storage", "Atlas"),
+            ("OpenAI Atlas Safe Storage", "OpenAI Atlas"),
+            ("com.openai.atlas Safe Storage", "com.openai.atlas"),
+        ],
+    },
     "chrome": {
         "cookie_file": str(Path.home() / "Library/Application Support/Google/Chrome/Default/Cookies"),
-        "keychain_service": "Chrome Safe Storage",
-        "keychain_account": "Chrome",
+        "keychain_candidates": [("Chrome Safe Storage", "Chrome")],
     },
     "arc": {
         "cookie_file": str(Path.home() / "Library/Application Support/Arc/User Data/Default/Cookies"),
-        "keychain_service": "Arc Safe Storage",
-        "keychain_account": "Arc",
+        "keychain_candidates": [("Arc Safe Storage", "Arc")],
     },
     "edge": {
         "cookie_file": str(Path.home() / "Library/Application Support/Microsoft Edge/Default/Cookies"),
-        "keychain_service": "Microsoft Edge Safe Storage",
-        "keychain_account": "Microsoft Edge",
+        "keychain_candidates": [("Microsoft Edge Safe Storage", "Microsoft Edge")],
     },
     "brave": {
         "cookie_file": str(Path.home() / "Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"),
-        "keychain_service": "Brave Safe Storage",
-        "keychain_account": "Brave",
+        "keychain_candidates": [("Brave Safe Storage", "Brave")],
     },
 }
 
@@ -948,7 +953,7 @@ domain_filter = "$domain_filter"
 sess_name = "$sess_name"
 
 if browser_type not in BROWSERS:
-    print(f"Error: Unknown browser '{browser_type}'. Use: chrome, arc, edge, brave", file=sys.stderr)
+    print(f"Error: Unknown browser '{browser_type}'. Use: atlas, chrome, arc, edge, brave", file=sys.stderr)
     sys.exit(1)
 
 config = BROWSERS[browser_type]
@@ -959,16 +964,19 @@ if not os.path.exists(config["cookie_file"]):
 
 # Get decryption key from Keychain
 try:
-    proc = subprocess.Popen(
-        ['/usr/bin/security', '-q', 'find-generic-password', '-w',
-         '-a', config["keychain_account"], '-s', config["keychain_service"]],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    key_password, _ = proc.communicate()
-    if proc.returncode != 0:
+    key_password = None
+    for service, account in config["keychain_candidates"]:
+        proc = subprocess.Popen(
+            ['/usr/bin/security', '-q', 'find-generic-password', '-w', '-a', account, '-s', service],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        candidate, _ = proc.communicate()
+        if proc.returncode == 0 and candidate.strip():
+            key_password = candidate.strip()
+            break
+    if not key_password:
         print(f"Error: Could not get {browser_type} encryption key from Keychain. Allow access when prompted.", file=sys.stderr)
         sys.exit(1)
-    key_password = key_password.strip()
 except Exception as e:
     print(f"Error: Keychain access failed: {e}", file=sys.stderr)
     sys.exit(1)

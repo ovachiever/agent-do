@@ -73,7 +73,7 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
             "totp": {"secret": "GITHUB_TOTP_SECRET"},
             "backup_codes": {"secret": "GITHUB_BACKUP_CODES"},
         },
-        "browser_import": {"browser": "arc", "domains": [".github.com"]},
+        "browser_import": {"browser": "atlas", "domains": [".github.com"]},
         "notes": ["Prefer saved-session reuse before browser import or fresh login."],
     },
     "google": {
@@ -96,7 +96,7 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
             "totp": {"secret": "GOOGLE_TOTP_SECRET"},
             "backup_codes": {"secret": "GOOGLE_BACKUP_CODES"},
         },
-        "browser_import": {"browser": "arc", "domains": [".google.com"]},
+        "browser_import": {"browser": "atlas", "domains": [".google.com"]},
         "notes": ["Fresh Google SSO often requires human approval. Reuse authenticated state first."],
     },
 }
@@ -434,7 +434,7 @@ def default_profile(
                 "password": f"{prefix}_PASSWORD",
             }
         },
-        "browser_import": {"browser": "arc", "domains": [f".{normalized_domain}"]},
+        "browser_import": {"browser": "atlas", "domains": [f".{normalized_domain}"]},
         "notes": ["Tune validation markers for this site after the first successful authenticated run."],
     }
 
@@ -519,6 +519,8 @@ def run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 def browser_app_name(browser: str | None) -> str | None:
     value = (browser or "").strip().lower()
+    if value == "atlas":
+        return "ChatGPT Atlas"
     if value == "arc":
         return "Arc"
     if value == "chrome":
@@ -1132,7 +1134,7 @@ def safe_macos_dialog_probe() -> dict[str, Any] | None:
 
 def live_browser_details(profile: dict[str, Any], *, browser_override: str | None = None) -> dict[str, str | None]:
     import_cfg = profile.get("browser_import") or {}
-    browser = str(browser_override or import_cfg.get("browser") or "arc").strip().lower() or "arc"
+    browser = str(browser_override or import_cfg.get("browser") or "atlas").strip().lower() or "atlas"
     app = browser_app_name(browser) or browser_override or browser
     return {"browser": browser, "app": app}
 
@@ -2743,7 +2745,7 @@ def load_saved_session(site: str, *, name: str = "default") -> dict[str, Any]:
 
 def browser_import(site: str, profile: dict[str, Any], *, name: str = "default") -> dict[str, Any]:
     config = profile.get("browser_import") or {}
-    browser = str(config.get("browser") or "arc")
+    browser = str(config.get("browser") or "atlas")
     domains = config.get("domains") or []
     alias = browse_session_name(site, name)
     args = ["session", "import-browser", alias, "--browser", browser]
