@@ -220,7 +220,7 @@ def main() -> int:
         ensure_ok_payload = json.loads(ensure_ok.stdout)
         require(ensure_ok_payload["ok"] is True, f"unexpected interactive ensure payload: {ensure_ok_payload}")
         require(ensure_ok_payload["strategy_used"] == "interactive", f"unexpected strategy: {ensure_ok_payload}")
-        require(ensure_ok_payload["source_browser"] == "atlas", f"unexpected source browser: {ensure_ok_payload}")
+        require(ensure_ok_payload["source_browser"] == "comet", f"unexpected source browser: {ensure_ok_payload}")
         open_log = json.loads((tmp / "open-log.json").read_text())
         require(open_log["args"][0] == "https://github.com/login", f"unexpected open args: {open_log}")
         require("--browser" in open_log["args"], f"missing browser flag in open args: {open_log}")

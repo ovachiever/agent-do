@@ -27,6 +27,13 @@ def run_bash(script: str) -> subprocess.CompletedProcess[str]:
 
 
 def main() -> int:
+    browse_source = (ROOT / "tools/agent-browse/agent-browse").read_text()
+    require("Library/Application Support/Comet/Default/Cookies" in browse_source, "expected Comet cookie path in agent-browse")
+    require("user-*/Cookies" in browse_source, "expected Atlas user-profile cookie discovery in agent-browse")
+    require("Chromium Safe Storage" in browse_source, "expected Chromium Safe Storage fallback in agent-browse")
+    require('"extractor": "chromium"' in browse_source, "expected Atlas to use the Chromium extractor path")
+    require("default: comet" in browse_source, "expected Comet to remain the default browser import source")
+
     browse_script = f"""
 set -euo pipefail
 source <(sed '$d' "{ROOT / 'tools/agent-browse/agent-browse'}")

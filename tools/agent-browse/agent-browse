@@ -147,7 +147,7 @@ SESSIONS:
   session export <name> <file>   Export session to portable file
   session import <file> [name]   Import session from file
   session import-browser <name>  Import cookies from a real browser
-    --browser atlas|chrome|arc|edge|brave  Browser to import from (default: atlas)
+    --browser comet|atlas|chrome|arc|edge|brave  Browser to import from (default: comet)
     --domain ".google.com"           Filter cookies by domain
   session active                 List active daemon sessions
 
@@ -900,11 +900,11 @@ main() {
                     ;;
                 import-browser)
                     # Extract cookies from a real Chromium browser and create a browse session
-                    # Usage: session import-browser <name> [--browser atlas|chrome|arc|edge|brave] [--domain ".google.com"]
+                    # Usage: session import-browser <name> [--browser comet|atlas|chrome|arc|edge|brave] [--domain ".google.com"]
                     local sess_name="${2:-}"
-                    [[ -z "$sess_name" ]] && { echo "Usage: agent-browse session import-browser <name> [--browser atlas|chrome|arc|edge|brave] [--domain .example.com]" >&2; exit 1; }
+                    [[ -z "$sess_name" ]] && { echo "Usage: agent-browse session import-browser <name> [--browser comet|atlas|chrome|arc|edge|brave] [--domain .example.com]" >&2; exit 1; }
                     shift 2
-                    local browser_type="atlas" domain_filter=""
+                    local browser_type="comet" domain_filter=""
                     while [[ $# -gt 0 ]]; do
                         case "$1" in
                             --browser) browser_type="$2"; shift 2 ;;
@@ -921,9 +921,29 @@ from datetime import datetime
 
 # Browser configurations
 BROWSERS = {
-    "atlas": {
-        "cookie_file": str(Path.home() / "Library/Application Support/com.openai.atlas/browser-data/host/Default/Cookies"),
+    "comet": {
+        "extractor": "chromium",
+        "cookie_file": str(Path.home() / "Library/Application Support/Comet/Default/Cookies"),
         "keychain_candidates": [
+            ("Comet Safe Storage", "Comet"),
+            ("ai.perplexity.comet Safe Storage", "ai.perplexity.comet"),
+        ],
+    },
+    "atlas": {
+        "extractor": "chromium",
+        "cookie_candidates": [
+            *[
+                str(path)
+                for path in sorted(
+                    (Path.home() / "Library/Application Support/com.openai.atlas/browser-data/host").glob("user-*/Cookies"),
+                    key=lambda candidate: candidate.stat().st_mtime,
+                    reverse=True,
+                )
+            ],
+            str(Path.home() / "Library/Application Support/com.openai.atlas/browser-data/host/Default/Cookies"),
+        ],
+        "keychain_candidates": [
+            ("Chromium Safe Storage", "Chromium"),
             ("ChatGPT Atlas Safe Storage", "ChatGPT Atlas"),
             ("Atlas Safe Storage", "Atlas"),
             ("OpenAI Atlas Safe Storage", "OpenAI Atlas"),
@@ -931,18 +951,22 @@ BROWSERS = {
         ],
     },
     "chrome": {
+        "extractor": "chrome",
         "cookie_file": str(Path.home() / "Library/Application Support/Google/Chrome/Default/Cookies"),
         "keychain_candidates": [("Chrome Safe Storage", "Chrome")],
     },
     "arc": {
+        "extractor": "arc",
         "cookie_file": str(Path.home() / "Library/Application Support/Arc/User Data/Default/Cookies"),
         "keychain_candidates": [("Arc Safe Storage", "Arc")],
     },
     "edge": {
+        "extractor": "edge",
         "cookie_file": str(Path.home() / "Library/Application Support/Microsoft Edge/Default/Cookies"),
         "keychain_candidates": [("Microsoft Edge Safe Storage", "Microsoft Edge")],
     },
     "brave": {
+        "extractor": "brave",
         "cookie_file": str(Path.home() / "Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"),
         "keychain_candidates": [("Brave Safe Storage", "Brave")],
     },
@@ -953,49 +977,54 @@ domain_filter = "$domain_filter"
 sess_name = "$sess_name"
 
 if browser_type not in BROWSERS:
-    print(f"Error: Unknown browser '{browser_type}'. Use: atlas, chrome, arc, edge, brave", file=sys.stderr)
+    print(f"Error: Unknown browser '{browser_type}'. Use: comet, atlas, chrome, arc, edge, brave", file=sys.stderr)
     sys.exit(1)
 
 config = BROWSERS[browser_type]
+extractor_name = config.get("extractor") or browser_type
+cookie_candidates = config.get("cookie_candidates") or [config["cookie_file"]]
+cookie_file = next((path for path in cookie_candidates if os.path.exists(path) and os.path.getsize(path) > 0), None)
+if not cookie_file:
+    cookie_file = next((path for path in cookie_candidates if os.path.exists(path)), None)
 
-if not os.path.exists(config["cookie_file"]):
-    print(f"Error: {browser_type} cookie file not found at {config['cookie_file']}", file=sys.stderr)
-    sys.exit(1)
-
-# Get decryption key from Keychain
-try:
-    key_password = None
-    for service, account in config["keychain_candidates"]:
-        proc = subprocess.Popen(
-            ['/usr/bin/security', '-q', 'find-generic-password', '-w', '-a', account, '-s', service],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        candidate, _ = proc.communicate()
-        if proc.returncode == 0 and candidate.strip():
-            key_password = candidate.strip()
-            break
-    if not key_password:
-        print(f"Error: Could not get {browser_type} encryption key from Keychain. Allow access when prompted.", file=sys.stderr)
-        sys.exit(1)
-except Exception as e:
-    print(f"Error: Keychain access failed: {e}", file=sys.stderr)
+if not cookie_file:
+    candidate_msg = ", ".join(cookie_candidates)
+    print(f"Error: {browser_type} cookie file not found. Tried: {candidate_msg}", file=sys.stderr)
     sys.exit(1)
 
 # Try browser_cookie3 first (handles decryption correctly)
 try:
     import browser_cookie3
     original_fn = browser_cookie3._get_osx_keychain_password
+
     def patched_fn(service, user):
-        if service == "Chrome Safe Storage":
-            return key_password
+        for candidate_service, candidate_user in config["keychain_candidates"]:
+            if service == candidate_service and user == candidate_user:
+                return original_fn(candidate_service, candidate_user)
+        if extractor_name == "chromium" and service == "Chromium Safe Storage" and user == "Chromium":
+            for candidate_service, candidate_user in config["keychain_candidates"]:
+                result = original_fn(candidate_service, candidate_user)
+                if result and result != getattr(browser_cookie3, "CHROMIUM_DEFAULT_PASSWORD", b"peanuts"):
+                    return result
         return original_fn(service, user)
+
     browser_cookie3._get_osx_keychain_password = patched_fn
 
-    cj = browser_cookie3.chrome(
+    extractor = getattr(browser_cookie3, extractor_name, None)
+    if extractor is None:
+        raise RuntimeError(f"browser_cookie3 does not support extractor '{extractor_name}'")
+
+    cj = extractor(
         domain_name=domain_filter if domain_filter else None,
-        cookie_file=config["cookie_file"]
+        cookie_file=cookie_file
     )
     raw_cookies = list(cj)
+except ModuleNotFoundError:
+    print(
+        "Error: browser_cookie3 is not installed. Install the Python package 'browser-cookie3' to use session import-browser.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 except Exception as e:
     print(f"Error: Cookie extraction failed: {e}", file=sys.stderr)
     sys.exit(1)
