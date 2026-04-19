@@ -33,6 +33,54 @@ def test_domain_matching() -> None:
     require(not MODULE.origin_matches_domain("https://vercel.com", ".openai.com"), "expected non-match")
 
 
+def test_parse_indexeddb_origin_dirname() -> None:
+    require(
+        MODULE.parse_indexeddb_origin_dirname("https_vercel.com_0.indexeddb.leveldb") == "https://vercel.com",
+        "expected default port suffix to be removed",
+    )
+    require(
+        MODULE.parse_indexeddb_origin_dirname("https_app.example.com_8443.indexeddb.leveldb") == "https://app.example.com:8443",
+        "expected explicit port suffix to be preserved",
+    )
+    require(MODULE.parse_indexeddb_origin_dirname("nonsense") is None, "expected invalid IndexedDB dirname to be ignored")
+
+
+def test_to_playwright_json_handles_plain_values() -> None:
+    value = MODULE.to_playwright_json(
+        {
+            "token": "abc",
+            "count": 2,
+            "flags": [True, False],
+            "nested": {"org": "o_123"},
+            "tupled": ("a", "b"),
+        }
+    )
+    require(
+        value == {
+            "token": "abc",
+            "count": 2,
+            "flags": [True, False],
+            "nested": {"org": "o_123"},
+            "tupled": ["a", "b"],
+        },
+        f"unexpected json conversion: {value}",
+    )
+
+
+def test_merge_origin_state_attaches_indexeddb() -> None:
+    origins = MODULE.merge_origin_state(
+        [{"origin": "https://vercel.com", "localStorage": [{"name": "x", "value": "1"}]}],
+        {"https://vercel.com": [{"name": "vcf-frecency", "version": 1, "stores": []}]},
+    )
+    require(len(origins) == 1, f"unexpected merged origin count: {origins}")
+    require(origins[0]["origin"] == "https://vercel.com", f"unexpected origin payload: {origins[0]}")
+    require(origins[0]["localStorage"] == [{"name": "x", "value": "1"}], f"unexpected localStorage: {origins[0]}")
+    require(
+        origins[0]["indexedDB"] == [{"name": "vcf-frecency", "version": 1, "stores": []}],
+        f"unexpected indexedDB payload: {origins[0]}",
+    )
+
+
 def test_choose_live_values_prefers_latest_non_deleted() -> None:
     records = [
         SimpleNamespace(script_key="token", value="old", leveldb_seq_number=1, is_live=True),
@@ -82,6 +130,9 @@ def test_choose_primary_url_prefers_domain_root_when_available() -> None:
 def main() -> int:
     test_normalize_origin()
     test_domain_matching()
+    test_parse_indexeddb_origin_dirname()
+    test_to_playwright_json_handles_plain_values()
+    test_merge_origin_state_attaches_indexeddb()
     test_choose_live_values_prefers_latest_non_deleted()
     test_choose_live_values_for_session_records()
     test_choose_primary_url_prefers_domain_root_when_available()

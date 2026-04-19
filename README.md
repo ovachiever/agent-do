@@ -181,6 +181,8 @@ agent-do browse session load mysite
 agent-do browse session import-browser mysite --browser comet --domain .example.com
 ```
 
+`session import-browser` now carries Chromium cookies, localStorage, sessionStorage, and best-effort IndexedDB into the saved browse session when those stores are available and serializable.
+
 For turning a browsing session into a reusable curl skill:
 
 ```bash

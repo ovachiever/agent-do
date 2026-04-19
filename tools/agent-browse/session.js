@@ -3,6 +3,7 @@
  * Phase 3: Save/load complete browser state including:
  * - Cookies (all domains)
  * - localStorage per origin
+ * - IndexedDB per origin
  * - sessionStorage per origin
  * - Current URL and scroll position
  * - Viewport size
@@ -40,8 +41,8 @@ export async function saveSession(page, context, name, description = '') {
         mkdirSync(sessionDir, { recursive: true });
     }
     
-    // 1. Save Playwright storage state (cookies + localStorage)
-    const storageState = await context.storageState();
+    // 1. Save Playwright storage state (cookies + localStorage + IndexedDB)
+    const storageState = await context.storageState({ indexedDB: true });
     writeFileSync(
         path.join(sessionDir, 'storage.json'),
         JSON.stringify(storageState, null, 2)
@@ -89,6 +90,7 @@ export async function saveSession(page, context, name, description = '') {
         url: page.url(),
         cookieCount: storageState.cookies?.length || 0,
         originsCount: storageState.origins?.length || 0,
+        indexedDbCount: (storageState.origins || []).reduce((count, origin) => count + ((origin.indexedDB || []).length), 0),
     };
     
     writeFileSync(

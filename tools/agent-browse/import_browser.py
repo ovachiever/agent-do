@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -183,13 +184,169 @@ def choose_live_values(records: Iterable, key_attr: str, value_attr: str, seq_at
     }
 
 
+def parse_indexeddb_origin_dirname(dirname: str) -> str | None:
+    base = dirname.removesuffix(".indexeddb.leveldb")
+    match = re.match(r"^(https?)_(.+)_(\d+)$", base)
+    if not match:
+        return None
+    scheme, host, port = match.groups()
+    if port == "0":
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
+
+
+def to_playwright_json(value):
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if value != value or value in {float("inf"), float("-inf")}:
+            raise ValueError("unsupported non-finite float")
+        return value
+    if isinstance(value, tuple):
+        return [to_playwright_json(item) for item in value]
+    if isinstance(value, list):
+        return [to_playwright_json(item) for item in value]
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("unsupported non-string object key")
+            result[key] = to_playwright_json(item)
+        return result
+    raise ValueError(f"unsupported IndexedDB value type: {type(value).__name__}")
+
+
+def decode_object_store_key_path(raw_value: bytes | None):
+    if not raw_value or raw_value in {b"\x00", b"\x00\x00", b"\x00\x00\x00"}:
+        return None
+    raise ValueError(f"unsupported IndexedDB keyPath encoding: {raw_value!r}")
+
+
+def decode_object_store_auto_increment(raw_value: bytes | None) -> bool:
+    return bool(raw_value and raw_value not in {b"\x00", b"\x00\x00"})
+
+
+def collect_indexeddb(profile_root: Path | None, domain_filter: str | None):
+    warnings: list[str] = []
+    indexeddb_by_origin: dict[str, list[dict]] = {}
+
+    if not profile_root:
+        return indexeddb_by_origin, warnings
+
+    try:
+        from ccl_chromium_reader.ccl_chromium_indexeddb import (
+            WrappedIndexDB,
+            DatabaseMetadataType,
+            ObjectStoreMetadataType,
+            decode_truncated_int,
+        )
+    except ModuleNotFoundError:
+        return indexeddb_by_origin, warnings
+
+    indexeddb_root = profile_root / "IndexedDB"
+    if not indexeddb_root.exists():
+        return indexeddb_by_origin, warnings
+
+    for db_dir in sorted(indexeddb_root.glob("*.indexeddb.leveldb")):
+        origin = parse_indexeddb_origin_dirname(db_dir.name)
+        if not origin or not origin_matches_domain(origin, domain_filter):
+            continue
+
+        try:
+            wrapped = WrappedIndexDB(db_dir)
+        except Exception as exc:  # pragma: no cover - defensive against corrupt profiles
+            warnings.append(f"Unable to read IndexedDB from {db_dir.name}: {exc}")
+            continue
+
+        try:
+            databases: list[dict] = []
+            raw_db = wrapped._raw_db
+            for dbid in wrapped.database_ids:
+                version_record = raw_db.database_metadata._metas.get((dbid.dbid_no, DatabaseMetadataType.IdbVersion))
+                version = decode_truncated_int(version_record.value) if version_record else 1
+                stores: list[dict] = []
+                for object_store in wrapped[dbid]:
+                    key_path_record = raw_db.object_store_meta._metas.get(
+                        (dbid.dbid_no, object_store.object_store_id, ObjectStoreMetadataType.KeyPath)
+                    )
+                    auto_increment_record = raw_db.object_store_meta._metas.get(
+                        (dbid.dbid_no, object_store.object_store_id, ObjectStoreMetadataType.AutoIncrementFlag)
+                    )
+                    try:
+                        key_path = decode_object_store_key_path(key_path_record.value if key_path_record else None)
+                    except ValueError as exc:
+                        warnings.append(f"Skipping IndexedDB store {dbid.name}/{object_store.name}: {exc}")
+                        continue
+
+                    auto_increment = decode_object_store_auto_increment(
+                        auto_increment_record.value if auto_increment_record else None
+                    )
+                    records: list[dict] = []
+                    skipped_records = 0
+                    for record in object_store.iterate_records(live_only=True):
+                        try:
+                            value = to_playwright_json(record.value)
+                            entry = {"value": value}
+                            if key_path is None:
+                                entry["key"] = to_playwright_json(record.key.value)
+                        except ValueError:
+                            skipped_records += 1
+                            continue
+                        records.append(entry)
+                    if skipped_records:
+                        warnings.append(
+                            f"Skipped {skipped_records} non-serializable IndexedDB records in {dbid.name}/{object_store.name}"
+                        )
+                    if not records:
+                        continue
+                    store_payload = {
+                        "name": object_store.name,
+                        "records": records,
+                        "indexes": [],
+                        "autoIncrement": auto_increment,
+                    }
+                    if key_path is not None:
+                        if isinstance(key_path, list):
+                            store_payload["keyPathArray"] = key_path
+                        else:
+                            store_payload["keyPath"] = key_path
+                    stores.append(store_payload)
+                if stores:
+                    databases.append(
+                        {
+                            "name": dbid.name,
+                            "version": version,
+                            "stores": stores,
+                        }
+                    )
+            if databases:
+                indexeddb_by_origin[origin] = databases
+        finally:
+            wrapped.close()
+
+    return indexeddb_by_origin, warnings
+
+
+def merge_origin_state(local_storage_origins: list[dict], indexeddb_by_origin: dict[str, list[dict]]) -> list[dict]:
+    by_origin: dict[str, dict] = {}
+    for origin in local_storage_origins:
+        by_origin[origin["origin"]] = {
+            "origin": origin["origin"],
+            "localStorage": origin.get("localStorage", []),
+        }
+    for origin, databases in indexeddb_by_origin.items():
+        entry = by_origin.setdefault(origin, {"origin": origin, "localStorage": []})
+        entry["indexedDB"] = databases
+    return [by_origin[key] for key in sorted(by_origin)]
+
+
 def import_storage(profile_root: Path | None, domain_filter: str | None):
     warnings: list[str] = []
-    playwright_origins: list[dict] = []
+    local_storage_origins: list[dict] = []
     session_by_origin: dict[str, dict[str, str]] = {}
 
     if not profile_root:
-        return playwright_origins, session_by_origin, warnings
+        return [], session_by_origin, warnings
 
     try:
         from ccl_chromium_reader import ccl_chromium_localstorage, ccl_chromium_sessionstorage
@@ -197,7 +354,7 @@ def import_storage(profile_root: Path | None, domain_filter: str | None):
         warnings.append(
             "ccl_chromium_reader is not installed; imported browser session will include cookies only."
         )
-        return playwright_origins, session_by_origin, warnings
+        return [], session_by_origin, warnings
 
     local_storage_dir = profile_root / "Local Storage" / "leveldb"
     if local_storage_dir.exists():
@@ -214,7 +371,7 @@ def import_storage(profile_root: Path | None, domain_filter: str | None):
                     live_predicate=lambda rec: getattr(rec, "is_live", False),
                 )
                 if values:
-                    playwright_origins.append(
+                    local_storage_origins.append(
                         {
                             "origin": origin,
                             "localStorage": [
@@ -241,7 +398,9 @@ def import_storage(profile_root: Path | None, domain_filter: str | None):
                 if values:
                     session_by_origin[origin] = values
 
-    return playwright_origins, session_by_origin, warnings
+    indexeddb_by_origin, indexeddb_warnings = collect_indexeddb(profile_root, domain_filter)
+    warnings.extend(indexeddb_warnings)
+    return merge_origin_state(local_storage_origins, indexeddb_by_origin), session_by_origin, warnings
 
 
 def choose_primary_url(domain_filter: str | None, cookies: list[dict], origins: list[dict], session_by_origin: dict[str, dict[str, str]]) -> str:
@@ -314,6 +473,7 @@ def import_browser_session(session_name: str, browser_type: str, domain_filter: 
                 "cookieCount": len(cookies),
                 "originsCount": len(origins),
                 "sessionOriginsCount": len(session_by_origin),
+                "indexedDbCount": sum(len(origin.get("indexedDB", [])) for origin in origins),
             },
             indent=2,
         )
@@ -329,6 +489,7 @@ def import_browser_session(session_name: str, browser_type: str, domain_filter: 
         "cookieCount": len(cookies),
         "originsCount": len(origins),
         "sessionOriginsCount": len(session_by_origin),
+        "indexedDbCount": sum(len(origin.get("indexedDB", [])) for origin in origins),
         "storageImported": bool(origins or session_by_origin),
         "profileRoot": str(profile_root),
         "url": url,

@@ -485,7 +485,7 @@ export class BrowserManager {
     async saveStorageState(path) {
         const context = this.contexts[0];
         if (context) {
-            await context.storageState({ path });
+            await context.storageState({ path, indexedDB: true });
         }
     }
     /**
@@ -955,7 +955,7 @@ export class BrowserManager {
         let storageState;
         if (currentContext) {
             try {
-                storageState = await currentContext.storageState();
+                storageState = await currentContext.storageState({ indexedDB: true });
             }
             catch {
                 // Ignore errors - context might be closed or invalid
@@ -1219,7 +1219,7 @@ export class BrowserManager {
             throw new Error('No login in progress. Call startLogin() first.');
         }
         // Extract auth state from headed browser
-        const storageState = await this.loginContext.storageState();
+        const storageState = await this.loginContext.storageState({ indexedDB: true });
         const loginUrl = this.loginPage.url();
         const loginTitle = await this.loginPage.title().catch(() => '');
         // Close headed login browser

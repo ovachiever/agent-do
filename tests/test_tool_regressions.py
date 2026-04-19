@@ -36,6 +36,13 @@ def main() -> int:
     require("user-*" in import_source, "expected Atlas user-profile discovery in import helper")
     require("Chromium Safe Storage" in import_source, "expected Chromium Safe Storage fallback in import helper")
     require("ccl_chromium_reader" in import_source, "expected storage reader support in import helper")
+    require("ccl_chromium_indexeddb" in import_source or "WrappedIndexDB" in import_source, "expected IndexedDB import support in import helper")
+    require("parse_indexeddb_origin_dirname" in import_source, "expected IndexedDB origin parser in import helper")
+
+    browser_js = (ROOT / "tools/agent-browse/browser.js").read_text()
+    require("indexedDB: true" in browser_js, "expected browser persistence paths to request IndexedDB")
+    session_js = (ROOT / "tools/agent-browse/session.js").read_text()
+    require("storageState({ indexedDB: true })" in session_js, "expected session save to request IndexedDB")
 
     browse_script = f"""
 set -euo pipefail
