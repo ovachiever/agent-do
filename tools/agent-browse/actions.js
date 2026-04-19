@@ -405,6 +405,9 @@ async function handleNavigate(command, browser) {
     await page.goto(command.url, {
         waitUntil: command.waitUntil ?? 'load',
     });
+    if (browser.activeSessionName) {
+        await restoreSessionStorage(page, browser.activeSessionName);
+    }
     // Title fetch can fail if a client-side redirect fires after load
     const title = await page.title().catch(() => '');
     const url = page.url();
@@ -1210,6 +1213,7 @@ async function handleSessionLoad(command, browser) {
     // Restore sessionStorage (not included in Playwright's storageState)
     const page = browser.getPage();
     await restoreSessionStorage(page, command.name);
+    browser.activeSessionName = command.name;
     updateSessionLastUsed(command.name);
     return successResponse(command.id, {
         ...result,

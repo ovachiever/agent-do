@@ -18,7 +18,7 @@ agent-do is a universal automation CLI for AI agents with 84 specialized tools. 
 ./agent-do find playwright             # Search tools by keyword
 ./agent-do creds check --tool render   # Check a tool's declared credentials
 ./agent-do creds required namecheap    # Show which secrets a tool expects
-./agent-do auth ensure github          # Reuse saved auth or import browser cookies
+./agent-do auth ensure github          # Reuse saved auth or import browser cookies/storage
 ./agent-do auth ensure cloudflare --strategy interactive --timeout 300  # Use the visible system browser, then import authenticated state
 ./agent-do resend status example.com   # Check Resend domain DNS/verification state
 ./agent-do spec init                   # Initialize repo-local spec storage
@@ -121,7 +121,7 @@ Registries merge in reverse priority order (higher-priority wins):
 
 | Tool | Tech | Notes |
 |------|------|-------|
-| `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. `login <url>` opens headed browser for SSO/MFA, `login done` transfers auth to headless. `session save/load` persists and restores full auth state (cookies + localStorage injected at context creation). `capture start/stop` records API traffic, `api` replays captured skills. |
+| `agent-browse/` | Node.js (Playwright) | Headless browser, @ref element selection, daemon.js lifecycle. `login <url>` opens headed browser for SSO/MFA, `login done` transfers auth to headless. `session save/load` persists and restores full auth state, and `session import-browser` now imports cookies plus Chromium localStorage/sessionStorage when available. `capture start/stop` records API traffic, `api` replays captured skills. |
 | `agent-auth` | Python | Site-level auth orchestrator over encrypted auth bundles, browser import, and secure credentials. Profiles live under `~/.agent-do/auth/`; `ensure` tries saved-session, browser-import, provider-refresh, then site-creds where configured. GitHub/Google profiles have provider-aware login handling, TOTP resolution through `agent-do creds`, recovery-code consumption from backup-code pools in secure storage, cross-site SSO reuse, account-chooser/consent checkpoint handling, mailbox-driven email or SMS continuation via `agent-do email` and `agent-do sms`, explicit passkey/security-key and device-approval action-required states, a `probe` command for classifying the live checkpoint branch plus frontmost macOS dialog state, and `advance` for executing one safe checkpoint step, preferring in-browser alternate methods before out-of-band waits when available. |
 | `agent-email` | Bash + Python | Email sending plus inbox querying. `snapshot`, `latest`, `wait`, `code`, and `link` support mailbox-driven auth workflows, with macOS Mail.app live queries and fixture-backed testing. |
 | `agent-sms` | Bash + Python | SMS sending plus message querying. `snapshot`, `latest`, `wait`, `code`, and `link` support phone-driven auth workflows, with macOS Messages.app live queries and fixture-backed testing. |

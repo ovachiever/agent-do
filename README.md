@@ -178,6 +178,7 @@ For sites with SSO or MFA:
 agent-do browse login https://app.example.com
 agent-do browse login done --save mysite
 agent-do browse session load mysite
+agent-do browse session import-browser mysite --browser comet --domain .example.com
 ```
 
 For turning a browsing session into a reusable curl skill:

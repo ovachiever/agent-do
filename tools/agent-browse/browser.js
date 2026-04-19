@@ -1154,9 +1154,11 @@ export class BrowserManager {
             try {
                 const targetDomain = new URL(url).origin;
                 await page.goto(targetDomain, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-                await page.goto(url, { waitUntil: 'load' });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+                await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
             } catch {
-                await page.goto(url, { waitUntil: 'load' });
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+                await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
             }
         }
         return {

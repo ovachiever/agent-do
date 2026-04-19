@@ -294,12 +294,21 @@ export async function restoreSessionStorage(page, name) {
     const sessionStoragePath = path.join(getSessionPath(name), 'session-storage.json');
     if (existsSync(sessionStoragePath)) {
         const data = JSON.parse(readFileSync(sessionStoragePath, 'utf-8'));
-        if (Object.keys(data).length > 0) {
+        let items = data;
+        if (data && typeof data === 'object' && data.origins && !Array.isArray(data.origins)) {
+            try {
+                const origin = new URL(page.url()).origin;
+                items = data.origins[origin] || {};
+            } catch {
+                items = {};
+            }
+        }
+        if (items && Object.keys(items).length > 0) {
             await page.evaluate((items) => {
                 for (const [key, value] of Object.entries(items)) {
                     sessionStorage.setItem(key, value);
                 }
-            }, data).catch(() => {});
+            }, items).catch(() => {});
         }
     }
 }

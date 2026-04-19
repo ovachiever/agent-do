@@ -983,15 +983,15 @@ end tell
             
             for i, win in enumerate(wins):
                 title = self._get_attribute(win, "AXTitle") or "Untitled"
-                pos = self._get_attribute(win, "AXPosition")
-                size = self._get_attribute(win, "AXSize")
+                pos = self._unpack_axvalue(self._get_attribute(win, "AXPosition"), "position")
+                size = self._unpack_axvalue(self._get_attribute(win, "AXSize"), "size")
                 
                 windows.append({
                     "app": app.localizedName(),
                     "index": i,
                     "title": title,
-                    "position": [int(pos.x), int(pos.y)] if pos else None,
-                    "size": [int(size.width), int(size.height)] if size else None
+                    "position": pos,
+                    "size": size
                 })
         
         return {"windows": windows, "count": len(windows)}
@@ -1006,11 +1006,11 @@ end tell
             # Screenshot element bounds
             element = self.session.resolve_ref(ref)
             if element:
-                pos = self._get_attribute(element, "AXPosition")
-                size = self._get_attribute(element, "AXSize")
+                pos = self._unpack_axvalue(self._get_attribute(element, "AXPosition"), "position")
+                size = self._unpack_axvalue(self._get_attribute(element, "AXSize"), "size")
                 if pos and size:
-                    x, y = int(pos.x), int(pos.y)
-                    w, h = int(size.width), int(size.height)
+                    x, y = pos
+                    w, h = size
                     subprocess.run([
                         "screencapture", "-R", f"{x},{y},{w},{h}", output_path
                     ], capture_output=True)

@@ -28,11 +28,14 @@ def run_bash(script: str) -> subprocess.CompletedProcess[str]:
 
 def main() -> int:
     browse_source = (ROOT / "tools/agent-browse/agent-browse").read_text()
-    require("Library/Application Support/Comet/Default/Cookies" in browse_source, "expected Comet cookie path in agent-browse")
-    require("user-*/Cookies" in browse_source, "expected Atlas user-profile cookie discovery in agent-browse")
-    require("Chromium Safe Storage" in browse_source, "expected Chromium Safe Storage fallback in agent-browse")
-    require('"extractor": "chromium"' in browse_source, "expected Atlas to use the Chromium extractor path")
     require("default: comet" in browse_source, "expected Comet to remain the default browser import source")
+    require("import_browser.py" in browse_source, "expected browser import helper to be used")
+    require("cookies and browser storage" in browse_source, "expected import-browser help text to mention storage")
+    import_source = (ROOT / "tools/agent-browse/import_browser.py").read_text()
+    require("Library/Application Support/Comet/Default" in import_source, "expected Comet profile path in import helper")
+    require("user-*" in import_source, "expected Atlas user-profile discovery in import helper")
+    require("Chromium Safe Storage" in import_source, "expected Chromium Safe Storage fallback in import helper")
+    require("ccl_chromium_reader" in import_source, "expected storage reader support in import helper")
 
     browse_script = f"""
 set -euo pipefail
