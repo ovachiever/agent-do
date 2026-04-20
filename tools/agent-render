@@ -14,7 +14,7 @@ Commands:
   show <svc>                   Detailed service info
   deploy <svc> [--commit SHA]  Trigger deploy
   deploys <svc>                List recent deploys
-  logs <svc>                   View recent logs
+  logs <svc> [opts]            View recent logs
   restart <svc>                Restart service
   suspend <svc>                Suspend service
   resume <svc>                 Resume service
@@ -37,6 +37,7 @@ Environment:
 Examples:
   agent-render services
   agent-render deploy my-api --commit abc123
+  agent-render logs my-api --since 1h --type app
   agent-render env my-api
   agent-render env-set my-api DATABASE_URL "postgres://..."
   agent-render db list
@@ -67,6 +68,47 @@ render_request() {
     fi
 
     curl "${args[@]}"
+}
+
+render_request_checked() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+    local token="${RENDER_API_KEY:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: RENDER_API_KEY not set" >&2
+        return 1
+    fi
+
+    local tmp_body
+    tmp_body="$(mktemp)"
+    trap 'rm -f "$tmp_body"' RETURN
+
+    local args=(-sS -o "$tmp_body" -w "%{http_code}" -X "$method" "${RENDER_API}${endpoint}" \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json")
+
+    if [[ -n "$data" ]]; then
+        args+=(-d "$data")
+    fi
+
+    local status
+    status=$(curl "${args[@]}")
+    local body
+    body="$(cat "$tmp_body")"
+
+    if [[ "$status" =~ ^2 ]]; then
+        printf '%s' "$body"
+        return 0
+    fi
+
+    echo "Error: Render API ${method} ${endpoint} returned HTTP ${status}" >&2
+    if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+    fi
+    return 1
 }
 
 resolve_service() {
@@ -133,6 +175,98 @@ for item in items:
 
 json_escape() {
     python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$1"
+}
+
+is_help_arg() {
+    local arg="${1:-}"
+    [[ "$arg" == "--help" || "$arg" == "-h" || "$arg" == "help" ]]
+}
+
+urlencode_pairs() {
+    python3 - "$@" <<'PY'
+import sys, urllib.parse
+pairs = []
+for arg in sys.argv[1:]:
+    key, value = arg.split("=", 1)
+    pairs.append((key, value))
+print(urllib.parse.urlencode(pairs))
+PY
+}
+
+normalize_log_time() {
+    python3 - "$1" <<'PY'
+import re
+import sys
+from datetime import datetime, timedelta, timezone
+
+raw = sys.argv[1].strip()
+now = datetime.now(timezone.utc)
+
+def emit(dt):
+    print(dt.isoformat().replace("+00:00", "Z"))
+
+if re.fullmatch(r"\d+", raw):
+    emit(now - timedelta(minutes=int(raw)))
+    raise SystemExit(0)
+
+m = re.fullmatch(r"(\d+)([mhd])", raw, re.IGNORECASE)
+if m:
+    amount = int(m.group(1))
+    unit = m.group(2).lower()
+    if unit == "m":
+        emit(now - timedelta(minutes=amount))
+    elif unit == "h":
+        emit(now - timedelta(hours=amount))
+    else:
+        emit(now - timedelta(days=amount))
+    raise SystemExit(0)
+
+try:
+    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+except ValueError:
+    print(f"invalid time value: {raw}", file=sys.stderr)
+    raise SystemExit(1)
+
+if dt.tzinfo is None:
+    dt = dt.replace(tzinfo=timezone.utc)
+else:
+    dt = dt.astimezone(timezone.utc)
+emit(dt)
+PY
+}
+
+show_logs_help() {
+    cat <<'EOF'
+Usage: agent-render logs <service> [options]
+
+Options:
+  --since <time>      Start of time range. Accepts minutes ago (`60`), duration (`1h`, `24h`, `7d`), or ISO timestamp.
+  --until <time>      End of time range. Same formats as --since.
+  --limit <n>         Max number of log entries to return (1-100, default: 20).
+  --type <value>      Filter log type (for example: app, request, build). Repeatable.
+  --level <value>     Filter severity level. Repeatable.
+  --text <value>      Filter by log message text. Repeatable.
+  --host <value>      Filter request log host. Repeatable.
+  --method <value>    Filter request method. Repeatable.
+  --status <value>    Filter request status code. Repeatable.
+  --path <value>      Filter request path. Repeatable.
+  --json              Print raw API response.
+  --forward           Return oldest logs first.
+  --backward          Return newest logs first (default).
+  --help              Show this message.
+EOF
+}
+
+append_multi_values() {
+    local __target="$1"
+    local raw="$2"
+    local part
+    IFS=',' read -r -a parts <<< "$raw"
+    for part in "${parts[@]}"; do
+        if [[ -n "$part" ]]; then
+            eval "$__target+=(\"\$part\")"
+        fi
+    done
 }
 
 # --- Commands ---
@@ -256,32 +390,194 @@ for item in items:
 }
 
 cmd_logs() {
-    local name_or_id="${1:-}"
+    if [[ $# -eq 0 ]]; then
+        show_logs_help
+        return 1
+    fi
+    if is_help_arg "${1:-}"; then
+        show_logs_help
+        return 0
+    fi
+
+    local name_or_id=""
+    local since=""
+    local until=""
+    local limit="20"
+    local direction="backward"
+    local json_output=0
+    local -a type_filters=()
+    local -a level_filters=()
+    local -a text_filters=()
+    local -a host_filters=()
+    local -a method_filters=()
+    local -a status_filters=()
+    local -a path_filters=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h|help)
+                show_logs_help
+                return 0
+                ;;
+            --since)
+                since="${2:-}"
+                [[ -n "$since" ]] || { echo "Error: --since requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --until)
+                until="${2:-}"
+                [[ -n "$until" ]] || { echo "Error: --until requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --limit)
+                limit="${2:-}"
+                [[ "$limit" =~ ^[0-9]+$ ]] || { echo "Error: --limit must be an integer" >&2; return 1; }
+                shift 2
+                ;;
+            --type)
+                append_multi_values type_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --type requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --level)
+                append_multi_values level_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --level requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --text)
+                append_multi_values text_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --text requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --host)
+                append_multi_values host_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --host requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --method)
+                append_multi_values method_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --method requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --status)
+                append_multi_values status_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --status requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --path)
+                append_multi_values path_filters "${2:-}"
+                [[ -n "${2:-}" ]] || { echo "Error: --path requires a value" >&2; return 1; }
+                shift 2
+                ;;
+            --json)
+                json_output=1
+                shift
+                ;;
+            --forward)
+                direction="forward"
+                shift
+                ;;
+            --backward)
+                direction="backward"
+                shift
+                ;;
+            --*)
+                echo "Error: Unknown logs option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$name_or_id" ]]; then
+                    name_or_id="$1"
+                else
+                    echo "Error: Unexpected argument: $1" >&2
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render logs <service>"
+        echo "Error: Service name or ID is required" >&2
+        show_logs_help
+        return 1
+    fi
+    if (( limit < 1 || limit > 100 )); then
+        echo "Error: --limit must be between 1 and 100" >&2
         return 1
     fi
 
     local sid
     sid=$(resolve_service "$name_or_id") || return 1
 
+    local service
+    service=$(render_request_checked GET "/services/$sid") || return 1
+
+    local owner_id
+    owner_id=$(echo "$service" | python3 -c "
+import sys, json
+svc = json.load(sys.stdin)
+print(svc.get('ownerId', ''))
+" 2>/dev/null)
+    if [[ -z "$owner_id" ]]; then
+        echo "Error: Could not resolve ownerId for service '$name_or_id' ($sid)" >&2
+        return 1
+    fi
+
+    local -a query_parts=("ownerId=$owner_id" "resource=$sid" "limit=$limit" "direction=$direction")
+    if [[ -n "$since" ]]; then
+        query_parts+=("startTime=$(normalize_log_time "$since")")
+    fi
+    if [[ -n "$until" ]]; then
+        query_parts+=("endTime=$(normalize_log_time "$until")")
+    fi
+    local value
+    for value in "${type_filters[@]}"; do query_parts+=("type=$value"); done
+    for value in "${level_filters[@]}"; do query_parts+=("level=$value"); done
+    for value in "${text_filters[@]}"; do query_parts+=("text=$value"); done
+    for value in "${host_filters[@]}"; do query_parts+=("host=$value"); done
+    for value in "${method_filters[@]}"; do query_parts+=("method=$value"); done
+    for value in "${status_filters[@]}"; do query_parts+=("statusCode=$value"); done
+    for value in "${path_filters[@]}"; do query_parts+=("path=$value"); done
+
+    local query
+    query=$(urlencode_pairs "${query_parts[@]}")
+
     local result
-    result=$(render_request GET "/services/$sid/logs")
+    result=$(render_request_checked GET "/logs?$query") || return 1
+
+    if [[ "$json_output" == "1" ]]; then
+        echo "$result"
+        return 0
+    fi
 
     echo "$result" | python3 -c "
 import sys, json
 try:
-    items = json.load(sys.stdin)
-    if isinstance(items, list):
-        for entry in items:
-            ts = entry.get('timestamp', '')
-            msg = entry.get('message', str(entry))
-            print(f'{ts}  {msg}')
-    else:
-        # Some service types return different formats
-        print(json.dumps(items, indent=2))
+    payload = json.load(sys.stdin)
+    logs = payload.get('logs', [])
+    if not logs:
+        print('No logs found')
+        sys.exit(0)
+    for entry in logs:
+        labels = {label.get('name'): label.get('value') for label in entry.get('labels', [])}
+        ts = entry.get('timestamp', '')
+        log_type = labels.get('type', '')
+        level = labels.get('level', '')
+        prefix = '/'.join([part for part in [log_type, level] if part])
+        msg = entry.get('message', str(entry))
+        ansi_stripped = __import__('re').sub(r'\\x1b\\[[0-9;]*m', '', msg)
+        if prefix:
+            print(f'{ts}  [{prefix}] {ansi_stripped}')
+        else:
+            print(f'{ts}  {ansi_stripped}')
+    if payload.get('hasMore'):
+        next_start = payload.get('nextStartTime', '')
+        next_end = payload.get('nextEndTime', '')
+        print(f'\\nMore logs available. nextStartTime={next_start} nextEndTime={next_end}', file=sys.stderr)
 except Exception as e:
-    print(sys.stdin.read() if hasattr(sys.stdin, 'read') else str(e))
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
 "
 }
 

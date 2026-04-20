@@ -35,6 +35,7 @@
 - `agent-do browse session import-browser` now supports Comet directly, and Comet is the default real-browser import source for auth/browser-import flows instead of Atlas.
 - `agent-do browse session import-browser` now imports Chromium localStorage and sessionStorage alongside cookies when those stores are available, so imported sessions can carry more than cookie state alone.
 - `agent-do browse` session save/login-transfer/storage-export paths now request Playwright storage state with IndexedDB enabled, and `session import-browser` now includes best-effort Chromium IndexedDB for stores that can be losslessly serialized into Playwright’s native format.
+- `agent-do render logs` now uses Render's `/v1/logs` API with `ownerId` and `resource` filters, supports real log-query flags, and no longer treats `logs --help` as a missing service lookup.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.
 - `agent-do --health` now reports credential readiness from the same registry metadata instead of relying only on a small hardcoded env-var list.
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.

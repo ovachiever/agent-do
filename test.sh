@@ -81,6 +81,7 @@ check_cmd "sms tests" python3 "$SCRIPT_DIR/tests/test_sms.py"
 check_cmd "live runtime tests" python3 "$SCRIPT_DIR/tests/test_live.py"
 check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"
 check_cmd "resend tests" python3 "$SCRIPT_DIR/tests/test_resend.py"
+check_cmd "render tests" python3 "$SCRIPT_DIR/tests/test_render.py"
 check_cmd "browser import tests" python3 "$SCRIPT_DIR/tests/test_browser_import.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
 
