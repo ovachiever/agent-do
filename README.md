@@ -183,6 +183,8 @@ agent-do browse session import-browser mysite --browser comet --domain .example.
 
 `session import-browser` now carries Chromium cookies, localStorage, sessionStorage, and best-effort IndexedDB into the saved browse session when those stores are available and serializable.
 
+`browse` daemon sessions are isolated. If you do not pass `--session` and do not set `AGENT_BROWSER_SESSION`, `agent-do browse` derives a per-agent daemon session automatically when an agent/thread identity like `CODEX_THREAD_ID` is available. That prevents multiple agents from stomping the same implicit browser daemon.
+
 For turning a browsing session into a reusable curl skill:
 
 ```bash

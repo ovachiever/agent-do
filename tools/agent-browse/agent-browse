@@ -6,7 +6,47 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DAEMON_DIR="$SCRIPT_DIR"
-SESSION="${AGENT_BROWSER_SESSION:-default}"
+
+derive_auto_session() {
+    python3 <<'PY'
+import os
+import re
+
+def sanitize(value: str) -> str:
+    value = re.sub(r'[^a-zA-Z0-9._-]+', '-', value).strip('-_.').lower()
+    return value[:24]
+
+def compact(value: str) -> str:
+    value = re.sub(r'[^a-zA-Z0-9]+', '', value).lower()
+    return value[:16]
+
+candidates = [
+    ("codex", os.environ.get("CODEX_THREAD_ID")),
+    ("claude", os.environ.get("CLAUDE_THREAD_ID")),
+    ("claude", os.environ.get("CLAUDE_SESSION_ID")),
+    ("claude", os.environ.get("CLAUDE_AGENT_ID")),
+]
+
+for prefix, value in candidates:
+    if not value:
+        continue
+    short = compact(value)
+    if short:
+        print(f"{prefix}-{short}")
+        raise SystemExit(0)
+
+tmux_pane = os.environ.get("TMUX_PANE")
+if tmux_pane:
+    short = sanitize(tmux_pane).lstrip("%")
+    if short:
+        print(f"tmux-{short}")
+        raise SystemExit(0)
+
+print("default")
+PY
+}
+
+SESSION="${AGENT_BROWSER_SESSION:-$(derive_auto_session)}"
 # Note: daemon.js uses os.tmpdir() which on macOS is /var/folders/...
 TMPDIR_ACTUAL="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')"
 SOCKET_PATH="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.sock"
@@ -210,8 +250,13 @@ EXIT CODES:
   8  Timeout
 
 ENVIRONMENT:
-  AGENT_BROWSER_SESSION          Default session name
+  AGENT_BROWSER_SESSION          Override daemon session name
   AGENT_BROWSER_HEADED           Set to 1 for headed mode
+
+DEFAULT SESSION:
+  When no explicit --session or AGENT_BROWSER_SESSION is set, agent-browse
+  derives an isolated daemon session from the current agent/thread identity
+  (for example CODEX_THREAD_ID) before falling back to "default".
 
 Examples:
   agent-browse open https://example.com
