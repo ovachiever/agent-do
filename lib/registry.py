@@ -108,6 +108,11 @@ def get_tool_info(registry: dict, tool_name: str) -> Optional[dict]:
     return registry.get('tools', {}).get(tool_name)
 
 
+def has_tool(registry: dict, tool_name: str) -> bool:
+    """Return whether a tool name is declared in the registry."""
+    return tool_name in registry.get('tools', {})
+
+
 def list_tools(registry: dict) -> list[str]:
     """List all available tools."""
     return sorted(registry.get('tools', {}).keys())

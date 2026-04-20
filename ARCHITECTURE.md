@@ -81,7 +81,7 @@ Tools live in `tools/agent-*`. The dispatcher (`exec_tool()`) checks in order:
 
 1. `tools/agent-<name>/agent-<name>` (directory with nested executable, e.g., agent-browse)
 2. `tools/agent-<name>` (standalone executable)
-3. `agent-<name>` in `$PATH` (external tool)
+3. `agent-<name>` in `$PATH` (external tool, only when `<name>` is registered in `registry.yaml`)
 
 Most tools are standalone bash scripts. Some are directory-based with Python or Node.js backends.
 

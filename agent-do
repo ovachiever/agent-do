@@ -32,6 +32,22 @@ if [[ -f "$SCRIPT_DIR/lib/live.sh" ]]; then
     source "$SCRIPT_DIR/lib/live.sh"
 fi
 
+tool_in_registry() {
+    local tool="$1"
+    python3 - "$tool" "$SCRIPT_DIR" <<'PY' 2>/dev/null
+import sys
+from pathlib import Path
+
+tool = sys.argv[1]
+script_dir = Path(sys.argv[2])
+sys.path.insert(0, str(script_dir / "lib"))
+
+from registry import has_tool, load_registry  # noqa: E402
+
+raise SystemExit(0 if has_tool(load_registry(), tool) else 1)
+PY
+}
+
 show_help() {
     cat << 'EOF'
 agent-do - Automation CLI
@@ -142,6 +158,10 @@ resolve_tool_exec() {
     if [[ -x "$tool_path" && ! -d "$tool_path" ]]; then
         echo "$tool_path"
         return 0
+    fi
+
+    if ! tool_in_registry "$tool"; then
+        return 1
     fi
 
     if command -v "agent-$tool" &>/dev/null; then

@@ -74,6 +74,18 @@ def main() -> int:
                 """
             ),
         )
+        (fake_home / "registry.yaml").write_text(
+            textwrap.dedent(
+                """\
+                tools:
+                  fake-live:
+                    description: Fake live test tool
+                    commands:
+                      inspect: Inspect live context
+                """
+            ),
+            encoding="utf-8",
+        )
 
         env = os.environ.copy()
         env["AGENT_DO_HOME"] = str(fake_home)

@@ -19,7 +19,7 @@ except ModuleNotFoundError:
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
 from cache import check_cache, cache_result, fuzzy_match, note_route_outcome, infer_project_scope
-from registry import load_registry, get_tool_info, get_tool_secret_envs
+from registry import load_registry, get_tool_info, get_tool_secret_envs, has_tool
 
 
 def resolve_tool_executable(tool_name: str) -> Path | None:
@@ -33,6 +33,10 @@ def resolve_tool_executable(tool_name: str) -> Path | None:
 
     if tool_root.exists() and tool_root.is_file():
         return tool_root
+
+    registry = load_registry()
+    if not has_tool(registry, tool_name):
+        return None
 
     binary = f"agent-{tool_name}"
     which = subprocess.run(

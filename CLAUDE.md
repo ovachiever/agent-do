@@ -75,7 +75,7 @@ The main `agent-do` script (bash) decides mode based on first argument:
 Tools live in `tools/agent-*`. The dispatcher checks (in order):
 1. `tools/agent-<name>/agent-<name>` (directory with nested executable)
 2. `tools/agent-<name>` (standalone executable)
-3. `agent-<name>` in `$PATH`
+3. `agent-<name>` in `$PATH` only when the tool name is registered in `registry.yaml`
 
 Most tools are standalone bash scripts. Some are directory-based with Python or Node.js backends.
 

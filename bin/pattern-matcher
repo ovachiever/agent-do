@@ -14,13 +14,14 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
 try:
-    from registry import load_registry, search_tools, match_prompt_tools, get_default_command
+    from registry import load_registry, search_tools, match_prompt_tools, get_default_command, has_tool
 except ModuleNotFoundError as e:
     if e.name == "yaml":
         load_registry = None
         search_tools = None
         match_prompt_tools = None
         get_default_command = None
+        has_tool = None
     else:
         raise
 
@@ -119,11 +120,17 @@ def route_has_valid_tool(result: Optional[dict]) -> bool:
     tool_root = script_dir / "tools" / f"agent-{tool_name}"
     nested_exec = tool_root / f"agent-{tool_name}"
 
-    return (
-        (tool_root.is_file())
-        or (tool_root.is_dir() and nested_exec.is_file())
-        or shutil.which(f"agent-{tool_name}") is not None
-    )
+    if (tool_root.is_file()) or (tool_root.is_dir() and nested_exec.is_file()):
+        return True
+
+    if load_registry is None or has_tool is None:
+        return False
+
+    registry = load_registry()
+    if not has_tool(registry, tool_name):
+        return False
+
+    return shutil.which(f"agent-{tool_name}") is not None
 
 
 def keyword_match(intent: str, registry: dict) -> Optional[dict]:

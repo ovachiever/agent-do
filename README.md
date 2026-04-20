@@ -496,7 +496,7 @@ GCP_SERVICE_ACCOUNT   # Google Cloud
 ```bash
 tools/agent-<name>/agent-<name>
 tools/agent-<name>
-agent-<name> in $PATH
+agent-<name> in $PATH (only when <name> is registered in registry.yaml)
 ```
 
 To add a tool:
@@ -504,6 +504,8 @@ To add a tool:
 1. Create the executable.
 2. Add it to `registry.yaml`.
 3. Add `routing` metadata if the tool should participate in discovery, hooks, or offline matching.
+
+Unregistered `agent-*` binaries on `PATH` are intentionally ignored by structured `agent-do` dispatch. This prevents unrelated third-party tools from shadowing built-in intents like `agent-do email`.
 
 Shared helpers such as `lib/snapshot.sh` and `lib/json-output.sh` let bash tools expose structured output and `--json` support with less repeated code.
 

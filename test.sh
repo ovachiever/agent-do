@@ -66,6 +66,7 @@ check_output "--offline routes network scan intent" "agent-network scan --port 3
 check_output "pattern matcher JSON uses iOS tool" '"tool": "ios"' "$SCRIPT_DIR/bin/pattern-matcher" --json "screenshot the iOS simulator"
 check_cmd "v1.1 routing foundation tests" python3 "$SCRIPT_DIR/tests/test_v11_routing.py"
 check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
+check_cmd "dispatch tests" python3 "$SCRIPT_DIR/tests/test_dispatch.py"
 check_cmd "auth tests" python3 "$SCRIPT_DIR/tests/test_auth.py"
 check_cmd "auth interactive tests" python3 "$SCRIPT_DIR/tests/test_auth_interactive.py"
 check_cmd "auth live-browser tests" python3 "$SCRIPT_DIR/tests/test_auth_live_browser.py"
