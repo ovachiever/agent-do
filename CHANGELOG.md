@@ -36,6 +36,7 @@
 - `agent-do browse session import-browser` now imports Chromium localStorage and sessionStorage alongside cookies when those stores are available, so imported sessions can carry more than cookie state alone.
 - `agent-do browse` session save/login-transfer/storage-export paths now request Playwright storage state with IndexedDB enabled, and `session import-browser` now includes best-effort Chromium IndexedDB for stores that can be losslessly serialized into Playwright’s native format.
 - `agent-do browse` now auto-derives its daemon session from the current agent/thread identity when `--session` and `AGENT_BROWSER_SESSION` are absent, so multiple agents stop colliding on the shared implicit `default` browser daemon.
+- Non-default `agent-do browse` daemons now fork writes away from existing shared saved-session names by default, so `session save <name>` or `login done --save <name>` stop silently overwriting a shared base unless `--shared` is used.
 - `agent-do render logs` now uses Render's `/v1/logs` API with `ownerId` and `resource` filters, supports real log-query flags, and no longer treats `logs --help` as a missing service lookup.
 - Structured tool dispatch now ignores unregistered `agent-*` binaries on `PATH`, so third-party commands cannot shadow built-in intents unless the tool name is explicitly registered in `registry.yaml`.
 - Structured execution and natural-language execution now preload declared tool secrets from env vars or secure storage before invoking the target tool.

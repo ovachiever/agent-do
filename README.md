@@ -185,6 +185,8 @@ agent-do browse session import-browser mysite --browser comet --domain .example.
 
 `browse` daemon sessions are isolated. If you do not pass `--session` and do not set `AGENT_BROWSER_SESSION`, `agent-do browse` derives a per-agent daemon session automatically when an agent/thread identity like `CODEX_THREAD_ID` is available. That prevents multiple agents from stomping the same implicit browser daemon.
 
+When a non-default agent daemon saves back to an existing shared saved-session name, `browse` now forks that write to an agent-scoped saved-session name by default instead of silently overwriting the shared base. Use `--shared` on `session save` or `login done --save` if you really want to update the literal shared saved-session name.
+
 For turning a browsing session into a reusable curl skill:
 
 ```bash

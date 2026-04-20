@@ -51,6 +51,53 @@ SESSION="${AGENT_BROWSER_SESSION:-$(derive_auto_session)}"
 TMPDIR_ACTUAL="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')"
 SOCKET_PATH="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.sock"
 PID_FILE="${TMPDIR_ACTUAL}/agent-browser-${SESSION}.pid"
+PERSISTENT_SESSIONS_DIR="${HOME}/.agent-browse/sessions"
+
+saved_session_path() {
+    local name="$1"
+    printf '%s/%s' "$PERSISTENT_SESSIONS_DIR" "$name"
+}
+
+saved_session_exists() {
+    local name="$1"
+    [[ -f "$(saved_session_path "$name")/storage.json" ]]
+}
+
+agent_scoped_saved_name() {
+    local name="$1"
+    if [[ "$name" == *@* ]]; then
+        printf '%s\n' "$name"
+        return 0
+    fi
+    printf '%s@%s\n' "$name" "$SESSION"
+}
+
+resolve_save_target_name() {
+    local requested="$1"
+    local shared="${2:-false}"
+
+    if [[ "$shared" == "true" ]]; then
+        printf '%s\n' "$requested"
+        return 0
+    fi
+
+    if [[ "$SESSION" == "default" ]]; then
+        printf '%s\n' "$requested"
+        return 0
+    fi
+
+    if [[ "$requested" == *@* ]]; then
+        printf '%s\n' "$requested"
+        return 0
+    fi
+
+    if saved_session_exists "$requested"; then
+        agent_scoped_saved_name "$requested"
+        return 0
+    fi
+
+    printf '%s\n' "$requested"
+}
 
 # ============================================================================
 # HELP
@@ -142,6 +189,7 @@ AUTH:
 LOGIN (manual SSO/MFA → headless handoff):
   login <url>                    Open headed browser for manual auth
   login done [--save <name>]     Transfer auth to headless, close headed window
+    --shared                     Save to the literal shared session name instead of forking
   login status                   Check if login window is open
   login cancel                   Close login window without transferring
 
@@ -182,6 +230,7 @@ SESSIONS:
   session                        Show current daemon session name
   session list                   List saved persistent sessions
   session save <name> [desc]     Save browser state (cookies, storage, URL)
+    --shared                     Overwrite the literal saved session name
   session load <name>            Restore saved session state
   session delete <name>          Delete a saved session
   session export <name> <file>   Export session to portable file
@@ -875,13 +924,16 @@ main() {
                 done)
                     shift
                     local save_name=""
+                    local shared_save=false
                     while [[ $# -gt 0 ]]; do
                         case "$1" in
                             --save) save_name="$2"; shift 2 ;;
+                            --shared) shared_save=true; shift ;;
                             *) shift ;;
                         esac
                     done
                     if [[ -n "$save_name" ]]; then
+                        save_name="$(resolve_save_target_name "$save_name" "$shared_save")"
                         json='{"id":"'$(cmd_id)'","action":"login_done","save":"'"$save_name"'"}'
                     else
                         json='{"id":"'$(cmd_id)'","action":"login_done"}'
@@ -914,7 +966,23 @@ main() {
                 save)
                     [[ $# -lt 2 ]] && { echo "Usage: agent-browse session save <name> [description]" >&2; exit 1; }
                     local name="$2"
-                    local desc="${3:-}"
+                    shift 2
+                    local shared_save=false
+                    local desc=""
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --shared) shared_save=true; shift ;;
+                            *)
+                                if [[ -z "$desc" ]]; then
+                                    desc="$1"
+                                else
+                                    desc="$desc $1"
+                                fi
+                                shift
+                                ;;
+                        esac
+                    done
+                    name="$(resolve_save_target_name "$name" "$shared_save")"
                     if [[ -n "$desc" ]]; then
                         json='{"id":"'$(cmd_id)'","action":"session_save","name":"'"$name"'","description":"'"$desc"'"}'
                     else

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -20,6 +21,17 @@ def require(condition: bool, message: str) -> None:
 def run(*args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         list(args),
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def run_bash(script: str, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", "-lc", script],
         cwd=ROOT,
         env=env,
         text=True,
@@ -79,6 +91,33 @@ def main() -> int:
     tmux_res = run(str(AGENT_DO), "browse", "session", env=tmux_env)
     require(tmux_res.returncode == 0, f"tmux fallback failed: {tmux_res.stderr}")
     require(session_name(tmux_res.stdout) == "tmux-58", f"unexpected tmux fallback: {tmux_res.stdout}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        temp_home = Path(tmp)
+        shared_dir = temp_home / ".agent-browse" / "sessions" / "travelbank"
+        shared_dir.mkdir(parents=True, exist_ok=True)
+        (shared_dir / "storage.json").write_text("{}")
+
+        fork_env = dict(explicit_default)
+        fork_env["HOME"] = str(temp_home)
+        fork_env["AGENT_BROWSER_SESSION"] = "codex-alpha"
+
+        helper = run_bash(
+            f"""
+source <(sed '$d' "{ROOT / 'tools/agent-browse/agent-browse'}")
+printf '%s\\n' "$(resolve_save_target_name travelbank false)"
+printf '%s\\n' "$(resolve_save_target_name travelbank true)"
+printf '%s\\n' "$(resolve_save_target_name freshsession false)"
+printf '%s\\n' "$(resolve_save_target_name travelbank@codex-alpha false)"
+""",
+            env=fork_env,
+        )
+        require(helper.returncode == 0, f"browse helper source failed: {helper.stderr}")
+        lines = [line.strip() for line in helper.stdout.splitlines() if line.strip()]
+        require(lines[0] == "travelbank@codex-alpha", f"expected shared session to fork: {lines}")
+        require(lines[1] == "travelbank", f"expected --shared to preserve literal name: {lines}")
+        require(lines[2] == "freshsession", f"expected new session name to remain literal: {lines}")
+        require(lines[3] == "travelbank@codex-alpha", f"expected agent-scoped names to remain unchanged: {lines}")
 
     print("browse session default tests passed")
     return 0
