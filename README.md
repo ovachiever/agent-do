@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 84 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 85 tools.
 
 When a command needs permission to control the visible local machine, `agent-do` uses an explicit runtime modifier instead of a wrapper tool:
 
@@ -325,9 +325,22 @@ agent-do spec show add-oauth-device-flow --type change
 agent-do spec status --change add-oauth-device-flow
 ```
 
+### `hardware`
+
+Unified hardware device control over the existing serial, bluetooth, USB, printer, and MIDI surfaces.
+
+```bash
+agent-do hardware snapshot
+agent-do hardware serial list
+agent-do hardware bluetooth devices
+agent-do hardware usb list
+agent-do hardware printer list
+agent-do hardware midi snapshot
+```
+
 ## Tool Surface
 
-There are 84 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 85 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
@@ -347,7 +360,7 @@ There are 84 tools today. A few are deep subsystems. Many are focused adapters. 
 | Infrastructure | `docker`, `k8s`, `cloud`, `gcp`, `ci`, `vm`, `network`, `dns`, `ssh`, `render`, `vercel`, `supabase`, `cloudflare`, `clerk`, `okta`, `namecheap` | Infra, cloud, auth, deployment |
 | Creative | `image`, `video`, `audio`, `3d`, `cad`, `latex` | Media and document generation |
 | Security | `burp`, `wireshark`, `ghidra` | Security and reverse-engineering tools |
-| Hardware | `serial`, `midi`, `homekit`, `bluetooth`, `usb`, `printer` | Device control |
+| Hardware | `hardware`, `serial`, `midi`, `homekit`, `bluetooth`, `usb`, `printer` | Device control and family-level hardware orchestration |
 | AI / Meta | `prompt`, `eval`, `memory`, `learn`, `swarm`, `agent`, `repl` | Agent support and orchestration |
 | Dev Tools | `git`, `api`, `tail`, `logs`, `sessions` | Git, HTTP, logs, session history |
 | Utilities | `clipboard`, `ocr`, `vision`, `metrics`, `debug` | System utility surfaces |

@@ -1499,6 +1499,51 @@ tools:
     - intent: transcribe recording.mp3
       command: agent-audio transcribe recording.mp3
     concurrency: mixed
+  hardware:
+    description: Unified hardware device control across serial, bluetooth, USB, printers, and MIDI
+    capabilities:
+    - snapshot connected hardware surfaces
+    - delegate serial port operations through one stable family tool
+    - delegate bluetooth device operations
+    - delegate USB device and storage operations
+    - delegate printer queue and print operations
+    - delegate MIDI device and message operations
+    commands:
+      snapshot: Snapshot all supported hardware domains
+      serial: 'Serial operations: serial <list|monitor|send|config> ...'
+      bluetooth: 'Bluetooth operations: bluetooth <status|devices|scan|connect|disconnect> ...'
+      usb: 'USB operations: usb <list|tree|info|eject|mount|unmount|disks> ...'
+      printer: 'Printer operations: printer <list|default|status|print|jobs|cancel|queue> ...'
+      midi: 'MIDI operations: midi <snapshot|list|monitor|send|play> ...'
+    examples:
+    - intent: snapshot connected hardware devices
+      command: agent-hardware snapshot
+    - intent: list serial ports through the hardware family
+      command: agent-hardware serial list
+    - intent: list printers through the hardware family
+      command: agent-hardware printer list
+    routing:
+      discover_keywords:
+      - hardware
+      - devices
+      - usb
+      - bluetooth
+      - serial
+      - printer
+      - midi
+      prompt_patterns:
+      - \bhardware\b
+      - \bbluetooth\b
+      - \busb\b
+      - \bserial\b
+      - \bprinter\b
+      - \bmidi\b
+      recommended_entrypoints:
+      - agent-do hardware snapshot
+      - agent-do hardware serial list
+      - agent-do hardware usb list
+      default_command: snapshot
+    concurrency: mixed
   serial:
     description: Serial port communication
     capabilities:

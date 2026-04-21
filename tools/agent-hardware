@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# agent-hardware - Unified hardware device control
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ -f "$REPO_ROOT/lib/json-output.sh" ]]; then
+    # shellcheck source=lib/json-output.sh
+    source "$REPO_ROOT/lib/json-output.sh"
+fi
+
+show_help() {
+    cat << 'EOF'
+agent-hardware - Unified hardware device control
+
+Commands:
+  snapshot                         Snapshot serial, bluetooth, usb, printers, and MIDI
+  serial <command> [args...]       Serial port operations
+  bluetooth <command> [args...]    Bluetooth operations
+  usb <command> [args...]          USB device operations
+  printer <command> [args...]      Printer operations
+  midi <command> [args...]         MIDI device operations
+
+Options:
+  --json                           Wrap delegated command output in structured JSON
+
+Examples:
+  agent-hardware snapshot
+  agent-hardware serial list
+  agent-hardware serial monitor /dev/tty.usbserial-1234 --baud 115200
+  agent-hardware bluetooth devices
+  agent-hardware usb list
+  agent-hardware printer list
+  agent-hardware midi snapshot
+EOF
+}
+
+resolve_leaf_exec() {
+    local leaf="$1"
+    local leaf_dir="${AGENT_DO_HARDWARE_TOOL_DIR:-$SCRIPT_DIR}"
+    local local_exec="$leaf_dir/agent-$leaf"
+
+    if [[ -x "$local_exec" ]]; then
+        echo "$local_exec"
+        return 0
+    fi
+
+    if command -v "agent-$leaf" >/dev/null 2>&1; then
+        command -v "agent-$leaf"
+        return 0
+    fi
+
+    return 1
+}
+
+delegate_domain() {
+    local domain="$1"
+    shift || true
+
+    local leaf_exec
+    if ! leaf_exec="$(resolve_leaf_exec "$domain")"; then
+        json_error "agent-$domain is not available" 1
+        return 1
+    fi
+
+    if [[ "${OUTPUT_FORMAT:-text}" != "json" ]]; then
+        exec "$leaf_exec" "$@"
+    fi
+
+    local stdout_file stderr_file status
+    stdout_file="$(mktemp)"
+    stderr_file="$(mktemp)"
+
+    set +e
+    "$leaf_exec" "$@" >"$stdout_file" 2>"$stderr_file"
+    status=$?
+    set -e
+
+    python3 - "$domain" "$status" "$stdout_file" "$stderr_file" "$@" <<'PY'
+import json
+import pathlib
+import sys
+
+domain = sys.argv[1]
+status = int(sys.argv[2])
+stdout_path = pathlib.Path(sys.argv[3])
+stderr_path = pathlib.Path(sys.argv[4])
+command = sys.argv[5:]
+
+stdout = stdout_path.read_text()
+stderr = stderr_path.read_text()
+stdout_path.unlink(missing_ok=True)
+stderr_path.unlink(missing_ok=True)
+
+result = stdout.strip()
+try:
+    parsed_result = json.loads(result)
+except Exception:
+    parsed_result = result
+
+payload = {
+    "success": status == 0,
+    "tool": "hardware",
+    "domain": domain,
+    "command": command,
+    "exit_code": status,
+    "result": parsed_result,
+}
+
+if stderr.strip():
+    payload["stderr"] = stderr.strip()
+
+print(json.dumps(payload, indent=2))
+PY
+
+    return "$status"
+}
+
+cmd_snapshot() {
+    local leaf_dir="${AGENT_DO_HARDWARE_TOOL_DIR:-$SCRIPT_DIR}"
+    python3 - "$leaf_dir" <<'PY'
+import json
+import os
+import platform
+import subprocess
+import sys
+from pathlib import Path
+
+leaf_dir = Path(sys.argv[1])
+
+
+def tool_path(name: str) -> Path:
+    return leaf_dir / f"agent-{name}"
+
+
+def split_lines(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def run_tool(name: str, *args: str) -> dict:
+    path = tool_path(name)
+    if not path.exists():
+        return {"available": False, "error": f"missing {path.name}"}
+
+    completed = subprocess.run(
+        [str(path), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    payload = {
+        "available": True,
+        "exit_code": completed.returncode,
+    }
+    if completed.stdout.strip():
+        payload["stdout"] = completed.stdout.strip()
+    if completed.stderr.strip():
+        payload["stderr"] = completed.stderr.strip()
+    return payload
+
+
+serial = run_tool("serial", "list")
+serial["ports"] = split_lines(serial.get("stdout", ""))
+
+bluetooth_status = run_tool("bluetooth", "status")
+bluetooth_status["status_lines"] = split_lines(bluetooth_status.get("stdout", ""))
+bluetooth_devices = run_tool("bluetooth", "devices")
+bluetooth_devices["devices"] = split_lines(bluetooth_devices.get("stdout", ""))
+
+usb = run_tool("usb", "list")
+usb["devices"] = split_lines(usb.get("stdout", ""))
+
+printer = run_tool("printer", "list")
+printer["printers"] = split_lines(printer.get("stdout", ""))
+
+midi = run_tool("midi", "snapshot")
+if "stdout" in midi:
+    try:
+        midi["snapshot"] = json.loads(midi["stdout"])
+    except json.JSONDecodeError:
+        midi["snapshot"] = {"raw": midi["stdout"]}
+
+snapshot = {
+    "tool": "hardware",
+    "timestamp": subprocess.run(
+        ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"],
+        text=True,
+        capture_output=True,
+        check=False,
+    ).stdout.strip(),
+    "platform": platform.system(),
+    "serial": serial,
+    "bluetooth": {
+        "status": bluetooth_status,
+        "devices": bluetooth_devices,
+    },
+    "usb": usb,
+    "printer": printer,
+    "midi": midi,
+}
+
+print(json.dumps(snapshot, indent=2))
+PY
+}
+
+parse_output_format "${@:-}"
+ARGS=("${PARSED_ARGS[@]}")
+
+command="${ARGS[0]:-help}"
+
+case "$command" in
+    snapshot|status)
+        cmd_snapshot
+        ;;
+    serial|bluetooth|usb|printer|midi)
+        if [[ ${#ARGS[@]} -lt 2 ]]; then
+            json_error "Subcommand required for $command" 1
+            exit 1
+        fi
+        delegate_domain "$command" "${ARGS[@]:1}"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        json_error "Unknown command: $command" 1
+        if [[ "${OUTPUT_FORMAT:-text}" != "json" ]]; then
+            echo "Try: agent-hardware help" >&2
+        fi
+        exit 1
+        ;;
+esac

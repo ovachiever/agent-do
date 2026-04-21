@@ -7,6 +7,7 @@
 - `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
 - `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.
 - `agent-do resend` for exact Resend domain records, verification state, and public DNS checks without relying on UI text.
+- `agent-do hardware` as a family-level surface over serial, bluetooth, USB, printer, and MIDI commands, with a combined hardware snapshot and delegated subdomain commands.
 - Internal `lib/live/` runtime substrate for explicit local-machine control approval, leases, and rerun hints behind the new `agent-do +live(...) ...` execution modifier.
 - `lib/creds-helper.sh` as a shared secure-store backend for macOS Keychain, Linux Secret Service, and a Windows DPAPI-backed per-user store.
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.
