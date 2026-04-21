@@ -1006,6 +1006,57 @@ tools:
       optional:
       - SLACK_WEBHOOK_URL
     concurrency: mixed
+  meetings:
+    description: Unified enterprise meeting orchestration across Zoom, Google Meet, and Microsoft Teams
+    capabilities:
+    - detect the active meeting provider
+    - auto-route join links and meeting identifiers to the correct provider
+    - provide one snapshot for provider readiness and current meeting state
+    - expose generic meeting controls like mute, video, share, chat, and end
+    - preserve provider-specific passthroughs under one family tool
+    commands:
+      snapshot: Snapshot provider availability and active meeting state
+      providers: List supported providers
+      active: Show the detected active meeting provider
+      join: 'Join a meeting: join <url|code|id> [--provider <name>]'
+      new: 'Start a new meeting: new [provider]'
+      schedule: 'Schedule a meeting: schedule <provider> <topic> [...]'
+      mute: Toggle microphone on the active provider
+      video: Toggle camera on the active provider
+      share: Start screen sharing on the active provider
+      chat: Open or send meeting chat on the active provider
+      end: End or leave the active meeting
+      zoom: 'Zoom passthrough: zoom <command> [args...]'
+      meet: 'Google Meet passthrough: meet <command> [args...]'
+      teams: 'Teams passthrough: teams <command> [args...]'
+    examples:
+    - intent: join a Google Meet link
+      command: agent-meetings join https://meet.google.com/abc-defg-hij
+    - intent: mute the current meeting
+      command: agent-meetings mute
+    - intent: start a new Zoom meeting
+      command: agent-meetings new zoom
+    routing:
+      discover_keywords:
+      - meetings
+      - zoom
+      - google meet
+      - teams
+      - conference call
+      - video call
+      prompt_patterns:
+      - \bzoom\b
+      - \bgoogle meet\b
+      - \bmeetings?\b
+      - \bmicrosoft teams\b
+      - \bteams meeting\b
+      - \bvideo call\b
+      recommended_entrypoints:
+      - agent-do meetings snapshot
+      - agent-do meetings join <meeting-url>
+      - agent-do meetings mute
+      default_command: snapshot
+    concurrency: mixed
   discord:
     description: Control Discord
     capabilities:

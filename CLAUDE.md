@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 85 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 86 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` (instant, no LLM)
 - **Natural Language** (humans): `agent-do -n "what you want"` (LLM-routed via Claude)
 
@@ -102,7 +102,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # filterEntries: removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth: identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill: writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 85 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 86 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog: tool descriptions, commands, examples
 ```
 
@@ -142,6 +142,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-namecheap` | Bash + curl | Namecheap domain and DNS management. Safe GET→merge→SET writes with suspicious-value rejection, exact provider read-back verification, and optional public DNS checks. Requires `NAMECHEAP_API_USER` + `NAMECHEAP_API_KEY`. |
 | `agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. Requires `RESEND_API_KEY`. |
 | `agent-hardware` | Bash | Unified hardware family surface over serial, bluetooth, USB, printers, and MIDI. `snapshot` gives one combined view, and `hardware <serial|bluetooth|usb|printer|midi> ...` delegates through a stable family tool without breaking the legacy leaf commands. |
+| `agent-meetings` | Bash | Unified enterprise meeting surface over Zoom, Google Meet, and Microsoft Teams. `snapshot` reports provider readiness and active meeting state, `join` auto-detects meeting URLs and codes, generic controls like `mute` and `share` route to the active provider, and provider passthroughs stay available under one family tool. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor: visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring. 22 commands. Storage: `~/.agent-do/context/` (global, per-user). |
 | `agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons (context/problem/solution/takeaway), architectural decisions (options/chosen/rationale/confidence), pattern consolidation via harvest. Git history review, swarm checkpoints, lesson promotion (local → team → global). Storage: `.zpc/` (per-project). Sources `lib/json-output.sh` + `lib/snapshot.sh`. |
@@ -171,7 +172,7 @@ Every tool in `registry.yaml` declares a `concurrency` field:
 | `write` | Has state-mutating commands | Must run serially |
 | `mixed` | Some commands read, some write | Orchestrator checks per-command |
 
-22 read-only tools (context, ocr, vision, metrics, etc.) can run concurrently. 16 write tools (render, vercel, namecheap, manna, etc.) must run serially. 43 mixed tools require per-command classification. When spawning parallel agents, assign read-only tools freely; gate write tools behind sequential execution.
+22 read-only tools (context, ocr, vision, metrics, etc.) can run concurrently. 16 write tools (render, vercel, namecheap, manna, etc.) must run serially. 44 mixed tools require per-command classification. When spawning parallel agents, assign read-only tools freely; gate write tools behind sequential execution.
 
 ### Universal Tool Pattern
 

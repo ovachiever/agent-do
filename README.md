@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 85 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 86 tools.
 
 When a command needs permission to control the visible local machine, `agent-do` uses an explicit runtime modifier instead of a wrapper tool:
 
@@ -338,9 +338,21 @@ agent-do hardware printer list
 agent-do hardware midi snapshot
 ```
 
+### `meetings`
+
+Unified meeting orchestration over Zoom, Google Meet, and Microsoft Teams, with provider auto-detection for join links and active-meeting controls.
+
+```bash
+agent-do meetings snapshot
+agent-do meetings join https://meet.google.com/abc-defg-hij
+agent-do meetings mute
+agent-do meetings new zoom
+agent-do meetings teams join "https://teams.microsoft.com/l/meetup-join/..."
+```
+
 ## Tool Surface
 
-There are 85 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 86 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
@@ -355,7 +367,7 @@ There are 85 tools today. A few are deep subsystems. Many are focused adapters. 
 | Mobile | `ios`, `android` | Simulator and emulator control |
 | Desktop | `macos`, `tui`, `screen`, `ide` | GUI and terminal UI automation |
 | Data | `db`, `excel`, `sheets`, `pdf`, `pdf2md` | Databases, spreadsheets, PDF flows |
-| Communication | `slack`, `discord`, `email`, `sms`, `teams`, `zoom`, `meet`, `voice`, `resend` | Messaging, email delivery, and meeting surfaces |
+| Communication | `meetings`, `slack`, `discord`, `email`, `sms`, `teams`, `zoom`, `meet`, `voice`, `resend` | Messaging, email delivery, and meeting surfaces |
 | Productivity | `calendar`, `notion`, `linear`, `figma`, `jupyter`, `lab`, `colab` | Product and workflow tools |
 | Infrastructure | `docker`, `k8s`, `cloud`, `gcp`, `ci`, `vm`, `network`, `dns`, `ssh`, `render`, `vercel`, `supabase`, `cloudflare`, `clerk`, `okta`, `namecheap` | Infra, cloud, auth, deployment |
 | Creative | `image`, `video`, `audio`, `3d`, `cad`, `latex` | Media and document generation |
