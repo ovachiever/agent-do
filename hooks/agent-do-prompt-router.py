@@ -244,6 +244,38 @@ FRONTEND_DESIGN_DIRECT = [
     r'\b(screenshot|browse).*(before|after|baseline|compare)\b',
 ]
 
+COMPLETION_DIRECT_WORDS = {
+    "continue",
+    "cont",
+}
+
+COMPLETION_AFFIRMATIONS = {
+    "agreed",
+    "ok",
+    "okay",
+    "sure",
+    "yep",
+    "yes",
+}
+
+COMPLETION_STATUS_WORDS = {
+    "next",
+    "left",
+    "else",
+}
+
+COMPLETION_STATUS_PATTERNS = [
+    r"\bwhere(\s+are)?\s+we\s+at\b",
+    r"\bhow('?s|\s+is)\s+it\s+going\b",
+    r"\bhow\s+are\s+we\s+doing\b",
+]
+
+COMPLETION_CHECK_CONTEXT = """## Completion Check
+
+Before proposing more work, first decide whether the primary goal is already complete.
+If it is, stop and label anything else as optional backlog, not required next work.
+"""
+
 DESIGN_TOOLKIT_CONTEXT = """## Design Toolkit — ACTIVE for this task
 
 This request involves visual/UI work. Follow this protocol:
@@ -359,6 +391,41 @@ def detect_frontend_design(prompt: str) -> bool:
     return False
 
 
+def needs_completion_check(prompt: str) -> bool:
+    """Detect short continuation/status prompts that should refresh the stop condition."""
+    prompt_lower = prompt.lower().strip()
+    normalized = re.sub(r"[^a-z0-9'\s]+", " ", prompt_lower)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return False
+
+    words = normalized.split()
+    short_prompt = len(words) <= 8
+
+    if short_prompt and any(word in COMPLETION_DIRECT_WORDS for word in words):
+        return True
+
+    if short_prompt and words and words[0] in COMPLETION_AFFIRMATIONS:
+        if any(word in COMPLETION_DIRECT_WORDS or (word == "go" and "ahead" in words) for word in words[1:]):
+            return True
+
+    if short_prompt and re.search(r"\bwhat('?s|\s+is)?\s+(next|left)\b", normalized):
+        return True
+
+    if short_prompt and "what" in words:
+        if any(word in COMPLETION_STATUS_WORDS for word in words):
+            return True
+
+    if short_prompt and "anything" in words and "else" in words:
+        return True
+
+    for pattern in COMPLETION_STATUS_PATTERNS:
+        if re.search(pattern, normalized):
+            return True
+
+    return False
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -374,7 +441,9 @@ def main():
     matches = shared_matches + analyze_prompt(prompt, skip_tools={tool for tool, _ in shared_matches})
     is_design = detect_frontend_design(prompt)
 
-    if matches or is_design:
+    needs_completion = needs_completion_check(prompt)
+
+    if matches or is_design or needs_completion:
         context = ""
 
         if matches:
@@ -401,6 +470,20 @@ def main():
                         "prompt_design_toolkit",
                         "prompt_router",
                         tools=["browse", "dpt"],
+                        prompt=prompt[:240],
+                    )
+                except Exception:
+                    pass
+
+        if needs_completion:
+            if context:
+                context += "\n"
+            context += COMPLETION_CHECK_CONTEXT
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "prompt_completion_check",
+                        "prompt_router",
                         prompt=prompt[:240],
                     )
                 except Exception:

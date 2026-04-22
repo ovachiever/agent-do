@@ -440,7 +440,7 @@ agent-do find ios simulator
 When Claude Code hooks are installed:
 
 - SessionStart injects project-aware tool guidance
-- UserPromptSubmit suggests likely `agent-do` tools from shared routing metadata
+- UserPromptSubmit suggests likely `agent-do` tools from shared routing metadata and adds a short completion-check reminder on fuzzy status/continue prompts like `continue`, `what's left`, or `where we at`
 - PreToolUse emits hard nudges when Claude reaches for raw commands that already have an `agent-do` equivalent
 
 Those nudges are non-blocking by default. They are meant to bend behavior, not break flow.

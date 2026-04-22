@@ -86,6 +86,25 @@ def main() -> int:
     spec_prompt_context = spec_prompt_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do spec" in spec_prompt_context, f"expected spec routing context, got: {spec_prompt_context}")
 
+    completion_prompts = [
+        "continue",
+        "agreed, continue",
+        "what's left",
+        "how's it going",
+        "where we at",
+    ]
+    for completion_prompt in completion_prompts:
+        completion_result = run(
+            "python3",
+            "hooks/agent-do-prompt-router.py",
+            input_text=json.dumps({"prompt": completion_prompt}),
+        )
+        require(completion_result.returncode == 0, f"completion prompt-router failed: {completion_result.stderr}")
+        completion_payload = json.loads(completion_result.stdout)
+        completion_context = completion_payload["hookSpecificOutput"]["additionalContext"]
+        require("## Completion Check" in completion_context, f"expected completion check context, got: {completion_context}")
+        require("primary goal is already complete" in completion_context, f"unexpected completion check wording: {completion_context}")
+
     playwright_nudge = run(
         "python3",
         "hooks/agent-do-pretooluse-check.py",
@@ -168,6 +187,12 @@ def main() -> int:
         )
         _ = run(
             "python3",
+            "hooks/agent-do-prompt-router.py",
+            input_text='{"prompt":"continue"}',
+            env=env,
+        )
+        _ = run(
+            "python3",
             "hooks/agent-do-pretooluse-check.py",
             input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
             env=env,
@@ -176,7 +201,7 @@ def main() -> int:
         stats = run("./agent-do", "nudges", "stats", "--json", env=env)
         require(stats.returncode == 0, f"nudges stats failed: {stats.stderr}")
         stats_payload = json.loads(stats.stdout)
-        require(stats_payload["total_events"] >= 2, f"expected telemetry events, got: {stats_payload}")
+        require(stats_payload["total_events"] >= 3, f"expected telemetry events, got: {stats_payload}")
         require("prompt_router" in stats_payload["sources"], f"missing prompt router telemetry: {stats_payload}")
         require("pretool" in stats_payload["sources"], f"missing pretool telemetry: {stats_payload}")
 
