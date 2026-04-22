@@ -11,22 +11,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from notify import (  # noqa: E402
+    emit_event,
     get_recipient,
+    get_rule,
     list_recipients,
+    list_rules,
     load_config,
+    load_rules,
     main_json,
     parse_provider_list,
+    parse_duration_seconds,
+    parse_key_value_pairs,
     providers_payload,
     render_text_result,
     save_config,
+    save_rules,
     send_notification,
+    update_rule,
     update_recipient,
 )
 from live.errors import LiveApprovalRequiredError  # noqa: E402
 
 
 def preprocess_args(argv: list[str]) -> list[str]:
-    commands = {"send", "providers", "recipients", "show", "set-recipient", "help", "--help", "-h"}
+    commands = {"send", "providers", "recipients", "show", "set-recipient", "rules", "show-rule", "set-rule", "emit", "help", "--help", "-h"}
     if argv and argv[0] not in commands and not argv[0].startswith("-"):
         return ["send", *argv]
     return argv
@@ -35,7 +43,7 @@ def preprocess_args(argv: list[str]) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-do notify",
-        description="Cross-provider notification contract for SMS, email, Slack, and local pipe delivery",
+        description="Cross-provider notification contract for SMS, email, Slack, Messenger, and local pipe delivery",
     )
     parser.add_argument("--json", action="store_true", help="Output structured JSON")
 
@@ -71,6 +79,32 @@ def build_parser() -> argparse.ArgumentParser:
     set_parser.add_argument("--prefer", help="Comma-separated preferred provider order")
     set_parser.add_argument("--subject", help="Default subject for email notifications")
 
+    rules_parser = subparsers.add_parser("rules", help="List configured notification rules")
+    rules_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    show_rule_parser = subparsers.add_parser("show-rule", help="Show one configured notification rule")
+    show_rule_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    show_rule_parser.add_argument("name", help="Rule name")
+
+    set_rule_parser = subparsers.add_parser("set-rule", help="Create or update a notification rule")
+    set_rule_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    set_rule_parser.add_argument("name", help="Rule name")
+    set_rule_parser.add_argument("--recipient", required=True, help="Configured notify recipient alias")
+    set_rule_parser.add_argument("--event", required=True, help="Event name to match")
+    set_rule_parser.add_argument("--message", required=True, help="Message template, e.g. 'Build failed for {service}'")
+    set_rule_parser.add_argument("--subject", help="Optional subject template")
+    set_rule_parser.add_argument("--via", help="Comma-separated provider order for this rule")
+    set_rule_parser.add_argument("--match", action="append", default=[], help="Exact fact match in key=value form; may be repeated")
+    set_rule_parser.add_argument("--fingerprint", help="Template for cooldown fingerprint, e.g. '{service}:{branch}'")
+    set_rule_parser.add_argument("--cooldown", help="Cooldown duration like 15m, 1h, or 1d")
+
+    emit_parser = subparsers.add_parser("emit", help="Evaluate rules for an event and send matching notifications")
+    emit_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    emit_parser.add_argument("event", help="Event name")
+    emit_parser.add_argument("--fact", action="append", default=[], help="Fact in key=value form; may be repeated")
+    emit_parser.add_argument("--dry-run", action="store_true", help="Show planned notifications without sending")
+    emit_parser.add_argument("--all", action="store_true", help="Send through all matching providers for each rule")
+
     return parser
 
 
@@ -78,6 +112,7 @@ def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(preprocess_args(argv))
     config = load_config()
+    rules_config = load_rules()
 
     if args.command in (None, "help"):
         parser.print_help()
@@ -139,6 +174,93 @@ def main(argv: list[str]) -> int:
         else:
             print(f"Saved recipient alias: {args.alias}")
         return 0
+
+    if args.command == "rules":
+        payload = {"rules": list_rules(rules_config)}
+        if args.json:
+            main_json(payload)
+        else:
+            for rule in payload["rules"]:
+                via = ",".join(rule.get("via", [])) or "-"
+                print(
+                    f"{rule['name']}: event={rule.get('event')} recipient={rule.get('recipient')} via={via} cooldown={rule.get('cooldown_seconds', 0)}s"
+                )
+        return 0
+
+    if args.command == "show-rule":
+        rule = get_rule(rules_config, args.name)
+        if rule is None:
+            message = f"Unknown rule: {args.name}"
+            if args.json:
+                main_json({"success": False, "error": message})
+            else:
+                print(message, file=sys.stderr)
+            return 1
+        payload = {"name": args.name, "rule": rule}
+        if args.json:
+            main_json(payload)
+        else:
+            print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "set-rule":
+        try:
+            rule = update_rule(
+                rules_config,
+                args.name,
+                recipient=args.recipient,
+                event=args.event,
+                message=args.message,
+                via=parse_provider_list(args.via) if args.via is not None else None,
+                subject=args.subject,
+                match=parse_key_value_pairs(args.match),
+                fingerprint=args.fingerprint,
+                cooldown_seconds=parse_duration_seconds(args.cooldown),
+            )
+        except ValueError as exc:
+            payload = {"success": False, "error": str(exc)}
+            if args.json:
+                main_json(payload)
+            else:
+                print(str(exc), file=sys.stderr)
+            return 1
+        save_rules(rules_config)
+        payload = {"success": True, "name": args.name, "rule": rule}
+        if args.json:
+            main_json(payload)
+        else:
+            print(f"Saved rule: {args.name}")
+        return 0
+
+    if args.command == "emit":
+        try:
+            payload = emit_event(
+                config,
+                rules_config,
+                args.event,
+                facts=parse_key_value_pairs(args.fact),
+                dry_run=args.dry_run,
+                send_all=args.all,
+            )
+        except LiveApprovalRequiredError as exc:
+            payload = exc.payload()
+            if args.json:
+                main_json(payload)
+            else:
+                print(json.dumps(payload, indent=2))
+            return 1
+        except ValueError as exc:
+            payload = {"success": False, "error": str(exc)}
+            if args.json:
+                main_json(payload)
+            else:
+                print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            main_json(payload)
+        else:
+            print(json.dumps(payload, indent=2))
+        return 0 if payload.get("success") else 1
 
     if args.command == "send":
         try:

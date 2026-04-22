@@ -118,6 +118,49 @@ print(f"{provider} sent")
         recipients_payload = json.loads(recipients.stdout)
         require(recipients_payload["recipients"][0]["alias"] == "me", f"unexpected recipients payload: {recipients_payload}")
 
+        set_rule = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "set-rule",
+                "build_failed",
+                "--recipient",
+                "me",
+                "--event",
+                "build",
+                "--message",
+                "Build failed for {service} on {branch}",
+                "--subject",
+                "Build failed: {service}",
+                "--via",
+                "sms,email",
+                "--match",
+                "status=failed",
+                "--match",
+                "env=prod",
+                "--fingerprint",
+                "{service}:{branch}:{status}",
+                "--cooldown",
+                "1h",
+                "--json",
+            ],
+            env=env,
+        )
+        require(set_rule.returncode == 0, f"set-rule failed: {set_rule.stderr}")
+        set_rule_payload = json.loads(set_rule.stdout)
+        require(set_rule_payload["rule"]["event"] == "build", f"unexpected set-rule payload: {set_rule_payload}")
+        require(set_rule_payload["rule"]["cooldown_seconds"] == 3600, f"unexpected cooldown payload: {set_rule_payload}")
+
+        rules = run([str(AGENT_DO), "notify", "rules", "--json"], env=env)
+        require(rules.returncode == 0, f"notify rules failed: {rules.stderr}")
+        rules_payload = json.loads(rules.stdout)
+        require(rules_payload["rules"][0]["name"] == "build_failed", f"unexpected rules payload: {rules_payload}")
+
+        show_rule = run([str(AGENT_DO), "notify", "show-rule", "build_failed", "--json"], env=env)
+        require(show_rule.returncode == 0, f"show-rule failed: {show_rule.stderr}")
+        show_rule_payload = json.loads(show_rule.stdout)
+        require(show_rule_payload["rule"]["match"]["status"] == "failed", f"unexpected show-rule payload: {show_rule_payload}")
+
         dry_run = run([str(AGENT_DO), "notify", "me", "Build complete", "--dry-run", "--json"], env=env)
         require(dry_run.returncode == 0, f"notify dry-run failed: {dry_run.stderr}")
         dry_run_payload = json.loads(dry_run.stdout)
@@ -140,6 +183,105 @@ print(f"{provider} sent")
             f"unexpected fallback order: {fallback_payload}",
         )
         require(fallback_payload["attempts"][1]["success"] is True, f"expected email fallback success: {fallback_payload}")
+
+        emit_nonmatch = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "emit",
+                "build",
+                "--fact",
+                "service=api",
+                "--fact",
+                "branch=main",
+                "--fact",
+                "status=passed",
+                "--fact",
+                "env=prod",
+                "--json",
+            ],
+            env=env,
+        )
+        require(emit_nonmatch.returncode == 0, f"emit nonmatch failed: {emit_nonmatch.stderr}")
+        emit_nonmatch_payload = json.loads(emit_nonmatch.stdout)
+        require(emit_nonmatch_payload["matched_rules"] == [], f"expected no matched rules: {emit_nonmatch_payload}")
+
+        emit_dry_run = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "emit",
+                "build",
+                "--fact",
+                "service=api",
+                "--fact",
+                "branch=main",
+                "--fact",
+                "status=failed",
+                "--fact",
+                "env=prod",
+                "--dry-run",
+                "--json",
+            ],
+            env=env,
+        )
+        require(emit_dry_run.returncode == 0, f"emit dry-run failed: {emit_dry_run.stderr}")
+        emit_dry_run_payload = json.loads(emit_dry_run.stdout)
+        require(len(emit_dry_run_payload["matched_rules"]) == 1, f"expected matched rule: {emit_dry_run_payload}")
+        require(emit_dry_run_payload["results"][0]["planned"] is True, f"expected planned emit result: {emit_dry_run_payload}")
+        require(
+            emit_dry_run_payload["results"][0]["notification"]["attempts"][0]["provider"] == "sms",
+            f"unexpected emit attempt order: {emit_dry_run_payload}",
+        )
+
+        del env["NOTIFY_TEST_FAIL"]
+        emit_sent = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "emit",
+                "build",
+                "--fact",
+                "service=api",
+                "--fact",
+                "branch=main",
+                "--fact",
+                "status=failed",
+                "--fact",
+                "env=prod",
+                "--json",
+            ],
+            env=env,
+        )
+        require(emit_sent.returncode == 0, f"emit send failed: {emit_sent.stderr}")
+        emit_sent_payload = json.loads(emit_sent.stdout)
+        require(emit_sent_payload["results"][0]["success"] is True, f"expected successful emit send: {emit_sent_payload}")
+        require(
+            emit_sent_payload["results"][0]["notification"]["attempts"][0]["provider"] == "sms",
+            f"unexpected emit notification payload: {emit_sent_payload}",
+        )
+
+        emit_cooldown = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "emit",
+                "build",
+                "--fact",
+                "service=api",
+                "--fact",
+                "branch=main",
+                "--fact",
+                "status=failed",
+                "--fact",
+                "env=prod",
+                "--json",
+            ],
+            env=env,
+        )
+        require(emit_cooldown.returncode == 0, f"emit cooldown failed: {emit_cooldown.stderr}")
+        emit_cooldown_payload = json.loads(emit_cooldown.stdout)
+        require(emit_cooldown_payload["results"][0]["skipped"] == "cooldown", f"expected cooldown skip: {emit_cooldown_payload}")
 
         messenger_denied = run([str(AGENT_DO), "notify", "me", "Ping", "--via", "messenger", "--json"], env=env)
         require(messenger_denied.returncode == 1, f"expected messenger live approval failure: {messenger_denied.stdout} {messenger_denied.stderr}")

@@ -210,6 +210,8 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 - `agent-do notify <recipient> <message>` routes outbound notifications without introducing another registry tool
 - provider adapters currently target `sms`, `email`, `slack`, `messenger`, and local `pipe`
 - recipient aliases, preferred provider order, and default subjects live under `~/.agent-do/notify/recipients.json`
+- event rules, fingerprints, and cooldown-aware delivery state live under `~/.agent-do/notify/rules.json` and `~/.agent-do/notify/state.json`
+- `agent-do notify set-rule ...` + `agent-do notify emit ...` let agents declare criteria once and later emit structured events with `key=value` facts
 - supports first-success fallback routing or `--all` fanout across matching providers
 - `messenger` is intentionally a live provider: it requires `+live(...)` and uses the existing local-machine control substrate instead of pretending to be an API transport
 

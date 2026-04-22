@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import time
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ from live.policy import require_live_control
 AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
 NOTIFY_DIR = AGENT_DO_HOME / "notify"
 RECIPIENTS_PATH = NOTIFY_DIR / "recipients.json"
+RULES_PATH = NOTIFY_DIR / "rules.json"
+STATE_PATH = NOTIFY_DIR / "state.json"
 
 DEFAULT_CONFIG = {
     "defaults": {
@@ -25,6 +28,14 @@ DEFAULT_CONFIG = {
         "subject": "agent-do notification",
     },
     "recipients": {},
+}
+
+DEFAULT_RULES = {
+    "rules": {},
+}
+
+DEFAULT_STATE = {
+    "deliveries": {},
 }
 
 PROVIDERS: dict[str, dict[str, str]] = {
@@ -66,9 +77,37 @@ def load_config() -> dict[str, Any]:
     return merged
 
 
+def load_rules() -> dict[str, Any]:
+    if not RULES_PATH.exists():
+        return json.loads(json.dumps(DEFAULT_RULES))
+    data = json.loads(RULES_PATH.read_text())
+    merged = json.loads(json.dumps(DEFAULT_RULES))
+    merged["rules"].update(data.get("rules", {}))
+    return merged
+
+
 def save_config(config: dict[str, Any]) -> None:
     ensure_notify_dir()
     RECIPIENTS_PATH.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+
+
+def save_rules(rules: dict[str, Any]) -> None:
+    ensure_notify_dir()
+    RULES_PATH.write_text(json.dumps(rules, indent=2, sort_keys=True) + "\n")
+
+
+def load_state() -> dict[str, Any]:
+    if not STATE_PATH.exists():
+        return json.loads(json.dumps(DEFAULT_STATE))
+    data = json.loads(STATE_PATH.read_text())
+    merged = json.loads(json.dumps(DEFAULT_STATE))
+    merged["deliveries"].update(data.get("deliveries", {}))
+    return merged
+
+
+def save_state(state: dict[str, Any]) -> None:
+    ensure_notify_dir()
+    STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
 
 
 def normalize_provider(provider: str) -> str:
@@ -84,6 +123,39 @@ def parse_provider_list(value: str | None) -> list[str]:
         if provider:
             providers.append(provider)
     return providers
+
+
+def parse_key_value_pairs(values: list[str] | None) -> dict[str, str]:
+    items: dict[str, str] = {}
+    for value in values or []:
+        if "=" not in value:
+            raise ValueError(f"Expected key=value, got: {value}")
+        key, item = value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Expected non-empty key in pair: {value}")
+        items[key] = item
+    return items
+
+
+def parse_duration_seconds(value: str | None) -> int:
+    if value is None:
+        return 0
+    raw = value.strip().lower()
+    if not raw:
+        return 0
+    suffix_map = {
+        "s": 1,
+        "m": 60,
+        "h": 3600,
+        "d": 86400,
+    }
+    suffix = raw[-1]
+    if suffix.isdigit():
+        return int(raw)
+    if suffix not in suffix_map:
+        raise ValueError(f"Unsupported duration suffix in: {value}")
+    return int(raw[:-1]) * suffix_map[suffix]
 
 
 def list_recipients(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -139,6 +211,116 @@ def update_recipient(
 
     recipients[alias] = recipient
     return recipient
+
+
+def list_rules(rules_config: dict[str, Any]) -> list[dict[str, Any]]:
+    items = []
+    for name, data in sorted(rules_config.get("rules", {}).items()):
+        items.append(
+            {
+                "name": name,
+                "event": data.get("event"),
+                "recipient": data.get("recipient"),
+                "via": data.get("via", []),
+                "match": data.get("match", {}),
+                "cooldown_seconds": int(data.get("cooldown_seconds", 0) or 0),
+            }
+        )
+    return items
+
+
+def get_rule(rules_config: dict[str, Any], name: str) -> dict[str, Any] | None:
+    rule = rules_config.get("rules", {}).get(name)
+    if rule is None:
+        return None
+    return dict(rule)
+
+
+def update_rule(
+    rules_config: dict[str, Any],
+    name: str,
+    *,
+    recipient: str,
+    event: str,
+    message: str,
+    via: list[str] | None = None,
+    subject: str | None = None,
+    match: dict[str, str] | None = None,
+    fingerprint: str | None = None,
+    cooldown_seconds: int | None = None,
+) -> dict[str, Any]:
+    rules = rules_config.setdefault("rules", {})
+    rule = dict(rules.get(name, {}))
+    rule["recipient"] = recipient
+    rule["event"] = event
+    rule["message"] = message
+    if via is not None:
+        rule["via"] = via
+    if subject is not None:
+        rule["subject"] = subject
+    if match is not None:
+        rule["match"] = match
+    if fingerprint is not None:
+        rule["fingerprint"] = fingerprint
+    if cooldown_seconds is not None:
+        rule["cooldown_seconds"] = max(0, int(cooldown_seconds))
+    rules[name] = rule
+    return rule
+
+
+class NotifyFormatDict(dict[str, Any]):
+    def __missing__(self, key: str) -> str:
+        raise ValueError(f"Missing fact for template field: {key}")
+
+
+def render_template(template: str, facts: dict[str, str]) -> str:
+    return template.format_map(NotifyFormatDict(facts))
+
+
+def rule_matches(rule: dict[str, Any], event: str, facts: dict[str, str]) -> bool:
+    if rule.get("event") != event:
+        return False
+    for key, expected in (rule.get("match") or {}).items():
+        if facts.get(key) != expected:
+            return False
+    return True
+
+
+def build_rule_fingerprint(rule_name: str, rule: dict[str, Any], facts: dict[str, str]) -> str:
+    template = rule.get("fingerprint")
+    if template:
+        raw = render_template(str(template), facts)
+    else:
+        raw = json.dumps({"rule": rule_name, "facts": facts}, sort_keys=True)
+    digest = sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"{rule_name}:{digest}"
+
+
+def should_send_rule(
+    state: dict[str, Any],
+    rule_name: str,
+    fingerprint: str,
+    cooldown_seconds: int,
+    now: float,
+) -> tuple[bool, dict[str, Any] | None]:
+    if cooldown_seconds <= 0:
+        return True, None
+    deliveries = state.setdefault("deliveries", {}).setdefault(rule_name, {})
+    last_sent = deliveries.get(fingerprint)
+    if last_sent is None:
+        return True, None
+    elapsed = max(0, int(now - float(last_sent)))
+    remaining = max(0, cooldown_seconds - elapsed)
+    if remaining <= 0:
+        return True, None
+    return False, {
+        "rule": rule_name,
+        "fingerprint": fingerprint,
+        "cooldown_seconds": cooldown_seconds,
+        "elapsed_seconds": elapsed,
+        "remaining_seconds": remaining,
+        "skipped": "cooldown",
+    }
 
 
 def resolve_attempts(
@@ -434,6 +616,115 @@ def send_notification(
         "send_all": send_all,
         "dry_run": dry_run,
         "attempts": results,
+    }
+
+
+def emit_event(
+    config: dict[str, Any],
+    rules_config: dict[str, Any],
+    event: str,
+    *,
+    facts: dict[str, str],
+    dry_run: bool = False,
+    send_all: bool = False,
+) -> dict[str, Any]:
+    rules = rules_config.get("rules", {})
+    matched: list[dict[str, Any]] = []
+    triggered: list[dict[str, Any]] = []
+    state = load_state()
+    state_dirty = False
+    now = time.time()
+
+    for rule_name, rule in sorted(rules.items()):
+        if not rule_matches(rule, event, facts):
+            continue
+
+        matched.append(
+            {
+                "name": rule_name,
+                "recipient": rule.get("recipient"),
+                "event": event,
+                "match": rule.get("match", {}),
+            }
+        )
+
+        try:
+            message = render_template(str(rule["message"]), facts)
+            subject_template = rule.get("subject")
+            subject = render_template(str(subject_template), facts) if subject_template else None
+            fingerprint = build_rule_fingerprint(rule_name, rule, facts)
+        except ValueError as exc:
+            triggered.append(
+                {
+                    "rule": rule_name,
+                    "success": False,
+                    "error": str(exc),
+                    "skipped": "template_error",
+                }
+            )
+            continue
+
+        cooldown_seconds = int(rule.get("cooldown_seconds", 0) or 0)
+        allowed, cooldown_payload = should_send_rule(state, rule_name, fingerprint, cooldown_seconds, now)
+        if not allowed:
+            triggered.append(cooldown_payload or {"rule": rule_name, "skipped": "cooldown"})
+            continue
+
+        if dry_run:
+            payload = send_notification(
+                config,
+                str(rule["recipient"]),
+                message,
+                via=list(rule.get("via", [])),
+                subject=subject,
+                send_all=send_all,
+                dry_run=True,
+            )
+            triggered.append(
+                {
+                    "rule": rule_name,
+                    "fingerprint": fingerprint,
+                    "cooldown_seconds": cooldown_seconds,
+                    "notification": payload,
+                    "planned": True,
+                    "success": True,
+                }
+            )
+            continue
+
+        payload = send_notification(
+            config,
+            str(rule["recipient"]),
+            message,
+            via=list(rule.get("via", [])),
+            subject=subject,
+            send_all=send_all,
+            dry_run=False,
+        )
+        triggered.append(
+            {
+                "rule": rule_name,
+                "fingerprint": fingerprint,
+                "cooldown_seconds": cooldown_seconds,
+                "notification": payload,
+                "success": bool(payload.get("success")),
+            }
+        )
+        if payload.get("success"):
+            state.setdefault("deliveries", {}).setdefault(rule_name, {})[fingerprint] = now
+            state_dirty = True
+
+    if state_dirty:
+        save_state(state)
+
+    overall_success = all(item.get("success", False) or item.get("skipped") for item in triggered) if triggered else True
+    return {
+        "success": overall_success,
+        "event": event,
+        "facts": facts,
+        "dry_run": dry_run,
+        "matched_rules": matched,
+        "results": triggered,
     }
 
 
