@@ -380,6 +380,26 @@ print(f"{provider} sent")
         require(group_emit_payload["results"][0]["notification"]["group"] == "ops", f"unexpected group emit payload: {group_emit_payload}")
         require(len(group_emit_payload["results"][0]["notification"]["deliveries"]) == 2, f"unexpected group emit deliveries: {group_emit_payload}")
 
+        history = run([str(AGENT_DO), "notify", "history", "--json", "--limit", "5"], env=env)
+        require(history.returncode == 0, f"notify history failed: {history.stderr}")
+        history_payload = json.loads(history.stdout)
+        require(len(history_payload["history"]) >= 1, f"expected history entries: {history_payload}")
+        require(history_payload["history"][0]["provider"] in {"sms", "email"}, f"unexpected history payload: {history_payload}")
+        require("timestamp" in history_payload["history"][0], f"missing timestamp in history payload: {history_payload}")
+
+        history_rule = run([str(AGENT_DO), "notify", "history", "--json", "--rule", "approval_group", "--limit", "5"], env=env)
+        require(history_rule.returncode == 0, f"notify history rule filter failed: {history_rule.stderr}")
+        history_rule_payload = json.loads(history_rule.stdout)
+        require(len(history_rule_payload["history"]) == 2, f"expected two group rule history entries: {history_rule_payload}")
+        require(all(item["rule"] == "approval_group" for item in history_rule_payload["history"]), f"unexpected rule-filtered history payload: {history_rule_payload}")
+        require(all(item.get("group") == "ops" for item in history_rule_payload["history"]), f"unexpected group history payload: {history_rule_payload}")
+
+        history_provider = run([str(AGENT_DO), "notify", "history", "--json", "--provider", "sms", "--success", "true", "--limit", "3"], env=env)
+        require(history_provider.returncode == 0, f"notify history provider filter failed: {history_provider.stderr}")
+        history_provider_payload = json.loads(history_provider.stdout)
+        require(len(history_provider_payload["history"]) >= 1, f"expected sms history entries: {history_provider_payload}")
+        require(all(item["provider"] == "sms" and item["success"] is True for item in history_provider_payload["history"]), f"unexpected provider-filtered history payload: {history_provider_payload}")
+
         emit_sent = run(
             [
                 str(AGENT_DO),

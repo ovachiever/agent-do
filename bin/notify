@@ -20,6 +20,7 @@ from notify import (  # noqa: E402
     get_rule,
     get_template,
     list_groups,
+    list_history,
     list_recipients,
     list_rules,
     list_templates,
@@ -27,6 +28,7 @@ from notify import (  # noqa: E402
     load_rules,
     load_state,
     main_json,
+    parse_bool_flag,
     parse_provider_list,
     parse_duration_seconds,
     parse_key_value_pairs,
@@ -50,6 +52,7 @@ def preprocess_args(argv: list[str]) -> list[str]:
         "providers",
         "recipients",
         "groups",
+        "history",
         "show",
         "show-group",
         "set-recipient",
@@ -99,6 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     groups_parser = subparsers.add_parser("groups", help="List configured recipient groups")
     groups_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    history_parser = subparsers.add_parser("history", help="Show recent notify delivery history")
+    history_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    history_parser.add_argument("--limit", type=int, default=20, help="Maximum number of entries to show")
+    history_parser.add_argument("--provider", help="Filter by provider")
+    history_parser.add_argument("--recipient", help="Filter by recipient or group alias")
+    history_parser.add_argument("--rule", help="Filter by rule name")
+    history_parser.add_argument("--event", help="Filter by event name")
+    history_parser.add_argument("--success", help="Filter by success=true|false")
 
     show_parser = subparsers.add_parser("show", help="Show one configured recipient")
     show_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -220,6 +232,35 @@ def main(argv: list[str]) -> int:
             for group in payload["groups"]:
                 members = ",".join(group.get("members", [])) or "-"
                 print(f"{group['alias']}: members={members}")
+        return 0
+
+    if args.command == "history":
+        try:
+            payload = {
+                "history": list_history(
+                    limit=args.limit,
+                    provider=args.provider,
+                    recipient=args.recipient,
+                    rule=args.rule,
+                    event=args.event,
+                    success=parse_bool_flag(args.success),
+                )
+            }
+        except ValueError as exc:
+            payload = {"success": False, "error": str(exc)}
+            if args.json:
+                main_json(payload)
+            else:
+                print(payload["error"], file=sys.stderr)
+            return 1
+        if args.json:
+            main_json(payload)
+        else:
+            for item in payload["history"]:
+                scope = item.get("group") or item.get("recipient")
+                event_part = f" event={item['event']}" if item.get("event") else ""
+                rule_part = f" rule={item['rule']}" if item.get("rule") else ""
+                print(f"{item['timestamp']} {scope} {item.get('provider')} {'ok' if item.get('success') else 'fail'}{event_part}{rule_part}")
         return 0
 
     if args.command == "show":

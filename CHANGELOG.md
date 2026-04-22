@@ -8,6 +8,7 @@
 - `agent-do notify delete-rule` and `agent-do notify reset-state` for rule cleanup and cooldown-state hygiene.
 - Built-in notify rule templates with `agent-do notify templates`, `show-template`, and `apply-template` for common cases like failed builds, failed deploys, stalled jobs, and approval requests.
 - Recipient groups for `agent-do notify`, so direct sends and event rules can target aliases like `ops` without duplicating recipients across rules.
+- Append-only notify delivery history with `agent-do notify history`, including filters for provider, recipient/group, rule, event, and success.
 - `agent-do auth` for site-level authentication orchestration over saved browser sessions, browser import, and secure credentials.
 - `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
 - `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.

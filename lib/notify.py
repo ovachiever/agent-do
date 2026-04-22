@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ NOTIFY_DIR = AGENT_DO_HOME / "notify"
 RECIPIENTS_PATH = NOTIFY_DIR / "recipients.json"
 RULES_PATH = NOTIFY_DIR / "rules.json"
 STATE_PATH = NOTIFY_DIR / "state.json"
+HISTORY_PATH = NOTIFY_DIR / "history.jsonl"
 
 DEFAULT_CONFIG = {
     "defaults": {
@@ -168,6 +170,60 @@ def load_state() -> dict[str, Any]:
 def save_state(state: dict[str, Any]) -> None:
     ensure_notify_dir()
     STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+
+def append_history(entries: list[dict[str, Any]]) -> None:
+    if not entries:
+        return
+    ensure_notify_dir()
+    with HISTORY_PATH.open("a") as handle:
+        for entry in entries:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def list_history(
+    *,
+    limit: int = 20,
+    provider: str | None = None,
+    recipient: str | None = None,
+    rule: str | None = None,
+    event: str | None = None,
+    success: bool | None = None,
+) -> list[dict[str, Any]]:
+    if not HISTORY_PATH.exists():
+        return []
+    lines = HISTORY_PATH.read_text().splitlines()
+    items: list[dict[str, Any]] = []
+    normalized_provider = normalize_provider(provider) if provider else None
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        if normalized_provider and item.get("provider") != normalized_provider:
+            continue
+        if recipient and item.get("recipient") != recipient and item.get("group") != recipient:
+            continue
+        if rule and item.get("rule") != rule:
+            continue
+        if event and item.get("event") != event:
+            continue
+        if success is not None and bool(item.get("success")) is not success:
+            continue
+        items.append(item)
+        if len(items) >= max(0, limit):
+            break
+    return items
+
+
+def parse_bool_flag(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "no", "n"}:
+        return False
+    raise ValueError(f"Expected boolean value, got: {value}")
 
 
 def delete_rule(rules_config: dict[str, Any], name: str) -> dict[str, Any] | None:
@@ -489,6 +545,36 @@ def apply_template(
     )
 
 
+def make_history_entry(
+    *,
+    recipient: str,
+    provider_result: dict[str, Any],
+    message: str,
+    subject: str,
+    history_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    history_meta = dict(history_meta or {})
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "recipient": recipient,
+        "provider": provider_result.get("provider"),
+        "target": provider_result.get("target"),
+        "success": bool(provider_result.get("success")),
+        "exit_code": provider_result.get("exit_code"),
+        "subject": subject,
+        "message": message,
+    }
+    if history_meta.get("group"):
+        entry["group"] = history_meta["group"]
+    if history_meta.get("rule"):
+        entry["rule"] = history_meta["rule"]
+    if history_meta.get("event"):
+        entry["event"] = history_meta["event"]
+    if history_meta.get("fingerprint"):
+        entry["fingerprint"] = history_meta["fingerprint"]
+    return entry
+
+
 class NotifyFormatDict(dict[str, Any]):
     def __missing__(self, key: str) -> str:
         raise ValueError(f"Missing fact for template field: {key}")
@@ -791,6 +877,7 @@ def send_notification(
     subject: str | None = None,
     send_all: bool = False,
     dry_run: bool = False,
+    history_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     group = get_group(config, recipient_name)
     if group is not None:
@@ -804,6 +891,7 @@ def send_notification(
                 subject=subject,
                 send_all=send_all,
                 dry_run=dry_run,
+                history_meta={**dict(history_meta or {}), "group": recipient_name},
             )
             for member in members
         ]
@@ -824,6 +912,7 @@ def send_notification(
     subject = subject or recipient.get("subject") or config.get("defaults", {}).get("subject", "agent-do notification")
 
     results = []
+    history_entries: list[dict[str, Any]] = []
     overall_success = False
     for attempt in attempts:
         planned = {
@@ -847,6 +936,15 @@ def send_notification(
         result["recipient"] = recipient_name
         result["subject"] = subject
         results.append(result)
+        history_entries.append(
+            make_history_entry(
+                recipient=recipient_name,
+                provider_result=result,
+                message=message,
+                subject=subject,
+                history_meta=history_meta,
+            )
+        )
 
         if result["success"]:
             overall_success = True
@@ -855,6 +953,8 @@ def send_notification(
 
     if dry_run:
         overall_success = True
+    else:
+        append_history(history_entries)
 
     return {
         "success": overall_success,
@@ -927,6 +1027,11 @@ def emit_event(
                 subject=subject,
                 send_all=send_all,
                 dry_run=True,
+                history_meta={
+                    "rule": rule_name,
+                    "event": event,
+                    "fingerprint": fingerprint,
+                },
             )
             triggered.append(
                 {
@@ -948,6 +1053,11 @@ def emit_event(
             subject=subject,
             send_all=send_all,
             dry_run=False,
+            history_meta={
+                "rule": rule_name,
+                "event": event,
+                "fingerprint": fingerprint,
+            },
         )
         triggered.append(
             {

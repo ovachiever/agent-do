@@ -214,6 +214,7 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 - recipient aliases and recipient groups share the same `~/.agent-do/notify/recipients.json` config so rules can target one person or a named group through the same send path
 - `agent-do notify set-rule ...` + `agent-do notify emit ...` let agents declare criteria once and later emit structured events with `key=value` facts
 - `agent-do notify templates`, `show-template`, and `apply-template` provide a small built-in library of common notification patterns without introducing a second rule system
+- `agent-do notify history` reads append-only delivery events from `~/.agent-do/notify/history.jsonl`, with filters for provider, recipient/group, rule, event, and success
 - `agent-do notify reset-state [rule]` and `agent-do notify delete-rule <rule>` provide cleanup so old cooldown state and retired rules do not linger
 - supports first-success fallback routing or `--all` fanout across matching providers
 - `messenger` is intentionally a live provider: it requires `+live(...)` and uses the existing local-machine control substrate instead of pretending to be an API transport

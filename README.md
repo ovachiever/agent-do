@@ -88,6 +88,7 @@ agent-do notify set-recipient me --sms +15551234567 --email me@example.com --sla
 agent-do notify set-group ops me backup
 agent-do notify templates
 agent-do notify apply-template build_failed --recipient me
+agent-do notify history --limit 10
 agent-do notify me "Build failed"
 agent-do notify ops "Heads up"
 agent-do notify me "Deploy complete" --via slack
@@ -319,6 +320,7 @@ agent-do notify set-recipient me --sms +15551234567 --email me@example.com --sla
 agent-do notify set-group ops me backup
 agent-do notify templates
 agent-do notify apply-template build_failed --recipient me
+agent-do notify history --limit 10
 agent-do notify me "Build failed"
 agent-do notify ops "Heads up"
 agent-do notify me "Deploy complete" --via slack
@@ -330,7 +332,7 @@ agent-do notify delete-rule build_failed
 agent-do notify providers
 ```
 
-`notify` also supports recipient groups, so one rule or one send can target aliases like `ops` or `engineering` without duplicating recipients. Built-in rule templates cover common cases like `build_failed`, `deploy_failed`, `deploy_done`, `job_stalled`, and `approval_needed`. `apply-template` turns one of those into a real rule you can edit or emit against. `set-rule` still exists for fully custom rules, `emit` evaluates them against structured `--fact key=value` inputs, `reset-state` clears cooldown fingerprints, and `delete-rule` removes retired rules cleanly.
+`notify` also supports recipient groups, so one rule or one send can target aliases like `ops` or `engineering` without duplicating recipients. Built-in rule templates cover common cases like `build_failed`, `deploy_failed`, `deploy_done`, `job_stalled`, and `approval_needed`. `apply-template` turns one of those into a real rule you can edit or emit against. `set-rule` still exists for fully custom rules, `emit` evaluates them against structured `--fact key=value` inputs, `history` shows what actually fired and through which provider, `reset-state` clears cooldown fingerprints, and `delete-rule` removes retired rules cleanly.
 
 ### `resend`
 
