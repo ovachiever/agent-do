@@ -23,6 +23,7 @@ from typing import Any
 HELP = """agent-coord - Project-local agent coordination mailbox
 
 Commands:
+  touch                                  Refresh presence in the local mailbox
   whoami                                 Show current coordination identity
   alias <name>                           Assign a friendly alias to this agent
   aliases                                List known aliases
@@ -44,6 +45,7 @@ Options:
   --json                                 Output structured JSON
 
 Examples:
+  agent-coord touch
   agent-coord whoami
   agent-coord alias reviewer
   agent-coord handoff infra --summary "Local verification is done" --ref app/api/generate/route.ts
@@ -61,9 +63,34 @@ THREAD_CANDIDATES: list[tuple[str, str]] = [
     ("claude", "CLAUDE_AGENT_ID"),
 ]
 
+ACTIVE_WINDOW_SECONDS = int(os.environ.get("AGENT_DO_COORD_ACTIVE_SECONDS", "1800"))
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def age_seconds(value: str | None) -> int | None:
+    parsed = parse_iso(value)
+    if parsed is None:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
+
+
+def classify_presence(value: str | None) -> str:
+    age = age_seconds(value)
+    if age is None:
+        return "unknown"
+    return "active" if age <= ACTIVE_WINDOW_SECONDS else "stale"
 
 
 def compact(value: str) -> str:
@@ -247,6 +274,14 @@ class CoordStore:
             self._save_agents(agents)
             return current
 
+    def touch(self) -> dict[str, Any]:
+        agent = self.register_self()
+        return {
+            "agent": agent,
+            "active_peers": [peer for peer in self.peers() if not peer["current"] and peer["status"] == "active"],
+            "active_window_seconds": ACTIVE_WINDOW_SECONDS,
+        }
+
     def self_record(self) -> dict[str, Any]:
         self.register_self()
         return self._load_agents().get(self.agent_id, {"agent_id": self.agent_id})
@@ -345,11 +380,15 @@ class CoordStore:
 
         peers: list[dict[str, Any]] = []
         for agent_id, record in sorted(self._load_agents().items()):
+            last_seen = record.get("last_seen")
             peers.append(
                 {
                     "agent_id": agent_id,
                     "alias": record.get("alias"),
-                    "last_seen": record.get("last_seen"),
+                    "last_seen": last_seen,
+                    "age_seconds": age_seconds(last_seen),
+                    "status": classify_presence(last_seen),
+                    "active_window_seconds": ACTIVE_WINDOW_SECONDS,
                     "current": agent_id == self.agent_id,
                     "unread_from_peer": unread_counts.get(agent_id, 0),
                 }
@@ -521,6 +560,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     sub = p.add_subparsers(dest="command")
 
+    sub.add_parser("touch")
     sub.add_parser("whoami")
 
     alias_p = sub.add_parser("alias")
@@ -632,6 +672,20 @@ def main(argv: list[str]) -> int:
 
     store = CoordStore(Path.cwd())
 
+    if args.command == "touch":
+        payload = store.touch()
+        payload.update(
+            {
+                "success": True,
+                "tool": "coord",
+                "agent_id": store.agent_id,
+                "project_root": str(store.project_root),
+                "coord_root": str(store.coord_root),
+                "storage": store.storage,
+            }
+        )
+        return print_payload(payload, args.json)
+
     if args.command == "whoami":
         record = store.self_record()
         payload = {
@@ -643,6 +697,9 @@ def main(argv: list[str]) -> int:
             "project_root": str(store.project_root),
             "coord_root": str(store.coord_root),
             "storage": store.storage,
+            "last_seen": record.get("last_seen"),
+            "status": classify_presence(record.get("last_seen")),
+            "active_window_seconds": ACTIVE_WINDOW_SECONDS,
         }
         return print_payload(payload, args.json)
 
@@ -672,8 +729,9 @@ def main(argv: list[str]) -> int:
         for peer in peers:
             current = " current" if peer["current"] else ""
             alias = f' alias:{peer["alias"]}' if peer.get("alias") else ""
+            status = f' status:{peer["status"]}'
             unread = f' unread_from_peer:{peer["unread_from_peer"]}' if peer.get("unread_from_peer") else ""
-            print(f'{peer["agent_id"]}{current}{alias}{unread}')
+            print(f'{peer["agent_id"]}{current}{alias}{status}{unread}')
         return 0
 
     if args.command in {"send", "handoff", "ask", "broadcast", "reply"}:

@@ -172,6 +172,42 @@ def main() -> int:
         require("Project-Scoped agent-do Tools" in additional, f"expected project tooling section, got: {additional}")
         require("agent-do suggest --project" in additional, f"expected project discovery hint, got: {additional}")
 
+    with tempfile.TemporaryDirectory() as tmpdir:
+        project = Path(tmpdir)
+        subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+        (project / "README.md").write_text("coord hook test", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["AGENT_DO_HOME"] = str(project / ".agent-do-home")
+
+        first_env = dict(env)
+        first_env["CODEX_THREAD_ID"] = "alpha-123"
+        first_hook = run(
+            "bash",
+            "hooks/agent-do-session-start.sh",
+            input_text=json.dumps({"cwd": str(project)}),
+            env=first_env,
+        )
+        require(first_hook.returncode == 0, f"first coord session hook failed: {first_hook.stderr}")
+        first_payload = json.loads(first_hook.stdout)
+        first_additional = first_payload["hookSpecificOutput"]["additionalContext"]
+        require("Active Agent Peers" not in first_additional, f"unexpected coord peer context for first session: {first_additional}")
+
+        second_env = dict(env)
+        second_env["CODEX_THREAD_ID"] = "beta-456"
+        second_hook = run(
+            "bash",
+            "hooks/agent-do-session-start.sh",
+            input_text=json.dumps({"cwd": str(project)}),
+            env=second_env,
+        )
+        require(second_hook.returncode == 0, f"second coord session hook failed: {second_hook.stderr}")
+        second_payload = json.loads(second_hook.stdout)
+        second_additional = second_payload["hookSpecificOutput"]["additionalContext"]
+        require("Active Agent Peers" in second_additional, f"expected coord peer context, got: {second_additional}")
+        require("agent-do coord inbox" in second_additional, f"expected coord inbox hint, got: {second_additional}")
+        require("reviewer" not in second_additional, "unexpected alias text before aliases were set")
+
     with tempfile.TemporaryDirectory() as telemetry_home:
         env = os.environ.copy()
         env["AGENT_DO_HOME"] = telemetry_home

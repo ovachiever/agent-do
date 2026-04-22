@@ -129,6 +129,52 @@ Refresh this list any time with:
 \`agent-do suggest --project\`"
 }
 
+append_coord_context() {
+    local touch_json active_count active_block
+
+    [ -n "$AGENT_DO_DIR" ] || return 0
+    [ -n "$CWD" ] || return 0
+    [ -x "$AGENT_DO_DIR/agent-do" ] || return 0
+
+    touch_json=$(cd "$CWD" && "$AGENT_DO_DIR/agent-do" coord touch --json 2>/dev/null || true)
+    [ -n "$touch_json" ] || return 0
+
+    active_count=$(echo "$touch_json" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('active_peers', [])))" 2>/dev/null || echo "0")
+    [ "$active_count" -gt 0 ] || return 0
+
+    active_block=$(echo "$touch_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+lines = []
+for peer in data.get('active_peers', []):
+    label = peer.get('alias') or peer.get('agent_id')
+    unread = peer.get('unread_from_peer', 0)
+    suffix = f' (unread: {unread})' if unread else ''
+    lines.append(f'- {label}{suffix}')
+print('\n'.join(lines))
+" 2>/dev/null || true)
+
+    [ -n "$active_block" ] || return 0
+
+    CONTEXT="$CONTEXT
+
+---
+
+## Active Agent Peers
+
+Your presence has been registered in the local project coordination mailbox.
+
+Other active peers detected in this repo:
+$active_block
+
+When work may overlap or needs a handoff, use:
+\`agent-do coord peers\`
+\`agent-do coord inbox\`
+\`agent-do coord claim <path>\`
+\`agent-do coord handoff <peer> --summary \"...\"\`
+"
+}
+
 # --- Inject tooling reminder ---
 CONTEXT="## TOOLING REMINDER - agent-do
 
@@ -253,6 +299,7 @@ fi
 
 append_project_tooling
 append_bootstrap_prompt
+append_coord_context
 
 ESCAPED=$(echo "$CONTEXT" | jq -Rs .)
 echo "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":$ESCAPED}}"

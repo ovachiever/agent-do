@@ -398,11 +398,14 @@ Project-local agent coordination mailbox for structured handoffs, inbox reads, r
 
 ```bash
 agent-do coord whoami
+agent-do coord touch
 agent-do coord alias reviewer
 agent-do coord handoff infra --summary "Local verification is done"
 agent-do coord inbox
 agent-do coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
 ```
+
+When Claude Code session hooks are installed, session start now silently refreshes local coord presence and only nudges if another active peer is already present in the same repo mailbox.
 
 ## Tool Surface
 

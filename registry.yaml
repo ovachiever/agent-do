@@ -1714,11 +1714,13 @@ tools:
     description: Project-local agent coordination mailbox
     capabilities:
     - derive stable agent identities per tmux/thread session
+    - refresh local presence automatically for coordination-aware sessions
     - send structured handoffs, questions, replies, and status messages
     - list inbox messages and wait for new coordination events
     - acknowledge messages and review thread history
     - manage advisory claims on files, paths, or work items
     commands:
+      touch: Refresh current agent presence and report active peers
       whoami: Show current coordination identity and mailbox root
       alias: 'Assign a friendly alias: alias <name>'
       aliases: List known aliases in this project mailbox
@@ -1740,6 +1742,8 @@ tools:
     examples:
     - intent: see who I am in this project mailbox
       command: agent-coord whoami
+    - intent: refresh my coordination presence
+      command: agent-coord touch
     - intent: hand off findings to another agent
       command: agent-coord handoff infra --summary "Local verification is done"
     - intent: ask another agent a scoped question

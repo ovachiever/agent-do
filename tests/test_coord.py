@@ -63,11 +63,17 @@ def main() -> int:
         whoami_payload = json.loads(whoami.stdout)
         require(whoami_payload["agent_id"] == "codex-alpha123", f"unexpected whoami payload: {whoami_payload}")
         require(whoami_payload["storage"] == "git-local", f"unexpected storage payload: {whoami_payload}")
+        require(whoami_payload["status"] == "active", f"unexpected whoami status: {whoami_payload}")
 
         alias_a = run([str(AGENT_DO), "coord", "alias", "reviewer", "--json"], cwd=project, env=env_a)
         require(alias_a.returncode == 0, f"coord alias reviewer failed: {alias_a.stderr}")
         alias_b = run([str(AGENT_DO), "coord", "alias", "infra", "--json"], cwd=project, env=env_b)
         require(alias_b.returncode == 0, f"coord alias infra failed: {alias_b.stderr}")
+
+        touch_a = run([str(AGENT_DO), "coord", "touch", "--json"], cwd=project, env=env_a)
+        require(touch_a.returncode == 0, f"coord touch failed: {touch_a.stderr}")
+        touch_a_payload = json.loads(touch_a.stdout)
+        require(touch_a_payload["active_window_seconds"] == 1800, f"unexpected touch payload: {touch_a_payload}")
 
         aliases = run([str(AGENT_DO), "coord", "aliases", "--json"], cwd=project, env=env_a)
         require(aliases.returncode == 0, f"coord aliases failed: {aliases.stderr}")
@@ -80,6 +86,9 @@ def main() -> int:
         peers_payload = json.loads(peers.stdout)
         peer_ids = [item["agent_id"] for item in peers_payload["peers"]]
         require(peer_ids == ["codex-alpha123", "codex-beta456"], f"unexpected peers payload: {peers_payload}")
+        for peer in peers_payload["peers"]:
+            require(peer["status"] == "active", f"unexpected peer status: {peers_payload}")
+            require(peer["active_window_seconds"] == 1800, f"unexpected peer active window: {peers_payload}")
 
         handoff = run(
             [
