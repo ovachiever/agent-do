@@ -78,6 +78,7 @@ OPTIONS:
   --list, -l     List available tools
   suggest        Recommend likely tools/commands for a task
   find           Search tools by keyword
+  notify         Cross-provider notification contract (SMS, email, Slack, pipe)
   nudges         Inspect local nudge telemetry
   bootstrap      Initialize stateful tools for the current project
   creds          Store and resolve tool credentials securely
@@ -275,6 +276,10 @@ case "${1:-}" in
     find)
         shift || true
         exec "$SCRIPT_DIR/bin/suggest" find "$@"
+        ;;
+    notify)
+        shift || true
+        exec "$SCRIPT_DIR/bin/notify" "$@"
         ;;
     nudges)
         shift || true

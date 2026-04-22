@@ -56,6 +56,7 @@ echo
 check_cmd "--help works" "$AGENT_DO" --help
 check_cmd "--list works" "$AGENT_DO" --list
 check_cmd "creds help works" "$AGENT_DO" creds --help
+check_cmd "notify help works" "$AGENT_DO" notify --help
 check_cmd "nudges stats works" "$AGENT_DO" nudges stats
 check_cmd "bootstrap --help works" "$AGENT_DO" bootstrap --help
 check_output "--status works in isolated home" "No active sessions." "$AGENT_DO" --status
@@ -85,6 +86,7 @@ check_cmd "resend tests" python3 "$SCRIPT_DIR/tests/test_resend.py"
 check_cmd "render tests" python3 "$SCRIPT_DIR/tests/test_render.py"
 check_cmd "hardware tests" python3 "$SCRIPT_DIR/tests/test_hardware.py"
 check_cmd "meetings tests" python3 "$SCRIPT_DIR/tests/test_meetings.py"
+check_cmd "notify tests" python3 "$SCRIPT_DIR/tests/test_notify.py"
 check_cmd "browser import tests" python3 "$SCRIPT_DIR/tests/test_browser_import.py"
 check_cmd "browse session default tests" python3 "$SCRIPT_DIR/tests/test_browse_session_defaults.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"

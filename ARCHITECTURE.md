@@ -46,6 +46,7 @@ The bash entry point checks the first argument:
 | Known tool name | Structured API | `exec_tool()` → `tools/agent-<name>` |
 | `creds` | Secure credential management | `tools/agent-creds` |
 | `suggest` / `find` / `nudges` | Discovery + telemetry | `bin/suggest`, `bin/nudges` |
+| `notify` | Root notification contract | `bin/notify` + `lib/notify.py` |
 | `bootstrap` | Project setup | `bin/bootstrap` |
 | `-n` / `--natural` | Natural language | `bin/intent-router` (Claude API) |
 | `--offline` | Offline NL | `bin/pattern-matcher` (regex) |
@@ -93,6 +94,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │   ├── intent-router       # LLM router (Python): 3-tier fallback
 │   ├── pattern-matcher     # Offline router (Python): shared registry routing + regex fallbacks
 │   ├── suggest             # Discovery CLI: task/project to likely tools
+│   ├── notify              # Root notification contract: routing + aliases
 │   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── bootstrap           # Stateful-tool bootstrap recommender/executor
 │   ├── health              # Dependency checker (bash): per-tool health status
@@ -203,6 +205,12 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 - `agent-do nudges stats` summarizes prompt and PreToolUse nudges
 - `agent-do nudges recent` shows recent local events from the live hook stack
 - Uses JSONL under `~/.agent-do/telemetry/`
+
+**`bin/notify` + `lib/notify.py`**: Root notification contract:
+- `agent-do notify <recipient> <message>` routes outbound notifications without introducing another registry tool
+- provider adapters currently target `sms`, `email`, `slack`, and local `pipe`
+- recipient aliases, preferred provider order, and default subjects live under `~/.agent-do/notify/recipients.json`
+- supports first-success fallback routing or `--all` fanout across matching providers
 
 ### Tool Concurrency Classification
 

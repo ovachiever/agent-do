@@ -81,6 +81,15 @@ agent-do bootstrap
 agent-do nudges stats
 ```
 
+When you need to notify a human across channels:
+
+```bash
+agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --prefer sms,slack,email
+agent-do notify me "Build failed"
+agent-do notify me "Deploy complete" --via slack
+agent-do notify recipients
+```
+
 When a tool needs secrets:
 
 ```bash
@@ -290,6 +299,17 @@ agent-do sms snapshot --json
 agent-do sms latest --from WidgetHub --json
 agent-do sms code --from WidgetHub --contains "verification"
 agent-do sms link --from WidgetHub --domain app.example.com
+```
+
+### `notify`
+
+Root-level notification contract over `sms`, `email`, `slack`, and local `pipe` delivery. This is not a registry tool. It is a built-in command surface for recipient aliases, provider routing, and fallback order.
+
+```bash
+agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --prefer sms,slack,email
+agent-do notify me "Build failed"
+agent-do notify me "Deploy complete" --via slack
+agent-do notify providers
 ```
 
 ### `resend`

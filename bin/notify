@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Root notification contract for agent-do."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from notify import (  # noqa: E402
+    get_recipient,
+    list_recipients,
+    load_config,
+    main_json,
+    parse_provider_list,
+    providers_payload,
+    render_text_result,
+    save_config,
+    send_notification,
+    update_recipient,
+)
+
+
+def preprocess_args(argv: list[str]) -> list[str]:
+    commands = {"send", "providers", "recipients", "show", "set-recipient", "help", "--help", "-h"}
+    if argv and argv[0] not in commands and not argv[0].startswith("-"):
+        return ["send", *argv]
+    return argv
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="agent-do notify",
+        description="Cross-provider notification contract for SMS, email, Slack, and local pipe delivery",
+    )
+    parser.add_argument("--json", action="store_true", help="Output structured JSON")
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    send_parser = subparsers.add_parser("send", help="Send a notification")
+    send_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    send_parser.add_argument("recipient", help="Configured alias or raw provider target")
+    send_parser.add_argument("message", help="Notification message body")
+    send_parser.add_argument("--via", help="Comma-separated provider order, e.g. sms,slack,email")
+    send_parser.add_argument("--subject", help="Subject line for email transports")
+    send_parser.add_argument("--all", action="store_true", help="Send through all matching providers instead of stopping at first success")
+    send_parser.add_argument("--dry-run", action="store_true", help="Show planned routing without sending")
+
+    providers_parser = subparsers.add_parser("providers", help="List supported notify providers")
+    providers_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    recipients_parser = subparsers.add_parser("recipients", help="List configured recipient aliases")
+    recipients_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
+    show_parser = subparsers.add_parser("show", help="Show one configured recipient")
+    show_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    show_parser.add_argument("alias", help="Recipient alias")
+
+    set_parser = subparsers.add_parser("set-recipient", help="Create or update a recipient alias")
+    set_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    set_parser.add_argument("alias", help="Recipient alias")
+    set_parser.add_argument("--sms", help="Phone number target")
+    set_parser.add_argument("--email", help="Email address target")
+    set_parser.add_argument("--slack", help="Slack channel or DM target")
+    set_parser.add_argument("--pipe", help="Shell command target for pipe delivery")
+    set_parser.add_argument("--prefer", help="Comma-separated preferred provider order")
+    set_parser.add_argument("--subject", help="Default subject for email notifications")
+
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(preprocess_args(argv))
+    config = load_config()
+
+    if args.command in (None, "help"):
+        parser.print_help()
+        return 0
+
+    if args.command == "providers":
+        payload = {"providers": providers_payload()}
+        if args.json:
+            main_json(payload)
+        else:
+            for provider in payload["providers"]:
+                print(f"{provider['provider']}: {provider['summary']}")
+        return 0
+
+    if args.command == "recipients":
+        payload = {"recipients": list_recipients(config)}
+        if args.json:
+            main_json(payload)
+        else:
+            for recipient in payload["recipients"]:
+                providers = ",".join(recipient.get("providers", [])) or "-"
+                prefer = ",".join(recipient.get("prefer", [])) or "-"
+                print(f"{recipient['alias']}: providers={providers} prefer={prefer}")
+        return 0
+
+    if args.command == "show":
+        recipient = get_recipient(config, args.alias)
+        if recipient is None:
+            message = f"Unknown recipient alias: {args.alias}"
+            if args.json:
+                main_json({"success": False, "error": message})
+            else:
+                print(message, file=sys.stderr)
+            return 1
+
+        payload = {"alias": args.alias, "recipient": recipient}
+        if args.json:
+            main_json(payload)
+        else:
+            print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "set-recipient":
+        recipient = update_recipient(
+            config,
+            args.alias,
+            sms=args.sms,
+            email=args.email,
+            slack=args.slack,
+            pipe=args.pipe,
+            prefer=parse_provider_list(args.prefer) if args.prefer is not None else None,
+            subject=args.subject,
+        )
+        save_config(config)
+        payload = {"success": True, "alias": args.alias, "recipient": recipient}
+        if args.json:
+            main_json(payload)
+        else:
+            print(f"Saved recipient alias: {args.alias}")
+        return 0
+
+    if args.command == "send":
+        payload = send_notification(
+            config,
+            args.recipient,
+            args.message,
+            via=parse_provider_list(args.via),
+            subject=args.subject,
+            send_all=args.all,
+            dry_run=args.dry_run,
+        )
+        if args.json:
+            main_json(payload)
+        else:
+            print(render_text_result(payload))
+        return 0 if payload.get("success") else 1
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
