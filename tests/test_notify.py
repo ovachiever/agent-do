@@ -84,6 +84,24 @@ print(f"{provider} sent")
             f"unexpected providers payload: {providers_payload}",
         )
 
+        templates = run([str(AGENT_DO), "notify", "templates", "--json"], env=env)
+        require(templates.returncode == 0, f"notify templates failed: {templates.stderr}")
+        templates_payload = json.loads(templates.stdout)
+        template_names = [item["name"] for item in templates_payload["templates"]]
+        require(
+            template_names == ["approval_needed", "build_failed", "deploy_done", "deploy_failed", "job_stalled"],
+            f"unexpected template payload: {templates_payload}",
+        )
+
+        show_template = run([str(AGENT_DO), "notify", "show-template", "build_failed", "--json"], env=env)
+        require(show_template.returncode == 0, f"show-template failed: {show_template.stderr}")
+        show_template_payload = json.loads(show_template.stdout)
+        require(show_template_payload["template"]["event"] == "build", f"unexpected show-template payload: {show_template_payload}")
+        require(
+            show_template_payload["template"]["required_facts"] == ["service", "branch", "status"],
+            f"unexpected show-template payload: {show_template_payload}",
+        )
+
         save = run(
             [
                 str(AGENT_DO),
@@ -117,6 +135,34 @@ print(f"{provider} sent")
         require(recipients.returncode == 0, f"notify recipients failed: {recipients.stderr}")
         recipients_payload = json.loads(recipients.stdout)
         require(recipients_payload["recipients"][0]["alias"] == "me", f"unexpected recipients payload: {recipients_payload}")
+
+        apply_template = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "apply-template",
+                "deploy_failed",
+                "--name",
+                "deploy_failed_prod",
+                "--recipient",
+                "me",
+                "--via",
+                "sms",
+                "--match",
+                "environment=prod",
+                "--cooldown",
+                "45m",
+                "--json",
+            ],
+            env=env,
+        )
+        require(apply_template.returncode == 0, f"apply-template failed: {apply_template.stderr}")
+        apply_template_payload = json.loads(apply_template.stdout)
+        require(apply_template_payload["rule"]["event"] == "deploy", f"unexpected apply-template payload: {apply_template_payload}")
+        require(apply_template_payload["rule"]["via"] == ["sms"], f"unexpected apply-template payload: {apply_template_payload}")
+        require(apply_template_payload["rule"]["match"]["status"] == "failed", f"unexpected apply-template payload: {apply_template_payload}")
+        require(apply_template_payload["rule"]["match"]["environment"] == "prod", f"unexpected apply-template payload: {apply_template_payload}")
+        require(apply_template_payload["rule"]["cooldown_seconds"] == 2700, f"unexpected apply-template payload: {apply_template_payload}")
 
         set_rule = run(
             [
@@ -154,7 +200,8 @@ print(f"{provider} sent")
         rules = run([str(AGENT_DO), "notify", "rules", "--json"], env=env)
         require(rules.returncode == 0, f"notify rules failed: {rules.stderr}")
         rules_payload = json.loads(rules.stdout)
-        require(rules_payload["rules"][0]["name"] == "build_failed", f"unexpected rules payload: {rules_payload}")
+        rule_names = [item["name"] for item in rules_payload["rules"]]
+        require(rule_names == ["build_failed", "deploy_failed_prod"], f"unexpected rules payload: {rules_payload}")
 
         show_rule = run([str(AGENT_DO), "notify", "show-rule", "build_failed", "--json"], env=env)
         require(show_rule.returncode == 0, f"show-rule failed: {show_rule.stderr}")

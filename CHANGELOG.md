@@ -6,6 +6,7 @@
 - `agent-do notify` as a root-level notification contract over `sms`, `email`, `slack`, `messenger`, and local `pipe`, backed by `bin/notify` and `lib/notify.py` instead of another registry tool.
 - Rule-driven notification emission through `agent-do notify set-rule` and `agent-do notify emit`, with exact fact matching, message templates, fingerprints, and cooldown-aware delivery state.
 - `agent-do notify delete-rule` and `agent-do notify reset-state` for rule cleanup and cooldown-state hygiene.
+- Built-in notify rule templates with `agent-do notify templates`, `show-template`, and `apply-template` for common cases like failed builds, failed deploys, stalled jobs, and approval requests.
 - `agent-do auth` for site-level authentication orchestration over saved browser sessions, browser import, and secure credentials.
 - `agent-do creds` for secure secret storage, inspection, export, and per-tool credential checks.
 - `agent-do spec` for repo-local canonical specs and active change packages under `agent-do-spec/`.

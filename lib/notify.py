@@ -61,6 +61,64 @@ PROVIDERS: dict[str, dict[str, str]] = {
     },
 }
 
+TEMPLATES: dict[str, dict[str, Any]] = {
+    "approval_needed": {
+        "summary": "Human approval is required for a named action or resource",
+        "event": "approval",
+        "message": "Approval needed for {item}",
+        "subject": "Approval needed: {item}",
+        "via": ["messenger", "sms"],
+        "match": {"status": "needed"},
+        "fingerprint": "{item}:{status}",
+        "cooldown_seconds": 900,
+        "required_facts": ["item", "status"],
+    },
+    "build_failed": {
+        "summary": "Build failed for a service or branch",
+        "event": "build",
+        "message": "Build failed for {service} on {branch}",
+        "subject": "Build failed: {service}",
+        "via": ["sms", "email"],
+        "match": {"status": "failed"},
+        "fingerprint": "{service}:{branch}:{status}",
+        "cooldown_seconds": 1800,
+        "required_facts": ["service", "branch", "status"],
+    },
+    "deploy_done": {
+        "summary": "Deployment completed successfully",
+        "event": "deploy",
+        "message": "Deploy finished for {service} in {environment}",
+        "subject": "Deploy finished: {service}",
+        "via": ["slack", "sms"],
+        "match": {"status": "succeeded"},
+        "fingerprint": "{service}:{environment}:{status}",
+        "cooldown_seconds": 900,
+        "required_facts": ["service", "environment", "status"],
+    },
+    "deploy_failed": {
+        "summary": "Deployment failed",
+        "event": "deploy",
+        "message": "Deploy failed for {service} in {environment}",
+        "subject": "Deploy failed: {service}",
+        "via": ["messenger", "sms", "email"],
+        "match": {"status": "failed"},
+        "fingerprint": "{service}:{environment}:{status}",
+        "cooldown_seconds": 1800,
+        "required_facts": ["service", "environment", "status"],
+    },
+    "job_stalled": {
+        "summary": "Long-running job appears stuck or stalled",
+        "event": "job",
+        "message": "Job stalled: {job}",
+        "subject": "Job stalled: {job}",
+        "via": ["slack", "sms"],
+        "match": {"status": "stalled"},
+        "fingerprint": "{job}:{status}",
+        "cooldown_seconds": 1800,
+        "required_facts": ["job", "status"],
+    },
+}
+
 
 def ensure_notify_dir() -> None:
     NOTIFY_DIR.mkdir(parents=True, exist_ok=True)
@@ -257,6 +315,30 @@ def list_rules(rules_config: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
+def list_templates() -> list[dict[str, Any]]:
+    items = []
+    for name, data in sorted(TEMPLATES.items()):
+        items.append(
+            {
+                "name": name,
+                "summary": data.get("summary"),
+                "event": data.get("event"),
+                "via": list(data.get("via", [])),
+                "match": dict(data.get("match", {})),
+                "cooldown_seconds": int(data.get("cooldown_seconds", 0) or 0),
+                "required_facts": list(data.get("required_facts", [])),
+            }
+        )
+    return items
+
+
+def get_template(name: str) -> dict[str, Any] | None:
+    template = TEMPLATES.get(name)
+    if template is None:
+        return None
+    return dict(template)
+
+
 def get_rule(rules_config: dict[str, Any], name: str) -> dict[str, Any] | None:
     rule = rules_config.get("rules", {}).get(name)
     if rule is None:
@@ -294,6 +376,39 @@ def update_rule(
         rule["cooldown_seconds"] = max(0, int(cooldown_seconds))
     rules[name] = rule
     return rule
+
+
+def apply_template(
+    rules_config: dict[str, Any],
+    template_name: str,
+    *,
+    rule_name: str,
+    recipient: str,
+    via: list[str] | None = None,
+    subject: str | None = None,
+    match: dict[str, str] | None = None,
+    cooldown_seconds: int | None = None,
+) -> dict[str, Any]:
+    template = get_template(template_name)
+    if template is None:
+        raise ValueError(f"Unknown notify template: {template_name}")
+
+    merged_match = dict(template.get("match", {}))
+    if match:
+        merged_match.update(match)
+
+    return update_rule(
+        rules_config,
+        rule_name,
+        recipient=recipient,
+        event=str(template["event"]),
+        message=str(template["message"]),
+        via=via if via is not None else list(template.get("via", [])),
+        subject=subject if subject is not None else template.get("subject"),
+        match=merged_match,
+        fingerprint=template.get("fingerprint"),
+        cooldown_seconds=cooldown_seconds if cooldown_seconds is not None else int(template.get("cooldown_seconds", 0) or 0),
+    )
 
 
 class NotifyFormatDict(dict[str, Any]):
