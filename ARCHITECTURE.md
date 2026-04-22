@@ -245,6 +245,7 @@ Directory-based tools with complex backends:
 | `tools/agent-macos/` | Bash + Python | Desktop GUI automation via macOS accessibility APIs. Click, type, UI tree inspection. Write/control actions are now gated through the shared `lib/live/` runtime substrate and require `agent-do +live(...)` or an active live lease. |
 | `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. Mouse and keyboard actions are now gated through the shared `lib/live/` runtime substrate and require `agent-do +live(...)` or an active live lease. |
 | `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
+| `tools/agent-coord` | Python | Project-local agent coordination mailbox. Derives stable identities from thread/tmux context, stores structured messages in a local repo mailbox under `.git/agent-do/coord/` when available, supports inbox/read/wait/ack, reply threads, and advisory claims so separate agent sessions can coordinate without external transports or human copy/paste. |
 | `tools/agent-cloudflare` | Bash + curl | Cloudflare management: zones, analytics (GraphQL), DNS, Workers, Pages, R2, firewall events. 23 commands. |
 | `tools/agent-clerk` | Bash + curl | Clerk auth platform: users, orgs, sessions, OAuth apps, enterprise SSO, JWT templates, roles. 55 commands. |
 | `tools/agent-okta` | Bash + curl | Okta tenant management: OIDC/SAML apps, SSO config, users, groups, auth servers, system logs. 34 commands. |

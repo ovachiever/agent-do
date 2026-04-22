@@ -16,6 +16,7 @@
 - `agent-do resend` for exact Resend domain records, verification state, and public DNS checks without relying on UI text.
 - `agent-do hardware` as a family-level surface over serial, bluetooth, USB, printer, and MIDI commands, with a combined hardware snapshot and delegated subdomain commands.
 - `agent-do meetings` as a family-level meeting surface over Zoom, Google Meet, and Microsoft Teams, with provider snapshots, auto-detected join routing, active-provider controls, and explicit passthroughs.
+- `agent-do coord` as a project-local agent coordination mailbox for structured handoffs, inbox/read/wait/ack, replies, and advisory claims between separate agent sessions in the same repo.
 - Internal `lib/live/` runtime substrate for explicit local-machine control approval, leases, and rerun hints behind the new `agent-do +live(...) ...` execution modifier.
 - `lib/creds-helper.sh` as a shared secure-store backend for macOS Keychain, Linux Secret Service, and a Windows DPAPI-backed per-user store.
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.

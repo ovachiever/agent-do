@@ -1710,6 +1710,64 @@ tools:
     - intent: list running agents
       command: agent-agent list
     concurrency: mixed
+  coord:
+    description: Project-local agent coordination mailbox
+    capabilities:
+    - derive stable agent identities per tmux/thread session
+    - send structured handoffs, questions, replies, and status messages
+    - list inbox messages and wait for new coordination events
+    - acknowledge messages and review thread history
+    - manage advisory claims on files, paths, or work items
+    commands:
+      whoami: Show current coordination identity and mailbox root
+      alias: 'Assign a friendly alias: alias <name>'
+      aliases: List known aliases in this project mailbox
+      peers: List known peers and unread counts
+      send: 'Send a structured message: send <peer> --subject <text> --body <text>'
+      handoff: 'Send a handoff: handoff <peer> --summary <text>'
+      ask: 'Send a question: ask <peer> --question <text>'
+      reply: 'Reply to a message: reply <message-id> --body <text>'
+      broadcast: 'Broadcast to all known peers: broadcast --subject <text> --body <text>'
+      inbox: List inbox messages for the current agent
+      read: 'Show a full message: read <message-id>'
+      wait: Wait for the next coordination message
+      ack: 'Acknowledge a message: ack <message-id>'
+      threads: List active coordination threads
+      thread: 'Show a single thread: thread <thread-id>'
+      claims: List active advisory claims
+      claim: 'Claim a file/path/work item: claim <key> [--reason <text>]'
+      release: 'Release a claim you own: release <key>'
+    examples:
+    - intent: see who I am in this project mailbox
+      command: agent-coord whoami
+    - intent: hand off findings to another agent
+      command: agent-coord handoff infra --summary "Local verification is done"
+    - intent: ask another agent a scoped question
+      command: agent-coord ask reviewer --question "Do you see any rollout conflicts?"
+    - intent: check my coordination inbox
+      command: agent-coord inbox
+    - intent: claim a file to avoid overlap
+      command: agent-coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
+    routing:
+      discover_keywords:
+      - handoff
+      - coordinate with another agent
+      - agent coordination
+      - tmux sessions
+      - peer mailbox
+      - claim file ownership
+      prompt_patterns:
+      - \bhandoff\b.*\bagent\b
+      - \bcoordinate\b.*\bagent\b
+      - \banother agent\b
+      - \bseparate tmux sessions?\b
+      - \bclaim\b.*\b(file|path|work)\b
+      recommended_entrypoints:
+      - agent-do coord whoami
+      - agent-do coord inbox
+      - agent-do coord handoff reviewer --summary "..."
+      default_command: inbox
+    concurrency: mixed
   3d:
     description: 3D modeling and rendering control
     capabilities:

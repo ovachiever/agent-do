@@ -1,0 +1,844 @@
+#!/usr/bin/env python3
+"""agent-coord - Project-local agent coordination mailbox."""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+HELP = """agent-coord - Project-local agent coordination mailbox
+
+Commands:
+  whoami                                 Show current coordination identity
+  alias <name>                           Assign a friendly alias to this agent
+  aliases                                List known aliases
+  peers                                  List known peers in this project mailbox
+  send <peer> --subject <text> ...       Send a structured message
+  handoff <peer> --summary <text>        Send a handoff message
+  ask <peer> --question <text>           Send a scoped question
+  reply <message-id> --body <text>       Reply to a message thread
+  broadcast --subject <text> ...         Broadcast a message to all known peers
+  inbox                                  List inbox messages for this agent
+  read <message-id>                      Show a full message
+  wait                                   Wait for the next inbox message
+  ack <message-id>                       Acknowledge a message
+  claims                                 List active advisory claims
+  claim <key> [--reason <text>]          Claim a file/path/work item
+  release <key>                          Release a claim you own
+
+Options:
+  --json                                 Output structured JSON
+
+Examples:
+  agent-coord whoami
+  agent-coord alias reviewer
+  agent-coord handoff infra --summary "Local verification is done" --ref app/api/generate/route.ts
+  agent-coord ask reviewer --question "Do you see any rollout conflicts?"
+  agent-coord inbox
+  agent-coord reply msg_abc123 --body "No direct conflict, but two rollout gotchas"
+  agent-coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
+"""
+
+
+THREAD_CANDIDATES: list[tuple[str, str]] = [
+    ("codex", "CODEX_THREAD_ID"),
+    ("claude", "CLAUDE_THREAD_ID"),
+    ("claude", "CLAUDE_SESSION_ID"),
+    ("claude", "CLAUDE_AGENT_ID"),
+]
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def compact(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]+", "", value).lower()[:16]
+
+
+def sanitize(value: str) -> str:
+    value = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-_.").lower()
+    return value[:24]
+
+
+def print_payload(payload: Any, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=False))
+    else:
+        if isinstance(payload, str):
+            print(payload)
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=False))
+    return 0
+
+
+def error(message: str, as_json: bool, code: int = 1, **extra: Any) -> int:
+    payload = {"success": False, "error": message, "code": code}
+    payload.update(extra)
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    return code
+
+
+def git_output(cwd: Path, *args: str) -> str | None:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip()
+
+
+def resolve_project_paths(cwd: Path) -> dict[str, str]:
+    git_dir_text = git_output(cwd, "rev-parse", "--git-dir")
+    if git_dir_text:
+        git_dir = Path(git_dir_text)
+        if not git_dir.is_absolute():
+            git_dir = (cwd / git_dir).resolve()
+        project_root_text = git_output(cwd, "rev-parse", "--show-toplevel")
+        project_root = Path(project_root_text).resolve() if project_root_text else cwd.resolve()
+        coord_root = git_dir / "agent-do" / "coord"
+        return {
+            "project_root": str(project_root),
+            "coord_root": str(coord_root),
+            "storage": "git-local",
+        }
+
+    project_root = cwd.resolve()
+    project_hash = hashlib.sha1(str(project_root).encode("utf-8")).hexdigest()[:16]
+    home = Path(os.environ.get("AGENT_DO_HOME", str(Path.home() / ".agent-do")))
+    coord_root = home / "projects" / project_hash / "coord"
+    return {
+        "project_root": str(project_root),
+        "coord_root": str(coord_root),
+        "storage": "global-fallback",
+    }
+
+
+def derive_identity() -> dict[str, str | None]:
+    for prefix, env_key in THREAD_CANDIDATES:
+        value = os.environ.get(env_key)
+        if not value:
+            continue
+        short = compact(value)
+        if short:
+            return {"agent_id": f"{prefix}-{short}", "source": env_key, "raw": value}
+
+    tmux_pane = os.environ.get("TMUX_PANE")
+    if tmux_pane:
+        short = sanitize(tmux_pane).lstrip("%")
+        if short:
+            return {"agent_id": f"tmux-{short}", "source": "TMUX_PANE", "raw": tmux_pane}
+
+    fallback = f"{socket.gethostname()}-{os.getpid()}"
+    return {"agent_id": f"host-{compact(fallback)}", "source": "hostname+pid", "raw": fallback}
+
+
+class CoordStore:
+    def __init__(self, cwd: Path) -> None:
+        paths = resolve_project_paths(cwd)
+        ident = derive_identity()
+        self.cwd = cwd
+        self.project_root = Path(paths["project_root"])
+        self.coord_root = Path(paths["coord_root"])
+        self.storage = paths["storage"]
+        self.agent_id = str(ident["agent_id"])
+        self.identity_source = str(ident["source"])
+        self.identity_raw = ident["raw"]
+
+        self.inbox_dir = self.coord_root / "inbox"
+        self.threads_dir = self.coord_root / "threads"
+        self.agents_path = self.coord_root / "agents.json"
+        self.claims_path = self.coord_root / "claims.json"
+        self.lock_path = self.coord_root / ".lock"
+
+        self.coord_root.mkdir(parents=True, exist_ok=True)
+        self.inbox_dir.mkdir(parents=True, exist_ok=True)
+        self.threads_dir.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def locked(self):
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a+") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    def _read_json(self, path: Path, default: Any) -> Any:
+        if not path.exists():
+            return default
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return default
+
+    def _write_json(self, path: Path, payload: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        tmp.replace(path)
+
+    def _load_agents(self) -> dict[str, dict[str, Any]]:
+        payload = self._read_json(self.agents_path, {"agents": {}})
+        agents = payload.get("agents", {})
+        if not isinstance(agents, dict):
+            return {}
+        return agents
+
+    def _save_agents(self, agents: dict[str, dict[str, Any]]) -> None:
+        self._write_json(self.agents_path, {"agents": agents})
+
+    def register_self(self) -> dict[str, Any]:
+        with self.locked():
+            agents = self._load_agents()
+            current = agents.get(self.agent_id, {})
+            current.update(
+                {
+                    "agent_id": self.agent_id,
+                    "last_seen": now_iso(),
+                    "project_root": str(self.project_root),
+                    "identity_source": self.identity_source,
+                }
+            )
+            if self.identity_raw:
+                current["identity_raw"] = self.identity_raw
+            agents[self.agent_id] = current
+            self._save_agents(agents)
+            return current
+
+    def alias_self(self, alias: str) -> dict[str, Any]:
+        with self.locked():
+            agents = self._load_agents()
+            current = agents.get(self.agent_id, {})
+            current.update(
+                {
+                    "agent_id": self.agent_id,
+                    "alias": alias,
+                    "last_seen": now_iso(),
+                    "project_root": str(self.project_root),
+                    "identity_source": self.identity_source,
+                }
+            )
+            if self.identity_raw:
+                current["identity_raw"] = self.identity_raw
+            agents[self.agent_id] = current
+            self._save_agents(agents)
+            return current
+
+    def self_record(self) -> dict[str, Any]:
+        self.register_self()
+        return self._load_agents().get(self.agent_id, {"agent_id": self.agent_id})
+
+    def aliases(self) -> list[dict[str, Any]]:
+        self.register_self()
+        aliases: list[dict[str, Any]] = []
+        for agent_id, record in sorted(self._load_agents().items()):
+            if record.get("alias"):
+                aliases.append(
+                    {
+                        "agent_id": agent_id,
+                        "alias": record["alias"],
+                        "last_seen": record.get("last_seen"),
+                        "current": agent_id == self.agent_id,
+                    }
+                )
+        return aliases
+
+    def alias_for(self, agent_id: str) -> str | None:
+        record = self._load_agents().get(agent_id, {})
+        alias = record.get("alias")
+        return alias if isinstance(alias, str) and alias else None
+
+    def current_identifiers(self) -> set[str]:
+        record = self.self_record()
+        identifiers = {self.agent_id, "*", "all"}
+        alias = record.get("alias")
+        if isinstance(alias, str) and alias:
+            identifiers.add(alias)
+        return identifiers
+
+    def resolve_peer(self, token: str) -> tuple[list[str], list[str]]:
+        agents = self._load_agents()
+        for agent_id, record in agents.items():
+            if token == agent_id:
+                return [agent_id], [token]
+            alias = record.get("alias")
+            if isinstance(alias, str) and alias and token == alias:
+                return [agent_id], [alias]
+        return [token], [token]
+
+    def known_peer_ids(self) -> list[str]:
+        self.register_self()
+        return [agent_id for agent_id in sorted(self._load_agents()) if agent_id != self.agent_id]
+
+    def list_messages(self) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+        for path in sorted(self.inbox_dir.glob("*.json")):
+            payload = self._read_json(path, None)
+            if not isinstance(payload, dict):
+                continue
+            messages.append(payload)
+        messages.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+        return messages
+
+    def message_for_current(self, message: dict[str, Any]) -> bool:
+        recipients = message.get("to", [])
+        if not isinstance(recipients, list):
+            return False
+        return any(token in self.current_identifiers() for token in recipients)
+
+    def find_message(self, message_id: str) -> tuple[Path, dict[str, Any]] | None:
+        path = self.inbox_dir / f"{message_id}.json"
+        if path.exists():
+            payload = self._read_json(path, None)
+            if isinstance(payload, dict):
+                return path, payload
+        for candidate in self.inbox_dir.glob("*.json"):
+            payload = self._read_json(candidate, None)
+            if isinstance(payload, dict) and payload.get("id") == message_id:
+                return candidate, payload
+        return None
+
+    def unread_messages(self) -> list[dict[str, Any]]:
+        current = self.agent_id
+        relevant = [m for m in self.list_messages() if self.message_for_current(m)]
+        unread: list[dict[str, Any]] = []
+        for message in relevant:
+            ack_ids = {
+                ack.get("agent_id")
+                for ack in message.get("acks", [])
+                if isinstance(ack, dict) and ack.get("agent_id")
+            }
+            if current not in ack_ids:
+                unread.append(message)
+        return unread
+
+    def peers(self) -> list[dict[str, Any]]:
+        self.register_self()
+        unread_counts: dict[str, int] = {}
+        for message in self.unread_messages():
+            sender = message.get("from")
+            if isinstance(sender, str):
+                unread_counts[sender] = unread_counts.get(sender, 0) + 1
+
+        peers: list[dict[str, Any]] = []
+        for agent_id, record in sorted(self._load_agents().items()):
+            peers.append(
+                {
+                    "agent_id": agent_id,
+                    "alias": record.get("alias"),
+                    "last_seen": record.get("last_seen"),
+                    "current": agent_id == self.agent_id,
+                    "unread_from_peer": unread_counts.get(agent_id, 0),
+                }
+            )
+        return peers
+
+    def _message_id(self) -> str:
+        return f"msg_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
+
+    def create_message(
+        self,
+        *,
+        kind: str,
+        recipients: list[str],
+        recipient_labels: list[str],
+        subject: str,
+        body: str,
+        refs: list[str] | None = None,
+        checks: list[str] | None = None,
+        next_steps: list[str] | None = None,
+        thread_id: str | None = None,
+        reply_to: str | None = None,
+    ) -> dict[str, Any]:
+        self.register_self()
+        record = self.self_record()
+        sender_alias = record.get("alias")
+        created_at = now_iso()
+        message_id = self._message_id()
+        if thread_id is None:
+            thread_id = f"thread_{uuid.uuid4().hex[:12]}"
+        payload = {
+            "id": message_id,
+            "thread_id": thread_id,
+            "kind": kind,
+            "from": self.agent_id,
+            "from_alias": sender_alias,
+            "to": recipients,
+            "to_labels": recipient_labels,
+            "subject": subject,
+            "body": body,
+            "refs": refs or [],
+            "checks": checks or [],
+            "next": next_steps or [],
+            "created_at": created_at,
+            "acked_at": None,
+            "acks": [],
+            "reply_to": reply_to,
+        }
+        path = self.inbox_dir / f"{message_id}.json"
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        return payload
+
+    def ack(self, message_id: str) -> dict[str, Any] | None:
+        found = self.find_message(message_id)
+        if not found:
+            return None
+        path, message = found
+        self.register_self()
+        record = self.self_record()
+        alias = record.get("alias")
+        with self.locked():
+            fresh = self._read_json(path, {})
+            acks = fresh.get("acks", [])
+            if not isinstance(acks, list):
+                acks = []
+            if not any(isinstance(ack, dict) and ack.get("agent_id") == self.agent_id for ack in acks):
+                acks.append({"agent_id": self.agent_id, "alias": alias, "at": now_iso()})
+            fresh["acks"] = acks
+            if acks:
+                fresh["acked_at"] = acks[0]["at"]
+            self._write_json(path, fresh)
+            return fresh
+
+    def thread_messages(self, thread_id: str) -> list[dict[str, Any]]:
+        messages = [m for m in self.list_messages() if m.get("thread_id") == thread_id]
+        messages.sort(key=lambda item: item.get("created_at", ""))
+        return messages
+
+    def thread_summaries(self) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for message in self.list_messages():
+            if not self.message_for_current(message) and message.get("from") != self.agent_id:
+                continue
+            grouped.setdefault(str(message.get("thread_id")), []).append(message)
+        threads: list[dict[str, Any]] = []
+        for thread_id, messages in sorted(grouped.items()):
+            messages.sort(key=lambda item: item.get("created_at", ""))
+            threads.append(
+                {
+                    "thread_id": thread_id,
+                    "count": len(messages),
+                    "subject": messages[-1].get("subject"),
+                    "last_at": messages[-1].get("created_at"),
+                }
+            )
+        threads.sort(key=lambda item: item.get("last_at") or "", reverse=True)
+        return threads
+
+    def _load_claims(self) -> list[dict[str, Any]]:
+        payload = self._read_json(self.claims_path, {"claims": []})
+        claims = payload.get("claims", [])
+        return claims if isinstance(claims, list) else []
+
+    def _save_claims(self, claims: list[dict[str, Any]]) -> None:
+        self._write_json(self.claims_path, {"claims": claims})
+
+    def claims(self) -> list[dict[str, Any]]:
+        self.register_self()
+        claims = self._load_claims()
+        claims.sort(key=lambda item: item.get("key", ""))
+        return claims
+
+    def claim(self, key: str, reason: str | None = None, force: bool = False) -> tuple[bool, dict[str, Any] | None, str | None]:
+        self.register_self()
+        record = self.self_record()
+        alias = record.get("alias")
+        with self.locked():
+            claims = self._load_claims()
+            for existing in claims:
+                if existing.get("key") != key:
+                    continue
+                if existing.get("owner") == self.agent_id:
+                    existing["reason"] = reason
+                    existing["updated_at"] = now_iso()
+                    self._save_claims(claims)
+                    return True, existing, None
+                if not force:
+                    owner = existing.get("owner_alias") or existing.get("owner")
+                    return False, existing, f"{key} is already claimed by {owner}"
+                claims.remove(existing)
+                break
+
+            claim = {
+                "key": key,
+                "owner": self.agent_id,
+                "owner_alias": alias,
+                "reason": reason,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            claims.append(claim)
+            self._save_claims(claims)
+            return True, claim, None
+
+    def release(self, key: str, force: bool = False) -> tuple[bool, dict[str, Any] | None, str | None]:
+        self.register_self()
+        with self.locked():
+            claims = self._load_claims()
+            for existing in list(claims):
+                if existing.get("key") != key:
+                    continue
+                if existing.get("owner") != self.agent_id and not force:
+                    owner = existing.get("owner_alias") or existing.get("owner")
+                    return False, existing, f"{key} is owned by {owner}"
+                claims.remove(existing)
+                self._save_claims(claims)
+                return True, existing, None
+            return False, None, f"No active claim for {key}"
+
+
+def read_text_arg(text: str | None, file_path: str | None) -> str | None:
+    if file_path:
+        return Path(file_path).read_text()
+    return text
+
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--json", action="store_true")
+    sub = p.add_subparsers(dest="command")
+
+    sub.add_parser("whoami")
+
+    alias_p = sub.add_parser("alias")
+    alias_p.add_argument("name")
+
+    sub.add_parser("aliases")
+    sub.add_parser("peers")
+
+    send_p = sub.add_parser("send")
+    send_p.add_argument("peer")
+    send_p.add_argument("--subject", required=True)
+    send_p.add_argument("--body")
+    send_p.add_argument("--body-file")
+    send_p.add_argument("--kind", default="status")
+    send_p.add_argument("--ref", action="append", default=[])
+    send_p.add_argument("--check", action="append", default=[])
+    send_p.add_argument("--next", dest="next_steps", action="append", default=[])
+
+    handoff_p = sub.add_parser("handoff")
+    handoff_p.add_argument("peer")
+    handoff_p.add_argument("--summary", required=True)
+    handoff_p.add_argument("--subject")
+    handoff_p.add_argument("--ref", action="append", default=[])
+    handoff_p.add_argument("--check", action="append", default=[])
+    handoff_p.add_argument("--next", dest="next_steps", action="append", default=[])
+
+    ask_p = sub.add_parser("ask")
+    ask_p.add_argument("peer")
+    ask_p.add_argument("--question", required=True)
+    ask_p.add_argument("--subject")
+    ask_p.add_argument("--ref", action="append", default=[])
+
+    reply_p = sub.add_parser("reply")
+    reply_p.add_argument("message_id")
+    reply_p.add_argument("--body")
+    reply_p.add_argument("--body-file")
+    reply_p.add_argument("--subject")
+    reply_p.add_argument("--ref", action="append", default=[])
+    reply_p.add_argument("--check", action="append", default=[])
+    reply_p.add_argument("--next", dest="next_steps", action="append", default=[])
+
+    broadcast_p = sub.add_parser("broadcast")
+    broadcast_p.add_argument("--subject", required=True)
+    broadcast_p.add_argument("--body")
+    broadcast_p.add_argument("--body-file")
+    broadcast_p.add_argument("--kind", default="broadcast")
+    broadcast_p.add_argument("--ref", action="append", default=[])
+    broadcast_p.add_argument("--check", action="append", default=[])
+    broadcast_p.add_argument("--next", dest="next_steps", action="append", default=[])
+
+    inbox_p = sub.add_parser("inbox")
+    inbox_p.add_argument("--unacked", action="store_true")
+    inbox_p.add_argument("--kind")
+
+    read_p = sub.add_parser("read")
+    read_p.add_argument("message_id")
+
+    wait_p = sub.add_parser("wait")
+    wait_p.add_argument("--timeout", type=float, default=60.0)
+    wait_p.add_argument("--interval", type=float, default=1.0)
+    wait_p.add_argument("--unacked", action="store_true")
+    wait_p.add_argument("--kind")
+
+    ack_p = sub.add_parser("ack")
+    ack_p.add_argument("message_id")
+
+    sub.add_parser("threads")
+    thread_p = sub.add_parser("thread")
+    thread_p.add_argument("thread_id")
+
+    sub.add_parser("claims")
+
+    claim_p = sub.add_parser("claim")
+    claim_p.add_argument("key")
+    claim_p.add_argument("--reason")
+    claim_p.add_argument("--force", action="store_true")
+
+    release_p = sub.add_parser("release")
+    release_p.add_argument("key")
+    release_p.add_argument("--force", action="store_true")
+
+    sub.add_parser("help")
+    return p
+
+
+def format_inbox(message: dict[str, Any]) -> str:
+    status = "acked" if message.get("acks") else "new"
+    sender = message.get("from_alias") or message.get("from")
+    subject = message.get("subject") or "(no subject)"
+    return f'{message.get("id")}  {message.get("kind")}  {status}  from:{sender}  subject:{subject}'
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) == 1 or argv[1] in {"--help", "-h", "help"}:
+        print(HELP)
+        return 0
+
+    raw_args = argv[1:]
+    force_json = False
+    if "--json" in raw_args:
+        force_json = True
+        raw_args = [arg for arg in raw_args if arg != "--json"]
+
+    args = parser().parse_args(raw_args)
+    args.json = bool(force_json or getattr(args, "json", False))
+    if not args.command:
+        print(HELP)
+        return 0
+
+    store = CoordStore(Path.cwd())
+
+    if args.command == "whoami":
+        record = store.self_record()
+        payload = {
+            "success": True,
+            "tool": "coord",
+            "agent_id": store.agent_id,
+            "alias": record.get("alias"),
+            "identity_source": store.identity_source,
+            "project_root": str(store.project_root),
+            "coord_root": str(store.coord_root),
+            "storage": store.storage,
+        }
+        return print_payload(payload, args.json)
+
+    if args.command == "alias":
+        record = store.alias_self(args.name)
+        return print_payload({"success": True, "tool": "coord", "agent": record}, args.json)
+
+    if args.command == "aliases":
+        aliases = store.aliases()
+        if args.json:
+            return print_payload({"success": True, "tool": "coord", "aliases": aliases}, True)
+        if not aliases:
+            print("No aliases.")
+            return 0
+        for item in aliases:
+            current = " (current)" if item["current"] else ""
+            print(f'{item["alias"]} -> {item["agent_id"]}{current}')
+        return 0
+
+    if args.command == "peers":
+        peers = store.peers()
+        if args.json:
+            return print_payload({"success": True, "tool": "coord", "peers": peers}, True)
+        if not peers:
+            print("No peers.")
+            return 0
+        for peer in peers:
+            current = " current" if peer["current"] else ""
+            alias = f' alias:{peer["alias"]}' if peer.get("alias") else ""
+            unread = f' unread_from_peer:{peer["unread_from_peer"]}' if peer.get("unread_from_peer") else ""
+            print(f'{peer["agent_id"]}{current}{alias}{unread}')
+        return 0
+
+    if args.command in {"send", "handoff", "ask", "broadcast", "reply"}:
+        if args.command == "send":
+            body = read_text_arg(args.body, args.body_file)
+            if not body:
+                return error("send requires --body or --body-file", args.json)
+            recipients, labels = store.resolve_peer(args.peer)
+            payload = store.create_message(
+                kind=args.kind,
+                recipients=recipients,
+                recipient_labels=labels,
+                subject=args.subject,
+                body=body,
+                refs=args.ref,
+                checks=args.check,
+                next_steps=args.next_steps,
+            )
+            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
+
+        if args.command == "handoff":
+            recipients, labels = store.resolve_peer(args.peer)
+            subject = args.subject or f"Handoff from {store.alias_for(store.agent_id) or store.agent_id}"
+            payload = store.create_message(
+                kind="handoff",
+                recipients=recipients,
+                recipient_labels=labels,
+                subject=subject,
+                body=args.summary,
+                refs=args.ref,
+                checks=args.check,
+                next_steps=args.next_steps,
+            )
+            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
+
+        if args.command == "ask":
+            recipients, labels = store.resolve_peer(args.peer)
+            subject = args.subject or f"Question from {store.alias_for(store.agent_id) or store.agent_id}"
+            payload = store.create_message(
+                kind="question",
+                recipients=recipients,
+                recipient_labels=labels,
+                subject=subject,
+                body=args.question,
+                refs=args.ref,
+            )
+            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
+
+        if args.command == "broadcast":
+            body = read_text_arg(args.body, args.body_file)
+            if not body:
+                return error("broadcast requires --body or --body-file", args.json)
+            recipients = store.known_peer_ids()
+            if not recipients:
+                return error("No known peers to broadcast to", args.json)
+            payload = store.create_message(
+                kind=args.kind,
+                recipients=recipients,
+                recipient_labels=recipients,
+                subject=args.subject,
+                body=body,
+                refs=args.ref,
+                checks=args.check,
+                next_steps=args.next_steps,
+            )
+            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
+
+        if args.command == "reply":
+            body = read_text_arg(args.body, args.body_file)
+            if not body:
+                return error("reply requires --body or --body-file", args.json)
+            found = store.find_message(args.message_id)
+            if not found:
+                return error(f"Message not found: {args.message_id}", args.json)
+            _, original = found
+            subject = args.subject or f"Re: {original.get('subject') or original.get('id')}"
+            payload = store.create_message(
+                kind="reply",
+                recipients=[str(original.get("from"))],
+                recipient_labels=[str(original.get("from_alias") or original.get("from"))],
+                subject=subject,
+                body=body,
+                refs=args.ref,
+                checks=args.check,
+                next_steps=args.next_steps,
+                thread_id=original.get("thread_id"),
+                reply_to=original.get("id"),
+            )
+            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
+
+    if args.command == "inbox":
+        messages = [m for m in store.list_messages() if store.message_for_current(m)]
+        if args.unacked:
+            unread_ids = {m["id"] for m in store.unread_messages()}
+            messages = [m for m in messages if m["id"] in unread_ids]
+        if args.kind:
+            messages = [m for m in messages if m.get("kind") == args.kind]
+        if args.json:
+            return print_payload({"success": True, "tool": "coord", "messages": messages}, True)
+        if not messages:
+            print("Inbox empty.")
+            return 0
+        print("INBOX")
+        for message in messages:
+            print(format_inbox(message))
+        return 0
+
+    if args.command == "read":
+        found = store.find_message(args.message_id)
+        if not found:
+            return error(f"Message not found: {args.message_id}", args.json)
+        _, message = found
+        return print_payload({"success": True, "tool": "coord", "message": message}, args.json)
+
+    if args.command == "wait":
+        deadline = time.time() + args.timeout
+        while True:
+            messages = [m for m in store.list_messages() if store.message_for_current(m)]
+            if args.unacked:
+                unread_ids = {m["id"] for m in store.unread_messages()}
+                messages = [m for m in messages if m["id"] in unread_ids]
+            if args.kind:
+                messages = [m for m in messages if m.get("kind") == args.kind]
+            if messages:
+                latest = sorted(messages, key=lambda item: item.get("created_at", ""))[-1]
+                return print_payload({"success": True, "tool": "coord", "message": latest}, args.json)
+            if time.time() >= deadline:
+                return error("Timed out waiting for coord message", args.json, code=2)
+            time.sleep(args.interval)
+
+    if args.command == "ack":
+        updated = store.ack(args.message_id)
+        if not updated:
+            return error(f"Message not found: {args.message_id}", args.json)
+        return print_payload({"success": True, "tool": "coord", "message": updated}, args.json)
+
+    if args.command == "threads":
+        threads = store.thread_summaries()
+        return print_payload({"success": True, "tool": "coord", "threads": threads}, args.json)
+
+    if args.command == "thread":
+        messages = store.thread_messages(args.thread_id)
+        if not messages:
+            return error(f"Thread not found: {args.thread_id}", args.json)
+        return print_payload({"success": True, "tool": "coord", "thread_id": args.thread_id, "messages": messages}, args.json)
+
+    if args.command == "claims":
+        claims = store.claims()
+        return print_payload({"success": True, "tool": "coord", "claims": claims}, args.json)
+
+    if args.command == "claim":
+        ok, claim, message = store.claim(args.key, args.reason, args.force)
+        if not ok:
+            return error(message or "Unable to claim key", args.json)
+        return print_payload({"success": True, "tool": "coord", "claim": claim}, args.json)
+
+    if args.command == "release":
+        ok, claim, message = store.release(args.key, args.force)
+        if not ok:
+            return error(message or "Unable to release key", args.json)
+        return print_payload({"success": True, "tool": "coord", "released": claim}, args.json)
+
+    print(HELP)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

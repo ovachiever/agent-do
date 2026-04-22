@@ -392,9 +392,21 @@ agent-do meetings new zoom
 agent-do meetings teams join "https://teams.microsoft.com/l/meetup-join/..."
 ```
 
+### `coord`
+
+Project-local agent coordination mailbox for structured handoffs, inbox reads, replies, and advisory claims between separate agent sessions in the same repo.
+
+```bash
+agent-do coord whoami
+agent-do coord alias reviewer
+agent-do coord handoff infra --summary "Local verification is done"
+agent-do coord inbox
+agent-do coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
+```
+
 ## Tool Surface
 
-There are 86 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 87 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
@@ -415,7 +427,7 @@ There are 86 tools today. A few are deep subsystems. Many are focused adapters. 
 | Creative | `image`, `video`, `audio`, `3d`, `cad`, `latex` | Media and document generation |
 | Security | `burp`, `wireshark`, `ghidra` | Security and reverse-engineering tools |
 | Hardware | `hardware`, `serial`, `midi`, `homekit`, `bluetooth`, `usb`, `printer` | Device control and family-level hardware orchestration |
-| AI / Meta | `prompt`, `eval`, `memory`, `learn`, `swarm`, `agent`, `repl` | Agent support and orchestration |
+| AI / Meta | `prompt`, `eval`, `memory`, `learn`, `swarm`, `agent`, `coord`, `repl` | Agent support, coordination, and orchestration |
 | Dev Tools | `git`, `api`, `tail`, `logs`, `sessions` | Git, HTTP, logs, session history |
 | Utilities | `clipboard`, `ocr`, `vision`, `metrics`, `debug` | System utility surfaces |
 
