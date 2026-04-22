@@ -131,10 +131,58 @@ print(f"{provider} sent")
         require(save_payload["recipient"]["sms"] == "+15551234567", f"unexpected save payload: {save_payload}")
         require(save_payload["recipient"]["messenger"] == "https://www.messenger.com/t/example-thread", f"unexpected save payload: {save_payload}")
 
+        backup_save = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "set-recipient",
+                "backup",
+                "--email",
+                "backup@example.com",
+                "--prefer",
+                "email",
+                "--subject",
+                "Backup alert",
+                "--json",
+            ],
+            env=env,
+        )
+        require(backup_save.returncode == 0, f"backup set-recipient failed: {backup_save.stderr}")
+        backup_save_payload = json.loads(backup_save.stdout)
+        require(backup_save_payload["recipient"]["email"] == "backup@example.com", f"unexpected backup recipient payload: {backup_save_payload}")
+
         recipients = run([str(AGENT_DO), "notify", "recipients", "--json"], env=env)
         require(recipients.returncode == 0, f"notify recipients failed: {recipients.stderr}")
         recipients_payload = json.loads(recipients.stdout)
-        require(recipients_payload["recipients"][0]["alias"] == "me", f"unexpected recipients payload: {recipients_payload}")
+        recipient_aliases = [item["alias"] for item in recipients_payload["recipients"]]
+        require(recipient_aliases == ["backup", "me"], f"unexpected recipients payload: {recipients_payload}")
+
+        set_group = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "set-group",
+                "ops",
+                "me",
+                "backup",
+                "--json",
+            ],
+            env=env,
+        )
+        require(set_group.returncode == 0, f"set-group failed: {set_group.stderr}")
+        set_group_payload = json.loads(set_group.stdout)
+        require(set_group_payload["group"]["members"] == ["me", "backup"], f"unexpected set-group payload: {set_group_payload}")
+
+        groups = run([str(AGENT_DO), "notify", "groups", "--json"], env=env)
+        require(groups.returncode == 0, f"notify groups failed: {groups.stderr}")
+        groups_payload = json.loads(groups.stdout)
+        require(groups_payload["groups"][0]["alias"] == "ops", f"unexpected groups payload: {groups_payload}")
+        require(groups_payload["groups"][0]["members"] == ["me", "backup"], f"unexpected groups payload: {groups_payload}")
+
+        show_group = run([str(AGENT_DO), "notify", "show-group", "ops", "--json"], env=env)
+        require(show_group.returncode == 0, f"show-group failed: {show_group.stderr}")
+        show_group_payload = json.loads(show_group.stdout)
+        require(show_group_payload["group"]["members"] == ["me", "backup"], f"unexpected show-group payload: {show_group_payload}")
 
         apply_template = run(
             [
@@ -197,11 +245,35 @@ print(f"{provider} sent")
         require(set_rule_payload["rule"]["event"] == "build", f"unexpected set-rule payload: {set_rule_payload}")
         require(set_rule_payload["rule"]["cooldown_seconds"] == 3600, f"unexpected cooldown payload: {set_rule_payload}")
 
+        group_rule = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "set-rule",
+                "approval_group",
+                "--recipient",
+                "ops",
+                "--event",
+                "approval",
+                "--message",
+                "Approval needed for {item}",
+                "--via",
+                "sms,email",
+                "--match",
+                "status=needed",
+                "--cooldown",
+                "10m",
+                "--json",
+            ],
+            env=env,
+        )
+        require(group_rule.returncode == 0, f"group rule failed: {group_rule.stderr}")
+
         rules = run([str(AGENT_DO), "notify", "rules", "--json"], env=env)
         require(rules.returncode == 0, f"notify rules failed: {rules.stderr}")
         rules_payload = json.loads(rules.stdout)
         rule_names = [item["name"] for item in rules_payload["rules"]]
-        require(rule_names == ["build_failed", "deploy_failed_prod"], f"unexpected rules payload: {rules_payload}")
+        require(rule_names == ["approval_group", "build_failed", "deploy_failed_prod"], f"unexpected rules payload: {rules_payload}")
 
         show_rule = run([str(AGENT_DO), "notify", "show-rule", "build_failed", "--json"], env=env)
         require(show_rule.returncode == 0, f"show-rule failed: {show_rule.stderr}")
@@ -219,6 +291,13 @@ print(f"{provider} sent")
         sent_payload = json.loads(sent.stdout)
         require(sent_payload["success"] is True, f"unexpected notify send payload: {sent_payload}")
         require(sent_payload["attempts"][0]["provider"] == "sms", f"unexpected notify send attempt: {sent_payload}")
+
+        group_send = run([str(AGENT_DO), "notify", "ops", "Team update", "--json"], env=env)
+        require(group_send.returncode == 0, f"group send failed: {group_send.stderr}")
+        group_send_payload = json.loads(group_send.stdout)
+        require(group_send_payload["group"] == "ops", f"unexpected group send payload: {group_send_payload}")
+        require(group_send_payload["success"] is True, f"unexpected group send payload: {group_send_payload}")
+        require([item["recipient"] for item in group_send_payload["deliveries"]] == ["me", "backup"], f"unexpected group deliveries: {group_send_payload}")
 
         env["NOTIFY_TEST_FAIL"] = "sms"
         fallback = run([str(AGENT_DO), "notify", "me", "Need backup", "--json"], env=env)
@@ -282,6 +361,25 @@ print(f"{provider} sent")
         )
 
         del env["NOTIFY_TEST_FAIL"]
+        group_emit = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "emit",
+                "approval",
+                "--fact",
+                "item=database migration",
+                "--fact",
+                "status=needed",
+                "--json",
+            ],
+            env=env,
+        )
+        require(group_emit.returncode == 0, f"group emit failed: {group_emit.stderr}")
+        group_emit_payload = json.loads(group_emit.stdout)
+        require(group_emit_payload["results"][0]["notification"]["group"] == "ops", f"unexpected group emit payload: {group_emit_payload}")
+        require(len(group_emit_payload["results"][0]["notification"]["deliveries"]) == 2, f"unexpected group emit deliveries: {group_emit_payload}")
+
         emit_sent = run(
             [
                 str(AGENT_DO),
@@ -374,6 +472,16 @@ print(f"{provider} sent")
         require(show_deleted_rule.returncode == 1, f"expected deleted rule lookup failure: {show_deleted_rule.stdout} {show_deleted_rule.stderr}")
         show_deleted_rule_payload = json.loads(show_deleted_rule.stdout)
         require("Unknown rule" in show_deleted_rule_payload["error"], f"unexpected deleted rule payload: {show_deleted_rule_payload}")
+
+        delete_group = run([str(AGENT_DO), "notify", "delete-group", "ops", "--json"], env=env)
+        require(delete_group.returncode == 0, f"delete-group failed: {delete_group.stderr}")
+        delete_group_payload = json.loads(delete_group.stdout)
+        require(delete_group_payload["alias"] == "ops", f"unexpected delete-group payload: {delete_group_payload}")
+
+        show_deleted_group = run([str(AGENT_DO), "notify", "show-group", "ops", "--json"], env=env)
+        require(show_deleted_group.returncode == 1, f"expected deleted group lookup failure: {show_deleted_group.stdout} {show_deleted_group.stderr}")
+        show_deleted_group_payload = json.loads(show_deleted_group.stdout)
+        require("Unknown group alias" in show_deleted_group_payload["error"], f"unexpected deleted group payload: {show_deleted_group_payload}")
 
         messenger_denied = run([str(AGENT_DO), "notify", "me", "Ping", "--via", "messenger", "--json"], env=env)
         require(messenger_denied.returncode == 1, f"expected messenger live approval failure: {messenger_denied.stdout} {messenger_denied.stderr}")

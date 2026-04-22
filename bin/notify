@@ -12,11 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from notify import (  # noqa: E402
     apply_template,
+    delete_group,
     delete_rule,
     emit_event,
+    get_group,
     get_recipient,
     get_rule,
     get_template,
+    list_groups,
     list_recipients,
     list_rules,
     list_templates,
@@ -34,6 +37,7 @@ from notify import (  # noqa: E402
     save_rules,
     save_state,
     send_notification,
+    update_group,
     update_rule,
     update_recipient,
 )
@@ -45,14 +49,18 @@ def preprocess_args(argv: list[str]) -> list[str]:
         "send",
         "providers",
         "recipients",
+        "groups",
         "show",
+        "show-group",
         "set-recipient",
+        "set-group",
         "rules",
         "show-rule",
         "set-rule",
         "templates",
         "show-template",
         "apply-template",
+        "delete-group",
         "delete-rule",
         "emit",
         "reset-state",
@@ -89,9 +97,16 @@ def build_parser() -> argparse.ArgumentParser:
     recipients_parser = subparsers.add_parser("recipients", help="List configured recipient aliases")
     recipients_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
+    groups_parser = subparsers.add_parser("groups", help="List configured recipient groups")
+    groups_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+
     show_parser = subparsers.add_parser("show", help="Show one configured recipient")
     show_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     show_parser.add_argument("alias", help="Recipient alias")
+
+    show_group_parser = subparsers.add_parser("show-group", help="Show one configured recipient group")
+    show_group_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    show_group_parser.add_argument("alias", help="Group alias")
 
     set_parser = subparsers.add_parser("set-recipient", help="Create or update a recipient alias")
     set_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -103,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
     set_parser.add_argument("--pipe", help="Shell command target for pipe delivery")
     set_parser.add_argument("--prefer", help="Comma-separated preferred provider order")
     set_parser.add_argument("--subject", help="Default subject for email notifications")
+
+    set_group_parser = subparsers.add_parser("set-group", help="Create or update a recipient group")
+    set_group_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    set_group_parser.add_argument("alias", help="Group alias")
+    set_group_parser.add_argument("members", nargs="+", help="Recipient or group aliases")
 
     rules_parser = subparsers.add_parser("rules", help="List configured notification rules")
     rules_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -143,6 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
     delete_rule_parser = subparsers.add_parser("delete-rule", help="Delete one configured notification rule")
     delete_rule_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     delete_rule_parser.add_argument("name", help="Rule name")
+
+    delete_group_parser = subparsers.add_parser("delete-group", help="Delete one configured recipient group")
+    delete_group_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    delete_group_parser.add_argument("alias", help="Group alias")
 
     emit_parser = subparsers.add_parser("emit", help="Evaluate rules for an event and send matching notifications")
     emit_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -188,6 +212,16 @@ def main(argv: list[str]) -> int:
                 print(f"{recipient['alias']}: providers={providers} prefer={prefer}")
         return 0
 
+    if args.command == "groups":
+        payload = {"groups": list_groups(config)}
+        if args.json:
+            main_json(payload)
+        else:
+            for group in payload["groups"]:
+                members = ",".join(group.get("members", [])) or "-"
+                print(f"{group['alias']}: members={members}")
+        return 0
+
     if args.command == "show":
         recipient = get_recipient(config, args.alias)
         if recipient is None:
@@ -199,6 +233,23 @@ def main(argv: list[str]) -> int:
             return 1
 
         payload = {"alias": args.alias, "recipient": recipient}
+        if args.json:
+            main_json(payload)
+        else:
+            print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "show-group":
+        group = get_group(config, args.alias)
+        if group is None:
+            message = f"Unknown group alias: {args.alias}"
+            if args.json:
+                main_json({"success": False, "error": message})
+            else:
+                print(message, file=sys.stderr)
+            return 1
+
+        payload = {"alias": args.alias, "group": group}
         if args.json:
             main_json(payload)
         else:
@@ -223,6 +274,16 @@ def main(argv: list[str]) -> int:
             main_json(payload)
         else:
             print(f"Saved recipient alias: {args.alias}")
+        return 0
+
+    if args.command == "set-group":
+        group = update_group(config, args.alias, members=args.members)
+        save_config(config)
+        payload = {"success": True, "alias": args.alias, "group": group}
+        if args.json:
+            main_json(payload)
+        else:
+            print(f"Saved group alias: {args.alias}")
         return 0
 
     if args.command == "rules":
@@ -352,6 +413,23 @@ def main(argv: list[str]) -> int:
             main_json(payload)
         else:
             print(f"Deleted rule: {args.name}")
+        return 0
+
+    if args.command == "delete-group":
+        removed = delete_group(config, args.alias)
+        if removed is None:
+            payload = {"success": False, "error": f"Unknown group alias: {args.alias}"}
+            if args.json:
+                main_json(payload)
+            else:
+                print(payload["error"], file=sys.stderr)
+            return 1
+        save_config(config)
+        payload = {"success": True, "alias": args.alias, "group": removed}
+        if args.json:
+            main_json(payload)
+        else:
+            print(f"Deleted group alias: {args.alias}")
         return 0
 
     if args.command == "emit":

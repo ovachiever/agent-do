@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
         "via": ["sms"],
         "subject": "agent-do notification",
     },
+    "groups": {},
     "recipients": {},
 }
 
@@ -131,6 +132,7 @@ def load_config() -> dict[str, Any]:
     data = json.loads(RECIPIENTS_PATH.read_text())
     merged = json.loads(json.dumps(DEFAULT_CONFIG))
     merged["defaults"].update(data.get("defaults", {}))
+    merged["groups"].update(data.get("groups", {}))
     merged["recipients"].update(data.get("recipients", {}))
     return merged
 
@@ -258,11 +260,32 @@ def list_recipients(config: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
+def list_groups(config: dict[str, Any]) -> list[dict[str, Any]]:
+    items = []
+    for alias, data in sorted(config.get("groups", {}).items()):
+        members = list(data.get("members", []))
+        items.append(
+            {
+                "alias": alias,
+                "members": members,
+                "count": len(members),
+            }
+        )
+    return items
+
+
 def get_recipient(config: dict[str, Any], alias: str) -> dict[str, Any] | None:
     recipient = config.get("recipients", {}).get(alias)
     if recipient is None:
         return None
     return dict(recipient)
+
+
+def get_group(config: dict[str, Any], alias: str) -> dict[str, Any] | None:
+    group = config.get("groups", {}).get(alias)
+    if group is None:
+        return None
+    return dict(group)
 
 
 def update_recipient(
@@ -297,6 +320,61 @@ def update_recipient(
 
     recipients[alias] = recipient
     return recipient
+
+
+def update_group(
+    config: dict[str, Any],
+    alias: str,
+    *,
+    members: list[str],
+) -> dict[str, Any]:
+    groups = config.setdefault("groups", {})
+    unique_members: list[str] = []
+    seen: set[str] = set()
+    for member in members:
+        item = member.strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        unique_members.append(item)
+    groups[alias] = {"members": unique_members}
+    return dict(groups[alias])
+
+
+def delete_group(config: dict[str, Any], alias: str) -> dict[str, Any] | None:
+    groups = config.setdefault("groups", {})
+    removed = groups.pop(alias, None)
+    if removed is None:
+        return None
+    return dict(removed)
+
+
+def expand_group_members(
+    config: dict[str, Any],
+    name: str,
+    *,
+    seen: set[str] | None = None,
+) -> list[str]:
+    seen = set(seen or set())
+    if name in seen:
+        cycle = " -> ".join([*sorted(seen), name])
+        raise ValueError(f"Notify group cycle detected: {cycle}")
+
+    group = get_group(config, name)
+    if group is None:
+        return [name]
+
+    next_seen = set(seen)
+    next_seen.add(name)
+    expanded: list[str] = []
+    added: set[str] = set()
+    for member in group.get("members", []):
+        for resolved in expand_group_members(config, str(member), seen=next_seen):
+            if resolved in added:
+                continue
+            added.add(resolved)
+            expanded.append(resolved)
+    return expanded
 
 
 def list_rules(rules_config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -714,6 +792,33 @@ def send_notification(
     send_all: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    group = get_group(config, recipient_name)
+    if group is not None:
+        members = expand_group_members(config, recipient_name)
+        deliveries = [
+            send_notification(
+                config,
+                member,
+                message,
+                via=via,
+                subject=subject,
+                send_all=send_all,
+                dry_run=dry_run,
+            )
+            for member in members
+        ]
+        overall_success = all(item.get("success", False) for item in deliveries) if deliveries else True
+        return {
+            "success": overall_success,
+            "group": recipient_name,
+            "members": members,
+            "message": message,
+            "subject": subject or config.get("defaults", {}).get("subject", "agent-do notification"),
+            "send_all": send_all,
+            "dry_run": dry_run,
+            "deliveries": deliveries,
+        }
+
     attempts = resolve_attempts(config, recipient_name, via=via)
     recipient = get_recipient(config, recipient_name) or {}
     subject = subject or recipient.get("subject") or config.get("defaults", {}).get("subject", "agent-do notification")
@@ -885,6 +990,12 @@ def providers_payload() -> list[dict[str, str]]:
 
 
 def render_text_result(payload: dict[str, Any]) -> str:
+    if payload.get("group"):
+        lines = [f"Notification group {payload['group']}:"]
+        for delivery in payload.get("deliveries", []):
+            lines.append(render_text_result(delivery))
+        return "\n".join(lines)
+
     lines = []
     if payload.get("dry_run"):
         lines.append(f"Planned notification for {payload['recipient']}:")

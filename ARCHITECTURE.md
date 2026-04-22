@@ -211,6 +211,7 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 - provider adapters currently target `sms`, `email`, `slack`, `messenger`, and local `pipe`
 - recipient aliases, preferred provider order, and default subjects live under `~/.agent-do/notify/recipients.json`
 - event rules, fingerprints, and cooldown-aware delivery state live under `~/.agent-do/notify/rules.json` and `~/.agent-do/notify/state.json`
+- recipient aliases and recipient groups share the same `~/.agent-do/notify/recipients.json` config so rules can target one person or a named group through the same send path
 - `agent-do notify set-rule ...` + `agent-do notify emit ...` let agents declare criteria once and later emit structured events with `key=value` facts
 - `agent-do notify templates`, `show-template`, and `apply-template` provide a small built-in library of common notification patterns without introducing a second rule system
 - `agent-do notify reset-state [rule]` and `agent-do notify delete-rule <rule>` provide cleanup so old cooldown state and retired rules do not linger

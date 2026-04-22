@@ -85,9 +85,11 @@ When you need to notify a human across channels:
 
 ```bash
 agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --messenger https://www.messenger.com/t/example-thread --prefer sms,slack,email
+agent-do notify set-group ops me backup
 agent-do notify templates
 agent-do notify apply-template build_failed --recipient me
 agent-do notify me "Build failed"
+agent-do notify ops "Heads up"
 agent-do notify me "Deploy complete" --via slack
 agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger
 agent-do notify set-rule build_failed --recipient me --event build --message "Build failed for {service}" --match status=failed --cooldown 30m
@@ -314,9 +316,11 @@ Root-level notification contract over `sms`, `email`, `slack`, `messenger`, and 
 
 ```bash
 agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --messenger https://www.messenger.com/t/example-thread --prefer sms,slack,email
+agent-do notify set-group ops me backup
 agent-do notify templates
 agent-do notify apply-template build_failed --recipient me
 agent-do notify me "Build failed"
+agent-do notify ops "Heads up"
 agent-do notify me "Deploy complete" --via slack
 agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger
 agent-do notify set-rule build_failed --recipient me --event build --message "Build failed for {service}" --match status=failed --cooldown 30m
@@ -326,7 +330,7 @@ agent-do notify delete-rule build_failed
 agent-do notify providers
 ```
 
-`notify` also supports built-in rule templates for common cases like `build_failed`, `deploy_failed`, `deploy_done`, `job_stalled`, and `approval_needed`. `apply-template` turns one of those into a real rule you can edit or emit against. `set-rule` still exists for fully custom rules, `emit` evaluates them against structured `--fact key=value` inputs, `reset-state` clears cooldown fingerprints, and `delete-rule` removes retired rules cleanly.
+`notify` also supports recipient groups, so one rule or one send can target aliases like `ops` or `engineering` without duplicating recipients. Built-in rule templates cover common cases like `build_failed`, `deploy_failed`, `deploy_done`, `job_stalled`, and `approval_needed`. `apply-template` turns one of those into a real rule you can edit or emit against. `set-rule` still exists for fully custom rules, `emit` evaluates them against structured `--fact key=value` inputs, `reset-state` clears cooldown fingerprints, and `delete-rule` removes retired rules cleanly.
 
 ### `resend`
 
