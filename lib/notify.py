@@ -110,6 +110,34 @@ def save_state(state: dict[str, Any]) -> None:
     STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
 
 
+def delete_rule(rules_config: dict[str, Any], name: str) -> dict[str, Any] | None:
+    rules = rules_config.setdefault("rules", {})
+    removed = rules.pop(name, None)
+    if removed is None:
+        return None
+    return dict(removed)
+
+
+def reset_state(state: dict[str, Any], *, rule_name: str | None = None) -> dict[str, Any]:
+    deliveries = state.setdefault("deliveries", {})
+    if rule_name is None:
+        cleared_rules = sorted(deliveries.keys())
+        cleared_count = sum(len(items) for items in deliveries.values())
+        state["deliveries"] = {}
+        return {
+            "scope": "all",
+            "cleared_rules": cleared_rules,
+            "cleared_count": cleared_count,
+        }
+
+    existing = deliveries.pop(rule_name, {})
+    return {
+        "scope": "rule",
+        "rule": rule_name,
+        "cleared_count": len(existing),
+    }
+
+
 def normalize_provider(provider: str) -> str:
     return provider.strip().lower().replace("-", "_")
 

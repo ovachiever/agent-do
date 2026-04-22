@@ -283,6 +283,51 @@ print(f"{provider} sent")
         emit_cooldown_payload = json.loads(emit_cooldown.stdout)
         require(emit_cooldown_payload["results"][0]["skipped"] == "cooldown", f"expected cooldown skip: {emit_cooldown_payload}")
 
+        reset_rule_state = run([str(AGENT_DO), "notify", "reset-state", "build_failed", "--json"], env=env)
+        require(reset_rule_state.returncode == 0, f"reset-state rule failed: {reset_rule_state.stderr}")
+        reset_rule_state_payload = json.loads(reset_rule_state.stdout)
+        require(reset_rule_state_payload["scope"] == "rule", f"unexpected reset-state payload: {reset_rule_state_payload}")
+        require(reset_rule_state_payload["rule"] == "build_failed", f"unexpected reset-state payload: {reset_rule_state_payload}")
+        require(reset_rule_state_payload["cleared_count"] == 1, f"expected one cleared fingerprint: {reset_rule_state_payload}")
+
+        emit_after_reset = run(
+            [
+                str(AGENT_DO),
+                "notify",
+                "emit",
+                "build",
+                "--fact",
+                "service=api",
+                "--fact",
+                "branch=main",
+                "--fact",
+                "status=failed",
+                "--fact",
+                "env=prod",
+                "--json",
+            ],
+            env=env,
+        )
+        require(emit_after_reset.returncode == 0, f"emit after reset failed: {emit_after_reset.stderr}")
+        emit_after_reset_payload = json.loads(emit_after_reset.stdout)
+        require(emit_after_reset_payload["results"][0]["success"] is True, f"expected send after reset: {emit_after_reset_payload}")
+
+        reset_all_state = run([str(AGENT_DO), "notify", "reset-state", "--json"], env=env)
+        require(reset_all_state.returncode == 0, f"reset-state all failed: {reset_all_state.stderr}")
+        reset_all_state_payload = json.loads(reset_all_state.stdout)
+        require(reset_all_state_payload["scope"] == "all", f"unexpected global reset payload: {reset_all_state_payload}")
+        require("build_failed" in reset_all_state_payload["cleared_rules"], f"expected build_failed in cleared rules: {reset_all_state_payload}")
+
+        delete_rule = run([str(AGENT_DO), "notify", "delete-rule", "build_failed", "--json"], env=env)
+        require(delete_rule.returncode == 0, f"delete-rule failed: {delete_rule.stderr}")
+        delete_rule_payload = json.loads(delete_rule.stdout)
+        require(delete_rule_payload["name"] == "build_failed", f"unexpected delete-rule payload: {delete_rule_payload}")
+
+        show_deleted_rule = run([str(AGENT_DO), "notify", "show-rule", "build_failed", "--json"], env=env)
+        require(show_deleted_rule.returncode == 1, f"expected deleted rule lookup failure: {show_deleted_rule.stdout} {show_deleted_rule.stderr}")
+        show_deleted_rule_payload = json.loads(show_deleted_rule.stdout)
+        require("Unknown rule" in show_deleted_rule_payload["error"], f"unexpected deleted rule payload: {show_deleted_rule_payload}")
+
         messenger_denied = run([str(AGENT_DO), "notify", "me", "Ping", "--via", "messenger", "--json"], env=env)
         require(messenger_denied.returncode == 1, f"expected messenger live approval failure: {messenger_denied.stdout} {messenger_denied.stderr}")
         messenger_denied_payload = json.loads(messenger_denied.stdout)

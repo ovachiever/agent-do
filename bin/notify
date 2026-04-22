@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from notify import (  # noqa: E402
+    delete_rule,
     emit_event,
     get_recipient,
     get_rule,
@@ -18,14 +19,17 @@ from notify import (  # noqa: E402
     list_rules,
     load_config,
     load_rules,
+    load_state,
     main_json,
     parse_provider_list,
     parse_duration_seconds,
     parse_key_value_pairs,
     providers_payload,
     render_text_result,
+    reset_state,
     save_config,
     save_rules,
+    save_state,
     send_notification,
     update_rule,
     update_recipient,
@@ -34,7 +38,22 @@ from live.errors import LiveApprovalRequiredError  # noqa: E402
 
 
 def preprocess_args(argv: list[str]) -> list[str]:
-    commands = {"send", "providers", "recipients", "show", "set-recipient", "rules", "show-rule", "set-rule", "emit", "help", "--help", "-h"}
+    commands = {
+        "send",
+        "providers",
+        "recipients",
+        "show",
+        "set-recipient",
+        "rules",
+        "show-rule",
+        "set-rule",
+        "delete-rule",
+        "emit",
+        "reset-state",
+        "help",
+        "--help",
+        "-h",
+    }
     if argv and argv[0] not in commands and not argv[0].startswith("-"):
         return ["send", *argv]
     return argv
@@ -98,12 +117,20 @@ def build_parser() -> argparse.ArgumentParser:
     set_rule_parser.add_argument("--fingerprint", help="Template for cooldown fingerprint, e.g. '{service}:{branch}'")
     set_rule_parser.add_argument("--cooldown", help="Cooldown duration like 15m, 1h, or 1d")
 
+    delete_rule_parser = subparsers.add_parser("delete-rule", help="Delete one configured notification rule")
+    delete_rule_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    delete_rule_parser.add_argument("name", help="Rule name")
+
     emit_parser = subparsers.add_parser("emit", help="Evaluate rules for an event and send matching notifications")
     emit_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     emit_parser.add_argument("event", help="Event name")
     emit_parser.add_argument("--fact", action="append", default=[], help="Fact in key=value form; may be repeated")
     emit_parser.add_argument("--dry-run", action="store_true", help="Show planned notifications without sending")
     emit_parser.add_argument("--all", action="store_true", help="Send through all matching providers for each rule")
+
+    reset_state_parser = subparsers.add_parser("reset-state", help="Reset notify cooldown state for one rule or all rules")
+    reset_state_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    reset_state_parser.add_argument("name", nargs="?", help="Optional rule name; omit to reset all notify cooldown state")
 
     return parser
 
@@ -232,6 +259,23 @@ def main(argv: list[str]) -> int:
             print(f"Saved rule: {args.name}")
         return 0
 
+    if args.command == "delete-rule":
+        removed = delete_rule(rules_config, args.name)
+        if removed is None:
+            payload = {"success": False, "error": f"Unknown rule: {args.name}"}
+            if args.json:
+                main_json(payload)
+            else:
+                print(payload["error"], file=sys.stderr)
+            return 1
+        save_rules(rules_config)
+        payload = {"success": True, "name": args.name, "rule": removed}
+        if args.json:
+            main_json(payload)
+        else:
+            print(f"Deleted rule: {args.name}")
+        return 0
+
     if args.command == "emit":
         try:
             payload = emit_event(
@@ -261,6 +305,19 @@ def main(argv: list[str]) -> int:
         else:
             print(json.dumps(payload, indent=2))
         return 0 if payload.get("success") else 1
+
+    if args.command == "reset-state":
+        state = load_state()
+        payload = {"success": True, **reset_state(state, rule_name=args.name)}
+        save_state(state)
+        if args.json:
+            main_json(payload)
+        else:
+            if payload["scope"] == "all":
+                print(f"Reset notify state for all rules ({payload['cleared_count']} fingerprints)")
+            else:
+                print(f"Reset notify state for {payload['rule']} ({payload['cleared_count']} fingerprints)")
+        return 0
 
     if args.command == "send":
         try:

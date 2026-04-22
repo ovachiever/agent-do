@@ -90,6 +90,8 @@ agent-do notify me "Deploy complete" --via slack
 agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger
 agent-do notify set-rule build_failed --recipient me --event build --message "Build failed for {service}" --match status=failed --cooldown 30m
 agent-do notify emit build --fact service=api --fact status=failed
+agent-do notify reset-state build_failed
+agent-do notify delete-rule build_failed
 agent-do notify recipients
 ```
 
@@ -315,10 +317,12 @@ agent-do notify me "Deploy complete" --via slack
 agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger
 agent-do notify set-rule build_failed --recipient me --event build --message "Build failed for {service}" --match status=failed --cooldown 30m
 agent-do notify emit build --fact service=api --fact status=failed
+agent-do notify reset-state build_failed
+agent-do notify delete-rule build_failed
 agent-do notify providers
 ```
 
-`notify` also supports rule-based event emission: `set-rule` stores event criteria, message templates, provider order, and cooldown windows, while `emit` evaluates those rules against structured `--fact key=value` inputs and only delivers matching notifications.
+`notify` also supports rule-based event emission: `set-rule` stores event criteria, message templates, provider order, and cooldown windows, `emit` evaluates those rules against structured `--fact key=value` inputs, `reset-state` clears cooldown fingerprints, and `delete-rule` removes retired rules cleanly.
 
 ### `resend`
 
