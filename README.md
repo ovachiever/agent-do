@@ -84,9 +84,10 @@ agent-do nudges stats
 When you need to notify a human across channels:
 
 ```bash
-agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --prefer sms,slack,email
+agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --messenger https://www.messenger.com/t/example-thread --prefer sms,slack,email
 agent-do notify me "Build failed"
 agent-do notify me "Deploy complete" --via slack
+agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger
 agent-do notify recipients
 ```
 
@@ -303,12 +304,13 @@ agent-do sms link --from WidgetHub --domain app.example.com
 
 ### `notify`
 
-Root-level notification contract over `sms`, `email`, `slack`, and local `pipe` delivery. This is not a registry tool. It is a built-in command surface for recipient aliases, provider routing, and fallback order.
+Root-level notification contract over `sms`, `email`, `slack`, `messenger`, and local `pipe` delivery. This is not a registry tool. It is a built-in command surface for recipient aliases, provider routing, and fallback order. `messenger` is a live provider and requires `+live(...)`.
 
 ```bash
-agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --prefer sms,slack,email
+agent-do notify set-recipient me --sms +15551234567 --email me@example.com --slack @erik --messenger https://www.messenger.com/t/example-thread --prefer sms,slack,email
 agent-do notify me "Build failed"
 agent-do notify me "Deploy complete" --via slack
+agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger
 agent-do notify providers
 ```
 

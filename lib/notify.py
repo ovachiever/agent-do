@@ -7,8 +7,12 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
+
+from live.errors import LiveApprovalRequiredError
+from live.policy import require_live_control
 
 
 AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
@@ -35,6 +39,10 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "slack": {
         "mode": "tool",
         "summary": "Slack message delivery via bot token or webhook",
+    },
+    "messenger": {
+        "mode": "live",
+        "summary": "Meta Messenger delivery through explicit +live desktop control",
     },
     "pipe": {
         "mode": "pipe",
@@ -106,6 +114,7 @@ def update_recipient(
     sms: str | None = None,
     email: str | None = None,
     slack: str | None = None,
+    messenger: str | None = None,
     pipe: str | None = None,
     prefer: list[str] | None = None,
     subject: str | None = None,
@@ -119,6 +128,8 @@ def update_recipient(
         recipient["email"] = email
     if slack is not None:
         recipient["slack"] = slack
+    if messenger is not None:
+        recipient["messenger"] = messenger
     if pipe is not None:
         recipient["pipe"] = pipe
     if prefer is not None:
@@ -178,6 +189,123 @@ def _agent_do_path() -> str:
     return str(Path(__file__).resolve().parents[1] / "agent-do")
 
 
+def _run_agent_do(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [_agent_do_path(), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _normalize_messenger_target(target: str) -> str:
+    if target.startswith(("http://", "https://", "messenger://")):
+        return target
+    return f"https://www.messenger.com/t/{target}"
+
+
+def _send_messenger(
+    *,
+    target: str,
+    message: str,
+    subject: str,
+    recipient_name: str,
+) -> dict[str, Any]:
+    reason = "notify:messenger"
+    approval = require_live_control(
+        scope="desktop",
+        tool="notify",
+        argv=["send", recipient_name, message, "--via", "messenger"],
+        app="Messenger",
+        reason=reason,
+    )
+
+    if os.environ.get("AGENT_DO_NOTIFY_MESSENGER_TEST_MODE", "").strip():
+        return {
+            "provider": "messenger",
+            "target": target,
+            "command": ["messenger-test-mode"],
+            "exit_code": 0,
+            "success": True,
+            "stdout": "messenger sent",
+            "stderr": "",
+            "approval": approval,
+        }
+
+    if os.uname().sysname != "Darwin":
+        return {
+            "provider": "messenger",
+            "target": target,
+            "command": [],
+            "exit_code": 1,
+            "success": False,
+            "stdout": "",
+            "stderr": "Messenger notify is currently implemented for macOS live control only",
+            "approval": approval,
+        }
+
+    app_name = os.environ.get("AGENT_DO_NOTIFY_MESSENGER_APP", "Messenger").strip() or "Messenger"
+    target_url = _normalize_messenger_target(target)
+
+    launch = subprocess.run(
+        ["open", "-a", app_name, target_url],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if launch.returncode != 0:
+        launch = subprocess.run(
+            ["open", target_url],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    time.sleep(1.0)
+
+    focus = _run_agent_do("macos", "focus", app_name)
+    time.sleep(0.5)
+
+    clicked_text = None
+    for candidate in ["Message", "Aa", "Type a message", "Write a message", "Reply", "Send message"]:
+        click = _run_agent_do("screen", "click", "--text", candidate)
+        if click.returncode == 0:
+            clicked_text = candidate
+            time.sleep(0.2)
+            break
+
+    typed = _run_agent_do("screen", "type", message)
+    if typed.returncode != 0:
+        return {
+            "provider": "messenger",
+            "target": target,
+            "command": ["screen", "type", message],
+            "exit_code": typed.returncode,
+            "success": False,
+            "stdout": typed.stdout.strip(),
+            "stderr": typed.stderr.strip() or "Failed to type message into Messenger",
+            "approval": approval,
+            "clicked_text": clicked_text,
+        }
+
+    pressed = _run_agent_do("screen", "press", "Enter")
+    return {
+        "provider": "messenger",
+        "target": target,
+        "command": ["open", "-a", app_name, target_url],
+        "exit_code": pressed.returncode,
+        "success": pressed.returncode == 0,
+        "stdout": "\n".join(
+            [item for item in [launch.stdout.strip(), focus.stdout.strip(), typed.stdout.strip(), pressed.stdout.strip()] if item]
+        ),
+        "stderr": "\n".join(
+            [item for item in [launch.stderr.strip(), focus.stderr.strip(), typed.stderr.strip(), pressed.stderr.strip()] if item]
+        ),
+        "approval": approval,
+        "clicked_text": clicked_text,
+        "subject": subject,
+    }
+
+
 def execute_provider(
     provider: str,
     *,
@@ -213,6 +341,16 @@ def execute_provider(
             "stdout": completed.stdout.strip(),
             "stderr": completed.stderr.strip(),
         }
+
+    if PROVIDERS[provider]["mode"] == "live":
+        if provider == "messenger":
+            return _send_messenger(
+                target=target,
+                message=message,
+                subject=subject,
+                recipient_name=recipient_name,
+            )
+        raise ValueError(f"Unsupported live notify provider: {provider}")
 
     agent_do = _agent_do_path()
     if provider == "sms":

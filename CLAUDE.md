@@ -17,6 +17,7 @@ agent-do is a universal automation CLI for AI agents with 86 specialized tools. 
 ./agent-do suggest --project           # Recommend likely tools for this repo
 ./agent-do find playwright             # Search tools by keyword
 ./agent-do notify me "Build failed"    # Send a cross-provider notification
+./agent-do +live(scope=desktop,app=Messenger,ttl=15m) notify me "Need approval" --via messenger  # Messenger provider requires live approval
 ./agent-do creds check --tool render   # Check a tool's declared credentials
 ./agent-do creds required namecheap    # Show which secrets a tool expects
 ./agent-do auth ensure github          # Reuse saved auth or import browser cookies/storage
@@ -145,7 +146,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. Requires `RESEND_API_KEY`. |
 | `agent-hardware` | Bash | Unified hardware family surface over serial, bluetooth, USB, printers, and MIDI. `snapshot` gives one combined view, and `hardware <serial|bluetooth|usb|printer|midi> ...` delegates through a stable family tool without breaking the legacy leaf commands. |
 | `agent-meetings` | Bash | Unified enterprise meeting surface over Zoom, Google Meet, and Microsoft Teams. `snapshot` reports provider readiness and active meeting state, `join` auto-detects meeting URLs and codes, generic controls like `mute` and `share` route to the active provider, and provider passthroughs stay available under one family tool. |
-| `bin/notify` + `lib/notify.py` | Python | Root notification contract over `sms`, `email`, `slack`, and `pipe`. Supports recipient aliases under `~/.agent-do/notify/recipients.json`, provider preference order, fallback routing, and dry-run planning without adding another public registry tool. |
+| `bin/notify` + `lib/notify.py` | Python | Root notification contract over `sms`, `email`, `slack`, `messenger`, and `pipe`. Supports recipient aliases under `~/.agent-do/notify/recipients.json`, provider preference order, fallback routing, dry-run planning, and live-gated Messenger delivery without adding another public registry tool. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor: visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring. 22 commands. Storage: `~/.agent-do/context/` (global, per-user). |
 | `agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons (context/problem/solution/takeaway), architectural decisions (options/chosen/rationale/confidence), pattern consolidation via harvest. Git history review, swarm checkpoints, lesson promotion (local → team → global). Storage: `.zpc/` (per-project). Sources `lib/json-output.sh` + `lib/snapshot.sh`. |

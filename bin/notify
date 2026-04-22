@@ -22,6 +22,7 @@ from notify import (  # noqa: E402
     send_notification,
     update_recipient,
 )
+from live.errors import LiveApprovalRequiredError  # noqa: E402
 
 
 def preprocess_args(argv: list[str]) -> list[str]:
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_parser.add_argument("--sms", help="Phone number target")
     set_parser.add_argument("--email", help="Email address target")
     set_parser.add_argument("--slack", help="Slack channel or DM target")
+    set_parser.add_argument("--messenger", help="Messenger conversation URL or thread target")
     set_parser.add_argument("--pipe", help="Shell command target for pipe delivery")
     set_parser.add_argument("--prefer", help="Comma-separated preferred provider order")
     set_parser.add_argument("--subject", help="Default subject for email notifications")
@@ -125,6 +127,7 @@ def main(argv: list[str]) -> int:
             sms=args.sms,
             email=args.email,
             slack=args.slack,
+            messenger=args.messenger,
             pipe=args.pipe,
             prefer=parse_provider_list(args.prefer) if args.prefer is not None else None,
             subject=args.subject,
@@ -138,15 +141,30 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "send":
-        payload = send_notification(
-            config,
-            args.recipient,
-            args.message,
-            via=parse_provider_list(args.via),
-            subject=args.subject,
-            send_all=args.all,
-            dry_run=args.dry_run,
-        )
+        try:
+            payload = send_notification(
+                config,
+                args.recipient,
+                args.message,
+                via=parse_provider_list(args.via),
+                subject=args.subject,
+                send_all=args.all,
+                dry_run=args.dry_run,
+            )
+        except LiveApprovalRequiredError as exc:
+            payload = exc.payload()
+            if args.json:
+                main_json(payload)
+            else:
+                print(json.dumps(payload, indent=2))
+            return 1
+        except ValueError as exc:
+            payload = {"success": False, "error": str(exc)}
+            if args.json:
+                main_json(payload)
+            else:
+                print(str(exc), file=sys.stderr)
+            return 1
         if args.json:
             main_json(payload)
         else:

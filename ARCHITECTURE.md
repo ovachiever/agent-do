@@ -208,9 +208,10 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 
 **`bin/notify` + `lib/notify.py`**: Root notification contract:
 - `agent-do notify <recipient> <message>` routes outbound notifications without introducing another registry tool
-- provider adapters currently target `sms`, `email`, `slack`, and local `pipe`
+- provider adapters currently target `sms`, `email`, `slack`, `messenger`, and local `pipe`
 - recipient aliases, preferred provider order, and default subjects live under `~/.agent-do/notify/recipients.json`
 - supports first-success fallback routing or `--all` fanout across matching providers
+- `messenger` is intentionally a live provider: it requires `+live(...)` and uses the existing local-machine control substrate instead of pretending to be an API transport
 
 ### Tool Concurrency Classification
 

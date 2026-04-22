@@ -80,7 +80,7 @@ print(f"{provider} sent")
         require(providers.returncode == 0, f"notify providers failed: {providers.stderr}")
         providers_payload = json.loads(providers.stdout)
         require(
-            [item["provider"] for item in providers_payload["providers"]] == ["email", "pipe", "slack", "sms"],
+            [item["provider"] for item in providers_payload["providers"]] == ["email", "messenger", "pipe", "slack", "sms"],
             f"unexpected providers payload: {providers_payload}",
         )
 
@@ -96,6 +96,8 @@ print(f"{provider} sent")
                 "me@example.com",
                 "--slack",
                 "@erik",
+                "--messenger",
+                "https://www.messenger.com/t/example-thread",
                 "--pipe",
                 "cat >/tmp/notify.out",
                 "--prefer",
@@ -109,6 +111,7 @@ print(f"{provider} sent")
         require(save.returncode == 0, f"set-recipient failed: {save.stderr}")
         save_payload = json.loads(save.stdout)
         require(save_payload["recipient"]["sms"] == "+15551234567", f"unexpected save payload: {save_payload}")
+        require(save_payload["recipient"]["messenger"] == "https://www.messenger.com/t/example-thread", f"unexpected save payload: {save_payload}")
 
         recipients = run([str(AGENT_DO), "notify", "recipients", "--json"], env=env)
         require(recipients.returncode == 0, f"notify recipients failed: {recipients.stderr}")
@@ -137,6 +140,31 @@ print(f"{provider} sent")
             f"unexpected fallback order: {fallback_payload}",
         )
         require(fallback_payload["attempts"][1]["success"] is True, f"expected email fallback success: {fallback_payload}")
+
+        messenger_denied = run([str(AGENT_DO), "notify", "me", "Ping", "--via", "messenger", "--json"], env=env)
+        require(messenger_denied.returncode == 1, f"expected messenger live approval failure: {messenger_denied.stdout} {messenger_denied.stderr}")
+        messenger_denied_payload = json.loads(messenger_denied.stdout)
+        require(messenger_denied_payload["action_required"] == "LIVE_APPROVAL_REQUIRED", f"unexpected messenger denied payload: {messenger_denied_payload}")
+        require("notify" in messenger_denied_payload["rerun"], f"expected notify rerun hint: {messenger_denied_payload}")
+
+        env["AGENT_DO_NOTIFY_MESSENGER_TEST_MODE"] = "1"
+        messenger_live = run(
+            [
+                str(AGENT_DO),
+                '+live(scope=desktop,app=Messenger,ttl=15m,reason="notify:messenger")',
+                "notify",
+                "me",
+                "Ping",
+                "--via",
+                "messenger",
+                "--json",
+            ],
+            env=env,
+        )
+        require(messenger_live.returncode == 0, f"messenger live send failed: {messenger_live.stderr}")
+        messenger_live_payload = json.loads(messenger_live.stdout)
+        require(messenger_live_payload["success"] is True, f"unexpected messenger live payload: {messenger_live_payload}")
+        require(messenger_live_payload["attempts"][0]["provider"] == "messenger", f"unexpected messenger attempt payload: {messenger_live_payload}")
 
     print("notify tests passed")
     return 0
