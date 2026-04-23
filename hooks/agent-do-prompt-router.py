@@ -8,8 +8,10 @@ Non-blocking — injects additionalContext only, never denies.
 """
 
 import json
-import sys
 import re
+import subprocess
+import sys
+from shutil import which
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
@@ -310,6 +312,19 @@ Screenshots = visual truth. Snapshots = structural truth. Both, in that order.
 Never ship UI changes without this verification loop.
 """
 
+COORD_PATTERNS = [
+    r"\banother agent\b",
+    r"\bother agent\b",
+    r"\bhandoff\b",
+    r"\bdon't conflict\b",
+    r"\bdo not conflict\b",
+    r"\breview .*agent\b",
+    r"\bother session\b",
+    r"\bseparate tmux sessions?\b",
+    r"\bwhat is the other agent doing\b",
+    r"\bcoordinate\b.*\bagent\b",
+]
+
 
 def analyze_prompt(prompt: str, skip_tools: set[str] | None = None) -> list[tuple[str, str]]:
     """Analyze prompt with the legacy route table."""
@@ -426,6 +441,121 @@ def needs_completion_check(prompt: str) -> bool:
     return False
 
 
+def detect_coord_prompt(prompt: str) -> bool:
+    prompt_lower = prompt.lower()
+    return any(re.search(pattern, prompt_lower) for pattern in COORD_PATTERNS)
+
+
+def resolve_agent_do_binary() -> str | None:
+    direct = which("agent-do")
+    if direct:
+        return direct
+
+    repo_candidate = Path(__file__).resolve().parents[1] / "agent-do"
+    if repo_candidate.exists():
+        return str(repo_candidate)
+
+    local = Path.home() / ".local" / "bin" / "agent-do"
+    if local.exists():
+        return str(local)
+
+    breadcrumb = Path.home() / ".agent-do" / "install-path"
+    if breadcrumb.exists():
+        resolved = breadcrumb.read_text().strip()
+        candidate = Path(resolved) / "agent-do"
+        if candidate.exists():
+            return str(candidate)
+
+    return None
+
+
+def load_coord_context(prompt: str, cwd: str | None) -> tuple[str, list[str]]:
+    explicit = detect_coord_prompt(prompt)
+    if not cwd:
+        if not explicit:
+            return "", []
+        return (
+            "## Coord Suggestion\n\n"
+            "This sounds like multi-agent coordination. Start with:\n"
+            "- `agent-do coord status`\n"
+            "- `agent-do coord interrupts`\n"
+            "- `agent-do coord focus set \"<goal>\" --path <path>`\n",
+            ["coord"],
+        )
+
+    agent_do = resolve_agent_do_binary()
+    if not agent_do:
+        return "", []
+
+    touched = subprocess.run(
+        [agent_do, "coord", "touch", "--json"],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if touched.returncode != 0 or not touched.stdout.strip():
+        return "", []
+
+    touch_payload = json.loads(touched.stdout)
+    active_peers = touch_payload.get("active_peers", [])
+    focus_goal = ((touch_payload.get("focus") or {}).get("goal")) or ""
+
+    interrupts_run = subprocess.run(
+        [agent_do, "coord", "interrupts", "--json", "--mark-seen", "--limit", "5"],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if interrupts_run.returncode != 0 or not interrupts_run.stdout.strip():
+        interrupts_payload = {"interrupts": []}
+    else:
+        interrupts_payload = json.loads(interrupts_run.stdout)
+
+    interrupts = interrupts_payload.get("interrupts", [])
+    if interrupts:
+        lines = []
+        for item in interrupts:
+            prefix = "[new] " if item.get("new") else ""
+            lines.append(f"- {prefix}{item.get('kind')}: {item.get('summary')}")
+        context = (
+            "## Coord Interrupts\n\n"
+            "Relevant coordination interrupts are active in this repo:\n"
+            f"{chr(10).join(lines)}\n\n"
+            "Use `agent-do coord status`, `agent-do coord interrupts`, or `agent-do coord focus show`.\n"
+        )
+        return context, ["coord"]
+
+    if active_peers and not focus_goal:
+        peer_lines = []
+        for peer in active_peers:
+            label = peer.get("alias") or peer.get("agent_id")
+            goal = ((peer.get("focus") or {}).get("goal")) or ""
+            suffix = f" goal: {goal}" if goal else ""
+            peer_lines.append(f"- {label}{suffix}")
+        context = (
+            "## Coord Focus Reminder\n\n"
+            "Other active peers exist in this repo, and you have not declared focus yet.\n"
+            f"{chr(10).join(peer_lines)}\n\n"
+            "Set focus before overlapping work starts with "
+            "`agent-do coord focus set \"<goal>\" --path <path> [--path <path> ...]`.\n"
+        )
+        return context, ["coord"]
+
+    if explicit:
+        return (
+            "## Coord Suggestion\n\n"
+            "This sounds like multi-agent coordination. Start with:\n"
+            "- `agent-do coord status`\n"
+            "- `agent-do coord interrupts`\n"
+            "- `agent-do coord focus set \"<goal>\" --path <path>`\n",
+            ["coord"],
+        )
+
+    return "", []
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -436,14 +566,16 @@ def main():
     prompt = input_data.get("prompt", "")
     if not prompt:
         sys.exit(0)
+    cwd = input_data.get("cwd")
 
     shared_matches = analyze_registry_prompt(prompt)
     matches = shared_matches + analyze_prompt(prompt, skip_tools={tool for tool, _ in shared_matches})
     is_design = detect_frontend_design(prompt)
 
     needs_completion = needs_completion_check(prompt)
+    coord_context, coord_tools = load_coord_context(prompt, cwd)
 
-    if matches or is_design or needs_completion:
+    if matches or is_design or needs_completion or coord_context:
         context = ""
 
         if matches:
@@ -484,6 +616,21 @@ def main():
                     record_nudge_event(
                         "prompt_completion_check",
                         "prompt_router",
+                        prompt=prompt[:240],
+                    )
+                except Exception:
+                    pass
+
+        if coord_context:
+            if context:
+                context += "\n"
+            context += coord_context
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "prompt_coord_context",
+                        "prompt_router",
+                        tools=coord_tools,
                         prompt=prompt[:240],
                     )
                 except Exception:

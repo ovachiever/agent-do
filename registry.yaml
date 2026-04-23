@@ -1711,66 +1711,65 @@ tools:
       command: agent-agent list
     concurrency: mixed
   coord:
-    description: Project-local agent coordination mailbox
+    description: Project-local agent state and interrupt broker
     capabilities:
     - derive stable agent identities per tmux/thread session
-    - refresh local presence automatically for coordination-aware sessions
-    - send structured handoffs, questions, replies, and status messages
-    - list inbox messages and wait for new coordination events
-    - acknowledge messages and review thread history
-    - manage advisory claims on files, paths, or work items
+    - renew short-lived presence leases and classify peers as active, idle, or stale
+    - declare current focus areas with goal plus project-relative paths
+    - manage advisory claims on files or paths
+    - declare dependencies on artifacts another agent may produce
+    - publish finished artifacts and compute contention, dependency, and novelty interrupts
     commands:
-      touch: Refresh current agent presence and report active peers
-      whoami: Show current coordination identity and mailbox root
+      touch: Renew current agent presence lease and report active peers
+      whoami: Show current coordination identity and broker root
       alias: 'Assign a friendly alias: alias <name>'
-      aliases: List known aliases in this project mailbox
-      peers: List known peers and unread counts
-      send: 'Send a structured message: send <peer> --subject <text> --body <text>'
-      handoff: 'Send a handoff: handoff <peer> --summary <text>'
-      ask: 'Send a question: ask <peer> --question <text>'
-      reply: 'Reply to a message: reply <message-id> --body <text>'
-      broadcast: 'Broadcast to all known peers: broadcast --subject <text> --body <text>'
-      inbox: List inbox messages for the current agent
-      read: 'Show a full message: read <message-id>'
-      wait: Wait for the next coordination message
-      ack: 'Acknowledge a message: ack <message-id>'
-      threads: List active coordination threads
-      thread: 'Show a single thread: thread <thread-id>'
-      claims: List active advisory claims
-      claim: 'Claim a file/path/work item: claim <key> [--reason <text>]'
-      release: 'Release a claim you own: release <key>'
+      aliases: List known aliases in this project
+      peers: List known peers and presence state
+      status: Show current focus, needs, publishes, and interrupt counts
+      interrupts: 'Show current interrupts: interrupts [--mark-seen] [--limit <n>]'
+      focus: 'Manage focus: focus set|show|clear'
+      claims: List advisory claims
+      claim: 'Claim a file/path: claim <path> [--reason <text>] [--strength soft|strong]'
+      release: 'Release a claim you own: release <path>'
+      need: 'Manage dependencies: need add|list|clear'
+      publishes: List published artifacts
+      publish: 'Manage published artifacts: publish add|clear'
     examples:
-    - intent: see who I am in this project mailbox
+    - intent: see who I am in this project
       command: agent-coord whoami
     - intent: refresh my coordination presence
       command: agent-coord touch
-    - intent: hand off findings to another agent
-      command: agent-coord handoff infra --summary "Local verification is done"
-    - intent: ask another agent a scoped question
-      command: agent-coord ask reviewer --question "Do you see any rollout conflicts?"
-    - intent: check my coordination inbox
-      command: agent-coord inbox
+    - intent: declare what I am working on
+      command: agent-coord focus set "private Render networking" --path recognition-oracle/render.yaml --path dm-ck/render.yaml
     - intent: claim a file to avoid overlap
       command: agent-coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
+    - intent: declare that I am waiting on a package
+      command: agent-coord need add dm-sdk@1.2.2 --why "switch off tarball dependency"
+    - intent: publish something another agent may care about
+      command: agent-coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
+    - intent: see whether anything should interrupt me
+      command: agent-coord interrupts
     routing:
       discover_keywords:
-      - handoff
       - coordinate with another agent
       - agent coordination
       - tmux sessions
-      - peer mailbox
+      - agent conflict
+      - dependency between agents
       - claim file ownership
       prompt_patterns:
-      - \bhandoff\b.*\bagent\b
       - \bcoordinate\b.*\bagent\b
       - \banother agent\b
+      - \bother agent\b
+      - \breview .*agent\b
+      - \bdo not conflict\b
       - \bseparate tmux sessions?\b
       - \bclaim\b.*\b(file|path|work)\b
       recommended_entrypoints:
-      - agent-do coord whoami
-      - agent-do coord inbox
-      - agent-do coord handoff reviewer --summary "..."
-      default_command: inbox
+      - agent-do coord status
+      - agent-do coord interrupts
+      - agent-do coord focus set "<goal>" --path <path>
+      default_command: status
     concurrency: mixed
   3d:
     description: 3D modeling and rendering control

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agent-coord - Project-local agent coordination mailbox."""
+"""agent-coord - Project-local state and interrupt broker for parallel agents."""
 
 from __future__ import annotations
 
@@ -12,34 +12,35 @@ import re
 import socket
 import subprocess
 import sys
-import time
-import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-HELP = """agent-coord - Project-local agent coordination mailbox
+HELP = """agent-coord - Project-local state and interrupt broker
 
 Commands:
-  touch                                  Refresh presence in the local mailbox
+  touch                                  Renew local presence lease
   whoami                                 Show current coordination identity
   alias <name>                           Assign a friendly alias to this agent
   aliases                                List known aliases
-  peers                                  List known peers in this project mailbox
-  send <peer> --subject <text> ...       Send a structured message
-  handoff <peer> --summary <text>        Send a handoff message
-  ask <peer> --question <text>           Send a scoped question
-  reply <message-id> --body <text>       Reply to a message thread
-  broadcast --subject <text> ...         Broadcast a message to all known peers
-  inbox                                  List inbox messages for this agent
-  read <message-id>                      Show a full message
-  wait                                   Wait for the next inbox message
-  ack <message-id>                       Acknowledge a message
-  claims                                 List active advisory claims
-  claim <key> [--reason <text>]          Claim a file/path/work item
-  release <key>                          Release a claim you own
+  peers [--all]                          List known peers and their presence state
+  status                                 Show current state summary and interrupt counts
+  interrupts [--mark-seen] [--limit N]   Show current contention/dependency/novelty interrupts
+  focus set <goal> --path <path> [...]   Set current work focus
+  focus show [peer]                      Show current focus
+  focus clear                            Clear current focus
+  claims                                 List advisory claims
+  claim <path> [--reason <text>]         Claim a path
+  release <path>                         Release a claimed path
+  need add <key> --why <text>            Declare a dependency
+  need list [--all]                      List dependencies
+  need clear <key>                       Clear a dependency you own
+  publishes                              List published artifacts
+  publish add <key> --status <s> --summary <text> [--ref <ref> ...]
+                                         Publish or update an artifact
+  publish clear <key>                    Clear a published artifact you own
 
 Options:
   --json                                 Output structured JSON
@@ -47,12 +48,11 @@ Options:
 Examples:
   agent-coord touch
   agent-coord whoami
-  agent-coord alias reviewer
-  agent-coord handoff infra --summary "Local verification is done" --ref app/api/generate/route.ts
-  agent-coord ask reviewer --question "Do you see any rollout conflicts?"
-  agent-coord inbox
-  agent-coord reply msg_abc123 --body "No direct conflict, but two rollout gotchas"
+  agent-coord focus set "private Render networking" --path recognition-oracle/render.yaml --path dm-ck/render.yaml
   agent-coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
+  agent-coord need add dm-sdk@1.2.2 --why "switch off tarball dependency"
+  agent-coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
+  agent-coord interrupts --mark-seen
 """
 
 
@@ -63,11 +63,16 @@ THREAD_CANDIDATES: list[tuple[str, str]] = [
     ("claude", "CLAUDE_AGENT_ID"),
 ]
 
-ACTIVE_WINDOW_SECONDS = int(os.environ.get("AGENT_DO_COORD_ACTIVE_SECONDS", "1800"))
+ACTIVE_WINDOW_SECONDS = int(os.environ.get("AGENT_DO_COORD_ACTIVE_SECONDS", "900"))
+IDLE_WINDOW_SECONDS = int(os.environ.get("AGENT_DO_COORD_IDLE_SECONDS", str(14 * 24 * 60 * 60)))
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return now().replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_iso(value: str | None) -> datetime | None:
@@ -83,14 +88,7 @@ def age_seconds(value: str | None) -> int | None:
     parsed = parse_iso(value)
     if parsed is None:
         return None
-    return max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
-
-
-def classify_presence(value: str | None) -> str:
-    age = age_seconds(value)
-    if age is None:
-        return "unknown"
-    return "active" if age <= ACTIVE_WINDOW_SECONDS else "stale"
+    return max(0, int((now() - parsed).total_seconds()))
 
 
 def compact(value: str) -> str:
@@ -117,7 +115,7 @@ def error(message: str, as_json: bool, code: int = 1, **extra: Any) -> int:
     payload = {"success": False, "error": message, "code": code}
     payload.update(extra)
     if as_json:
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(payload, indent=2, sort_keys=False))
     else:
         print(f"Error: {message}", file=sys.stderr)
     return code
@@ -181,11 +179,49 @@ def derive_identity() -> dict[str, str | None]:
     return {"agent_id": f"host-{compact(fallback)}", "source": "hostname+pid", "raw": fallback}
 
 
+def normalize_path(project_root: Path, cwd: Path, value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return raw
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve(strict=False).relative_to(project_root).as_posix()
+        except ValueError:
+            return candidate.as_posix()
+    try:
+        return (cwd / candidate).resolve(strict=False).relative_to(project_root).as_posix()
+    except ValueError:
+        return Path(os.path.normpath(raw)).as_posix()
+
+
+def path_overlaps(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a == "." or b == ".":
+        return True
+    return a.startswith(f"{b}/") or b.startswith(f"{a}/")
+
+
+def classify_presence(record: dict[str, Any]) -> str:
+    lease_expires_at = parse_iso(record.get("lease_expires_at"))
+    if lease_expires_at and now() <= lease_expires_at:
+        return "active"
+    last_seen = parse_iso(record.get("last_seen"))
+    if last_seen is None:
+        return "unknown"
+    if (now() - last_seen).total_seconds() <= IDLE_WINDOW_SECONDS:
+        return "idle"
+    return "stale"
+
+
 class CoordStore:
     def __init__(self, cwd: Path) -> None:
         paths = resolve_project_paths(cwd)
         ident = derive_identity()
-        self.cwd = cwd
+        self.cwd = cwd.resolve()
         self.project_root = Path(paths["project_root"])
         self.coord_root = Path(paths["coord_root"])
         self.storage = paths["storage"]
@@ -193,15 +229,15 @@ class CoordStore:
         self.identity_source = str(ident["source"])
         self.identity_raw = ident["raw"]
 
-        self.inbox_dir = self.coord_root / "inbox"
-        self.threads_dir = self.coord_root / "threads"
-        self.agents_path = self.coord_root / "agents.json"
-        self.claims_path = self.coord_root / "claims.json"
-        self.lock_path = self.coord_root / ".lock"
-
         self.coord_root.mkdir(parents=True, exist_ok=True)
-        self.inbox_dir.mkdir(parents=True, exist_ok=True)
-        self.threads_dir.mkdir(parents=True, exist_ok=True)
+
+        self.agents_path = self.coord_root / "agents.json"
+        self.focus_path = self.coord_root / "focus.json"
+        self.claims_path = self.coord_root / "claims.json"
+        self.needs_path = self.coord_root / "needs.json"
+        self.publishes_path = self.coord_root / "publishes.json"
+        self.events_path = self.coord_root / "events.jsonl"
+        self.lock_path = self.coord_root / ".lock"
 
     @contextmanager
     def locked(self):
@@ -230,262 +266,18 @@ class CoordStore:
     def _load_agents(self) -> dict[str, dict[str, Any]]:
         payload = self._read_json(self.agents_path, {"agents": {}})
         agents = payload.get("agents", {})
-        if not isinstance(agents, dict):
-            return {}
-        return agents
+        return agents if isinstance(agents, dict) else {}
 
     def _save_agents(self, agents: dict[str, dict[str, Any]]) -> None:
         self._write_json(self.agents_path, {"agents": agents})
 
-    def register_self(self) -> dict[str, Any]:
-        with self.locked():
-            agents = self._load_agents()
-            current = agents.get(self.agent_id, {})
-            current.update(
-                {
-                    "agent_id": self.agent_id,
-                    "last_seen": now_iso(),
-                    "project_root": str(self.project_root),
-                    "identity_source": self.identity_source,
-                }
-            )
-            if self.identity_raw:
-                current["identity_raw"] = self.identity_raw
-            agents[self.agent_id] = current
-            self._save_agents(agents)
-            return current
+    def _load_focus(self) -> dict[str, dict[str, Any]]:
+        payload = self._read_json(self.focus_path, {"focus": {}})
+        focus = payload.get("focus", {})
+        return focus if isinstance(focus, dict) else {}
 
-    def alias_self(self, alias: str) -> dict[str, Any]:
-        with self.locked():
-            agents = self._load_agents()
-            current = agents.get(self.agent_id, {})
-            current.update(
-                {
-                    "agent_id": self.agent_id,
-                    "alias": alias,
-                    "last_seen": now_iso(),
-                    "project_root": str(self.project_root),
-                    "identity_source": self.identity_source,
-                }
-            )
-            if self.identity_raw:
-                current["identity_raw"] = self.identity_raw
-            agents[self.agent_id] = current
-            self._save_agents(agents)
-            return current
-
-    def touch(self) -> dict[str, Any]:
-        agent = self.register_self()
-        return {
-            "agent": agent,
-            "active_peers": [peer for peer in self.peers() if not peer["current"] and peer["status"] == "active"],
-            "active_window_seconds": ACTIVE_WINDOW_SECONDS,
-        }
-
-    def self_record(self) -> dict[str, Any]:
-        self.register_self()
-        return self._load_agents().get(self.agent_id, {"agent_id": self.agent_id})
-
-    def aliases(self) -> list[dict[str, Any]]:
-        self.register_self()
-        aliases: list[dict[str, Any]] = []
-        for agent_id, record in sorted(self._load_agents().items()):
-            if record.get("alias"):
-                aliases.append(
-                    {
-                        "agent_id": agent_id,
-                        "alias": record["alias"],
-                        "last_seen": record.get("last_seen"),
-                        "current": agent_id == self.agent_id,
-                    }
-                )
-        return aliases
-
-    def alias_for(self, agent_id: str) -> str | None:
-        record = self._load_agents().get(agent_id, {})
-        alias = record.get("alias")
-        return alias if isinstance(alias, str) and alias else None
-
-    def current_identifiers(self) -> set[str]:
-        record = self.self_record()
-        identifiers = {self.agent_id, "*", "all"}
-        alias = record.get("alias")
-        if isinstance(alias, str) and alias:
-            identifiers.add(alias)
-        return identifiers
-
-    def resolve_peer(self, token: str) -> tuple[list[str], list[str]]:
-        agents = self._load_agents()
-        for agent_id, record in agents.items():
-            if token == agent_id:
-                return [agent_id], [token]
-            alias = record.get("alias")
-            if isinstance(alias, str) and alias and token == alias:
-                return [agent_id], [alias]
-        return [token], [token]
-
-    def known_peer_ids(self) -> list[str]:
-        self.register_self()
-        return [agent_id for agent_id in sorted(self._load_agents()) if agent_id != self.agent_id]
-
-    def list_messages(self) -> list[dict[str, Any]]:
-        messages: list[dict[str, Any]] = []
-        for path in sorted(self.inbox_dir.glob("*.json")):
-            payload = self._read_json(path, None)
-            if not isinstance(payload, dict):
-                continue
-            messages.append(payload)
-        messages.sort(key=lambda item: item.get("created_at", ""), reverse=True)
-        return messages
-
-    def message_for_current(self, message: dict[str, Any]) -> bool:
-        recipients = message.get("to", [])
-        if not isinstance(recipients, list):
-            return False
-        return any(token in self.current_identifiers() for token in recipients)
-
-    def find_message(self, message_id: str) -> tuple[Path, dict[str, Any]] | None:
-        path = self.inbox_dir / f"{message_id}.json"
-        if path.exists():
-            payload = self._read_json(path, None)
-            if isinstance(payload, dict):
-                return path, payload
-        for candidate in self.inbox_dir.glob("*.json"):
-            payload = self._read_json(candidate, None)
-            if isinstance(payload, dict) and payload.get("id") == message_id:
-                return candidate, payload
-        return None
-
-    def unread_messages(self) -> list[dict[str, Any]]:
-        current = self.agent_id
-        relevant = [m for m in self.list_messages() if self.message_for_current(m)]
-        unread: list[dict[str, Any]] = []
-        for message in relevant:
-            ack_ids = {
-                ack.get("agent_id")
-                for ack in message.get("acks", [])
-                if isinstance(ack, dict) and ack.get("agent_id")
-            }
-            if current not in ack_ids:
-                unread.append(message)
-        return unread
-
-    def peers(self) -> list[dict[str, Any]]:
-        self.register_self()
-        unread_counts: dict[str, int] = {}
-        for message in self.unread_messages():
-            sender = message.get("from")
-            if isinstance(sender, str):
-                unread_counts[sender] = unread_counts.get(sender, 0) + 1
-
-        peers: list[dict[str, Any]] = []
-        for agent_id, record in sorted(self._load_agents().items()):
-            last_seen = record.get("last_seen")
-            peers.append(
-                {
-                    "agent_id": agent_id,
-                    "alias": record.get("alias"),
-                    "last_seen": last_seen,
-                    "age_seconds": age_seconds(last_seen),
-                    "status": classify_presence(last_seen),
-                    "active_window_seconds": ACTIVE_WINDOW_SECONDS,
-                    "current": agent_id == self.agent_id,
-                    "unread_from_peer": unread_counts.get(agent_id, 0),
-                }
-            )
-        return peers
-
-    def _message_id(self) -> str:
-        return f"msg_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
-
-    def create_message(
-        self,
-        *,
-        kind: str,
-        recipients: list[str],
-        recipient_labels: list[str],
-        subject: str,
-        body: str,
-        refs: list[str] | None = None,
-        checks: list[str] | None = None,
-        next_steps: list[str] | None = None,
-        thread_id: str | None = None,
-        reply_to: str | None = None,
-    ) -> dict[str, Any]:
-        self.register_self()
-        record = self.self_record()
-        sender_alias = record.get("alias")
-        created_at = now_iso()
-        message_id = self._message_id()
-        if thread_id is None:
-            thread_id = f"thread_{uuid.uuid4().hex[:12]}"
-        payload = {
-            "id": message_id,
-            "thread_id": thread_id,
-            "kind": kind,
-            "from": self.agent_id,
-            "from_alias": sender_alias,
-            "to": recipients,
-            "to_labels": recipient_labels,
-            "subject": subject,
-            "body": body,
-            "refs": refs or [],
-            "checks": checks or [],
-            "next": next_steps or [],
-            "created_at": created_at,
-            "acked_at": None,
-            "acks": [],
-            "reply_to": reply_to,
-        }
-        path = self.inbox_dir / f"{message_id}.json"
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        return payload
-
-    def ack(self, message_id: str) -> dict[str, Any] | None:
-        found = self.find_message(message_id)
-        if not found:
-            return None
-        path, message = found
-        self.register_self()
-        record = self.self_record()
-        alias = record.get("alias")
-        with self.locked():
-            fresh = self._read_json(path, {})
-            acks = fresh.get("acks", [])
-            if not isinstance(acks, list):
-                acks = []
-            if not any(isinstance(ack, dict) and ack.get("agent_id") == self.agent_id for ack in acks):
-                acks.append({"agent_id": self.agent_id, "alias": alias, "at": now_iso()})
-            fresh["acks"] = acks
-            if acks:
-                fresh["acked_at"] = acks[0]["at"]
-            self._write_json(path, fresh)
-            return fresh
-
-    def thread_messages(self, thread_id: str) -> list[dict[str, Any]]:
-        messages = [m for m in self.list_messages() if m.get("thread_id") == thread_id]
-        messages.sort(key=lambda item: item.get("created_at", ""))
-        return messages
-
-    def thread_summaries(self) -> list[dict[str, Any]]:
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for message in self.list_messages():
-            if not self.message_for_current(message) and message.get("from") != self.agent_id:
-                continue
-            grouped.setdefault(str(message.get("thread_id")), []).append(message)
-        threads: list[dict[str, Any]] = []
-        for thread_id, messages in sorted(grouped.items()):
-            messages.sort(key=lambda item: item.get("created_at", ""))
-            threads.append(
-                {
-                    "thread_id": thread_id,
-                    "count": len(messages),
-                    "subject": messages[-1].get("subject"),
-                    "last_at": messages[-1].get("created_at"),
-                }
-            )
-        threads.sort(key=lambda item: item.get("last_at") or "", reverse=True)
-        return threads
+    def _save_focus(self, focus: dict[str, dict[str, Any]]) -> None:
+        self._write_json(self.focus_path, {"focus": focus})
 
     def _load_claims(self) -> list[dict[str, Any]]:
         payload = self._read_json(self.claims_path, {"claims": []})
@@ -495,64 +287,654 @@ class CoordStore:
     def _save_claims(self, claims: list[dict[str, Any]]) -> None:
         self._write_json(self.claims_path, {"claims": claims})
 
+    def _load_needs(self) -> list[dict[str, Any]]:
+        payload = self._read_json(self.needs_path, {"needs": []})
+        needs = payload.get("needs", [])
+        return needs if isinstance(needs, list) else []
+
+    def _save_needs(self, needs: list[dict[str, Any]]) -> None:
+        self._write_json(self.needs_path, {"needs": needs})
+
+    def _load_publishes(self) -> list[dict[str, Any]]:
+        payload = self._read_json(self.publishes_path, {"publishes": []})
+        publishes = payload.get("publishes", [])
+        return publishes if isinstance(publishes, list) else []
+
+    def _save_publishes(self, publishes: list[dict[str, Any]]) -> None:
+        self._write_json(self.publishes_path, {"publishes": publishes})
+
+    def _load_events(self) -> list[dict[str, Any]]:
+        if not self.events_path.exists():
+            return []
+        events: list[dict[str, Any]] = []
+        for line in self.events_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        events.sort(key=lambda item: int(item.get("seq", 0)))
+        return events
+
+    def _append_event(
+        self,
+        *,
+        kind: str,
+        paths: list[str] | None = None,
+        keys: list[str] | None = None,
+        summary: str,
+    ) -> dict[str, Any]:
+        events = self._load_events()
+        seq = (max((int(item.get("seq", 0)) for item in events), default=0) + 1)
+        self_record = self.self_record(refresh=False)
+        event = {
+            "seq": seq,
+            "id": f"evt_{seq:06d}",
+            "kind": kind,
+            "agent_id": self.agent_id,
+            "agent_alias": self_record.get("alias"),
+            "paths": paths or [],
+            "keys": keys or [],
+            "summary": summary,
+            "created_at": now_iso(),
+        }
+        with self.events_path.open("a") as fh:
+            fh.write(json.dumps(event, sort_keys=True) + "\n")
+        return event
+
+    def _resolve_peer(self, token: str | None) -> tuple[str | None, str | None]:
+        if token is None:
+            return None, None
+        agents = self._load_agents()
+        if token in agents:
+            return token, agents[token].get("alias")
+        for agent_id, record in agents.items():
+            alias = record.get("alias")
+            if isinstance(alias, str) and alias == token:
+                return agent_id, alias
+        return token, token
+
+    def register_self(self) -> dict[str, Any]:
+        with self.locked():
+            agents = self._load_agents()
+            current = agents.get(self.agent_id, {})
+            current.update(
+                {
+                    "agent_id": self.agent_id,
+                    "last_seen": now_iso(),
+                    "lease_expires_at": datetime.fromtimestamp(
+                        now().timestamp() + ACTIVE_WINDOW_SECONDS, tz=timezone.utc
+                    ).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "project_root": str(self.project_root),
+                    "identity_source": self.identity_source,
+                }
+            )
+            if self.identity_raw:
+                current["identity_raw"] = self.identity_raw
+            agents[self.agent_id] = current
+            self._save_agents(agents)
+            return current
+
+    def self_record(self, refresh: bool = True) -> dict[str, Any]:
+        if refresh:
+            self.register_self()
+        return self._load_agents().get(self.agent_id, {"agent_id": self.agent_id})
+
+    def alias_self(self, alias: str) -> dict[str, Any]:
+        current = self.register_self()
+        with self.locked():
+            agents = self._load_agents()
+            current = agents.get(self.agent_id, current)
+            current["alias"] = alias
+            agents[self.agent_id] = current
+            self._save_agents(agents)
+            return current
+
+    def aliases(self) -> list[dict[str, Any]]:
+        self.register_self()
+        aliases: list[dict[str, Any]] = []
+        for agent_id, record in sorted(self._load_agents().items()):
+            alias = record.get("alias")
+            if not isinstance(alias, str) or not alias:
+                continue
+            aliases.append(
+                {
+                    "agent_id": agent_id,
+                    "alias": alias,
+                    "status": classify_presence(record),
+                    "current": agent_id == self.agent_id,
+                }
+            )
+        return aliases
+
+    def focus_map(self) -> dict[str, dict[str, Any]]:
+        return self._load_focus()
+
+    def focus_for(self, token: str | None = None) -> dict[str, Any] | None:
+        agent_id = self.agent_id if token is None else self._resolve_peer(token)[0]
+        if not agent_id:
+            return None
+        return self.focus_map().get(agent_id)
+
+    def set_focus(self, goal: str, paths: list[str]) -> dict[str, Any]:
+        self.register_self()
+        normalized = sorted({normalize_path(self.project_root, self.cwd, path) for path in paths if path.strip()})
+        payload = {
+            "agent_id": self.agent_id,
+            "alias": self.self_record(refresh=False).get("alias"),
+            "goal": goal,
+            "paths": normalized,
+            "updated_at": now_iso(),
+        }
+        with self.locked():
+            focus = self._load_focus()
+            focus[self.agent_id] = payload
+            self._save_focus(focus)
+            self._append_event(
+                kind="focus_set",
+                paths=normalized,
+                summary=f"{payload.get('alias') or self.agent_id} set focus: {goal}",
+            )
+        return payload
+
+    def clear_focus(self) -> dict[str, Any] | None:
+        self.register_self()
+        with self.locked():
+            focus = self._load_focus()
+            existing = focus.pop(self.agent_id, None)
+            self._save_focus(focus)
+            if existing:
+                self._append_event(
+                    kind="focus_clear",
+                    paths=existing.get("paths", []),
+                    summary=f"{existing.get('alias') or self.agent_id} cleared focus",
+                )
+            return existing
+
+    def peers(self, include_stale: bool = False) -> list[dict[str, Any]]:
+        self.register_self()
+        focus = self.focus_map()
+        peers: list[dict[str, Any]] = []
+        for agent_id, record in sorted(self._load_agents().items()):
+            status = classify_presence(record)
+            if status == "stale" and not include_stale:
+                continue
+            peer_focus = focus.get(agent_id)
+            peers.append(
+                {
+                    "agent_id": agent_id,
+                    "alias": record.get("alias"),
+                    "status": status,
+                    "last_seen": record.get("last_seen"),
+                    "lease_expires_at": record.get("lease_expires_at"),
+                    "current": agent_id == self.agent_id,
+                    "focus": peer_focus,
+                }
+            )
+        return peers
+
     def claims(self) -> list[dict[str, Any]]:
         self.register_self()
         claims = self._load_claims()
-        claims.sort(key=lambda item: item.get("key", ""))
+        agents = self._load_agents()
+        for claim in claims:
+            owner = claim.get("owner")
+            owner_record = agents.get(str(owner), {})
+            claim["owner_status"] = classify_presence(owner_record) if owner_record else "unknown"
+        claims.sort(key=lambda item: item.get("path", ""))
         return claims
 
-    def claim(self, key: str, reason: str | None = None, force: bool = False) -> tuple[bool, dict[str, Any] | None, str | None]:
+    def claim(self, path: str, reason: str | None, strength: str) -> tuple[bool, dict[str, Any] | None, str | None]:
         self.register_self()
-        record = self.self_record()
-        alias = record.get("alias")
+        normalized = normalize_path(self.project_root, self.cwd, path)
+        alias = self.self_record(refresh=False).get("alias")
         with self.locked():
             claims = self._load_claims()
             for existing in claims:
-                if existing.get("key") != key:
+                if existing.get("path") != normalized:
                     continue
                 if existing.get("owner") == self.agent_id:
                     existing["reason"] = reason
+                    existing["strength"] = strength
                     existing["updated_at"] = now_iso()
                     self._save_claims(claims)
+                    self._append_event(
+                        kind="claim",
+                        paths=[normalized],
+                        summary=f"{alias or self.agent_id} updated claim on {normalized}",
+                    )
                     return True, existing, None
-                if not force:
-                    owner = existing.get("owner_alias") or existing.get("owner")
-                    return False, existing, f"{key} is already claimed by {owner}"
-                claims.remove(existing)
-                break
+                owner = existing.get("owner_alias") or existing.get("owner")
+                return False, existing, f"{normalized} is already claimed by {owner}"
 
             claim = {
-                "key": key,
+                "path": normalized,
                 "owner": self.agent_id,
                 "owner_alias": alias,
                 "reason": reason,
+                "strength": strength,
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             }
             claims.append(claim)
             self._save_claims(claims)
+            self._append_event(
+                kind="claim",
+                paths=[normalized],
+                summary=f"{alias or self.agent_id} claimed {normalized}",
+            )
             return True, claim, None
 
-    def release(self, key: str, force: bool = False) -> tuple[bool, dict[str, Any] | None, str | None]:
+    def release(self, path: str) -> tuple[bool, dict[str, Any] | None, str | None]:
         self.register_self()
+        normalized = normalize_path(self.project_root, self.cwd, path)
         with self.locked():
             claims = self._load_claims()
             for existing in list(claims):
-                if existing.get("key") != key:
+                if existing.get("path") != normalized:
                     continue
-                if existing.get("owner") != self.agent_id and not force:
+                if existing.get("owner") != self.agent_id:
                     owner = existing.get("owner_alias") or existing.get("owner")
-                    return False, existing, f"{key} is owned by {owner}"
+                    return False, existing, f"{normalized} is owned by {owner}"
                 claims.remove(existing)
                 self._save_claims(claims)
+                self._append_event(
+                    kind="release",
+                    paths=[normalized],
+                    summary=f"{existing.get('owner_alias') or self.agent_id} released {normalized}",
+                )
                 return True, existing, None
-            return False, None, f"No active claim for {key}"
+            return False, None, f"No active claim for {normalized}"
 
+    def needs(self, include_all: bool = False) -> list[dict[str, Any]]:
+        self.register_self()
+        needs = self._load_needs()
+        if not include_all:
+            needs = [item for item in needs if item.get("owner") == self.agent_id]
+        needs.sort(key=lambda item: (item.get("key", ""), item.get("created_at", "")))
+        return needs
 
-def read_text_arg(text: str | None, file_path: str | None) -> str | None:
-    if file_path:
-        return Path(file_path).read_text()
-    return text
+    def add_need(self, key: str, why: str, from_token: str | None) -> dict[str, Any]:
+        self.register_self()
+        alias = self.self_record(refresh=False).get("alias")
+        from_agent_id, from_alias = self._resolve_peer(from_token)
+        with self.locked():
+            needs = self._load_needs()
+            existing = next(
+                (
+                    item
+                    for item in needs
+                    if item.get("owner") == self.agent_id and item.get("key") == key
+                ),
+                None,
+            )
+            if existing:
+                existing.update(
+                    {
+                        "why": why,
+                        "from": from_agent_id,
+                        "from_alias": from_alias,
+                        "updated_at": now_iso(),
+                    }
+                )
+                payload = existing
+            else:
+                payload = {
+                    "key": key,
+                    "owner": self.agent_id,
+                    "owner_alias": alias,
+                    "why": why,
+                    "from": from_agent_id,
+                    "from_alias": from_alias,
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                }
+                needs.append(payload)
+            self._save_needs(needs)
+            self._append_event(
+                kind="need_add",
+                keys=[key],
+                summary=f"{alias or self.agent_id} needs {key}",
+            )
+            return payload
+
+    def clear_need(self, key: str) -> tuple[bool, dict[str, Any] | None]:
+        self.register_self()
+        with self.locked():
+            needs = self._load_needs()
+            for existing in list(needs):
+                if existing.get("owner") == self.agent_id and existing.get("key") == key:
+                    needs.remove(existing)
+                    self._save_needs(needs)
+                    self._append_event(
+                        kind="need_clear",
+                        keys=[key],
+                        summary=f"{existing.get('owner_alias') or self.agent_id} cleared need {key}",
+                    )
+                    return True, existing
+            return False, None
+
+    def publishes(self) -> list[dict[str, Any]]:
+        self.register_self()
+        publishes = self._load_publishes()
+        agents = self._load_agents()
+        for publish in publishes:
+            owner = str(publish.get("owner"))
+            owner_record = agents.get(owner, {})
+            publish["owner_status"] = classify_presence(owner_record) if owner_record else "unknown"
+        publishes.sort(key=lambda item: (item.get("key", ""), item.get("updated_at", "")), reverse=False)
+        return publishes
+
+    def add_publish(self, key: str, status: str, summary: str, refs: list[str]) -> dict[str, Any]:
+        self.register_self()
+        alias = self.self_record(refresh=False).get("alias")
+        with self.locked():
+            publishes = self._load_publishes()
+            existing = next(
+                (
+                    item
+                    for item in publishes
+                    if item.get("owner") == self.agent_id and item.get("key") == key
+                ),
+                None,
+            )
+            if existing:
+                existing.update(
+                    {
+                        "status": status,
+                        "summary": summary,
+                        "refs": refs,
+                        "updated_at": now_iso(),
+                    }
+                )
+                payload = existing
+            else:
+                payload = {
+                    "key": key,
+                    "owner": self.agent_id,
+                    "owner_alias": alias,
+                    "status": status,
+                    "summary": summary,
+                    "refs": refs,
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                }
+                publishes.append(payload)
+            self._save_publishes(publishes)
+            self._append_event(
+                kind="publish_add",
+                keys=[key],
+                summary=f"{alias or self.agent_id} published {key} ({status})",
+            )
+            return payload
+
+    def clear_publish(self, key: str) -> tuple[bool, dict[str, Any] | None]:
+        self.register_self()
+        with self.locked():
+            publishes = self._load_publishes()
+            for existing in list(publishes):
+                if existing.get("owner") == self.agent_id and existing.get("key") == key:
+                    publishes.remove(existing)
+                    self._save_publishes(publishes)
+                    self._append_event(
+                        kind="publish_clear",
+                        keys=[key],
+                        summary=f"{existing.get('owner_alias') or self.agent_id} cleared publish {key}",
+                    )
+                    return True, existing
+            return False, None
+
+    def _current_paths(self) -> list[str]:
+        focus = self.focus_for() or {}
+        focus_paths = list(focus.get("paths", []))
+        claim_paths = [item["path"] for item in self.claims() if item.get("owner") == self.agent_id]
+        return sorted({*focus_paths, *claim_paths})
+
+    def _current_need_keys(self) -> set[str]:
+        return {str(item.get("key")) for item in self.needs() if item.get("key")}
+
+    def _last_interrupt_seq(self) -> int:
+        record = self.self_record(refresh=False)
+        value = record.get("last_interrupt_seq", 0)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def _mark_interrupt_seq(self, seq: int) -> None:
+        current = self.register_self()
+        with self.locked():
+            agents = self._load_agents()
+            current = agents.get(self.agent_id, current)
+            current["last_interrupt_seq"] = seq
+            agents[self.agent_id] = current
+            self._save_agents(agents)
+
+    def _matching_publish(self, need: dict[str, Any], publishes: list[dict[str, Any]]) -> dict[str, Any] | None:
+        key = need.get("key")
+        from_target = need.get("from")
+        from_alias = need.get("from_alias")
+        candidates = [item for item in publishes if item.get("key") == key]
+        if from_target:
+            candidates = [
+                item
+                for item in candidates
+                if item.get("owner") == from_target or item.get("owner_alias") == from_alias or item.get("owner_alias") == from_target
+            ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+        return candidates[0]
+
+    def interrupts(self, mark_seen: bool = False, limit: int = 20) -> dict[str, Any]:
+        self.register_self()
+        last_seen_seq = self._last_interrupt_seq()
+        focus = self.focus_for() or {}
+        my_paths = self._current_paths()
+        my_needs = self.needs()
+        my_need_keys = {str(item.get("key")) for item in my_needs if item.get("key")}
+        agents = self._load_agents()
+        publishes = self.publishes()
+        active_peers = [
+            peer for peer in self.peers(include_stale=False)
+            if not peer["current"] and peer["status"] == "active"
+        ]
+
+        interrupts: list[dict[str, Any]] = []
+
+        # Current contentions.
+        claims = self.claims()
+        my_claim_paths = {item["path"] for item in claims if item.get("owner") == self.agent_id}
+        for peer in active_peers:
+            peer_focus = peer.get("focus") or {}
+            peer_focus_paths = [str(item) for item in peer_focus.get("paths", [])]
+            peer_claim_paths = [
+                item["path"]
+                for item in claims
+                if item.get("owner") == peer["agent_id"]
+            ]
+            overlaps = sorted(
+                {
+                    mine
+                    for mine in [*my_paths, *my_claim_paths]
+                    for theirs in [*peer_focus_paths, *peer_claim_paths]
+                    if path_overlaps(mine, theirs)
+                }
+            )
+            if not overlaps:
+                continue
+            peer_label = peer.get("alias") or peer["agent_id"]
+            interrupts.append(
+                {
+                    "kind": "contention",
+                    "severity": "warning",
+                    "peer": peer["agent_id"],
+                    "peer_label": peer_label,
+                    "paths": overlaps,
+                    "keys": [],
+                    "summary": f"{peer_label} is active in overlapping paths: {', '.join(overlaps)}",
+                    "new": False,
+                    "event_id": None,
+                }
+            )
+
+        # Current dependencies.
+        for need in my_needs:
+            match = self._matching_publish(need, publishes)
+            if match:
+                owner_label = match.get("owner_alias") or match.get("owner")
+                seq = 0
+                latest_event = next(
+                    (
+                        event
+                        for event in reversed(self._load_events())
+                        if event.get("kind") == "publish_add"
+                        and need.get("key") in event.get("keys", [])
+                        and event.get("agent_id") == match.get("owner")
+                    ),
+                    None,
+                )
+                if latest_event:
+                    seq = int(latest_event.get("seq", 0))
+                interrupts.append(
+                    {
+                        "kind": "dependency",
+                        "severity": "info",
+                        "peer": match.get("owner"),
+                        "peer_label": owner_label,
+                        "paths": [],
+                        "keys": [need["key"]],
+                        "summary": f"Dependency satisfied: {need['key']} is available from {owner_label}",
+                        "new": seq > last_seen_seq,
+                        "event_id": latest_event.get("id") if latest_event else None,
+                    }
+                )
+                continue
+
+            from_target = need.get("from")
+            if not from_target:
+                continue
+            owner_record = agents.get(str(from_target), {})
+            owner_label = owner_record.get("alias") or need.get("from_alias") or from_target
+            owner_status = classify_presence(owner_record) if owner_record else "unknown"
+            interrupts.append(
+                {
+                    "kind": "dependency",
+                    "severity": "warning" if owner_status == "active" else "info",
+                    "peer": from_target,
+                    "peer_label": owner_label,
+                    "paths": [],
+                    "keys": [need["key"]],
+                    "summary": (
+                        f"Dependency still blocked on {owner_label}: {need['key']}"
+                        if owner_status == "active"
+                        else f"Dependency waiting with no active owner: {need['key']}"
+                    ),
+                    "new": False,
+                    "event_id": None,
+                }
+            )
+
+        # Relevant novelty since last seen.
+        seen_by_novelty: set[int] = set()
+        for event in self._load_events():
+            seq = int(event.get("seq", 0))
+            if seq <= last_seen_seq:
+                continue
+            if event.get("agent_id") == self.agent_id:
+                continue
+            event_paths = [str(item) for item in event.get("paths", [])]
+            event_keys = {str(item) for item in event.get("keys", [])}
+            relevant = False
+            if event_paths and any(path_overlaps(mine, theirs) for mine in my_paths for theirs in event_paths):
+                relevant = True
+            if event_keys and event_keys & my_need_keys:
+                relevant = True
+            if not relevant:
+                continue
+            if event.get("kind") in {"focus_set", "claim"}:
+                continue
+            seen_by_novelty.add(seq)
+            interrupts.append(
+                {
+                    "kind": "novelty",
+                    "severity": "info",
+                    "peer": event.get("agent_id"),
+                    "peer_label": event.get("agent_alias") or event.get("agent_id"),
+                    "paths": event_paths,
+                    "keys": sorted(event_keys),
+                    "summary": event.get("summary"),
+                    "new": True,
+                    "event_id": event.get("id"),
+                }
+            )
+
+        interrupts.sort(
+            key=lambda item: (
+                {"contention": 0, "dependency": 1, "novelty": 2}.get(str(item.get("kind")), 9),
+                0 if item.get("new") else 1,
+                item.get("summary", ""),
+            )
+        )
+        interrupts = interrupts[:limit]
+
+        max_seq = max((int(item.get("seq", 0)) for item in self._load_events()), default=last_seen_seq)
+        if mark_seen and max_seq > last_seen_seq:
+            self._mark_interrupt_seq(max_seq)
+
+        counts = {"contention": 0, "dependency": 0, "novelty": 0}
+        for item in interrupts:
+            kind = str(item.get("kind"))
+            counts[kind] = counts.get(kind, 0) + 1
+
+        return {
+            "interrupts": interrupts,
+            "counts": counts,
+            "last_interrupt_seq": last_seen_seq,
+            "current_event_seq": max_seq,
+            "focus": focus or None,
+        }
+
+    def touch(self) -> dict[str, Any]:
+        agent = self.register_self()
+        current_focus = self.focus_for()
+        peers = self.peers(include_stale=False)
+        active_peers = [peer for peer in peers if not peer["current"] and peer["status"] == "active"]
+        return {
+            "agent": {
+                **agent,
+                "status": classify_presence(agent),
+            },
+            "focus": current_focus,
+            "active_peers": active_peers,
+            "active_window_seconds": ACTIVE_WINDOW_SECONDS,
+            "idle_window_seconds": IDLE_WINDOW_SECONDS,
+        }
+
+    def status(self) -> dict[str, Any]:
+        record = self.self_record()
+        my_claims = [item for item in self.claims() if item.get("owner") == self.agent_id]
+        my_needs = self.needs()
+        my_publishes = [item for item in self.publishes() if item.get("owner") == self.agent_id]
+        interrupt_state = self.interrupts(mark_seen=False, limit=20)
+        return {
+            "agent": {
+                "agent_id": self.agent_id,
+                "alias": record.get("alias"),
+                "status": classify_presence(record),
+                "last_seen": record.get("last_seen"),
+                "lease_expires_at": record.get("lease_expires_at"),
+            },
+            "focus": self.focus_for(),
+            "claims": my_claims,
+            "needs": my_needs,
+            "publishes": my_publishes,
+            "interrupts": interrupt_state,
+            "active_peers": [peer for peer in self.peers(include_stale=False) if not peer["current"] and peer["status"] == "active"],
+        }
 
 
 def parser() -> argparse.ArgumentParser:
@@ -562,95 +944,75 @@ def parser() -> argparse.ArgumentParser:
 
     sub.add_parser("touch")
     sub.add_parser("whoami")
+    sub.add_parser("status")
 
     alias_p = sub.add_parser("alias")
     alias_p.add_argument("name")
 
     sub.add_parser("aliases")
-    sub.add_parser("peers")
 
-    send_p = sub.add_parser("send")
-    send_p.add_argument("peer")
-    send_p.add_argument("--subject", required=True)
-    send_p.add_argument("--body")
-    send_p.add_argument("--body-file")
-    send_p.add_argument("--kind", default="status")
-    send_p.add_argument("--ref", action="append", default=[])
-    send_p.add_argument("--check", action="append", default=[])
-    send_p.add_argument("--next", dest="next_steps", action="append", default=[])
+    peers_p = sub.add_parser("peers")
+    peers_p.add_argument("--all", action="store_true")
 
-    handoff_p = sub.add_parser("handoff")
-    handoff_p.add_argument("peer")
-    handoff_p.add_argument("--summary", required=True)
-    handoff_p.add_argument("--subject")
-    handoff_p.add_argument("--ref", action="append", default=[])
-    handoff_p.add_argument("--check", action="append", default=[])
-    handoff_p.add_argument("--next", dest="next_steps", action="append", default=[])
+    interrupts_p = sub.add_parser("interrupts")
+    interrupts_p.add_argument("--mark-seen", action="store_true")
+    interrupts_p.add_argument("--limit", type=int, default=20)
 
-    ask_p = sub.add_parser("ask")
-    ask_p.add_argument("peer")
-    ask_p.add_argument("--question", required=True)
-    ask_p.add_argument("--subject")
-    ask_p.add_argument("--ref", action="append", default=[])
-
-    reply_p = sub.add_parser("reply")
-    reply_p.add_argument("message_id")
-    reply_p.add_argument("--body")
-    reply_p.add_argument("--body-file")
-    reply_p.add_argument("--subject")
-    reply_p.add_argument("--ref", action="append", default=[])
-    reply_p.add_argument("--check", action="append", default=[])
-    reply_p.add_argument("--next", dest="next_steps", action="append", default=[])
-
-    broadcast_p = sub.add_parser("broadcast")
-    broadcast_p.add_argument("--subject", required=True)
-    broadcast_p.add_argument("--body")
-    broadcast_p.add_argument("--body-file")
-    broadcast_p.add_argument("--kind", default="broadcast")
-    broadcast_p.add_argument("--ref", action="append", default=[])
-    broadcast_p.add_argument("--check", action="append", default=[])
-    broadcast_p.add_argument("--next", dest="next_steps", action="append", default=[])
-
-    inbox_p = sub.add_parser("inbox")
-    inbox_p.add_argument("--unacked", action="store_true")
-    inbox_p.add_argument("--kind")
-
-    read_p = sub.add_parser("read")
-    read_p.add_argument("message_id")
-
-    wait_p = sub.add_parser("wait")
-    wait_p.add_argument("--timeout", type=float, default=60.0)
-    wait_p.add_argument("--interval", type=float, default=1.0)
-    wait_p.add_argument("--unacked", action="store_true")
-    wait_p.add_argument("--kind")
-
-    ack_p = sub.add_parser("ack")
-    ack_p.add_argument("message_id")
-
-    sub.add_parser("threads")
-    thread_p = sub.add_parser("thread")
-    thread_p.add_argument("thread_id")
+    focus_p = sub.add_parser("focus")
+    focus_sub = focus_p.add_subparsers(dest="focus_command")
+    focus_set = focus_sub.add_parser("set")
+    focus_set.add_argument("goal")
+    focus_set.add_argument("--path", action="append", required=True, dest="paths")
+    focus_show = focus_sub.add_parser("show")
+    focus_show.add_argument("peer", nargs="?")
+    focus_sub.add_parser("clear")
 
     sub.add_parser("claims")
-
     claim_p = sub.add_parser("claim")
-    claim_p.add_argument("key")
+    claim_p.add_argument("path")
     claim_p.add_argument("--reason")
-    claim_p.add_argument("--force", action="store_true")
+    claim_p.add_argument("--strength", choices=["soft", "strong"], default="soft")
 
     release_p = sub.add_parser("release")
-    release_p.add_argument("key")
-    release_p.add_argument("--force", action="store_true")
+    release_p.add_argument("path")
+
+    need_p = sub.add_parser("need")
+    need_sub = need_p.add_subparsers(dest="need_command")
+    need_add = need_sub.add_parser("add")
+    need_add.add_argument("key")
+    need_add.add_argument("--why", required=True)
+    need_add.add_argument("--from", dest="from_target")
+    need_list = need_sub.add_parser("list")
+    need_list.add_argument("--all", action="store_true")
+    need_clear = need_sub.add_parser("clear")
+    need_clear.add_argument("key")
+
+    sub.add_parser("publishes")
+    publish_p = sub.add_parser("publish")
+    publish_sub = publish_p.add_subparsers(dest="publish_command")
+    publish_add = publish_sub.add_parser("add")
+    publish_add.add_argument("key")
+    publish_add.add_argument("--status", required=True)
+    publish_add.add_argument("--summary", required=True)
+    publish_add.add_argument("--ref", action="append", default=[])
+    publish_clear = publish_sub.add_parser("clear")
+    publish_clear.add_argument("key")
 
     sub.add_parser("help")
     return p
 
 
-def format_inbox(message: dict[str, Any]) -> str:
-    status = "acked" if message.get("acks") else "new"
-    sender = message.get("from_alias") or message.get("from")
-    subject = message.get("subject") or "(no subject)"
-    return f'{message.get("id")}  {message.get("kind")}  {status}  from:{sender}  subject:{subject}'
+def format_peer(peer: dict[str, Any]) -> str:
+    label = peer.get("alias") or peer.get("agent_id")
+    current = " current" if peer.get("current") else ""
+    focus = peer.get("focus") or {}
+    goal = f' goal:"{focus.get("goal")}"' if focus.get("goal") else ""
+    return f"{label} status:{peer.get('status')}{current}{goal}"
+
+
+def format_interrupt(item: dict[str, Any]) -> str:
+    prefix = "[new] " if item.get("new") else ""
+    return f"{prefix}{item.get('kind')}: {item.get('summary')}"
 
 
 def main(argv: list[str]) -> int:
@@ -698,8 +1060,10 @@ def main(argv: list[str]) -> int:
             "coord_root": str(store.coord_root),
             "storage": store.storage,
             "last_seen": record.get("last_seen"),
-            "status": classify_presence(record.get("last_seen")),
+            "lease_expires_at": record.get("lease_expires_at"),
+            "status": classify_presence(record),
             "active_window_seconds": ACTIVE_WINDOW_SECONDS,
+            "idle_window_seconds": IDLE_WINDOW_SECONDS,
         }
         return print_payload(payload, args.json)
 
@@ -716,183 +1080,112 @@ def main(argv: list[str]) -> int:
             return 0
         for item in aliases:
             current = " (current)" if item["current"] else ""
-            print(f'{item["alias"]} -> {item["agent_id"]}{current}')
+            print(f'{item["alias"]} -> {item["agent_id"]} status:{item["status"]}{current}')
         return 0
 
     if args.command == "peers":
-        peers = store.peers()
+        peers = store.peers(include_stale=args.all)
         if args.json:
             return print_payload({"success": True, "tool": "coord", "peers": peers}, True)
         if not peers:
             print("No peers.")
             return 0
         for peer in peers:
-            current = " current" if peer["current"] else ""
-            alias = f' alias:{peer["alias"]}' if peer.get("alias") else ""
-            status = f' status:{peer["status"]}'
-            unread = f' unread_from_peer:{peer["unread_from_peer"]}' if peer.get("unread_from_peer") else ""
-            print(f'{peer["agent_id"]}{current}{alias}{status}{unread}')
+            print(format_peer(peer))
         return 0
 
-    if args.command in {"send", "handoff", "ask", "broadcast", "reply"}:
-        if args.command == "send":
-            body = read_text_arg(args.body, args.body_file)
-            if not body:
-                return error("send requires --body or --body-file", args.json)
-            recipients, labels = store.resolve_peer(args.peer)
-            payload = store.create_message(
-                kind=args.kind,
-                recipients=recipients,
-                recipient_labels=labels,
-                subject=args.subject,
-                body=body,
-                refs=args.ref,
-                checks=args.check,
-                next_steps=args.next_steps,
-            )
-            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
-
-        if args.command == "handoff":
-            recipients, labels = store.resolve_peer(args.peer)
-            subject = args.subject or f"Handoff from {store.alias_for(store.agent_id) or store.agent_id}"
-            payload = store.create_message(
-                kind="handoff",
-                recipients=recipients,
-                recipient_labels=labels,
-                subject=subject,
-                body=args.summary,
-                refs=args.ref,
-                checks=args.check,
-                next_steps=args.next_steps,
-            )
-            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
-
-        if args.command == "ask":
-            recipients, labels = store.resolve_peer(args.peer)
-            subject = args.subject or f"Question from {store.alias_for(store.agent_id) or store.agent_id}"
-            payload = store.create_message(
-                kind="question",
-                recipients=recipients,
-                recipient_labels=labels,
-                subject=subject,
-                body=args.question,
-                refs=args.ref,
-            )
-            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
-
-        if args.command == "broadcast":
-            body = read_text_arg(args.body, args.body_file)
-            if not body:
-                return error("broadcast requires --body or --body-file", args.json)
-            recipients = store.known_peer_ids()
-            if not recipients:
-                return error("No known peers to broadcast to", args.json)
-            payload = store.create_message(
-                kind=args.kind,
-                recipients=recipients,
-                recipient_labels=recipients,
-                subject=args.subject,
-                body=body,
-                refs=args.ref,
-                checks=args.check,
-                next_steps=args.next_steps,
-            )
-            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
-
-        if args.command == "reply":
-            body = read_text_arg(args.body, args.body_file)
-            if not body:
-                return error("reply requires --body or --body-file", args.json)
-            found = store.find_message(args.message_id)
-            if not found:
-                return error(f"Message not found: {args.message_id}", args.json)
-            _, original = found
-            subject = args.subject or f"Re: {original.get('subject') or original.get('id')}"
-            payload = store.create_message(
-                kind="reply",
-                recipients=[str(original.get("from"))],
-                recipient_labels=[str(original.get("from_alias") or original.get("from"))],
-                subject=subject,
-                body=body,
-                refs=args.ref,
-                checks=args.check,
-                next_steps=args.next_steps,
-                thread_id=original.get("thread_id"),
-                reply_to=original.get("id"),
-            )
-            return print_payload({"success": True, "tool": "coord", "message": payload}, args.json)
-
-    if args.command == "inbox":
-        messages = [m for m in store.list_messages() if store.message_for_current(m)]
-        if args.unacked:
-            unread_ids = {m["id"] for m in store.unread_messages()}
-            messages = [m for m in messages if m["id"] in unread_ids]
-        if args.kind:
-            messages = [m for m in messages if m.get("kind") == args.kind]
+    if args.command == "status":
+        payload = store.status()
         if args.json:
-            return print_payload({"success": True, "tool": "coord", "messages": messages}, True)
-        if not messages:
-            print("Inbox empty.")
-            return 0
-        print("INBOX")
-        for message in messages:
-            print(format_inbox(message))
+            return print_payload({"success": True, "tool": "coord", **payload}, True)
+        agent = payload["agent"]
+        print(f'Agent: {agent["alias"] or agent["agent_id"]} status:{agent["status"]}')
+        if payload["focus"]:
+            print(f'Focus: {payload["focus"]["goal"]} [{", ".join(payload["focus"]["paths"])}]')
+        print(
+            "State:"
+            f" claims={len(payload['claims'])}"
+            f" needs={len(payload['needs'])}"
+            f" publishes={len(payload['publishes'])}"
+            f" active_peers={len(payload['active_peers'])}"
+        )
+        print(
+            "Interrupts:"
+            f" contention={payload['interrupts']['counts']['contention']}"
+            f" dependency={payload['interrupts']['counts']['dependency']}"
+            f" novelty={payload['interrupts']['counts']['novelty']}"
+        )
         return 0
 
-    if args.command == "read":
-        found = store.find_message(args.message_id)
-        if not found:
-            return error(f"Message not found: {args.message_id}", args.json)
-        _, message = found
-        return print_payload({"success": True, "tool": "coord", "message": message}, args.json)
+    if args.command == "interrupts":
+        payload = store.interrupts(mark_seen=args.mark_seen, limit=args.limit)
+        if args.json:
+            return print_payload({"success": True, "tool": "coord", **payload}, True)
+        if not payload["interrupts"]:
+            print("No interrupts.")
+            return 0
+        for item in payload["interrupts"]:
+            print(format_interrupt(item))
+        return 0
 
-    if args.command == "wait":
-        deadline = time.time() + args.timeout
-        while True:
-            messages = [m for m in store.list_messages() if store.message_for_current(m)]
-            if args.unacked:
-                unread_ids = {m["id"] for m in store.unread_messages()}
-                messages = [m for m in messages if m["id"] in unread_ids]
-            if args.kind:
-                messages = [m for m in messages if m.get("kind") == args.kind]
-            if messages:
-                latest = sorted(messages, key=lambda item: item.get("created_at", ""))[-1]
-                return print_payload({"success": True, "tool": "coord", "message": latest}, args.json)
-            if time.time() >= deadline:
-                return error("Timed out waiting for coord message", args.json, code=2)
-            time.sleep(args.interval)
-
-    if args.command == "ack":
-        updated = store.ack(args.message_id)
-        if not updated:
-            return error(f"Message not found: {args.message_id}", args.json)
-        return print_payload({"success": True, "tool": "coord", "message": updated}, args.json)
-
-    if args.command == "threads":
-        threads = store.thread_summaries()
-        return print_payload({"success": True, "tool": "coord", "threads": threads}, args.json)
-
-    if args.command == "thread":
-        messages = store.thread_messages(args.thread_id)
-        if not messages:
-            return error(f"Thread not found: {args.thread_id}", args.json)
-        return print_payload({"success": True, "tool": "coord", "thread_id": args.thread_id, "messages": messages}, args.json)
+    if args.command == "focus":
+        if args.focus_command == "set":
+            payload = store.set_focus(args.goal, args.paths)
+            return print_payload({"success": True, "tool": "coord", "focus": payload}, args.json)
+        if args.focus_command == "show":
+            payload = store.focus_for(args.peer)
+            if payload is None:
+                return error("Focus not found", args.json, code=2)
+            return print_payload({"success": True, "tool": "coord", "focus": payload}, args.json)
+        if args.focus_command == "clear":
+            payload = store.clear_focus()
+            return print_payload({"success": True, "tool": "coord", "cleared": payload}, args.json)
+        return error("focus requires set|show|clear", args.json, code=2)
 
     if args.command == "claims":
         claims = store.claims()
         return print_payload({"success": True, "tool": "coord", "claims": claims}, args.json)
 
     if args.command == "claim":
-        ok, claim, message = store.claim(args.key, args.reason, args.force)
+        ok, claim, message = store.claim(args.path, args.reason, args.strength)
         if not ok:
-            return error(message or "Unable to claim key", args.json)
+            return error(message or "Unable to claim path", args.json)
         return print_payload({"success": True, "tool": "coord", "claim": claim}, args.json)
 
     if args.command == "release":
-        ok, claim, message = store.release(args.key, args.force)
+        ok, payload, message = store.release(args.path)
         if not ok:
-            return error(message or "Unable to release key", args.json)
-        return print_payload({"success": True, "tool": "coord", "released": claim}, args.json)
+            return error(message or "Unable to release path", args.json)
+        return print_payload({"success": True, "tool": "coord", "released": payload}, args.json)
+
+    if args.command == "need":
+        if args.need_command == "add":
+            payload = store.add_need(args.key, args.why, args.from_target)
+            return print_payload({"success": True, "tool": "coord", "need": payload}, args.json)
+        if args.need_command == "list":
+            payload = store.needs(include_all=args.all)
+            return print_payload({"success": True, "tool": "coord", "needs": payload}, args.json)
+        if args.need_command == "clear":
+            ok, payload = store.clear_need(args.key)
+            if not ok:
+                return error(f"No active need for {args.key}", args.json, code=2)
+            return print_payload({"success": True, "tool": "coord", "cleared": payload}, args.json)
+        return error("need requires add|list|clear", args.json, code=2)
+
+    if args.command == "publishes":
+        payload = store.publishes()
+        return print_payload({"success": True, "tool": "coord", "publishes": payload}, args.json)
+
+    if args.command == "publish":
+        if args.publish_command == "add":
+            payload = store.add_publish(args.key, args.status, args.summary, args.ref)
+            return print_payload({"success": True, "tool": "coord", "publish": payload}, args.json)
+        if args.publish_command == "clear":
+            ok, payload = store.clear_publish(args.key)
+            if not ok:
+                return error(f"No active publish for {args.key}", args.json, code=2)
+            return print_payload({"success": True, "tool": "coord", "cleared": payload}, args.json)
+        return error("publish requires add|clear", args.json, code=2)
 
     print(HELP)
     return 0

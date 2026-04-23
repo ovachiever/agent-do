@@ -394,18 +394,19 @@ agent-do meetings teams join "https://teams.microsoft.com/l/meetup-join/..."
 
 ### `coord`
 
-Project-local agent coordination mailbox for structured handoffs, inbox reads, replies, and advisory claims between separate agent sessions in the same repo.
+Project-local agent state board for parallel agent work. It tracks who is active, what each agent is touching, what each agent needs, what each agent has published, and whether that should interrupt someone else.
 
 ```bash
 agent-do coord whoami
 agent-do coord touch
-agent-do coord alias reviewer
-agent-do coord handoff infra --summary "Local verification is done"
-agent-do coord inbox
+agent-do coord focus set "private Render networking" --path recognition-oracle/render.yaml --path dm-ck/render.yaml
 agent-do coord claim recognition-oracle/render.yaml --reason "private Render blueprint wiring"
+agent-do coord need add dm-sdk@1.2.2 --why "switch off tarball dependency"
+agent-do coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
+agent-do coord interrupts
 ```
 
-When Claude Code session hooks are installed, session start now silently refreshes local coord presence and only nudges if another active peer is already present in the same repo mailbox.
+When Claude Code session hooks are installed, session start now silently renews local coord presence and only nudges on real coordination interrupts or when active peers exist and you have not declared focus yet.
 
 ## Tool Surface
 

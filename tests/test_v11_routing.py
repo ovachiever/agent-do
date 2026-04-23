@@ -191,7 +191,8 @@ def main() -> int:
         require(first_hook.returncode == 0, f"first coord session hook failed: {first_hook.stderr}")
         first_payload = json.loads(first_hook.stdout)
         first_additional = first_payload["hookSpecificOutput"]["additionalContext"]
-        require("Active Agent Peers" not in first_additional, f"unexpected coord peer context for first session: {first_additional}")
+        require("Coord Interrupts" not in first_additional, f"unexpected coord interrupt context for first session: {first_additional}")
+        require("Coord Focus Reminder" not in first_additional, f"unexpected coord focus reminder for first session: {first_additional}")
 
         second_env = dict(env)
         second_env["CODEX_THREAD_ID"] = "beta-456"
@@ -204,9 +205,57 @@ def main() -> int:
         require(second_hook.returncode == 0, f"second coord session hook failed: {second_hook.stderr}")
         second_payload = json.loads(second_hook.stdout)
         second_additional = second_payload["hookSpecificOutput"]["additionalContext"]
-        require("Active Agent Peers" in second_additional, f"expected coord peer context, got: {second_additional}")
-        require("agent-do coord inbox" in second_additional, f"expected coord inbox hint, got: {second_additional}")
-        require("reviewer" not in second_additional, "unexpected alias text before aliases were set")
+        require("Coord Focus Reminder" in second_additional, f"expected coord focus reminder, got: {second_additional}")
+        require("agent-do coord focus set" in second_additional, f"expected coord focus hint, got: {second_additional}")
+
+        subprocess.run(
+            [str(ROOT / "agent-do"), "coord", "focus", "set", "render work", "--path", "recognition-oracle/render.yaml", "--json"],
+            cwd=project,
+            env=first_env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            [str(ROOT / "agent-do"), "coord", "claim", "recognition-oracle/render.yaml", "--reason", "private render work", "--json"],
+            cwd=project,
+            env=first_env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            [str(ROOT / "agent-do"), "coord", "focus", "set", "review overlap", "--path", "recognition-oracle/render.yaml", "--json"],
+            cwd=project,
+            env=second_env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        overlap_hook = run(
+            "bash",
+            "hooks/agent-do-session-start.sh",
+            input_text=json.dumps({"cwd": str(project)}),
+            env=second_env,
+        )
+        require(overlap_hook.returncode == 0, f"overlap coord session hook failed: {overlap_hook.stderr}")
+        overlap_payload = json.loads(overlap_hook.stdout)
+        overlap_additional = overlap_payload["hookSpecificOutput"]["additionalContext"]
+        require("Coord Interrupts" in overlap_additional, f"expected coord interrupts, got: {overlap_additional}")
+        require("contention" in overlap_additional, f"expected contention interrupt, got: {overlap_additional}")
+
+        coord_prompt = run(
+            "python3",
+            "hooks/agent-do-prompt-router.py",
+            input_text=json.dumps({"prompt": "please review the other agent's work so we do not conflict", "cwd": str(project)}),
+            env=second_env,
+        )
+        require(coord_prompt.returncode == 0, f"coord prompt-router failed: {coord_prompt.stderr}")
+        coord_prompt_payload = json.loads(coord_prompt.stdout)
+        coord_prompt_context = coord_prompt_payload["hookSpecificOutput"]["additionalContext"]
+        require("Coord Interrupts" in coord_prompt_context, f"expected coord prompt context, got: {coord_prompt_context}")
+        require("agent-do coord status" in coord_prompt_context, f"expected coord status hint, got: {coord_prompt_context}")
 
     with tempfile.TemporaryDirectory() as telemetry_home:
         env = os.environ.copy()

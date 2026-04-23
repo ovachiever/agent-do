@@ -130,7 +130,7 @@ Refresh this list any time with:
 }
 
 append_coord_context() {
-    local touch_json active_count active_block
+    local touch_json interrupts_json active_count focus_goal active_block interrupt_count interrupt_block
 
     [ -n "$AGENT_DO_DIR" ] || return 0
     [ -n "$CWD" ] || return 0
@@ -140,7 +140,43 @@ append_coord_context() {
     [ -n "$touch_json" ] || return 0
 
     active_count=$(echo "$touch_json" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('active_peers', [])))" 2>/dev/null || echo "0")
+    focus_goal=$(echo "$touch_json" | python3 -c "import json,sys; data=json.load(sys.stdin); print(((data.get('focus') or {}).get('goal')) or '')" 2>/dev/null || true)
+
+    interrupts_json=$(cd "$CWD" && "$AGENT_DO_DIR/agent-do" coord interrupts --json --mark-seen --limit 5 2>/dev/null || true)
+    interrupt_count=$(echo "$interrupts_json" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('interrupts', [])))" 2>/dev/null || echo "0")
+
+    if [ "$interrupt_count" -gt 0 ]; then
+        interrupt_block=$(echo "$interrupts_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+lines = []
+for item in data.get('interrupts', []):
+    prefix = '[new] ' if item.get('new') else ''
+    lines.append(f'- {prefix}{item.get(\"kind\")}: {item.get(\"summary\")}')
+print('\n'.join(lines))
+" 2>/dev/null || true)
+
+        [ -n "$interrupt_block" ] || return 0
+
+        CONTEXT="$CONTEXT
+
+---
+
+## Coord Interrupts
+
+Relevant coordination interrupts are active in this repo:
+$interrupt_block
+
+Use:
+\`agent-do coord status\`
+\`agent-do coord interrupts\`
+\`agent-do coord focus show\`
+"
+        return 0
+    fi
+
     [ "$active_count" -gt 0 ] || return 0
+    [ -z "$focus_goal" ] || return 0
 
     active_block=$(echo "$touch_json" | python3 -c "
 import json, sys
@@ -148,8 +184,9 @@ data = json.load(sys.stdin)
 lines = []
 for peer in data.get('active_peers', []):
     label = peer.get('alias') or peer.get('agent_id')
-    unread = peer.get('unread_from_peer', 0)
-    suffix = f' (unread: {unread})' if unread else ''
+    focus = peer.get('focus') or {}
+    goal = focus.get('goal')
+    suffix = f' goal: {goal}' if goal else ''
     lines.append(f'- {label}{suffix}')
 print('\n'.join(lines))
 " 2>/dev/null || true)
@@ -160,18 +197,18 @@ print('\n'.join(lines))
 
 ---
 
-## Active Agent Peers
+## Coord Focus Reminder
 
-Your presence has been registered in the local project coordination mailbox.
+Other active peers exist in this repo, and you have not declared focus yet.
 
-Other active peers detected in this repo:
+Active peers:
 $active_block
 
-When work may overlap or needs a handoff, use:
+Set focus before overlapping work starts:
+\`agent-do coord focus set \"<goal>\" --path <path> [--path <path> ...]\`
 \`agent-do coord peers\`
-\`agent-do coord inbox\`
 \`agent-do coord claim <path>\`
-\`agent-do coord handoff <peer> --summary \"...\"\`
+\`agent-do coord interrupts\`
 "
 }
 
