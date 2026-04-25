@@ -175,6 +175,29 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         project = Path(tmpdir)
         subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+        (project / "AGENTS.md").write_text("Use agent-do zpc in this repo.\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["AGENT_DO_HOME"] = str(project / ".agent-do-home")
+        env["AGENT_DO_BOOTSTRAP_PROMPT_MODE"] = "native"
+        env["AGENT_DO_BOOTSTRAP_AUTO_RESPONSE"] = "bootstrap"
+
+        bootstrap_hook = run(
+            "bash",
+            "hooks/agent-do-session-start.sh",
+            input_text=json.dumps({"cwd": str(project)}),
+            env=env,
+        )
+        require(bootstrap_hook.returncode == 0, f"bootstrap session hook failed: {bootstrap_hook.stderr}")
+        require((project / ".zpc").is_dir(), "expected native bootstrap hook to initialize .zpc")
+
+        bootstrap_payload = json.loads(bootstrap_hook.stdout)
+        bootstrap_context = bootstrap_payload["hookSpecificOutput"]["additionalContext"]
+        require("Bootstrap Opportunity" not in bootstrap_context, f"did not expect fallback bootstrap context: {bootstrap_context}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        project = Path(tmpdir)
+        subprocess.run(["git", "init", "-q"], cwd=project, check=True)
         (project / "README.md").write_text("coord hook test", encoding="utf-8")
 
         env = os.environ.copy()

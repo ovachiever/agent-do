@@ -194,7 +194,7 @@ result=$(api_request GET "$url" -H "Authorization: Bearer $TOKEN")
 **`bin/bootstrap`**: Idempotent setup for stateful tools:
 - Detects project-local signals in `CLAUDE.md`, `AGENTS.md`, and the repo root
 - Initializes `context` globally and `zpc` / `manna` locally when the project actually uses them
-- Powers the SessionStart bootstrap prompt injected by the Claude Code hook
+- Powers the SessionStart bootstrap detection used by the global Claude/Codex hooks, which can trigger a native macOS bootstrap prompt
 
 **`bin/suggest`**: Discovery CLI:
 - `agent-do suggest "<task>"` picks likely tools and concrete commands

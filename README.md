@@ -505,7 +505,7 @@ agent-do bootstrap
 - `zpc` in `.zpc/` when the repo uses ZPC
 - `manna` in `.manna/` when the repo uses Manna
 
-If the SessionStart hook is installed, Claude asks once at session start when bootstrap work is pending.
+If the global SessionStart hook is installed, Claude and Codex show a native macOS bootstrap prompt at session start when bootstrap work is pending.
 
 ## Credentials
 

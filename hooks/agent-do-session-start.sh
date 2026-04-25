@@ -40,8 +40,43 @@ if [ -n "$AGENT_DO_DIR" ] && [ -n "$CLAUDE_ENV_FILE" ]; then
     echo "export PATH=\"$AGENT_DO_DIR:\$PATH\"" >> "$CLAUDE_ENV_FILE"
 fi
 
+run_native_bootstrap_prompt() {
+    local ask_prompt="$1"
+    local project_root="$2"
+    local response
+
+    case "${AGENT_DO_BOOTSTRAP_AUTO_RESPONSE:-}" in
+        bootstrap)
+            response="Bootstrap"
+            ;;
+        not_now)
+            response="Not now"
+            ;;
+        *)
+            if ! command -v osascript >/dev/null 2>&1; then
+                return 2
+            fi
+
+            response=$(osascript <<EOF 2>/dev/null || true
+display dialog "$(printf '%s' "$ask_prompt" | sed 's/\\/\\\\/g; s/"/\\"/g')" with title "agent-do Bootstrap" buttons {"Not now", "Bootstrap"} default button "Bootstrap"
+button returned of result
+EOF
+)
+            ;;
+    esac
+
+    if [[ "$response" == "Bootstrap" ]]; then
+        (
+            cd "$project_root"
+            "$AGENT_DO_DIR/agent-do" bootstrap --yes >/dev/null 2>&1 || true
+        )
+    fi
+
+    return 0
+}
+
 append_bootstrap_prompt() {
-    local bootstrap_json needs_bootstrap ask_prompt project_root commands
+    local bootstrap_json needs_bootstrap ask_prompt project_root commands prompt_mode
 
     [ -n "$AGENT_DO_DIR" ] || return 0
     [ -n "$CWD" ] || return 0
@@ -56,6 +91,24 @@ append_bootstrap_prompt() {
     ask_prompt=$(echo "$bootstrap_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ask_prompt',''))" 2>/dev/null || true)
     project_root=$(echo "$bootstrap_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('project_root',''))" 2>/dev/null || true)
     commands=$(echo "$bootstrap_json" | python3 -c "import json,sys; data=json.load(sys.stdin); [print(cmd) for cmd in data.get('commands', [])]" 2>/dev/null || true)
+
+    prompt_mode="${AGENT_DO_BOOTSTRAP_PROMPT_MODE:-}"
+    if [ -z "$prompt_mode" ]; then
+        if [ "$(uname -s)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
+            prompt_mode="native"
+        else
+            prompt_mode="context"
+        fi
+    fi
+
+    case "$prompt_mode" in
+        native)
+            run_native_bootstrap_prompt "$ask_prompt" "$project_root" && return 0
+            ;;
+        disabled)
+            return 0
+            ;;
+    esac
 
     CONTEXT="$CONTEXT
 
