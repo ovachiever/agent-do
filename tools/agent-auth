@@ -614,7 +614,7 @@ def capture_email_baseline(profile: dict[str, Any], *, limit: int = 25) -> list[
     if not email_challenge_config(profile):
         return []
     try:
-        payload = run_email_json("snapshot", "--limit", str(limit))
+        payload = run_email_json("snapshot", "--limit", str(limit), *email_challenge_scope_args(email_challenge_config(profile)))
     except Exception:
         return []
     recent = ((payload.get("recent_messages") or {}).get("items") or [])
@@ -1472,6 +1472,7 @@ def build_email_probe_command(challenge: dict[str, Any]) -> str:
         command.extend(["--subject", subject_filter])
     if contains:
         command.extend(["--contains", contains])
+    command.extend(email_challenge_scope_args(challenge))
     if domain and challenge_type == "link":
         command.extend(["--domain", domain])
     if code_regex and challenge_type == "code":
@@ -1479,6 +1480,17 @@ def build_email_probe_command(challenge: dict[str, Any]) -> str:
     elif code_length and challenge_type == "code":
         command.extend(["--length", str(code_length)])
     return " ".join(shlex.quote(part) for part in command)
+
+
+def email_challenge_scope_args(challenge: dict[str, Any]) -> list[str]:
+    command: list[str] = []
+    account = str(challenge.get("account") or "").strip()
+    mailbox = str(challenge.get("mailbox") or "").strip()
+    if account:
+        command.extend(["--account", account])
+    if mailbox:
+        command.extend(["--mailbox", mailbox])
+    return command
 
 
 def build_phone_probe_command(challenge: dict[str, Any]) -> str:
@@ -2217,6 +2229,7 @@ def complete_phone_challenge_with_baseline(profile: dict[str, Any], baseline_ids
         common_args.extend(["--contains", contains_filter])
     if unread_only:
         common_args.append("--unread")
+    common_args.extend(email_challenge_scope_args(challenge))
     for message_id in baseline_ids or []:
         common_args.extend(["--exclude-id", message_id])
     common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
@@ -2300,6 +2313,7 @@ def complete_email_challenge_with_baseline(profile: dict[str, Any], baseline_ids
         common_args.extend(["--contains", contains_filter])
     if unread_only:
         common_args.append("--unread")
+    common_args.extend(email_challenge_scope_args(challenge))
     for message_id in baseline_ids or []:
         common_args.extend(["--exclude-id", message_id])
     common_args.extend(["--timeout", str(timeout_seconds), "--interval", str(poll_seconds)])
@@ -3516,6 +3530,10 @@ def cmd_init(args: argparse.Namespace) -> int:
             challenge["subject_contains"] = args.email_subject
         if args.email_contains:
             challenge["contains"] = args.email_contains
+        if args.email_account:
+            challenge["account"] = args.email_account
+        if args.email_mailbox:
+            challenge["mailbox"] = args.email_mailbox
         if args.email_domain and challenge_type == "link":
             challenge["domain"] = args.email_domain
         if args.email_code_length and challenge_type == "code":
@@ -4525,6 +4543,8 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--email-from")
     init_parser.add_argument("--email-subject")
     init_parser.add_argument("--email-contains")
+    init_parser.add_argument("--email-account")
+    init_parser.add_argument("--email-mailbox")
     init_parser.add_argument("--email-domain")
     init_parser.add_argument("--email-timeout", type=int, default=120)
     init_parser.add_argument("--email-interval", type=int, default=5)

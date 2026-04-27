@@ -76,6 +76,16 @@ def main() -> int:
     dpt_context = dpt_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do dpt score" in dpt_context, f"expected DPT routing context, got: {dpt_context}")
 
+    mail_result = run(
+        "python3",
+        "hooks/agent-do-prompt-router.py",
+        input_text='{"prompt":"check my mail inbox for the latest verification code"}',
+    )
+    require(mail_result.returncode == 0, f"mail prompt-router failed: {mail_result.stderr}")
+    mail_payload = json.loads(mail_result.stdout)
+    mail_context = mail_payload["hookSpecificOutput"]["additionalContext"]
+    require("agent-do email" in mail_context, f"expected email routing context for mail prompt, got: {mail_context}")
+
     spec_prompt_result = run(
         "python3",
         "hooks/agent-do-prompt-router.py",

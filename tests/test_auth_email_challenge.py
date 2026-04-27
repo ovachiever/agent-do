@@ -228,13 +228,30 @@ if args and args[0] == "--json":
 command = args[0]
 mode = os.environ.get("FAKE_AUTH_EMAIL_MODE", "code")
 exclude_ids = []
+account = ""
+mailbox = ""
 i = 1
 while i < len(args):
     if args[i] == "--exclude-id" and i + 1 < len(args):
         exclude_ids.append(args[i + 1])
         i += 2
+    elif args[i] == "--account" and i + 1 < len(args):
+        account = args[i + 1]
+        i += 2
+    elif args[i] == "--mailbox" and i + 1 < len(args):
+        mailbox = args[i + 1]
+        i += 2
     else:
         i += 1
+
+expected_account = os.environ.get("FAKE_AUTH_EMAIL_EXPECT_ACCOUNT", "")
+expected_mailbox = os.environ.get("FAKE_AUTH_EMAIL_EXPECT_MAILBOX", "")
+if expected_account and account != expected_account:
+    print(json.dumps({"ok": False, "message": f"expected --account {expected_account}, got {account}"}))
+    raise SystemExit(1)
+if expected_mailbox and mailbox != expected_mailbox:
+    print(json.dumps({"ok": False, "message": f"expected --mailbox {expected_mailbox}, got {mailbox}"}))
+    raise SystemExit(1)
 
 if os.environ.get("FAKE_AUTH_EMAIL_TIMEOUT") == "1":
     print(json.dumps({"ok": False, "message": "Timed out waiting for matching email"}))
@@ -305,6 +322,8 @@ def main() -> int:
         code_env = dict(base_env)
         code_env["AGENT_DO_HOME"] = str(code_home)
         code_env["FAKE_BROWSE_ROOT"] = str(tmp / "code-browse-state")
+        code_env["FAKE_AUTH_EMAIL_EXPECT_ACCOUNT"] = "Work"
+        code_env["FAKE_AUTH_EMAIL_EXPECT_MAILBOX"] = "Inbox"
 
         init_seed = run(
             str(AGENT_DO),
@@ -320,6 +339,10 @@ def main() -> int:
             "WidgetHub",
             "--email-subject",
             "verification code",
+            "--email-account",
+            "Work",
+            "--email-mailbox",
+            "Inbox",
             "--json",
             cwd=ROOT,
             env=code_env,
@@ -331,6 +354,14 @@ def main() -> int:
         require(
             show_seed_payload["profile"]["email_challenge"]["type"] == "code",
             f"expected seeded email challenge profile: {show_seed_payload}",
+        )
+        require(
+            show_seed_payload["profile"]["email_challenge"]["account"] == "Work",
+            f"expected seeded email account scope: {show_seed_payload}",
+        )
+        require(
+            show_seed_payload["profile"]["email_challenge"]["mailbox"] == "Inbox",
+            f"expected seeded email mailbox scope: {show_seed_payload}",
         )
 
         code_profile = code_home / "auth" / "profiles" / "app-code.yaml"
@@ -362,6 +393,8 @@ def main() -> int:
               type: code
               from_contains: WidgetHub
               subject_contains: verification code
+              account: Work
+              mailbox: Inbox
               code_length: 6
               timeout_seconds: 30
               poll_interval_seconds: 1
@@ -376,6 +409,8 @@ def main() -> int:
         link_env["AGENT_DO_HOME"] = str(link_home)
         link_env["FAKE_BROWSE_ROOT"] = str(tmp / "link-browse-state")
         link_env["FAKE_AUTH_EMAIL_MODE"] = "link"
+        link_env["FAKE_AUTH_EMAIL_EXPECT_ACCOUNT"] = "Primary"
+        link_env["FAKE_AUTH_EMAIL_EXPECT_MAILBOX"] = "Inbox"
         link_profile = link_home / "auth" / "profiles" / "app-link.yaml"
         write_profile(
             link_profile,
@@ -404,6 +439,8 @@ def main() -> int:
             email_challenge:
               type: link
               from_contains: WidgetHub
+              account: Primary
+              mailbox: Inbox
               domain: app.example.com
               timeout_seconds: 30
               poll_interval_seconds: 1

@@ -145,6 +145,7 @@ PROMPT_ROUTES = {
         'patterns': [
             r'\b(send|compose|read)\s*email\b',
             r'\bemail\s*(to|from)\b',
+            r'\b(check|read|open|search)\s*(my\s*)?mail\b',
             r'\binbox\b',
         ],
         'suggestion': 'This looks like email work. Use: `agent-do email --help` or `agent-do "your email task"`'

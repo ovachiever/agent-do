@@ -150,7 +150,7 @@ agent-do +live(scope=browser,app=Arc,ttl=15m) auth ensure cloudflare --strategy 
 When a site emails a verification code or magic link:
 
 ```bash
-agent-do auth init widgethub --domain app.example.com --login-url https://app.example.com/login --email-code --email-from WidgetHub --email-subject "verification code"
+agent-do auth init widgethub --domain app.example.com --login-url https://app.example.com/login --email-code --email-from WidgetHub --email-subject "verification code" --email-account Work --email-mailbox Inbox
 agent-do auth ensure widgethub
 ```
 
@@ -291,12 +291,14 @@ When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspec
 
 ### `email`
 
-Inbox querying for agent workflows, including verification code and magic link extraction.
+Email sending plus structured mailbox querying for agent workflows, including account/mailbox scoping, exact message fetch by id, and explicit metadata-only states when Mail.app has indexed a message but not exposed its content.
 
 ```bash
 agent-do email snapshot --json
-agent-do email latest --from WidgetHub --json
-agent-do email code --from WidgetHub --subject "verification code"
+agent-do email search "invoice" --all-mailboxes --json
+agent-do email latest --from WidgetHub --account Work --json
+agent-do email get --id msg-123 --json
+agent-do email code --from WidgetHub --subject "verification code" --account Work --mailbox Inbox
 agent-do email link --from WidgetHub --domain app.example.com
 ```
 

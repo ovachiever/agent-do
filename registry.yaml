@@ -174,7 +174,7 @@ tools:
     - intent: open the real browser for a cloudflare login and import the authenticated state
       command: agent-auth ensure cloudflare --strategy interactive --timeout 300
     - intent: initialize a site that sends email verification codes
-      command: agent-auth init widgethub --domain app.example.com --email-code --email-from WidgetHub --email-subject "verification code"
+      command: agent-auth init widgethub --domain app.example.com --email-code --email-from WidgetHub --email-subject "verification code" --email-account Work --email-mailbox Inbox
     - intent: initialize a site that texts verification codes
       command: agent-auth init widgethub --domain app.example.com --sms-code --sms-from WidgetHub --sms-contains "verification"
     - intent: log into github with saved creds and totp
@@ -1080,27 +1080,34 @@ tools:
     description: Control email
     capabilities:
     - send emails
-    - read inbox
-    - search messages
+    - query inboxes and mailboxes
+    - search messages with account and mailbox scoping
     - wait for matching messages
+    - fetch exact messages by id
     - extract verification codes
     - extract magic links
     commands:
       send: Send email
-      read: Read inbox
-      search: Search emails
-      snapshot: Snapshot inbox state as JSON
+      read: Open Mail.app
+      search: Search emails with structured filters
+      snapshot: Snapshot scoped mailbox state as JSON
       latest: Show latest matching message
       wait: Wait for a matching message
+      get: Fetch one exact message by id
       code: Extract verification code from matching email
       link: Extract magic link from matching email
+      mailboxes: List available mailboxes
     examples:
     - intent: send email to john@example.com
       command: agent-email send john@example.com
     - intent: read my inbox
       command: agent-email read
+    - intent: search archived mail for an invoice
+      command: agent-email search invoice --all-mailboxes --json
+    - intent: fetch one exact message by id
+      command: agent-email get --id msg-123 --json
     - intent: wait for a verification code email
-      command: agent-email code --from auth@example.com --subject "verification code"
+      command: agent-email code --from auth@example.com --subject "verification code" --account Work --mailbox Inbox
     - intent: get the latest magic link
       command: agent-email link --from login@example.com --domain app.example.com
     concurrency: mixed

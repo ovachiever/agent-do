@@ -475,6 +475,7 @@ def base_env(tmp: Path, name: str, mode: str) -> dict[str, str]:
     env["AGENT_DO_AUTH_BROWSE_CMD"] = str(tmp / "fake-browse")
     env["AGENT_DO_AUTH_MACOS_CMD"] = str(tmp / "fake-macos")
     env["AGENT_DO_AUTH_EMAIL_CMD"] = str(tmp / "fake-email")
+    env["AUTH_SESSION_MASTER_KEY_V1"] = "test-master-key"
     env["FAKE_AUTH_ADVANCE_MODE"] = mode
     return env
 
