@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 
 OUTPUT_JSON = os.environ.get("AGENT_EMAIL_OUTPUT_JSON") == "1"
@@ -167,11 +169,6 @@ def project_message(message: dict[str, Any], *, include_source: bool = False, in
     return projected
 
 
-def applescript_quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
 class FixtureSource:
     def __init__(self, payload: dict[str, Any]):
         self.payload = payload
@@ -249,81 +246,78 @@ class FixtureSource:
                 return message
         return None
 
+    def query_messages(self, args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[dict[str, Any]], tuple[int, int]]:
+        selected = self.selected_mailboxes(args)
+        counts = self.count_messages(selected)
+        messages = self.list_messages(selected, max(1, args.limit))
+        matches_list = [item for item in messages if matches(item, args)]
+        return selected, matches_list, counts
+
 
 class MacMailSource:
     def __init__(self) -> None:
         if sys.platform != "darwin":
             fail("Email querying currently requires macOS Mail.app or AGENT_EMAIL_FIXTURE", error="unsupported_platform")
+        self.db_path = self._locate_envelope_index()
+        self.conn = sqlite3.connect(str(self.db_path))
+        self.conn.row_factory = sqlite3.Row
         self._accounts: list[dict[str, Any]] | None = None
         self._mailboxes: list[dict[str, Any]] | None = None
 
     @property
     def platform(self) -> str:
-        return "macOS Mail.app"
+        return "macOS Mail Envelope Index"
 
-    def _run_osascript(self, script: str, *, timeout: int = 30) -> str:
-        proc = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "osascript failed")
-        return proc.stdout.strip()
+    def _locate_envelope_index(self) -> Path:
+        override = os.environ.get("AGENT_EMAIL_ENVELOPE_INDEX")
+        if override:
+            path = Path(override).expanduser()
+            if path.exists():
+                return path
+            fail(f"Envelope Index not found: {path}", error="envelope_index_not_found")
+        roots = sorted((Path.home() / "Library" / "Mail").glob("V*/MailData/Envelope Index"), reverse=True)
+        for path in roots:
+            if path.exists():
+                return path
+        fail("Could not locate Apple Mail Envelope Index", error="envelope_index_not_found")
+
+    def _query(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
+        return list(self.conn.execute(sql, params))
+
+    def _decode_mailbox(self, url: str) -> tuple[str, str, str]:
+        parsed = urlparse(url or "")
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc
+        account = f"{scheme}://{netloc}" if netloc else (scheme or "mail")
+        mailbox = unquote(parsed.path.lstrip("/")) or "Inbox"
+        mailbox_type = scheme.upper() if scheme else ""
+        return account, mailbox, mailbox_type
 
     def accounts(self) -> list[dict[str, Any]]:
         if self._accounts is not None:
             return self._accounts
-        script = f'''
-        tell application "Mail"
-            set fieldSep to ASCII character 31
-            set recordSep to ASCII character 30
-            set output to ""
-            repeat with acct in accounts
-                set output to output & (name of acct as string) & fieldSep & (account type of acct as string) & recordSep
-            end repeat
-            return output
-        end tell
-        '''
-        raw = self._run_osascript(script, timeout=10)
-        accounts: list[dict[str, Any]] = []
-        for row in [item for item in raw.split(RECORD_SEP) if item]:
-            parts = row.split(FIELD_SEP)
-            accounts.append({"name": parts[0] if len(parts) > 0 else "", "type": parts[1] if len(parts) > 1 else ""})
-        self._accounts = accounts
-        return accounts
+        accounts: dict[str, dict[str, Any]] = {}
+        for item in self.mailboxes():
+            name = item.get("account", "")
+            if not name or name in accounts:
+                continue
+            accounts[name] = {"name": name, "type": item.get("type", "")}
+        self._accounts = sorted(accounts.values(), key=lambda item: normalize_key(item["name"]))
+        return self._accounts
 
     def mailboxes(self) -> list[dict[str, Any]]:
         if self._mailboxes is not None:
             return self._mailboxes
-        script = f'''
-        tell application "Mail"
-            set fieldSep to ASCII character 31
-            set recordSep to ASCII character 30
-            set output to ""
-            repeat with acct in accounts
-                set acctName to name of acct as string
-                repeat with mbx in every mailbox of acct
-                    set output to output & acctName & fieldSep & (name of mbx as string) & recordSep
-                end repeat
-            end repeat
-            return output
-        end tell
-        '''
-        raw = self._run_osascript(script, timeout=15)
+        rows = self._query("SELECT url FROM mailboxes ORDER BY url")
         mailboxes: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
-        for row in [item for item in raw.split(RECORD_SEP) if item]:
-            parts = row.split(FIELD_SEP)
-            account = parts[0] if len(parts) > 0 else ""
-            mailbox = parts[1] if len(parts) > 1 else ""
-            key = (account, mailbox)
-            if key in seen:
+        seen: set[str] = set()
+        for row in rows:
+            url = str(row["url"] or "")
+            if not url or url in seen:
                 continue
-            seen.add(key)
-            mailboxes.append({"account": account, "mailbox": mailbox})
+            seen.add(url)
+            account, mailbox, mailbox_type = self._decode_mailbox(url)
+            mailboxes.append({"account": account, "mailbox": mailbox, "url": url, "type": mailbox_type})
         self._mailboxes = sorted(mailboxes, key=lambda item: (normalize_key(item["account"]), normalize_key(item["mailbox"])))
         return self._mailboxes
 
@@ -333,217 +327,172 @@ class MacMailSource:
     def count_messages(self, selected: list[dict[str, Any]]) -> tuple[int, int]:
         if not selected:
             return (0, 0)
-        blocks: list[str] = []
-        for item in selected:
-            account = applescript_quote(item["account"])
-            mailbox = applescript_quote(item["mailbox"])
-            blocks.append(
-                f'''
-                try
-                    set acct to first account whose name is {account}
-                    set mbx to first mailbox of acct whose name is {mailbox}
-                    set totalCount to totalCount + (count of messages of mbx)
-                    set unreadCount to unreadCount + (count of (every message of mbx whose read status is false))
-                end try
-                '''
-            )
-        script = f'''
-        tell application "Mail"
-            set totalCount to 0
-            set unreadCount to 0
-            {"".join(blocks)}
-            return (totalCount as string) & "{FIELD_SEP}" & (unreadCount as string)
-        end tell
-        '''
-        raw = self._run_osascript(script, timeout=20)
-        parts = raw.split(FIELD_SEP)
-        total = int(parts[0]) if parts and parts[0].isdigit() else 0
-        unread = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-        return (total, unread)
+        urls = [item["url"] for item in selected if item.get("url")]
+        placeholders = ",".join("?" for _ in urls)
+        row = self.conn.execute(
+            f"""
+            SELECT COUNT(*) AS total_count,
+                   COALESCE(SUM(CASE WHEN COALESCE(m.read, 0) = 0 THEN 1 ELSE 0 END), 0) AS unread_count
+            FROM messages m
+            JOIN mailboxes mb ON m.mailbox = mb.ROWID
+            WHERE COALESCE(m.deleted, 0) = 0
+              AND mb.url IN ({placeholders})
+            """,
+            tuple(urls),
+        ).fetchone()
+        return (int(row["total_count"] or 0), int(row["unread_count"] or 0))
 
     def list_messages(self, selected: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        args = argparse.Namespace(
+            from_filter="",
+            subject_filter="",
+            contains="",
+            query_text="",
+            unread=False,
+            limit=limit,
+            exclude_ids=[],
+            account="",
+            mailbox="",
+            all_mailboxes=True,
+        )
+        _, messages, _ = self.query_messages(args, selected_override=selected)
+        return messages
+
+    def get_message(self, selected: list[dict[str, Any]], message_id: str) -> dict[str, Any] | None:
         if not selected:
-            return []
-        per_mailbox_limit = max(limit, 50)
-        blocks: list[str] = []
-        for item in selected:
-            account = applescript_quote(item["account"])
-            mailbox = applescript_quote(item["mailbox"])
-            blocks.append(
-                f'''
-                try
-                    set acct to first account whose name is {account}
-                    set mbx to first mailbox of acct whose name is {mailbox}
-                    set mailboxCount to count of messages of mbx
-                    if mailboxCount > 0 then
-                        set msgCount to {per_mailbox_limit}
-                        if mailboxCount < msgCount then set msgCount to mailboxCount
-                        set msgs to messages 1 thru msgCount of mbx
-                        repeat with m in msgs
-                            set msgId to ""
-                            try
-                                set msgId to message id of m as string
-                            end try
-                            set subj to ""
-                            try
-                                set subj to subject of m as string
-                            end try
-                            set sndr to ""
-                            try
-                                set sndr to sender of m as string
-                            end try
-                            set isRead to "false"
-                            try
-                                set isRead to read status of m as string
-                            end try
-                            set dt to ""
-                            try
-                                set dt to date received of m as string
-                            end try
-                            set bodyText to ""
-                            try
-                                set bodyText to content of m as string
-                            end try
-                            set sourceText to ""
-                            try
-                                set sourceText to source of m as string
-                            end try
-                            set bodyAvailable to "false"
-                            if length of bodyText > 0 then set bodyAvailable to "true"
-                            set sourceAvailable to "false"
-                            if length of sourceText > 0 then set sourceAvailable to "true"
-                            set attCount to 0
-                            try
-                                set attCount to count of mail attachments of m
-                            end try
-                            set output to output & msgId & "{FIELD_SEP}" & {account} & "{FIELD_SEP}" & {mailbox} & "{FIELD_SEP}" & subj & "{FIELD_SEP}" & sndr & "{FIELD_SEP}" & isRead & "{FIELD_SEP}" & dt & "{FIELD_SEP}" & bodyText & "{FIELD_SEP}" & bodyAvailable & "{FIELD_SEP}" & sourceAvailable & "{FIELD_SEP}" & (attCount as string) & "{RECORD_SEP}"
-                        end repeat
-                    end if
-                end try
-                '''
-            )
-        script = f'''
-        tell application "Mail"
-            set output to ""
-            {"".join(blocks)}
-            return output
-        end tell
-        '''
-        raw = self._run_osascript(script, timeout=45)
-        messages: list[dict[str, Any]] = []
-        for index, row in enumerate([item for item in raw.split(RECORD_SEP) if item], start=1):
-            parts = row.split(FIELD_SEP)
-            body = parts[7] if len(parts) > 7 else ""
+            return None
+        args = argparse.Namespace(
+            from_filter="",
+            subject_filter="",
+            contains="",
+            query_text="",
+            unread=False,
+            limit=1,
+            exclude_ids=[],
+            account="",
+            mailbox="",
+            all_mailboxes=True,
+        )
+        _, matches_list, _ = self.query_messages(args, selected_override=selected, message_id=message_id)
+        return matches_list[0] if matches_list else None
+
+    def query_messages(
+        self,
+        args: argparse.Namespace,
+        *,
+        selected_override: list[dict[str, Any]] | None = None,
+        message_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], tuple[int, int]]:
+        selected = selected_override or self.selected_mailboxes(args)
+        counts = self.count_messages(selected)
+        if not selected:
+            return selected, [], counts
+
+        urls = [item["url"] for item in selected if item.get("url")]
+        placeholders = ",".join("?" for _ in urls)
+        where = [
+            "COALESCE(m.deleted, 0) = 0",
+            f"mb.url IN ({placeholders})",
+        ]
+        params: list[Any] = list(urls)
+
+        if message_id:
+            if message_id.startswith("db:"):
+                try:
+                    rowid = int(message_id.split(":", 1)[1])
+                except ValueError:
+                    rowid = -1
+                where.append("m.ROWID = ?")
+                params.append(rowid)
+            else:
+                where.append("CAST(m.message_id AS TEXT) = ?")
+                params.append(message_id)
+
+        if args.from_filter:
+            where.append("lower(COALESCE(a.address, '')) LIKE ?")
+            params.append(f"%{args.from_filter.lower()}%")
+        if args.subject_filter:
+            where.append("lower(COALESCE(sub.subject, '')) LIKE ?")
+            params.append(f"%{args.subject_filter.lower()}%")
+        query_text = args.query_text or ""
+        contains = args.contains or ""
+        if query_text:
+            where.append("(lower(COALESCE(sub.subject, '')) LIKE ? OR lower(COALESCE(sumry.summary, '')) LIKE ?)")
+            needle = f"%{query_text.lower()}%"
+            params.extend([needle, needle])
+        if contains:
+            where.append("(lower(COALESCE(sub.subject, '')) LIKE ? OR lower(COALESCE(sumry.summary, '')) LIKE ?)")
+            needle = f"%{contains.lower()}%"
+            params.extend([needle, needle])
+        if args.unread:
+            where.append("COALESCE(m.read, 0) = 0")
+
+        limit = max(1, int(args.limit))
+        query = f"""
+            SELECT
+                m.ROWID AS rowid,
+                m.message_id AS message_id_value,
+                COALESCE(a.address, '') AS sender_address,
+                COALESCE(sub.subject, '') AS subject_text,
+                COALESCE(sumry.summary, '') AS summary_text,
+                COALESCE(m.read, 0) AS is_read,
+                COALESCE(m.date_received, m.date_sent, 0) AS display_date,
+                mb.url AS mailbox_url,
+                COALESCE(att.attachment_count, 0) AS attachment_count,
+                COALESCE(sm.message_body_indexed, 0) AS message_body_indexed
+            FROM messages m
+            JOIN mailboxes mb ON m.mailbox = mb.ROWID
+            LEFT JOIN sender_addresses sa ON m.sender = sa.ROWID
+            LEFT JOIN addresses a ON sa.address = a.ROWID
+            LEFT JOIN subjects sub ON m.subject = sub.ROWID
+            LEFT JOIN summaries sumry ON m.summary = sumry.ROWID
+            LEFT JOIN searchable_messages sm ON sm.message = m.ROWID
+            LEFT JOIN (
+                SELECT message, COUNT(*) AS attachment_count
+                FROM attachments
+                GROUP BY message
+            ) att ON att.message = m.ROWID
+            WHERE {" AND ".join(where)}
+            ORDER BY COALESCE(m.date_received, m.date_sent, 0) DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        rows = self._query(query, tuple(params))
+        matches_list: list[dict[str, Any]] = []
+        for index, row in enumerate(rows, start=1):
+            account, mailbox, _mailbox_type = self._decode_mailbox(str(row["mailbox_url"] or ""))
+            attachments: list[dict[str, Any]] = []
+            attachment_count = int(row["attachment_count"] or 0)
+            if attachment_count:
+                attachments = [{"name": f"attachment-{i+1}", "mime_type": ""} for i in range(attachment_count)]
+            summary_text = normalize_text(row["summary_text"])
+            body = summary_text if summary_text else ""
             availability = {
                 "metadata_found": True,
-                "body_available": (parts[8] if len(parts) > 8 else "").lower() == "true",
-                "source_available": (parts[9] if len(parts) > 9 else "").lower() == "true",
-                "attachment_count": int(parts[10]) if len(parts) > 10 and parts[10].isdigit() else 0,
+                "body_available": bool(body),
+                "source_available": False,
+                "attachment_count": attachment_count,
+                "state": "hydrated" if (body or attachment_count > 0) else "metadata_only",
             }
-            availability["state"] = "hydrated" if (availability["body_available"] or availability["source_available"] or availability["attachment_count"] > 0) else "metadata_only"
-            messages.append(
+            matches_list.append(
                 normalize_message(
                     {
-                        "id": parts[0] if len(parts) > 0 else f"message-{index}",
-                        "account": parts[1] if len(parts) > 1 else "",
-                        "mailbox": parts[2] if len(parts) > 2 else "",
-                        "subject": parts[3] if len(parts) > 3 else "",
-                        "from": parts[4] if len(parts) > 4 else "",
-                        "status": "read" if (parts[5] if len(parts) > 5 else "").lower() == "true" else "unread",
-                        "date": parts[6] if len(parts) > 6 else "",
+                        "id": f"db:{int(row['rowid'])}",
+                        "account": account,
+                        "mailbox": mailbox,
+                        "subject": row["subject_text"],
+                        "from": row["sender_address"],
+                        "status": "read" if int(row["is_read"] or 0) else "unread",
+                        "date": datetime.fromtimestamp(int(row["display_date"] or 0), tz=timezone.utc).isoformat() if int(row["display_date"] or 0) else "",
                         "body": body,
+                        "source": "",
+                        "attachments": attachments,
                         "availability": availability,
                     },
                     index,
                 )
             )
-        return sort_messages(messages)[:limit]
-
-    def get_message(self, selected: list[dict[str, Any]], message_id: str) -> dict[str, Any] | None:
-        if not selected:
-            return None
-        blocks: list[str] = []
-        for item in selected:
-            account = applescript_quote(item["account"])
-            mailbox = applescript_quote(item["mailbox"])
-            blocks.append(
-                f'''
-                try
-                    set acct to first account whose name is {account}
-                    set mbx to first mailbox of acct whose name is {mailbox}
-                    repeat with m in messages of mbx
-                        set msgId to ""
-                        try
-                            set msgId to message id of m as string
-                        end try
-                        if msgId is {applescript_quote(message_id)} then
-                            set subj to ""
-                            try
-                                set subj to subject of m as string
-                            end try
-                            set sndr to ""
-                            try
-                                set sndr to sender of m as string
-                            end try
-                            set isRead to "false"
-                            try
-                                set isRead to read status of m as string
-                            end try
-                            set dt to ""
-                            try
-                                set dt to date received of m as string
-                            end try
-                            set bodyText to ""
-                            try
-                                set bodyText to content of m as string
-                            end try
-                            set sourceText to ""
-                            try
-                                set sourceText to source of m as string
-                            end try
-                            set attOutput to ""
-                            try
-                                repeat with att in mail attachments of m
-                                    set attName to ""
-                                    try
-                                        set attName to name of att as string
-                                    end try
-                                    set attOutput to attOutput & attName & "{ATTACH_SEP}"
-                                end repeat
-                            end try
-                            return msgId & "{FIELD_SEP}" & {account} & "{FIELD_SEP}" & {mailbox} & "{FIELD_SEP}" & subj & "{FIELD_SEP}" & sndr & "{FIELD_SEP}" & isRead & "{FIELD_SEP}" & dt & "{FIELD_SEP}" & bodyText & "{FIELD_SEP}" & sourceText & "{FIELD_SEP}" & attOutput
-                        end if
-                    end repeat
-                end try
-                '''
-            )
-        script = f'''
-        tell application "Mail"
-            {"".join(blocks)}
-            return ""
-        end tell
-        '''
-        raw = self._run_osascript(script, timeout=60)
-        if not raw:
-            return None
-        parts = raw.split(FIELD_SEP)
-        attachment_names = [item for item in (parts[9] if len(parts) > 9 else "").split(ATTACH_SEP) if item]
-        attachments = [{"name": item, "mime_type": ""} for item in attachment_names]
-        return normalize_message(
-            {
-                "id": parts[0] if len(parts) > 0 else message_id,
-                "account": parts[1] if len(parts) > 1 else "",
-                "mailbox": parts[2] if len(parts) > 2 else "",
-                "subject": parts[3] if len(parts) > 3 else "",
-                "from": parts[4] if len(parts) > 4 else "",
-                "status": "read" if (parts[5] if len(parts) > 5 else "").lower() == "true" else "unread",
-                "date": parts[6] if len(parts) > 6 else "",
-                "body": parts[7] if len(parts) > 7 else "",
-                "source": parts[8] if len(parts) > 8 else "",
-                "attachments": attachments,
-            },
-            1,
-        )
+        return selected, matches_list, counts
 
 
 def load_fixture_source() -> FixtureSource | None:
@@ -587,7 +536,7 @@ def scope_mailboxes(mailboxes: list[dict[str, Any]], args: argparse.Namespace) -
                 continue
         elif not all_mailboxes and not is_inbox_mailbox(mailbox):
             continue
-        selected.append({"account": item.get("account", ""), "mailbox": item.get("mailbox", "")})
+        selected.append(dict(item))
     return selected
 
 
@@ -606,7 +555,10 @@ def scope_payload(args: argparse.Namespace, selected: list[dict[str, Any]]) -> d
         "mode": mode,
         "account": normalize_text(getattr(args, "account", "")),
         "mailbox": normalize_text(getattr(args, "mailbox", "")),
-        "selected_mailboxes": {"count": len(selected), "items": selected},
+        "selected_mailboxes": {
+            "count": len(selected),
+            "items": [{"account": item.get("account", ""), "mailbox": item.get("mailbox", "")} for item in selected],
+        },
     }
 
 
@@ -632,11 +584,7 @@ def matches(message: dict[str, Any], args: argparse.Namespace) -> bool:
 
 
 def filtered_messages(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[dict[str, Any]], tuple[int, int]]:
-    selected = source.selected_mailboxes(args)
-    messages = source.list_messages(selected, max(1, args.limit))
-    counts = source.count_messages(selected)
-    matches_list = [item for item in messages if matches(item, args)]
-    return selected, matches_list, counts
+    return source.query_messages(args)
 
 
 def find_message(source: FixtureSource | MacMailSource, args: argparse.Namespace, *, require_body: bool = False) -> dict[str, Any]:
@@ -736,18 +684,23 @@ def wait_for_message(source: FixtureSource | MacMailSource, args: argparse.Names
 
 
 def handle_snapshot(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> None:
+    all_mailboxes = source.mailboxes if isinstance(source, FixtureSource) else source.mailboxes()
+    all_accounts = source.accounts if isinstance(source, FixtureSource) else source.accounts()
     selected = source.selected_mailboxes(args)
     messages = source.list_messages(selected, max(1, args.limit))
     counts = source.count_messages(selected)
+    inbox_args = argparse.Namespace(account=getattr(args, "account", ""), mailbox="", all_mailboxes=False)
+    inbox_selected = scope_mailboxes(all_mailboxes, inbox_args)
+    inbox_counts = source.count_messages(inbox_selected)
     payload = {
         "ok": True,
         "platform": source.platform,
-        "accounts": {"count": len(source.accounts if isinstance(source, FixtureSource) else source.accounts()), "items": source.accounts if isinstance(source, FixtureSource) else source.accounts()},
-        "mailboxes": {"count": len(source.mailboxes if isinstance(source, FixtureSource) else source.mailboxes()), "items": source.mailboxes if isinstance(source, FixtureSource) else source.mailboxes()},
+        "accounts": {"count": len(all_accounts), "items": all_accounts},
+        "mailboxes": {"count": len(all_mailboxes), "items": all_mailboxes},
         "scope": scope_payload(args, selected),
         "message_count": counts[0],
         "unread_count": counts[1],
-        "inbox_unread": counts[1],
+        "inbox_unread": inbox_counts[1],
         "recent_messages": {"count": len(messages), "items": [project_message(item) for item in messages]},
     }
     emit(payload)
