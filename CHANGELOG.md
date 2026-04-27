@@ -14,6 +14,7 @@
 - `agent-do sms snapshot|latest|wait|code|link` for message polling, verification code extraction, and link extraction.
 - `agent-do auth probe` for classifying the live auth checkpoint branch and optional frontmost macOS dialog state.
 - `agent-do auth advance` for executing one safe checkpoint step, then returning the updated auth branch state.
+- `lib/snapshot.sh` honors `AGENT_DO_SNAPSHOT_COMPACT=1` to emit single-line JSON instead of pretty-printed output, for piping to jq, log lines, or other tools that prefer one document per line.
 
 ### Changed
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.
