@@ -32,6 +32,7 @@
 - Discovery metadata now covers `agent-do spec`, including prompt matching for change proposals and repo-local spec work.
 - Docs and smoke tests now cover the new credential workflow.
 - `agent-do namecheap dns-add` and `dns-update` now reject suspicious masked values, verify exact Namecheap read-back by default, and can optionally confirm public DNS answers.
+- `lib/snapshot.sh` `snapshot_field` now escapes the JSON-required C0 control characters `\b \t \n \f \r`, so tool snapshots whose values contain those characters (log lines, terminal output, multi-line text) produce strictly valid JSON instead of output that strict parsers reject.
 
 ### Fixed
 - `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.

@@ -80,6 +80,28 @@ check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"
 check_cmd "resend tests" python3 "$SCRIPT_DIR/tests/test_resend.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
 
+# lib/snapshot.sh: snapshot_field escapes JSON-required control characters
+# (\b \t \n \f \r) so values containing them produce valid JSON.
+snapshot_escape_output=$(
+    bash -c '
+        source "$0/lib/snapshot.sh"
+        snapshot_begin escape-test
+        snapshot_field tab        "$(printf "a\tb")"
+        snapshot_field cr         "$(printf "a\rb")"
+        snapshot_field bs         "$(printf "a\bb")"
+        snapshot_field ff         "$(printf "a\fb")"
+        snapshot_field lf         "$(printf "a\nb")"
+        snapshot_field backslash  "C:\\Users\\ct"
+        snapshot_field quote      "she said \"hi\""
+        snapshot_end
+    ' "$SCRIPT_DIR" 2>&1
+)
+if echo "$snapshot_escape_output" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+    pass "snapshot_field escapes JSON control characters"
+else
+    fail "snapshot_field escapes JSON control characters" "invalid JSON: $snapshot_escape_output"
+fi
+
 BOOTSTRAP_PROJECT="$TEST_HOME/bootstrap-project"
 mkdir -p "$BOOTSTRAP_PROJECT"
 cat > "$BOOTSTRAP_PROJECT/CLAUDE.md" <<'EOF'

@@ -27,10 +27,15 @@ snapshot_begin() {
 snapshot_field() {
     local key="$1"
     local value="$2"
-    # Escape quotes in value
+    # Escape control characters required by RFC 8259.
+    # Backslash must come first so escapes inserted below aren't double-escaped.
     value="${value//\\/\\\\}"
     value="${value//\"/\\\"}"
     value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\t'/\\t}"
+    value="${value//$'\b'/\\b}"
+    value="${value//$'\f'/\\f}"
     _SNAPSHOT_FIELDS+=("\"$key\": \"$value\"")
 }
 
