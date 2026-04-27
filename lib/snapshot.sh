@@ -12,6 +12,11 @@
 #   snapshot_json_field "key" '{"nested": "json"}'
 #   snapshot_array_field "key" '["item1", "item2"]'
 #   snapshot_end
+#
+# Environment variables:
+#   AGENT_DO_SNAPSHOT_COMPACT=1   Emit single-line JSON instead of pretty-printed.
+#                                 Useful for piping to jq, log lines, or other tools
+#                                 that prefer one document per line.
 
 # Accumulate snapshot fields
 _SNAPSHOT_TOOL=""
@@ -70,8 +75,10 @@ snapshot_end() {
         output+="$field"
     done
     output+="}"
-    # Pretty-print if python3 available
-    if command -v python3 &>/dev/null; then
+    # Pretty-print if python3 is available, unless AGENT_DO_SNAPSHOT_COMPACT=1.
+    if [[ "${AGENT_DO_SNAPSHOT_COMPACT:-}" == "1" ]]; then
+        echo "$output"
+    elif command -v python3 &>/dev/null; then
         echo "$output" | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read()), indent=2))" 2>/dev/null || echo "$output"
     else
         echo "$output"

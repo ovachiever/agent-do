@@ -80,6 +80,22 @@ check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"
 check_cmd "resend tests" python3 "$SCRIPT_DIR/tests/test_resend.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
 
+# lib/snapshot.sh: AGENT_DO_SNAPSHOT_COMPACT=1 produces single-line JSON.
+snapshot_compact_output=$(
+    AGENT_DO_SNAPSHOT_COMPACT=1 bash -c "
+        source '$SCRIPT_DIR/lib/snapshot.sh'
+        snapshot_begin 'compact-test'
+        snapshot_field 'key' 'value'
+        snapshot_end
+    " 2>&1
+)
+if [[ "$snapshot_compact_output" != *$'\n'* ]] && \
+   printf '%s' "$snapshot_compact_output" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+    pass "snapshot compact mode emits single-line JSON"
+else
+    fail "snapshot compact mode emits single-line JSON" "output: $snapshot_compact_output"
+fi
+
 BOOTSTRAP_PROJECT="$TEST_HOME/bootstrap-project"
 mkdir -p "$BOOTSTRAP_PROJECT"
 cat > "$BOOTSTRAP_PROJECT/CLAUDE.md" <<'EOF'
