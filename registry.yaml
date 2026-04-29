@@ -1084,6 +1084,7 @@ tools:
     - search messages with account and mailbox scoping
     - wait for matching messages
     - fetch exact messages by id
+    - export messages as json, text, html, eml, or pdf when content is available
     - extract verification codes
     - extract magic links
     commands:
@@ -1094,6 +1095,7 @@ tools:
       latest: Show latest matching message
       wait: Wait for a matching message
       get: Fetch one exact message by id
+      export: Export one exact message by id
       code: Extract verification code from matching email
       link: Extract magic link from matching email
       mailboxes: List available mailboxes
@@ -1106,6 +1108,8 @@ tools:
       command: agent-email search invoice --all-mailboxes --json
     - intent: fetch one exact message by id
       command: agent-email get --id msg-123 --json
+    - intent: export an email receipt as html
+      command: agent-email export --id msg-123 --format html --output receipt.html
     - intent: wait for a verification code email
       command: agent-email code --from auth@example.com --subject "verification code" --account Work --mailbox Inbox
     - intent: get the latest magic link
