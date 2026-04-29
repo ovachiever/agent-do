@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 86 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 87 tools.
 
 When a command needs permission to control the visible local machine, `agent-do` uses an explicit runtime modifier instead of a wrapper tool:
 
@@ -291,7 +291,7 @@ When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspec
 
 ### `email`
 
-Email sending plus structured mailbox querying for agent workflows, including account/mailbox scoping, exact message fetch by id, and explicit metadata-only states when Mail.app has indexed a message but not exposed its content.
+Email sending plus structured mailbox querying for agent workflows, including account/mailbox scoping, exact message fetch by id, and explicit metadata-only states when Apple Mail's Envelope Index has message metadata but no readable local content.
 
 ```bash
 agent-do email snapshot --json

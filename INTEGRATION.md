@@ -23,9 +23,9 @@ The installer:
 Runs once per Claude Code session. Two jobs:
 - **Adds agent-do to PATH** via `CLAUDE_ENV_FILE` so all `Bash` tool calls can find it
 - **Injects a tooling reminder** into Claude's context with the `agent-do` pattern and project-scoped likely tools
-- **Prompts for project bootstrap when needed** by telling Claude to ask once on the first reply if project-local setup like `zpc` or `manna` is missing
+- **Prompts for project bootstrap when needed** with a native macOS dialog at session start when project-local setup like `zpc` or `manna` is missing
 
-SessionStart itself is not an interactive prompt surface. The hook can add context, but the actual yes/no question must be asked by Claude in the normal conversation flow.
+SessionStart is not a chat surface, but the current hook can trigger a native macOS bootstrap dialog directly when bootstrap work is pending. If bootstrap is not pending, it falls back to context injection only.
 
 Path auto-detection chain (no hardcoded paths):
 1. `which agent-do` (already in PATH)
@@ -162,7 +162,7 @@ CHECK if agent-do has a tool:
     agent-do --health                     # Dependency readiness
     agent-do bootstrap --recommend        # Detect pending project setup
     agent-do nudges stats                 # summary of hook nudges on this machine
-    agent-do --list                       # List all 84 tools
+    agent-do --list                       # List all 87 tools
     agent-do <tool> --help                # Per-tool help
 
 Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,
