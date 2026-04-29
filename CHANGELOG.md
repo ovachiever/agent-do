@@ -63,6 +63,7 @@
 ### Fixed
 - `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.
 - `agent-do namecheap dns-add` no longer crashes after successful writes because of the bare `host` reference in its success path.
+- `agent-do render` commands now resolve services by name again; `resolve_service` was querying an invalid `name[]=` filter that the Render API rejects as "not a valid field," so every name-based lookup fell through to the not-found branch and only `srv-xxx` IDs worked.
 
 ## v1.1 (2026-04-11)
 
