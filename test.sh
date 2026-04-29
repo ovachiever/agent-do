@@ -167,6 +167,42 @@ else
     fail "snapshot_error encodes message via JSON encoder" "invalid or wrong JSON: $snapshot_error_output"
 fi
 
+# lib/snapshot.sh: invalid UTF-8 in one field must not poison sibling fields.
+# Pre-fix behavior: a single bad-UTF-8 value caused python encoding to abort,
+# the whole snapshot fell back to manual escaping, and unrelated control bytes
+# in other fields silently lost their \u-escaping (and the snapshot's overall
+# bytes were no longer valid UTF-8). Post-fix: the bad value is encoded via
+# errors="replace" (U+FFFD substitution) and other fields keep full encoder.
+snapshot_bounded_output=$(
+    bash -c '
+        source "$0/lib/snapshot.sh"
+        snapshot_begin bounded-test
+        snapshot_field ascii   "hello"
+        snapshot_field ctrl    "$(printf "a\x01b")"
+        snapshot_field bad     "$(printf "before\xc3\x28after")"
+        snapshot_field other   "$(printf "x\x02y")"
+        AGENT_DO_SNAPSHOT_COMPACT=1 snapshot_end
+    ' "$SCRIPT_DIR" 2>&1
+)
+if printf '%s' "$snapshot_bounded_output" | python3 -c '
+import sys, json
+data = sys.stdin.buffer.read()
+# Snapshot output must be valid UTF-8 even when a value contains invalid bytes.
+text = data.decode("utf-8")
+d = json.loads(text)
+# Clean fields must keep full encoder semantics (control chars escaped).
+assert d["ctrl"] == "a\x01b"
+assert d["other"] == "x\x02y"
+# Bad-bytes field gets U+FFFD substitution; we just verify it round-trips and
+# the surrounding text is intact.
+assert d["bad"].startswith("before")
+assert d["bad"].endswith("(after")
+' 2>/dev/null; then
+    pass "snapshot bad-UTF-8 field does not poison siblings"
+else
+    fail "snapshot bad-UTF-8 field does not poison siblings" "invalid or wrong JSON: $snapshot_bounded_output"
+fi
+
 BOOTSTRAP_PROJECT="$TEST_HOME/bootstrap-project"
 mkdir -p "$BOOTSTRAP_PROJECT"
 cat > "$BOOTSTRAP_PROJECT/CLAUDE.md" <<'EOF'

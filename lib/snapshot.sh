@@ -15,10 +15,14 @@
 #
 # String values are encoded via python3's json module when available, which
 # covers the full RFC 8259 string-escape requirements (all of U+0000..U+001F,
-# plus \\ and \"). When python3 is unavailable, a manual fallback escapes the
-# named C0 controls (\b \t \n \f \r) plus \\ and \"; other control bytes
-# may pass through unescaped on that path. Values containing literal NUL bytes
-# are unsupported in either path; bash strips NUL during command substitution.
+# plus \\ and \"). Bytes that are not valid UTF-8 are substituted with U+FFFD
+# (the Unicode replacement character) so the encoded snapshot is always valid
+# UTF-8 and always valid JSON. When python3 is unavailable, a manual fallback
+# escapes the named C0 controls (\b \t \n \f \r) plus \\ and \"; other
+# control bytes may pass through unescaped on that path, and tool authors
+# should not rely on that path for arbitrary control-byte input. Values
+# containing literal NUL bytes are unsupported in either path; bash strips
+# NUL during command substitution.
 #
 # Environment variables:
 #   AGENT_DO_SNAPSHOT_COMPACT=1   Emit single-line JSON instead of pretty-printed.
@@ -88,30 +92,66 @@ _snapshot_fallback_escape() {
 snapshot_end() {
     local i
     local count=${#_SNAPSHOT_FIELDS[@]}
+    # encoded_values is a sparse parallel array indexed against _SNAPSHOT_FIELDS.
+    # STRING-tagged positions get filled with python-encoded JSON strings on
+    # success, or are left empty so the per-field walker uses the manual
+    # fallback. RAW-tagged positions are left empty here and resolved directly
+    # from _SNAPSHOT_VALUES at walk time.
     local -a encoded_values=()
+    for ((i=0; i<count; i++)); do encoded_values[$i]=""; done
 
-    if command -v python3 &>/dev/null && [[ $count -gt 0 ]]; then
-        # NUL-delimited values to python; one encoded JSON string per line back.
-        # python3 reads stdin as bytes, splits on NUL, encodes each part with
-        # json.dumps (which produces the full quoted form, e.g. "hello"), and
-        # prints them one per line. Bash reads back into encoded_values.
+    # Build the STRING-only sublist for the python pipeline. Track which field
+    # indexes were STRING-tagged so we can put the encoded results back.
+    local -a string_indexes=()
+    local -a string_values=()
+    for ((i=0; i<count; i++)); do
+        if [[ "${_SNAPSHOT_FIELDS[$i]%%:*}" == "STRING" ]]; then
+            string_indexes+=("$i")
+            string_values+=("${_SNAPSHOT_VALUES[$i]}")
+        fi
+    done
+
+    local string_count=${#string_indexes[@]}
+    if command -v python3 &>/dev/null && [[ $string_count -gt 0 ]]; then
+        # NUL-delimited STRING values to python; one encoded JSON string per
+        # line back. The python script tries strict UTF-8 decode first, then
+        # falls back to errors="replace" for any single value containing
+        # invalid bytes. This bounds the failure to that one value (which gets
+        # U+FFFD substitution) instead of aborting the whole script and
+        # silently downgrading every other STRING field's escaping.
         local encoded_output
-        encoded_output=$(printf '%s\0' "${_SNAPSHOT_VALUES[@]}" | python3 -c '
+        encoded_output=$(printf '%s\0' "${string_values[@]}" | python3 -c '
 import sys, json
 data = sys.stdin.buffer.read()
 if data.endswith(b"\x00"):
     data = data[:-1]
 for p in data.split(b"\x00"):
-    print(json.dumps(p.decode("utf-8")))
+    try:
+        decoded = p.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = p.decode("utf-8", errors="replace")
+    print(json.dumps(decoded))
 ' 2>/dev/null) || encoded_output=""
 
         if [[ -n "$encoded_output" ]]; then
+            local -a encoded_lines=()
             local IFS=$'\n'
-            read -d '' -r -a encoded_values <<< "$encoded_output" || true
+            read -d '' -r -a encoded_lines <<< "$encoded_output" || true
+
+            # Place each encoded line at its original field index.
+            if [[ ${#encoded_lines[@]} -eq $string_count ]]; then
+                local j
+                for ((j=0; j<string_count; j++)); do
+                    local idx="${string_indexes[$j]}"
+                    encoded_values[$idx]="${encoded_lines[$j]}"
+                done
+            fi
         fi
     fi
 
-    # Build the output object. Walk the parallel arrays.
+    # Build the output object. Walk the field array, using either the encoded
+    # value (STRING tag, encoder ran) or the manual fallback (STRING tag,
+    # encoder unavailable or empty result), or the raw value verbatim (RAW).
     local output="{"
     local first=true
     for ((i=0; i<count; i++)); do
@@ -124,10 +164,8 @@ for p in data.split(b"\x00"):
         if [[ "$tag" == "RAW" ]]; then
             field_json="\"$key\": $raw_value"
         else
-            local encoded
-            if [[ ${#encoded_values[@]} -eq $count ]]; then
-                encoded="${encoded_values[$i]}"
-            else
+            local encoded="${encoded_values[$i]}"
+            if [[ -z "$encoded" ]]; then
                 encoded=$(_snapshot_fallback_escape "$raw_value")
             fi
             field_json="\"$key\": $encoded"
