@@ -68,6 +68,7 @@ When you know the goal but not the tool:
 
 ```bash
 agent-do suggest "deploy this service"
+agent-do suggest "deploy this service" --ai on
 agent-do suggest --project
 agent-do find playwright
 ```
@@ -464,12 +465,14 @@ agent-do find ios simulator
 
 `suggest --project` inspects the current repo and ranks likely tools from local signals such as `vercel.json`, `playwright`, `ios/`, `.zpc/`, docs, and framework manifests.
 
+For task suggestions, `suggest` is grounded in registry metadata first. When `ANTHROPIC_API_KEY` is available, `suggest` can ask Claude Sonnet 4.6 with adaptive thinking to choose the best first command from those real registry candidates. Use `--ai off` for deterministic local matching or `--ai on` to require the model path.
+
 ### Nudges
 
 When Claude Code hooks are installed:
 
 - SessionStart injects project-aware tool guidance
-- UserPromptSubmit suggests likely `agent-do` tools from shared routing metadata and adds a short completion-check reminder on fuzzy status/continue prompts like `continue`, `what's left`, or `where we at`
+- UserPromptSubmit suggests likely `agent-do` tools from shared routing metadata, adds a short completion-check reminder on fuzzy status/continue prompts like `continue`, `what's left`, or `where we at`, and only injects coord context for explicit coordination requests or blocking coord interrupts
 - PreToolUse emits hard nudges when Claude reaches for raw commands that already have an `agent-do` equivalent
 
 Those nudges are non-blocking by default. They are meant to bend behavior, not break flow.
@@ -563,8 +566,9 @@ The richer layers sit beside that core:
 - `tools/agent-creds` and `lib/creds-helper.sh` resolve secrets from env vars or the secure store
 - `bin/intent-router` handles natural-language routing
 - `bin/pattern-matcher` handles offline matching
-- `bin/suggest` and `bin/nudges` handle discovery and local telemetry
+- `bin/suggest` and `bin/nudges` handle discovery, optional Sonnet-backed command selection, and local telemetry
 - `bin/bootstrap` and `bin/health` handle setup and readiness
+- `lib/ai_router.py` provides optional Claude JSON calls for grounded suggestions and prompt-hook gating
 - `lib/cache.py` stores project-aware route memory
 - `hooks/` gives Claude Code a way to prefer `agent-do` without forcing block mode
 
@@ -582,7 +586,12 @@ That architecture is simple on purpose. The point is not to hide the tool surfac
 
 ```bash
 AGENT_DO_HOME         # Config and state directory, default: ~/.agent-do
-ANTHROPIC_API_KEY     # Required for natural-language mode
+ANTHROPIC_API_KEY     # Required for natural-language mode and optional AI-backed suggest/hook gating
+AGENT_DO_SUGGEST_AI   # auto|on|off for AI-backed suggest command selection
+AGENT_DO_HOOK_AI      # auto|on|off for AI-backed UserPromptSubmit gating
+AGENT_DO_AI_MODEL     # Default: claude-sonnet-4-6
+AGENT_DO_AI_EFFORT    # Default: max for Sonnet 4.6 adaptive thinking
+AGENT_DO_AI_MAX_TOKENS # Default: 64000, the API-required output ceiling
 RENDER_API_KEY        # Render, or store with: agent-do creds store RENDER_API_KEY --stdin
 VERCEL_ACCESS_TOKEN   # Vercel, or store with: agent-do creds store VERCEL_ACCESS_TOKEN --stdin
 SUPABASE_ACCESS_TOKEN # Supabase, or store with: agent-do creds store SUPABASE_ACCESS_TOKEN --stdin

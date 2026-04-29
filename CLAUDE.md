@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 86 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 88 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` (instant, no LLM)
 - **Natural Language** (humans): `agent-do -n "what you want"` (LLM-routed via Claude)
 
@@ -14,6 +14,7 @@ agent-do is a universal automation CLI for AI agents with 86 specialized tools. 
 ./test.sh                              # Run all tests
 ./agent-do --list                      # List available tools
 ./agent-do suggest "task"              # Recommend a likely tool/command
+./agent-do suggest "task" --ai on       # Require Sonnet-backed command selection
 ./agent-do suggest --project           # Recommend likely tools for this repo
 ./agent-do find playwright             # Search tools by keyword
 ./agent-do notify me "Build failed"    # Send a cross-provider notification
@@ -96,7 +97,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── bin/
 │   ├── intent-router       # LLM router (Python): cache, fuzzy, Claude API
 │   ├── pattern-matcher     # Offline router (Python): regex + keyword matching
-│   ├── suggest             # Discovery CLI: task/project to likely tools/commands
+│   ├── suggest             # Discovery CLI: task/project to likely tools/commands, optional Sonnet rerank
 │   ├── notify              # Root notification contract over sms/email/slack/pipe
 │   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── health              # Tool dependency checker (bash)
@@ -105,6 +106,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
 │   ├── registry.py         # Tool registry loader (merges user/bundled/plugin registries)
 │   ├── cache.py            # Project-aware route memory + fuzzy matching
+│   ├── ai_router.py        # Optional Claude JSON helper for suggest and hook gating
 │   ├── telemetry.py        # JSONL telemetry for nudges/suggestions
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   ├── json-output.sh      # Shared --json flag and structured output for tools
@@ -201,7 +203,7 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 
 ## Dependencies
 
-- **Python 3.10+**: `anthropic>=0.18.0`, `pyyaml>=6.0`
+- **Python 3.10+**: `anthropic>=0.97.0`, `pyyaml>=6.0`
 - **agent-browse**: Node.js with `playwright-core`, `ws`, `zod`
 - **agent-unbrowse**: Node.js with `playwright-core`, `zod`
 - **agent-manna**: Rust with clap, serde, serde_yaml, chrono, sha2, fs2
@@ -210,7 +212,12 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 ## Environment
 
 - `AGENT_DO_HOME`: Config/state directory (default: `~/.agent-do`)
-- `ANTHROPIC_API_KEY`: Required for natural language mode and `--dry-run`/`--how`
+- `ANTHROPIC_API_KEY`: Required for natural language mode and optional AI-backed suggest/hook gating
+- `AGENT_DO_SUGGEST_AI`: `auto|on|off` for AI-backed suggest command selection
+- `AGENT_DO_HOOK_AI`: `auto|on|off` for AI-backed UserPromptSubmit gating
+- `AGENT_DO_AI_MODEL`: Defaults to `claude-sonnet-4-6`
+- `AGENT_DO_AI_EFFORT`: Defaults to `max` for Sonnet 4.6 adaptive thinking
+- `AGENT_DO_AI_MAX_TOKENS`: Defaults to `64000`, the API-required output ceiling
 - `MANNA_SESSION_ID`: Override session ID for agent-manna
 - `RENDER_API_KEY`: API key for agent-render (Render.com), or store with `agent-do creds store RENDER_API_KEY --stdin`
 - `VERCEL_ACCESS_TOKEN`: API token for agent-vercel (Vercel), or store with `agent-do creds store VERCEL_ACCESS_TOKEN --stdin`

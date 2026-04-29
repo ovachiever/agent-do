@@ -4,6 +4,7 @@
 
 ### Added
 - `agent-do gh` for GitHub repository, pull request, review, and merge work-state across accessible repos, with `inbox`, `awaiting`, `prs`, `pr`, `diff`, `threads`, `checks`, `review`, `approve`, `request-changes`, `comment`, `merge`, `ready`, and `draft` commands.
+- Optional Sonnet 4.6 adaptive-thinking command selection for `agent-do suggest`, grounded in registry candidates with deterministic fallback and `--ai auto|on|off`.
 - `agent-do notify` as a root-level notification contract over `sms`, `email`, `slack`, `messenger`, and local `pipe`, backed by `bin/notify` and `lib/notify.py` instead of another registry tool.
 - Rule-driven notification emission through `agent-do notify set-rule` and `agent-do notify emit`, with exact fact matching, message templates, fingerprints, and cooldown-aware delivery state.
 - `agent-do notify delete-rule` and `agent-do notify reset-state` for rule cleanup and cooldown-state hygiene.
@@ -30,6 +31,9 @@
 - `lib/snapshot.sh` honors `AGENT_DO_SNAPSHOT_COMPACT=1` to emit single-line JSON instead of pretty-printed output, for piping to jq, log lines, or other tools that prefer one document per line.
 
 ### Changed
+- UserPromptSubmit coord nudges now stay quiet for ordinary work prompts and only inject coord context for explicit coordination requests or blocking coord interrupts.
+- UserPromptSubmit no longer suggests `agent-do context search` just because a prompt asks to edit local docs, README, or changelog files.
+- Python dependency floor for `anthropic` is now `>=0.97.0` so Sonnet 4.6 adaptive-thinking request fields are supported.
 - Session-start bootstrap handling now uses a native macOS prompt in the global Claude/Codex hook path instead of relying on the model to remember to ask in conversation.
 - `agent-do email` discovery now uses Apple Mail's local Envelope Index for account, mailbox, and message lookup, so large live mailboxes no longer block on AppleScript enumeration timeouts.
 - `agent-do email` now exposes `search`, `get --id`, and `mailboxes` on top of a unified structured query path, with explicit `metadata_only` message states and scoped unread counts that distinguish all-mailbox totals from inbox-only unread totals.

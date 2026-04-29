@@ -376,6 +376,9 @@ def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
 
     for match in matches:
         tool = match['tool']
+        if should_suppress_tool_suggestion(tool, prompt):
+            continue
+
         info = match['info']
         commands = list(info.get('commands', {}).keys())
         entrypoints = get_recommended_entrypoints(info) if get_recommended_entrypoints else []
@@ -426,6 +429,25 @@ def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
         suggestions.append((tool, suggestion))
 
     return suggestions
+
+
+def should_suppress_tool_suggestion(tool: str, prompt: str) -> bool:
+    """Avoid nudges that are technically matched but operationally unhelpful."""
+    prompt_lower = prompt.lower()
+
+    if tool == "context":
+        local_docs_work = re.search(
+            r"\b(update|edit|write|fix|clean|change|document|docs?|readme|changelog)\b",
+            prompt_lower,
+        )
+        external_reference_work = re.search(
+            r"\b(search|fetch|look\s+up|reference|external|upstream|official|llms\.txt|what\s+do(?:es)?\s+the\s+docs?)\b",
+            prompt_lower,
+        )
+        if local_docs_work and not external_reference_work:
+            return True
+
+    return False
 
 
 def detect_frontend_design(prompt: str) -> bool:
@@ -567,11 +589,15 @@ def should_emit_coord_context(
 ) -> bool:
     if explicit:
         return True
-    if not active_peers and not interrupts:
+    if not interrupts:
         return False
 
+    blocking_interrupt = any(item.get("kind") in {"contention", "dependency"} for item in interrupts)
+    if blocking_interrupt:
+        return True
+
     local_work_signal = prompt_looks_like_coord_work(prompt)
-    if not local_work_signal and not interrupts:
+    if not local_work_signal:
         return False
 
     ai_decision = ai_should_emit_coord_context(
@@ -585,7 +611,7 @@ def should_emit_coord_context(
     if ai_decision is not None:
         return ai_decision
 
-    return local_work_signal
+    return False
 
 
 def resolve_agent_do_binary() -> str | None:

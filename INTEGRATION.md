@@ -38,6 +38,10 @@ Path auto-detection chain (no hardcoded paths):
 
 Analyzes every user prompt and suggests relevant agent-do tools. It now uses shared routing metadata from `registry.yaml`, so prompt nudges, PreToolUse nudges, and offline matching can converge on the same native suggestions instead of drifting.
 
+Prompt-time coordination is intentionally narrow. UserPromptSubmit injects coord context for explicit coordination prompts or blocking coord interrupts; it does not emit active-peer focus reminders for ordinary work prompts. SessionStart remains the place for broad project-level coordination reminders.
+
+When `ANTHROPIC_API_KEY` is available, the hook can use the shared Sonnet 4.6 adaptive-thinking JSON helper to decide whether coord context is useful. The deterministic fallback stays conservative.
+
 It still has broad fallback coverage across these categories:
 
 | Category | Trigger Examples |
@@ -153,6 +157,7 @@ CHECK if agent-do has a tool:
     agent-do <tool> <command> [args...]   # Structured API (AI/scripts)
     agent-do -n "what you want"           # Natural language (humans)
     agent-do suggest "task"               # likely tool/command for a task
+    agent-do suggest "task" --ai on        # require Sonnet-backed command selection
     agent-do suggest --project            # likely tools for this repo
     agent-do find <keyword>               # keyword search across tools
     agent-do creds check --tool <tool>    # check declared tool credentials

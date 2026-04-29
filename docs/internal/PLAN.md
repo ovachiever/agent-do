@@ -32,7 +32,7 @@ One command. Natural language. Done.
 ┌─────────────────────────────────────────────────────────┐
 │                   Intent Router                          │
 │  ┌───────────────────────────────────────────────────┐  │
-│  │  Haiku 4.5 (medium thinking)                      │  │
+│  │  Claude router                                    │  │
 │  │  - Parses natural language                        │  │
 │  │  - Maps to tool + command + args                  │  │
 │  │  - Has full tool registry in context              │  │
@@ -283,7 +283,7 @@ agent-tui spawn python             # Or use tools directly
 ```python
 #!/usr/bin/env python3
 """
-Intent router using Claude Haiku 4.5 with extended thinking.
+Intent router using the Claude API.
 Maps natural language intents to agent-* tool commands.
 """
 
@@ -348,7 +348,7 @@ def build_state_context(state: dict) -> str:
     return "\n".join(lines) if lines else "No active sessions."
 
 def route_intent(intent: str, registry: dict, state: dict, dry_run: bool = False, explain: bool = False) -> dict:
-    """Route intent to tool command using Haiku"""
+    """Route intent to tool command using Claude."""
     client = anthropic.Anthropic()
     
     mode = "explain what tool to use" if explain else "determine the exact command"
@@ -381,7 +381,7 @@ Rules:
 - Reference session IDs from current state when relevant"""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",  # Using Sonnet for now, switch to Haiku when available
+        model="claude-sonnet-4-6",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -532,7 +532,7 @@ Help: `agent-do --how "your question"`
 ## Fallback Layers
 
 ```
-1. Intent Router (Haiku) → 95% of cases
+1. Intent Router (Claude API) → ambiguous cases
          ↓ (if offline/rate-limited)
 2. Local Pattern Cache → Common intents cached from previous runs
          ↓ (if no cache hit)  
@@ -566,16 +566,9 @@ def cache_result(intent: str, result: dict):
 
 ---
 
-## Cost Analysis
+## Cost Behavior
 
-| Model | Input | Output | Per Request |
-|-------|-------|--------|-------------|
-| Haiku 4.5 | ~2K tokens | ~100 tokens | ~$0.002 |
-| Sonnet (fallback) | ~2K tokens | ~100 tokens | ~$0.01 |
-
-At 100 requests/day with Haiku = $0.20/day = $6/month
-
-With caching, actual LLM calls drop 50%+ after initial learning period.
+Structured commands and offline matching do not call an LLM. Natural-language routing and AI-backed discovery use Claude only after cache, fuzzy, or registry-first paths are exhausted or explicitly requested.
 
 ---
 
@@ -644,10 +637,10 @@ With caching, actual LLM calls drop 50%+ after initial learning period.
 agent-do/
 ├── agent-do                 # Main entry point (bash)
 ├── bin/
-│   ├── intent-router        # Haiku-powered router (python)
+│   ├── intent-router        # Claude-powered router (python)
 │   ├── pattern-matcher      # Offline fallback (python)
 │   └── status               # Status display (bash)
-├── tools/                   # All 76 tools (standalone scripts + directory-based)
+├── tools/                   # All 88 tools (standalone scripts + directory-based)
 │   ├── agent-browse/        # Headless browser + API capture (Node.js, Playwright)
 │   ├── agent-unbrowse/      # Standalone API capture → curl skills (Node.js)
 │   ├── agent-manna/         # Git-backed issue tracking (Rust)
@@ -669,7 +662,7 @@ agent-do/
 │   ├── state.py             # State management
 │   ├── cache.py             # Pattern caching
 │   └── registry.py          # Registry loading
-├── registry.yaml            # All 76 tools defined
+├── registry.yaml            # All 88 tools defined
 ├── requirements.txt         # Python dependencies
 ├── PLAN.md                  # This file
 ├── README.md
@@ -682,7 +675,7 @@ agent-do/
 
 ```
 # requirements.txt
-anthropic>=0.18.0
+anthropic>=0.97.0
 pyyaml>=6.0
 ```
 

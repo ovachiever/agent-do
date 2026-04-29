@@ -45,7 +45,7 @@ The bash entry point checks the first argument:
 |-----------|------|------|
 | Known tool name | Structured API | `exec_tool()` → `tools/agent-<name>` |
 | `creds` | Secure credential management | `tools/agent-creds` |
-| `suggest` / `find` / `nudges` | Discovery + telemetry | `bin/suggest`, `bin/nudges` |
+| `suggest` / `find` / `nudges` | Discovery + telemetry | `bin/suggest`, `bin/nudges`, optional `lib/ai_router.py` |
 | `notify` | Root notification contract | `bin/notify` + `lib/notify.py` |
 | `bootstrap` | Project setup | `bin/bootstrap` |
 | `-n` / `--natural` | Natural language | `bin/intent-router` (Claude API) |
@@ -70,7 +70,11 @@ The same registry-driven metadata is used by the bash dispatcher, `bin/intent-ro
 2. **Weighted fuzzy match** (`lib/cache.py:fuzzy_match`): Jaccard similarity ranked by project scope and past route success
 3. **Claude API**: full LLM call with registry + session state in context
 
-Successful routes are cached and then scored by later outcomes, so the router can prefer the route that actually works in the current repo. At 100 requests/day, LLM cost is still around ~$0.20/day, but cache quality improves over time.
+Successful routes are cached and then scored by later outcomes, so the router can prefer the route that actually works in the current repo and reduce later LLM calls.
+
+### Discovery AI
+
+`bin/suggest` remains registry-first. It builds candidate tools and commands from `registry.yaml`, then can optionally ask Claude Sonnet 4.6 with adaptive thinking to choose the best first command from those candidates. The model is not allowed to invent tools or shell pipelines; if the call is unavailable or returns an unsafe command, `suggest` falls back to deterministic local matching.
 
 ### Offline Pattern Matching
 
@@ -93,7 +97,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── bin/
 │   ├── intent-router       # LLM router (Python): 3-tier fallback
 │   ├── pattern-matcher     # Offline router (Python): shared registry routing + regex fallbacks
-│   ├── suggest             # Discovery CLI: task/project to likely tools
+│   ├── suggest             # Discovery CLI: task/project to likely tools, optional Sonnet rerank
 │   ├── notify              # Root notification contract: routing + aliases
 │   ├── nudges              # Local telemetry summary for hook nudges
 │   ├── bootstrap           # Stateful-tool bootstrap recommender/executor
@@ -102,6 +106,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── lib/
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
 │   ├── registry.py         # Registry loader + shared routing helpers
+│   ├── ai_router.py        # Optional Claude JSON helper for suggest and hook gating
 │   ├── cache.py            # Project-aware route memory + fuzzy matching
 │   ├── telemetry.py        # JSONL telemetry for suggestions and hard nudges
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools

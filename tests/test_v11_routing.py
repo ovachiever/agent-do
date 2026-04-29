@@ -294,9 +294,17 @@ def main() -> int:
             env=second_env,
         )
         require(work_prompt.returncode == 0, f"work coord prompt-router failed: {work_prompt.stderr}")
-        work_prompt_payload = json.loads(work_prompt.stdout)
-        work_prompt_context = work_prompt_payload["hookSpecificOutput"]["additionalContext"]
-        require("Coord Focus Reminder" in work_prompt_context, f"expected coord focus for work prompt, got: {work_prompt_context}")
+        require("Coord Focus Reminder" not in work_prompt.stdout, f"did not expect active-peer coord noise, got: {work_prompt.stdout}")
+
+        docs_prompt = run(
+            "python3",
+            "hooks/agent-do-prompt-router.py",
+            input_text=json.dumps({"prompt": "update docs, clean repo, update readme, do the thang and THEN push", "cwd": str(project)}),
+            env=second_env,
+        )
+        require(docs_prompt.returncode == 0, f"docs prompt-router failed: {docs_prompt.stderr}")
+        require("Coord Focus Reminder" not in docs_prompt.stdout, f"did not expect coord reminder for normal work prompt: {docs_prompt.stdout}")
+        require("agent-do context search" not in docs_prompt.stdout, f"did not expect context nudge for local docs work: {docs_prompt.stdout}")
 
         subprocess.run(
             [str(ROOT / "agent-do"), "coord", "focus", "set", "render work", "--path", "recognition-oracle/render.yaml", "--json"],
