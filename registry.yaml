@@ -1441,6 +1441,66 @@ tools:
     - intent: trigger deploy pipeline
       command: agent-ci trigger deploy
     concurrency: write
+  gh:
+    description: GitHub repository, pull request, review, and merge work-state across accessible repos
+    capabilities:
+    - discover accessible GitHub repositories
+    - list actionable pull requests across repos
+    - inspect pull request details, diffs, checks, and unresolved review threads
+    - approve, comment, request changes, mark ready/draft, and merge pull requests
+    commands:
+      whoami: Show authenticated GitHub user
+      repos: List or sync accessible repositories
+      inbox: Show actionable PR work across repositories
+      prs: Search pull requests
+      pr: Show PR details
+      diff: Show PR diff
+      threads: Show unresolved PR review threads
+      checks: Show PR checks
+      review: Summarize a PR for review
+      approve: Approve a PR
+      request-changes: Request changes on a PR
+      comment: Comment on a PR
+      merge: Merge a PR
+      ready: Mark a PR ready for review
+      draft: Convert a PR to draft
+    examples:
+    - intent: show GitHub pull requests that need me
+      command: agent-gh inbox
+    - intent: list open PRs across my repos
+      command: agent-gh prs --state open
+    - intent: review pull request 3 in agent-do
+      command: agent-gh review ovachiever/agent-do#3 --summary
+    - intent: show unresolved GitHub review comments
+      command: agent-gh threads ovachiever/agent-do#3
+    - intent: approve this GitHub PR
+      command: agent-gh approve ovachiever/agent-do#3 --body "LGTM"
+    routing:
+      default_command: inbox
+      recommended_entrypoints:
+      - agent-do gh inbox
+      - agent-do gh prs --state open
+      - agent-do gh review owner/repo#123 --summary
+      discover_keywords:
+      - github pull request
+      - github pr
+      - pr review
+      - review comments
+      - unresolved threads
+      - requested review
+      - approve pr
+      - merge pr
+      - github inbox
+      prompt_patterns:
+      - '\b(?:github|gh)\b.*\b(?:pull request|pr|review|merge|approve|checks?)\b'
+      - '\b(?:what|which)\s+prs?\s+(?:need|needs|want|wants)\s+me\b'
+      - '\bunresolved\s+(?:review\s+)?comments?\b'
+      raw_cli_equivalents:
+      - pattern: '^\s*gh\s+(?:search\s+prs|pr\s+(?:view|diff|checks|review|merge|ready))\b'
+        replacement: agent-do gh
+        example: agent-do gh inbox
+        reason: agent-do gh keeps GitHub PR/review work-state in one structured surface
+    concurrency: mixed
   logs:
     description: Control log aggregation
     capabilities:

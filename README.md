@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 87 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 88 tools.
 
 When a command needs permission to control the visible local machine, `agent-do` uses an explicit runtime modifier instead of a wrapper tool:
 
@@ -410,9 +410,19 @@ agent-do coord interrupts
 
 When Claude Code session hooks are installed, session start now silently renews local coord presence and only nudges on real coordination interrupts or when active peers exist and you have not declared focus yet.
 
+When you need GitHub pull request and review state across repos:
+
+```bash
+agent-do gh inbox
+agent-do gh prs --state open
+agent-do gh review ovachiever/agent-do#3 --summary
+agent-do gh threads ovachiever/agent-do#3
+agent-do gh approve ovachiever/agent-do#2 --body "LGTM"
+```
+
 ## Tool Surface
 
-There are 87 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 88 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
@@ -434,7 +444,7 @@ There are 87 tools today. A few are deep subsystems. Many are focused adapters. 
 | Security | `burp`, `wireshark`, `ghidra` | Security and reverse-engineering tools |
 | Hardware | `hardware`, `serial`, `midi`, `homekit`, `bluetooth`, `usb`, `printer` | Device control and family-level hardware orchestration |
 | AI / Meta | `prompt`, `eval`, `memory`, `learn`, `swarm`, `agent`, `coord`, `repl` | Agent support, coordination, and orchestration |
-| Dev Tools | `git`, `api`, `tail`, `logs`, `sessions` | Git, HTTP, logs, session history |
+| Dev Tools | `git`, `gh`, `api`, `tail`, `logs`, `sessions` | Local git, GitHub PR/review work, HTTP, logs, session history |
 | Utilities | `clipboard`, `ocr`, `vision`, `metrics`, `debug` | System utility surfaces |
 
 Use `agent-do --list` for the full catalog. Use `agent-do <tool> --help` for any specific tool.

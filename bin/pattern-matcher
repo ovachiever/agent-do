@@ -188,10 +188,13 @@ def registry_prompt_match(intent: str, registry: dict) -> Optional[dict]:
     if not best_cmd and commands:
         best_cmd = commands[0]
 
-    for cmd in commands:
-        if cmd.lower() in intent_lower:
-            best_cmd = cmd
-            break
+    if tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", intent_lower):
+        best_cmd = "inbox"
+    else:
+        for cmd in commands:
+            if cmd.lower() in intent_lower:
+                best_cmd = cmd
+                break
 
     if not best_cmd:
         return None

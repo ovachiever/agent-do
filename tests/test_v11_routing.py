@@ -86,6 +86,16 @@ def main() -> int:
     mail_context = mail_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do email" in mail_context, f"expected email routing context for mail prompt, got: {mail_context}")
 
+    gh_prompt = run(
+        "python3",
+        "hooks/agent-do-prompt-router.py",
+        input_text='{"prompt":"what PRs need me on GitHub"}',
+    )
+    require(gh_prompt.returncode == 0, f"gh prompt-router failed: {gh_prompt.stderr}")
+    gh_prompt_payload = json.loads(gh_prompt.stdout)
+    gh_context = gh_prompt_payload["hookSpecificOutput"]["additionalContext"]
+    require("agent-do gh inbox" in gh_context, f"expected gh inbox routing context, got: {gh_context}")
+
     spec_prompt_result = run(
         "python3",
         "hooks/agent-do-prompt-router.py",
@@ -145,6 +155,12 @@ def main() -> int:
         offline_payload.get("from_registry_routing") is True,
         f"expected registry-driven offline routing, got: {offline_payload}",
     )
+
+    gh_offline = run("python3", "bin/pattern-matcher", "--json", "what PRs need me on GitHub")
+    require(gh_offline.returncode == 0, f"gh pattern matcher failed: {gh_offline.stderr}")
+    gh_payload = json.loads(gh_offline.stdout)
+    require(gh_payload["tool"] == "gh", f"unexpected gh offline tool: {gh_payload}")
+    require(gh_payload["command"] == "inbox", f"expected gh inbox for actionable PR prompt: {gh_payload}")
 
     suggest = run("./agent-do", "suggest", "deploy this on vercel", "--json")
     require(suggest.returncode == 0, f"suggest failed: {suggest.stderr}")

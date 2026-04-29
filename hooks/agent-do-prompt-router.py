@@ -361,10 +361,13 @@ def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
         readiness = get_tool_readiness(info) if get_tool_readiness else {}
 
         primary = None
-        for command in commands:
-            if command.lower() in prompt.lower():
-                primary = f"agent-do {tool} {command}"
-                break
+        if tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", prompt.lower()):
+            primary = "agent-do gh inbox"
+        else:
+            for command in commands:
+                if command.lower() in prompt.lower():
+                    primary = f"agent-do {tool} {command}"
+                    break
 
         if primary is None and get_default_command is not None:
             default_command = get_default_command(info)

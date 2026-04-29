@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `agent-do gh` for GitHub repository, pull request, review, and merge work-state across accessible repos, with `inbox`, `prs`, `pr`, `diff`, `threads`, `checks`, `review`, `approve`, `request-changes`, `comment`, `merge`, `ready`, and `draft` commands.
 - `agent-do notify` as a root-level notification contract over `sms`, `email`, `slack`, `messenger`, and local `pipe`, backed by `bin/notify` and `lib/notify.py` instead of another registry tool.
 - Rule-driven notification emission through `agent-do notify set-rule` and `agent-do notify emit`, with exact fact matching, message templates, fingerprints, and cooldown-aware delivery state.
 - `agent-do notify delete-rule` and `agent-do notify reset-state` for rule cleanup and cooldown-state hygiene.

@@ -113,7 +113,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # filterEntries: removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth: identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill: writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 87 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 88 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog: tool descriptions, commands, examples
 ```
 
@@ -154,6 +154,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. Requires `RESEND_API_KEY`. |
 | `agent-hardware` | Bash | Unified hardware family surface over serial, bluetooth, USB, printers, and MIDI. `snapshot` gives one combined view, and `hardware <serial|bluetooth|usb|printer|midi> ...` delegates through a stable family tool without breaking the legacy leaf commands. |
 | `agent-meetings` | Bash | Unified enterprise meeting surface over Zoom, Google Meet, and Microsoft Teams. `snapshot` reports provider readiness and active meeting state, `join` auto-detects meeting URLs and codes, generic controls like `mute` and `share` route to the active provider, and provider passthroughs stay available under one family tool. |
+| `agent-gh` | Python | GitHub repository, pull request, review, and merge work-state across accessible repos. Uses the GitHub CLI as transport, caches accessible repo inventory under `~/.agent-do/gh/`, supports `inbox`, `prs`, `pr`, `diff`, `threads`, `checks`, `review`, `approve`, `request-changes`, `comment`, `merge`, `ready`, and `draft`, and keeps GitHub PR/review operations separate from local `agent-git` and workflow-level `agent-ci`. |
 | `agent-coord` | Python | Project-local state-and-interrupt broker for parallel agents. Derives stable identities from thread/tmux context, renews short presence leases, tracks focus/claims/needs/publishes under the current repo’s local coord store, and computes contention/dependency/novelty interrupts instead of using an agent mailbox. |
 | `bin/notify` + `lib/notify.py` | Python | Root notification contract over `sms`, `email`, `slack`, `messenger`, and `pipe`. Supports recipient aliases and groups under `~/.agent-do/notify/recipients.json`, event rules under `~/.agent-do/notify/rules.json`, cooldown state under `~/.agent-do/notify/state.json`, append-only delivery history in `~/.agent-do/notify/history.jsonl`, built-in templates for common rule types, provider preference order, fallback routing, cooldown-aware `emit`, `history`, `reset-state`, `delete-rule`, dry-run planning, and live-gated Messenger delivery without adding another public registry tool. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor: visual quality scoring across 5 perception layers (72 rules, 0-100 score). |

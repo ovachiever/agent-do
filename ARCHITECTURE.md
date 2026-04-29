@@ -9,7 +9,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 3. **Natural Language Mode**: LLM-routed for human users
 4. **Discovery + nudge layer**: task suggestions, project-scoped tool ranking, and hook nudges
 5. **Bootstrap + health flow**: explicit setup path for stateful tools and dependency checks
-6. **87 specialized tools**: browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+6. **88 specialized tools**: browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
 
 ## Routing Flow
 
@@ -111,7 +111,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
 │       ├── auth.js         # Auth extraction from captured headers/cookies
 │       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
-├── tools/agent-*           # 87 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 88 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -238,6 +238,7 @@ Directory-based tools with complex backends:
 | `tools/agent-auth` | Python | Site-level auth orchestrator over encrypted auth bundles, browser import, and secure credentials. Profiles and encrypted session bundles live under `~/.agent-do/auth/`; provider-aware GitHub and Google adapters sit on top of the generic login path, `provider-refresh` can reuse upstream provider auth for cross-site SSO, provider-backed site profiles can inherit upstream GitHub or Google TOTP and backup-code config when those checkpoints appear, `interactive` can open a real system browser and re-import authenticated state for anti-bot or remote human-visible flows, and `live-browser-control` can keep the agent in that visible browser under explicit `+live(...)` approval instead of handing state back to Playwright. Account-chooser and consent checkpoints are persisted in session metadata, mailbox-driven email or SMS challenges can continue through `agent-email` and `agent-sms`, recovery-code branches can consume the next unused provider backup code from secure storage, passkey/security-key and device-approval checkpoints surface as explicit action-required states, `probe` classifies the live auth branch plus optional macOS dialog state, and `advance` executes one safe checkpoint step before returning the updated state, preferring in-browser alternate auth methods that match available credentials over out-of-band waits when those selectors are visible. |
 | `tools/agent-email` | Bash + Python | Email sending and structured mailbox querying. Apple Mail's local Envelope Index powers scoped `snapshot`, `search`, `latest`, `wait`, `get`, `code`, `link`, and `mailboxes`, with fixture-backed tests, exact message fetch by id, and explicit metadata-only states when message content is unavailable. |
 | `tools/agent-sms` | Bash + Python | SMS sending plus message querying. macOS Messages.app helpers plus query primitives (`snapshot`, `latest`, `wait`, `code`, `link`) for auth and automation flows. |
+| `tools/agent-gh` | Python | GitHub repository, pull request, review, and merge work-state across accessible repos. Uses `gh` as transport, caches repo inventory under `~/.agent-do/gh/`, surfaces actionable PR inbox state, and provides PR detail, diffs, checks, unresolved review threads, reviews, merge, ready, and draft commands without replacing local `agent-git` or workflow-level `agent-ci`. |
 | `tools/agent-unbrowse/` | Node.js, Playwright | Standalone API traffic capture. 2 files (`daemon.js`, `protocol.js`). Launches headed browser for manual browsing. Capture pipeline shared via `lib/capture/`. |
 | `tools/agent-manna/` | Rust | Git-backed issue tracking. Session-based claims prevent multi-agent conflicts. |
 | `tools/agent-db/` | Bash + Python | Database client (PostgreSQL, MySQL, SQLite). Connection management, queries, schema inspection. |

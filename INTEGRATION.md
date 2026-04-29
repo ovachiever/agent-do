@@ -162,11 +162,11 @@ CHECK if agent-do has a tool:
     agent-do --health                     # Dependency readiness
     agent-do bootstrap --recommend        # Detect pending project setup
     agent-do nudges stats                 # summary of hook nudges on this machine
-    agent-do --list                       # List all 87 tools
+    agent-do --list                       # List all 88 tools
     agent-do <tool> --help                # Per-tool help
 
 Key tools: vercel, render, supabase, gcp, browse, ios, android, macos, tui, db,
-docker, k8s, cloud, ssh, excel, slack, image, video, audio, zpc
+docker, k8s, cloud, ssh, excel, slack, image, video, audio, git, gh, ci, zpc
 ```
 
 ## Nudge vs Block Mode

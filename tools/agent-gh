@@ -1,0 +1,829 @@
+#!/usr/bin/env python3
+"""agent-gh - GitHub PR and review work-state for agent-do."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
+STATE_DIR = AGENT_DO_HOME / "gh"
+REPOS_CACHE = STATE_DIR / "repos.json"
+USER_CACHE = STATE_DIR / "user.json"
+
+PR_VIEW_FIELDS = ",".join(
+    [
+        "additions",
+        "assignees",
+        "author",
+        "baseRefName",
+        "changedFiles",
+        "comments",
+        "commits",
+        "createdAt",
+        "deletions",
+        "files",
+        "headRefName",
+        "headRefOid",
+        "isDraft",
+        "labels",
+        "latestReviews",
+        "maintainerCanModify",
+        "mergeStateStatus",
+        "mergeable",
+        "number",
+        "reviewDecision",
+        "reviewRequests",
+        "state",
+        "statusCheckRollup",
+        "title",
+        "updatedAt",
+        "url",
+    ]
+)
+
+PR_SEARCH_FIELDS = "number,title,state,url,repository,author,isDraft,updatedAt,commentsCount,labels"
+
+
+class GhError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class PrRef:
+    repo: str | None
+    number: str
+    original: str
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def ensure_state_dir() -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def gh_bin() -> str:
+    configured = os.environ.get("AGENT_GH_BIN")
+    if configured:
+        return configured
+    found = shutil.which("gh")
+    if not found:
+        raise GhError("gh CLI not found. Install GitHub CLI and run `gh auth login`.")
+    return found
+
+
+def run_gh(args: list[str], *, input_text: str | None = None) -> str:
+    cmd = [gh_bin(), *args]
+    result = subprocess.run(
+        cmd,
+        input=input_text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown gh error"
+        raise GhError(f"gh {' '.join(args)} failed: {detail}")
+    return result.stdout
+
+
+def gh_json(args: list[str], *, input_text: str | None = None) -> Any:
+    output = run_gh(args, input_text=input_text).strip()
+    if not output:
+        return None
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise GhError(f"gh returned invalid JSON for {' '.join(args)}: {exc}") from exc
+
+
+def repo_from_git() -> str | None:
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    remote = result.stdout.strip()
+    match = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?$", remote)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def parse_pr_ref(raw: str | None) -> PrRef:
+    value = (raw or "").strip()
+    if not value:
+        repo = repo_from_git()
+        if not repo:
+            raise GhError("PR reference required outside a GitHub-backed repo")
+        return PrRef(repo=repo, number="", original="")
+
+    url = re.search(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)", value)
+    if url:
+        return PrRef(repo=url.group(1), number=url.group(2), original=value)
+
+    owner_repo = re.fullmatch(r"([^/\s]+/[^#\s]+)#(\d+)", value)
+    if owner_repo:
+        return PrRef(repo=owner_repo.group(1), number=owner_repo.group(2), original=value)
+
+    if re.fullmatch(r"\d+", value):
+        repo = repo_from_git()
+        if not repo:
+            raise GhError("Bare PR number requires a GitHub-backed repo")
+        return PrRef(repo=repo, number=value, original=value)
+
+    raise GhError(f"Invalid PR reference: {value}")
+
+
+def pr_gh_args(ref: PrRef) -> list[str]:
+    args: list[str] = []
+    if ref.number:
+        args.append(ref.number)
+    if ref.repo:
+        args.extend(["--repo", ref.repo])
+    return args
+
+
+def current_user(*, refresh: bool = False) -> dict[str, Any]:
+    ensure_state_dir()
+    if not refresh and USER_CACHE.exists():
+        try:
+            return json.loads(USER_CACHE.read_text())
+        except json.JSONDecodeError:
+            pass
+    payload = gh_json(["api", "user"])
+    user = {
+        "login": payload.get("login", ""),
+        "id": payload.get("id"),
+        "name": payload.get("name"),
+        "url": payload.get("html_url"),
+        "synced_at": now_iso(),
+    }
+    USER_CACHE.write_text(json.dumps(user, indent=2) + "\n")
+    return user
+
+
+def normalize_repo(item: dict[str, Any]) -> dict[str, Any]:
+    owner = item.get("owner") or {}
+    owner_login = owner.get("login") if isinstance(owner, dict) else None
+    full_name = item.get("full_name") or item.get("nameWithOwner")
+    if not full_name and owner_login and item.get("name"):
+        full_name = f"{owner_login}/{item['name']}"
+    return {
+        "name": item.get("name"),
+        "full_name": full_name,
+        "owner": owner_login,
+        "visibility": item.get("visibility") or ("private" if item.get("private") else "public"),
+        "private": bool(item.get("private") or item.get("isPrivate")),
+        "archived": bool(item.get("archived") or item.get("isArchived")),
+        "default_branch": item.get("default_branch") or (item.get("defaultBranchRef") or {}).get("name"),
+        "url": item.get("html_url") or item.get("url"),
+        "pushed_at": item.get("pushed_at") or item.get("pushedAt"),
+        "updated_at": item.get("updated_at") or item.get("updatedAt"),
+    }
+
+
+def fetch_repos(limit: int | None = None) -> list[dict[str, Any]]:
+    args = [
+        "api",
+        "--paginate",
+        "--slurp",
+        "/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100",
+    ]
+    raw = gh_json(args)
+    items: list[dict[str, Any]] = []
+    if isinstance(raw, list) and raw and isinstance(raw[0], list):
+        for page in raw:
+            items.extend(page)
+    elif isinstance(raw, list):
+        items = raw
+    repos = [normalize_repo(item) for item in items if isinstance(item, dict)]
+    repos = [repo for repo in repos if repo.get("full_name")]
+    if limit is not None:
+        repos = repos[:limit]
+    return repos
+
+
+def write_repos_cache(repos: list[dict[str, Any]]) -> None:
+    ensure_state_dir()
+    REPOS_CACHE.write_text(
+        json.dumps({"synced_at": now_iso(), "count": len(repos), "repos": repos}, indent=2) + "\n"
+    )
+
+
+def read_repos_cache() -> dict[str, Any] | None:
+    if not REPOS_CACHE.exists():
+        return None
+    try:
+        return json.loads(REPOS_CACHE.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def normalize_pr(item: dict[str, Any]) -> dict[str, Any]:
+    repo = item.get("repository") or {}
+    author = item.get("author") or {}
+    labels = item.get("labels") or []
+    return {
+        "ref": f"{repo.get('nameWithOwner') or repo.get('fullName') or repo.get('full_name')}#{item.get('number')}",
+        "repo": repo.get("nameWithOwner") or repo.get("fullName") or repo.get("full_name"),
+        "number": item.get("number"),
+        "title": item.get("title"),
+        "state": item.get("state"),
+        "draft": bool(item.get("isDraft")),
+        "author": author.get("login") if isinstance(author, dict) else author,
+        "updated_at": item.get("updatedAt"),
+        "url": item.get("url"),
+        "comments": item.get("commentsCount"),
+        "labels": [label.get("name") for label in labels if isinstance(label, dict)],
+    }
+
+
+def search_prs(args: argparse.Namespace) -> list[dict[str, Any]]:
+    gh_args = ["search", "prs", "--json", PR_SEARCH_FIELDS, "--limit", str(args.limit)]
+    has_explicit_scope = bool(
+        args.repo
+        or args.owner
+        or args.author
+        or args.review_requested
+        or args.review
+        or args.checks
+        or args.query
+    )
+    if args.state != "all":
+        gh_args.extend(["--state", args.state])
+    for repo in args.repo or []:
+        gh_args.extend(["--repo", repo])
+    for owner in args.owner or []:
+        gh_args.extend(["--owner", owner])
+    if args.author:
+        gh_args.extend(["--author", args.author])
+    if args.review_requested:
+        gh_args.extend(["--review-requested", "@me" if args.review_requested == "me" else args.review_requested])
+    if args.review:
+        gh_args.extend(["--review", args.review])
+    if args.checks:
+        gh_args.extend(["--checks", args.checks])
+    if not has_explicit_scope:
+        gh_args.extend(["--author", "@me"])
+    if args.query:
+        gh_args.append(args.query)
+    payload = gh_json(gh_args) or []
+    return [normalize_pr(item) for item in payload]
+
+
+def pr_detail(ref: PrRef) -> dict[str, Any]:
+    payload = gh_json(["pr", "view", *pr_gh_args(ref), "--json", PR_VIEW_FIELDS])
+    return normalize_pr_detail(ref, payload or {})
+
+
+def normalize_pr_detail(ref: PrRef, payload: dict[str, Any]) -> dict[str, Any]:
+    review_requests = payload.get("reviewRequests") or []
+    latest_reviews = payload.get("latestReviews") or []
+    files = payload.get("files") or []
+    status_rollup = payload.get("statusCheckRollup") or []
+    return {
+        "ref": f"{ref.repo}#{payload.get('number') or ref.number}",
+        "repo": ref.repo,
+        "number": payload.get("number") or int(ref.number or 0),
+        "title": payload.get("title"),
+        "state": payload.get("state"),
+        "draft": bool(payload.get("isDraft")),
+        "author": (payload.get("author") or {}).get("login"),
+        "base": payload.get("baseRefName"),
+        "head": payload.get("headRefName"),
+        "head_sha": payload.get("headRefOid"),
+        "mergeable": payload.get("mergeable"),
+        "merge_state": payload.get("mergeStateStatus"),
+        "review_decision": payload.get("reviewDecision"),
+        "changed_files": payload.get("changedFiles"),
+        "additions": payload.get("additions"),
+        "deletions": payload.get("deletions"),
+        "review_requests": [
+            (request.get("requestedReviewer") or {}).get("login")
+            or (request.get("requestedReviewer") or {}).get("name")
+            for request in review_requests
+            if isinstance(request, dict)
+        ],
+        "latest_reviews": [
+            {
+                "author": (review.get("author") or {}).get("login"),
+                "state": review.get("state"),
+                "submitted_at": review.get("submittedAt"),
+            }
+            for review in latest_reviews
+            if isinstance(review, dict)
+        ],
+        "files": [
+            {
+                "path": file.get("path"),
+                "additions": file.get("additions"),
+                "deletions": file.get("deletions"),
+            }
+            for file in files
+            if isinstance(file, dict)
+        ],
+        "checks": summarize_checks(status_rollup),
+        "updated_at": payload.get("updatedAt"),
+        "created_at": payload.get("createdAt"),
+        "url": payload.get("url"),
+    }
+
+
+def summarize_checks(checks: list[Any]) -> dict[str, Any]:
+    summary = {"total": 0, "passed": 0, "failed": 0, "pending": 0, "items": []}
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        state = check.get("state") or check.get("status")
+        conclusion = check.get("conclusion")
+        name = check.get("name") or check.get("workflowName")
+        bucket = "pending"
+        if conclusion in {"SUCCESS", "success"} or state in {"SUCCESS", "success"}:
+            bucket = "passed"
+        elif conclusion in {"FAILURE", "failure", "ERROR", "error", "CANCELLED", "cancelled"}:
+            bucket = "failed"
+        summary["total"] += 1
+        summary[bucket] += 1
+        summary["items"].append({"name": name, "state": state, "conclusion": conclusion, "bucket": bucket})
+    return summary
+
+
+def pr_checks(ref: PrRef) -> list[dict[str, Any]]:
+    payload = gh_json(["pr", "checks", *pr_gh_args(ref), "--json", "name,state,bucket,link,description,workflow,startedAt,completedAt"])
+    return payload or []
+
+
+def pr_threads(ref: PrRef, *, all_threads: bool = False) -> list[dict[str, Any]]:
+    if not ref.repo or not ref.number:
+        raise GhError("threads requires an explicit PR reference")
+    owner, repo = ref.repo.split("/", 1)
+    query = """
+query($owner:String!, $repo:String!, $number:Int!) {
+  repository(owner:$owner, name:$repo) {
+    pullRequest(number:$number) {
+      reviewThreads(first:100) {
+        nodes {
+          id
+          isResolved
+          path
+          line
+          comments(first:20) {
+            nodes {
+              id
+              body
+              createdAt
+              url
+              author { login }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+    payload = gh_json(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"repo={repo}",
+            "-F",
+            f"number={ref.number}",
+            "-f",
+            f"query={query}",
+        ]
+    )
+    nodes = (
+        ((payload or {}).get("data") or {})
+        .get("repository", {})
+        .get("pullRequest", {})
+        .get("reviewThreads", {})
+        .get("nodes", [])
+    )
+    threads = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get("isResolved") and not all_threads:
+            continue
+        comments = [
+            {
+                "author": (comment.get("author") or {}).get("login"),
+                "body": comment.get("body"),
+                "created_at": comment.get("createdAt"),
+                "url": comment.get("url"),
+            }
+            for comment in ((node.get("comments") or {}).get("nodes") or [])
+            if isinstance(comment, dict)
+        ]
+        threads.append(
+            {
+                "id": node.get("id"),
+                "resolved": bool(node.get("isResolved")),
+                "path": node.get("path"),
+                "line": node.get("line"),
+                "comments": comments,
+            }
+        )
+    return threads
+
+
+def build_inbox(limit: int) -> list[dict[str, Any]]:
+    items: dict[str, dict[str, Any]] = {}
+
+    def add(reason: str, prs: list[dict[str, Any]]) -> None:
+        for pr in prs:
+            key = pr.get("ref") or pr.get("url")
+            if not key:
+                continue
+            entry = items.setdefault(key, {**pr, "reasons": []})
+            if reason not in entry["reasons"]:
+                entry["reasons"].append(reason)
+
+    base = argparse.Namespace(
+        limit=limit,
+        state="open",
+        repo=[],
+        owner=[],
+        author=None,
+        review_requested="me",
+        review=None,
+        checks=None,
+        query=None,
+    )
+    add("review_requested", search_prs(base))
+
+    mine = argparse.Namespace(**{**vars(base), "review_requested": None, "author": "@me"})
+    add("authored_open", search_prs(mine))
+
+    failed = argparse.Namespace(**{**vars(base), "review_requested": None, "author": "@me", "checks": "failure"})
+    add("authored_failed_checks", search_prs(failed))
+
+    changes = argparse.Namespace(**{**vars(base), "review_requested": None, "author": "@me", "review": "changes_requested"})
+    add("authored_changes_requested", search_prs(changes))
+
+    return list(items.values())[:limit]
+
+
+def print_json(payload: Any) -> None:
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def print_table(rows: list[dict[str, Any]], fields: list[str]) -> None:
+    if not rows:
+        print("No results.")
+        return
+    widths = {field: len(field.upper()) for field in fields}
+    for row in rows:
+        for field in fields:
+            widths[field] = max(widths[field], len(str(row.get(field, "") or "")))
+    print("  ".join(field.upper().ljust(widths[field]) for field in fields))
+    for row in rows:
+        print("  ".join(str(row.get(field, "") or "").ljust(widths[field]) for field in fields))
+
+
+def output(payload: Any, *, json_mode: bool, table_fields: list[str] | None = None) -> None:
+    if json_mode:
+        print_json(payload)
+        return
+    if isinstance(payload, list) and table_fields:
+        print_table(payload, table_fields)
+        return
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if isinstance(value, (dict, list)):
+                print(f"{key}: {json.dumps(value)}")
+            else:
+                print(f"{key}: {value}")
+        return
+    print(payload)
+
+
+def cmd_whoami(args: argparse.Namespace) -> None:
+    output({"user": current_user(refresh=args.refresh)}, json_mode=args.json)
+
+
+def cmd_repos(args: argparse.Namespace) -> None:
+    if args.repos_command == "sync" or args.refresh:
+        repos = fetch_repos(limit=args.limit)
+        write_repos_cache(repos)
+        payload = {"synced_at": now_iso(), "count": len(repos), "repos": repos}
+    else:
+        cache = read_repos_cache()
+        if cache is None:
+            repos = fetch_repos(limit=args.limit)
+            write_repos_cache(repos)
+            payload = {"synced_at": now_iso(), "count": len(repos), "repos": repos}
+        else:
+            repos = cache.get("repos", [])
+            if args.limit:
+                repos = repos[: args.limit]
+            payload = {**cache, "count": len(repos), "repos": repos}
+    if args.json:
+        print_json(payload)
+    else:
+        print_table(payload["repos"], ["full_name", "visibility", "default_branch", "updated_at"])
+
+
+def cmd_prs(args: argparse.Namespace) -> None:
+    prs = search_prs(args)
+    payload = {"count": len(prs), "prs": prs}
+    if args.json:
+        print_json(payload)
+    else:
+        print_table(prs, ["ref", "state", "draft", "author", "updated_at", "title"])
+
+
+def cmd_inbox(args: argparse.Namespace) -> None:
+    entries = build_inbox(args.limit)
+    payload = {"count": len(entries), "items": entries}
+    if args.json:
+        print_json(payload)
+    else:
+        print_table(entries, ["ref", "reasons", "state", "author", "updated_at", "title"])
+
+
+def cmd_pr(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    detail = pr_detail(ref)
+    if args.json:
+        print_json({"pr": detail})
+    else:
+        output(detail, json_mode=False)
+
+
+def cmd_diff(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    print(run_gh(["pr", "diff", *pr_gh_args(ref)]), end="")
+
+
+def cmd_threads(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    threads = pr_threads(ref, all_threads=args.all)
+    payload = {"count": len(threads), "threads": threads}
+    if args.json:
+        print_json(payload)
+    else:
+        rows = []
+        for thread in threads:
+            first = (thread.get("comments") or [{}])[0]
+            rows.append(
+                {
+                    "path": thread.get("path"),
+                    "line": thread.get("line"),
+                    "resolved": thread.get("resolved"),
+                    "author": first.get("author"),
+                    "body": (first.get("body") or "").replace("\n", " ")[:100],
+                }
+            )
+        print_table(rows, ["path", "line", "resolved", "author", "body"])
+
+
+def cmd_checks(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    checks = pr_checks(ref)
+    payload = {"count": len(checks), "checks": checks}
+    if args.json:
+        print_json(payload)
+    else:
+        print_table(checks, ["name", "state", "conclusion", "bucket", "link"])
+
+
+def cmd_review_summary(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    detail = pr_detail(ref)
+    checks = pr_checks(ref)
+    threads = pr_threads(ref)
+    payload = {
+        "pr": detail,
+        "checks": {"count": len(checks), "items": checks},
+        "unresolved_threads": {"count": len(threads), "items": threads},
+    }
+    if args.json:
+        print_json(payload)
+    else:
+        print(f"{detail.get('ref')}: {detail.get('title')}")
+        print(f"State: {detail.get('state')}  Draft: {detail.get('draft')}  Review: {detail.get('review_decision')}")
+        print(f"Checks: {len(checks)}  Unresolved threads: {len(threads)}")
+        print(f"Files changed: {detail.get('changed_files')}  +{detail.get('additions')} -{detail.get('deletions')}")
+
+
+def read_body(args: argparse.Namespace, *, required: bool = False) -> str | None:
+    if args.body_file:
+        if args.body_file == "-":
+            return sys.stdin.read()
+        return Path(args.body_file).read_text()
+    if args.body:
+        return args.body
+    if required:
+        raise GhError("--body or --body-file is required")
+    return None
+
+
+def cmd_review_action(args: argparse.Namespace, action: str) -> None:
+    ref = parse_pr_ref(args.pr)
+    body = read_body(args, required=action == "--request-changes")
+    gh_args = ["pr", "review", *pr_gh_args(ref), action]
+    if body:
+        gh_args.extend(["--body", body])
+    run_gh(gh_args)
+    print(f"Submitted review for {ref.repo}#{ref.number}")
+
+
+def cmd_merge(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    strategy = "--squash"
+    if args.merge:
+        strategy = "--merge"
+    if args.rebase:
+        strategy = "--rebase"
+    gh_args = ["pr", "merge", *pr_gh_args(ref), strategy]
+    if args.auto:
+        gh_args.append("--auto")
+    if args.delete_branch:
+        gh_args.append("--delete-branch")
+    if args.match_head_commit:
+        gh_args.extend(["--match-head-commit", args.match_head_commit])
+    if args.subject:
+        gh_args.extend(["--subject", args.subject])
+    if args.body:
+        gh_args.extend(["--body", args.body])
+    run_gh(gh_args)
+    print(f"Merged {ref.repo}#{ref.number}")
+
+
+def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
+    ref = parse_pr_ref(args.pr)
+    gh_args = ["pr", "ready", *pr_gh_args(ref)]
+    if draft:
+        gh_args.append("--undo")
+    run_gh(gh_args)
+    print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="agent-gh - GitHub PR and review work-state")
+    parser.set_defaults(func=None)
+    sub = parser.add_subparsers(dest="command")
+
+    whoami = sub.add_parser("whoami", help="Show authenticated GitHub user")
+    whoami.add_argument("--json", action="store_true")
+    whoami.add_argument("--refresh", action="store_true")
+    whoami.set_defaults(func=cmd_whoami)
+
+    repos = sub.add_parser("repos", help="List or sync accessible repositories")
+    repos.add_argument("repos_command", nargs="?", choices=["sync"], default="list")
+    repos.add_argument("--json", action="store_true")
+    repos.add_argument("--refresh", action="store_true")
+    repos.add_argument("--limit", type=int)
+    repos.set_defaults(func=cmd_repos)
+
+    prs = sub.add_parser("prs", help="Search pull requests")
+    prs.add_argument("query", nargs="?")
+    prs.add_argument("--json", action="store_true")
+    prs.add_argument("--limit", type=int, default=30)
+    prs.add_argument("--state", choices=["open", "closed", "all"], default="open")
+    prs.add_argument("--repo", action="append")
+    prs.add_argument("--owner", action="append")
+    prs.add_argument("--author")
+    prs.add_argument("--review-requested", nargs="?", const="me")
+    prs.add_argument("--review", choices=["none", "required", "approved", "changes_requested"])
+    prs.add_argument("--checks", choices=["pending", "success", "failure"])
+    prs.set_defaults(func=cmd_prs)
+
+    inbox = sub.add_parser("inbox", help="Show actionable PR work across repositories")
+    inbox.add_argument("--json", action="store_true")
+    inbox.add_argument("--limit", type=int, default=30)
+    inbox.set_defaults(func=cmd_inbox)
+
+    pr = sub.add_parser("pr", help="Show PR detail")
+    pr.add_argument("pr", nargs="?")
+    pr.add_argument("--json", action="store_true")
+    pr.set_defaults(func=cmd_pr)
+
+    diff = sub.add_parser("diff", help="Show PR diff")
+    diff.add_argument("pr")
+    diff.set_defaults(func=cmd_diff)
+
+    threads = sub.add_parser("threads", help="Show PR review threads")
+    threads.add_argument("pr")
+    threads.add_argument("--all", action="store_true")
+    threads.add_argument("--json", action="store_true")
+    threads.set_defaults(func=cmd_threads)
+
+    checks = sub.add_parser("checks", help="Show PR checks")
+    checks.add_argument("pr")
+    checks.add_argument("--json", action="store_true")
+    checks.set_defaults(func=cmd_checks)
+
+    review = sub.add_parser("review", help="Summarize a PR for review")
+    review.add_argument("pr")
+    review.add_argument("--summary", action="store_true", default=True)
+    review.add_argument("--json", action="store_true")
+    review.set_defaults(func=cmd_review_summary)
+
+    for name, action, help_text, body_required in [
+        ("approve", "--approve", "Approve a pull request", False),
+        ("request-changes", "--request-changes", "Request changes on a pull request", True),
+        ("comment", "--comment", "Comment on a pull request", False),
+    ]:
+        action_parser = sub.add_parser(name, help=help_text)
+        action_parser.add_argument("pr")
+        action_parser.add_argument("--body")
+        action_parser.add_argument("--body-file")
+        action_parser.set_defaults(func=lambda ns, action=action: cmd_review_action(ns, action))
+
+    merge = sub.add_parser("merge", help="Merge a pull request")
+    merge.add_argument("pr")
+    strategy = merge.add_mutually_exclusive_group()
+    strategy.add_argument("--squash", action="store_true")
+    strategy.add_argument("--merge", action="store_true")
+    strategy.add_argument("--rebase", action="store_true")
+    merge.add_argument("--auto", action="store_true")
+    merge.add_argument("--delete-branch", action="store_true")
+    merge.add_argument("--match-head-commit")
+    merge.add_argument("--subject")
+    merge.add_argument("--body")
+    merge.set_defaults(func=cmd_merge)
+
+    ready = sub.add_parser("ready", help="Mark a pull request ready for review")
+    ready.add_argument("pr")
+    ready.set_defaults(func=lambda ns: cmd_ready(ns, draft=False))
+
+    draft = sub.add_parser("draft", help="Convert a pull request to draft")
+    draft.add_argument("pr")
+    draft.set_defaults(func=lambda ns: cmd_ready(ns, draft=True))
+
+    return parser
+
+
+def show_help() -> None:
+    print(
+        """agent-gh - GitHub PR and review work-state
+
+Commands:
+  whoami                         Show authenticated GitHub user
+  repos [sync]                   List or sync accessible repositories
+  inbox                          Show actionable PR work across repositories
+  prs [query]                    Search pull requests
+  pr <repo#num|url|num>          Show PR details
+  diff <pr>                      Show PR diff
+  threads <pr>                   Show unresolved PR review threads
+  checks <pr>                    Show PR checks
+  review <pr> --summary          Summarize a PR for review
+  approve <pr> [--body text]     Approve a PR
+  request-changes <pr> --body t  Request changes on a PR
+  comment <pr> [--body text]     Comment on a PR
+  merge <pr> [--squash]          Merge a PR
+  ready <pr>                     Mark a PR ready for review
+  draft <pr>                     Convert a PR to draft
+
+Examples:
+  agent-do gh inbox
+  agent-do gh prs --review-requested
+  agent-do gh pr ovachiever/agent-do#3 --json
+  agent-do gh threads ovachiever/agent-do#3
+  agent-do gh approve ovachiever/agent-do#2 --body "LGTM"
+"""
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 1 and argv[0] in {"help", "--help", "-h"}:
+        show_help()
+        return 0
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.func is None:
+        parser.print_help()
+        return 0
+    try:
+        args.func(args)
+        return 0
+    except GhError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
