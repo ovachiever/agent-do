@@ -291,13 +291,14 @@ When auth lands on a live checkpoint branch, `agent-do auth probe <site>` inspec
 
 ### `email`
 
-Email sending plus structured mailbox querying for agent workflows, including account/mailbox scoping, exact message fetch by id, and explicit metadata-only states when Apple Mail's Envelope Index has message metadata but no readable local content.
+Email sending plus structured mailbox querying for agent workflows, including account/mailbox scoping, exact message fetch by id, and explicit availability states when Apple Mail's Envelope Index has metadata but no full local content. `summary_only` means the Mail index has a searchable summary, not authoritative raw body/source.
 
 ```bash
 agent-do email snapshot --json
 agent-do email search "invoice" --all-mailboxes --json
 agent-do email latest --from WidgetHub --account Work --json
 agent-do email get --id msg-123 --json
+agent-do email export --id msg-123 --format html --output receipt.html
 agent-do email code --from WidgetHub --subject "verification code" --account Work --mailbox Inbox
 agent-do email link --from WidgetHub --domain app.example.com
 ```

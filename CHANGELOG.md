@@ -24,6 +24,7 @@
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.
 - Browser clipboard commands through `agent-do browse clipboard read|copy|paste` for copy-first extraction flows.
 - `agent-do email latest|wait|code|link` for inbox polling, verification code extraction, and magic-link extraction.
+- `agent-do email export --id` for headless JSON, text, HTML, EML, and PDF exports when message content is available, with an explicit `--allow-summary` opt-in for Apple Mail index summaries.
 - `agent-do sms snapshot|latest|wait|code|link` for message polling, verification code extraction, and link extraction.
 - `agent-do auth probe` for classifying the live auth checkpoint branch and optional frontmost macOS dialog state.
 - `agent-do auth advance` for executing one safe checkpoint step, then returning the updated auth branch state.
@@ -32,7 +33,9 @@
 ### Changed
 - Session-start bootstrap handling now uses a native macOS prompt in the global Claude/Codex hook path instead of relying on the model to remember to ask in conversation.
 - `agent-do email` discovery now uses Apple Mail's local Envelope Index for account, mailbox, and message lookup, so large live mailboxes no longer block on AppleScript enumeration timeouts.
-- `agent-do email` now exposes `search`, `get --id`, and `mailboxes` on top of a unified structured query path, with explicit `metadata_only` message states and scoped unread counts that distinguish all-mailbox totals from inbox-only unread totals.
+- `agent-do email` now exposes `search`, `get --id`, and `mailboxes` on top of a unified structured query path, with explicit `metadata_only`, `summary_only`, `full_body`, `raw_source`, and attachment metadata states plus scoped unread counts that distinguish all-mailbox totals from inbox-only unread totals.
+- `agent-do email send` now routes through a real Python helper instead of interpolated shell heredocs, and Mail.app composition passes user fields as `osascript` argv values.
+- `agent-do email --from` filtering now follows the live Apple Mail Envelope Index sender schema, including direct address rows and sender-address mapping tables.
 - `agent-do` now recognizes `+live` and `+live(...)` as runtime modifiers before normal tool dispatch, so explicit local-control approval can live at the call site without introducing a wrapper tool in the registry.
 - `agent-do auth` now supports `--strategy live-browser-control`, which keeps the agent in the visible real browser under `+live(...)` approval and runs the same checkpoint model on top of the existing `macos` and `screen` control surfaces instead of importing back into Playwright.
 - Saved authenticated state is now a first-class outer-harness concern instead of an implicit split between `creds` and `browse`, with encrypted auth bundles stored under `~/.agent-do/auth/`.

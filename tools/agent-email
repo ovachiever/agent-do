@@ -20,6 +20,7 @@ Commands:
   code                       Extract verification code from latest/waited message
   link                       Extract magic link from latest/waited message
   get --id <message-id>      Fetch one exact message by id
+  export --id <message-id>   Export one message as json, txt, html, eml, or pdf
   mailboxes                  List available mailboxes
 
 Options:
@@ -42,6 +43,9 @@ Options:
   --regex <pattern>          Explicit regex for verification code extraction
   --domain <host>            Restrict extracted link to a domain
   --exclude-id <id>          Ignore a previously seen message id
+  --format <format>          Export format: json, txt, html, eml, pdf
+  --output <path>            Write exported message to a file
+  --allow-summary            Allow summary-only exports when full body/source is unavailable
   --json                     Output JSON for query commands
 
 Environment:
@@ -51,12 +55,14 @@ Environment:
   SMTP_PASS                  SMTP password
   EMAIL_FROM                 Default from address
   AGENT_EMAIL_FIXTURE        JSON fixture file for tests or offline development
+  AGENT_EMAIL_ENVELOPE_INDEX Apple Mail Envelope Index override for tests/debugging
 
 Examples:
   agent-email send user@example.com "Hello" --body "Hi there!"
   agent-email search "invoice" --all-mailboxes --json
   agent-email latest --from WidgetHub --account Primary --json
   agent-email get --id msg-123 --json
+  agent-email export --id msg-123 --format html --output receipt.html
   agent-email code --from login@example.com --subject "verification code"
   agent-email link --from auth@example.com --domain app.example.com
 EOF
@@ -66,200 +72,8 @@ query_helper() {
     python3 "$ROOT/lib/email_query.py" "$@"
 }
 
-send_email_python() {
-    local to="$1"
-    local subject="$2"
-    local body="$3"
-    local attach="${4:-}"
-    local cc="${5:-}"
-    local bcc="${6:-}"
-    local from_override="${7:-}"
-
-    python3 << PYTHON
-import os
-import smtplib
-from email import encoders
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
-smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-smtp_user = os.environ.get("SMTP_USER", "")
-smtp_pass = os.environ.get("SMTP_PASS", "")
-email_from = "$from_override" or os.environ.get("EMAIL_FROM", smtp_user)
-
-if not smtp_user or not smtp_pass:
-    print("Error: SMTP_USER and SMTP_PASS required")
-    raise SystemExit(1)
-
-msg = MIMEMultipart()
-msg["From"] = email_from
-msg["To"] = "$to"
-msg["Subject"] = "$subject"
-if "$cc":
-    msg["Cc"] = "$cc"
-if "$bcc":
-    msg["Bcc"] = "$bcc"
-msg.attach(MIMEText("""$body""", "plain"))
-
-attach_path = "$attach"
-if attach_path and os.path.isfile(attach_path):
-    with open(attach_path, "rb") as fh:
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(fh.read())
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f'attachment; filename="{os.path.basename(attach_path)}"')
-    msg.attach(part)
-
-try:
-    server = smtplib.SMTP(smtp_host, smtp_port)
-    server.starttls()
-    server.login(smtp_user, smtp_pass)
-    recipients = ["$to"]
-    if "$cc":
-        recipients.append("$cc")
-    if "$bcc":
-        recipients.append("$bcc")
-    server.sendmail(email_from, recipients, msg.as_string())
-    server.quit()
-    print(f"Email sent to $to")
-except Exception as exc:
-    print(f"Error: {exc}")
-    raise SystemExit(1)
-PYTHON
-}
-
-send_email_mail() {
-    local to="$1"
-    local subject="$2"
-    local body="$3"
-    local cc="${4:-}"
-    local bcc="${5:-}"
-    local from_override="${6:-}"
-
-    if [[ -n "$cc" || -n "$bcc" || -n "$from_override" ]]; then
-        echo "Error: --cc, --bcc, and --from require smtp or macos send methods" >&2
-        return 1
-    fi
-
-    if command -v mail >/dev/null 2>&1; then
-        echo "$body" | mail -s "$subject" "$to"
-        echo "Email sent to $to"
-    else
-        echo "Error: mail command not found" >&2
-        return 1
-    fi
-}
-
-send_email_macos() {
-    local to="$1"
-    local subject="$2"
-    local body="$3"
-    local cc="${4:-}"
-    local bcc="${5:-}"
-    local from_override="${6:-}"
-
-    local sender_clause=""
-    if [[ -n "$from_override" ]]; then
-        sender_clause=", sender:\"$from_override\""
-    fi
-
-    osascript << EOF
-tell application "Mail"
-    set newMessage to make new outgoing message with properties {subject:"$subject", content:"$body", visible:true$sender_clause}
-    tell newMessage
-        make new to recipient with properties {address:"$to"}
-        if "$cc" is not "" then
-            make new cc recipient with properties {address:"$cc"}
-        end if
-        if "$bcc" is not "" then
-            make new bcc recipient with properties {address:"$bcc"}
-        end if
-    end tell
-    activate
-end tell
-EOF
-    echo "Email composed in Mail.app"
-}
-
-cmd_send() {
-    local to=""
-    local subject=""
-    local body=""
-    local body_file=""
-    local attach=""
-    local cc=""
-    local bcc=""
-    local from_override=""
-    local method="auto"
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --body|-b) body="$2"; shift 2 ;;
-            --file|-f) body_file="$2"; shift 2 ;;
-            --attach|-a) attach="$2"; shift 2 ;;
-            --cc) cc="$2"; shift 2 ;;
-            --bcc) bcc="$2"; shift 2 ;;
-            --from) from_override="$2"; shift 2 ;;
-            --method) method="$2"; shift 2 ;;
-            -*)
-                echo "Unknown option: $1" >&2
-                return 1
-                ;;
-            *)
-                if [[ -z "$to" ]]; then
-                    to="$1"
-                elif [[ -z "$subject" ]]; then
-                    subject="$1"
-                else
-                    body="$1"
-                fi
-                shift
-                ;;
-        esac
-    done
-
-    if [[ -z "$to" || -z "$subject" ]]; then
-        echo "Error: Recipient and subject required" >&2
-        echo "Usage: agent-email send <to> <subject> --body <text>" >&2
-        return 1
-    fi
-
-    if [[ -n "$body_file" ]]; then
-        if [[ ! -f "$body_file" ]]; then
-            echo "Error: body file not found: $body_file" >&2
-            return 1
-        fi
-        body="$(cat "$body_file")"
-    fi
-
-    [[ -z "$body" ]] && body="(No body)"
-
-    case "$method" in
-        smtp|python)
-            send_email_python "$to" "$subject" "$body" "$attach" "$cc" "$bcc" "$from_override"
-            ;;
-        mail)
-            send_email_mail "$to" "$subject" "$body" "$cc" "$bcc" "$from_override"
-            ;;
-        macos|app)
-            send_email_macos "$to" "$subject" "$body" "$cc" "$bcc" "$from_override"
-            ;;
-        auto)
-            if [[ -n "${SMTP_USER:-}" ]]; then
-                send_email_python "$to" "$subject" "$body" "$attach" "$cc" "$bcc" "$from_override"
-            elif [[ "$(uname)" == "Darwin" ]]; then
-                send_email_macos "$to" "$subject" "$body" "$cc" "$bcc" "$from_override"
-            else
-                send_email_mail "$to" "$subject" "$body" "$cc" "$bcc" "$from_override"
-            fi
-            ;;
-        *)
-            echo "Error: Unknown send method: $method" >&2
-            return 1
-            ;;
-    esac
+send_helper() {
+    python3 "$ROOT/lib/email_send.py" "$@"
 }
 
 cmd_read() {
@@ -287,13 +101,13 @@ export AGENT_EMAIL_OUTPUT_JSON="$OUTPUT_JSON"
 case "${1:-help}" in
     send|compose|write)
         shift
-        cmd_send "$@"
+        send_helper "$@"
         ;;
     read|inbox|open)
         shift || true
         cmd_read "$@"
         ;;
-    search|find|snapshot|snap|latest|wait|code|link|get|count|unread|mailboxes)
+    search|find|snapshot|snap|latest|wait|code|link|get|export|count|unread|mailboxes)
         query_helper "$@"
         ;;
     help|--help|-h)

@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -93,12 +96,15 @@ def normalize_attachments(value: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for index, item in enumerate(items, start=1):
         if isinstance(item, dict):
-            normalized.append(
-                {
-                    "name": normalize_text(item.get("name")) or f"attachment-{index}",
-                    "mime_type": normalize_text(item.get("mime_type")),
-                }
-            )
+            attachment = {
+                "name": normalize_text(item.get("name")) or f"attachment-{index}",
+                "mime_type": normalize_text(item.get("mime_type")),
+            }
+            if "size" in item:
+                attachment["size"] = item.get("size")
+            if "download_available" in item:
+                attachment["download_available"] = bool(item.get("download_available"))
+            normalized.append(attachment)
         else:
             normalized.append({"name": normalize_text(item) or f"attachment-{index}", "mime_type": ""})
     return normalized
@@ -115,12 +121,39 @@ def availability_from_message(
     attachment_count = int(override.get("attachment_count") or len(attachments))
     body_available = bool(body.strip()) if "body_available" not in override else bool(override.get("body_available"))
     source_available = bool(source.strip()) if "source_available" not in override else bool(override.get("source_available"))
-    state = str(override.get("state") or ("hydrated" if (body_available or source_available or attachment_count > 0) else "metadata_only"))
+    body_kind = str(override.get("body_kind") or ("full" if body_available else "none"))
+    body_is_full = bool(override.get("body_is_full", body_available and body_kind != "summary"))
+    attachment_metadata_available = bool(override.get("attachment_metadata_available", attachment_count > 0))
+    attachment_download_available = bool(override.get("attachment_download_available", False))
+    if override.get("state"):
+        state = str(override["state"])
+    elif source_available:
+        state = "raw_source"
+    elif body_available and body_is_full:
+        state = "full_body"
+    elif body_available:
+        state = "summary_only"
+    elif attachment_download_available:
+        state = "attachment_downloaded"
+    elif attachment_metadata_available:
+        state = "attachment_metadata"
+    else:
+        state = "metadata_only"
+    export_formats = ["json"]
+    if source_available:
+        export_formats.append("eml")
+    if body_available and body_is_full:
+        export_formats.extend(["txt", "html", "pdf"])
     return {
         "metadata_found": bool(override.get("metadata_found", True)),
         "body_available": body_available,
         "source_available": source_available,
         "attachment_count": attachment_count,
+        "attachment_metadata_available": attachment_metadata_available,
+        "attachment_download_available": attachment_download_available,
+        "body_kind": body_kind,
+        "body_is_full": body_is_full,
+        "export_formats": export_formats,
         "state": state,
     }
 
@@ -256,7 +289,7 @@ class FixtureSource:
 
 class MacMailSource:
     def __init__(self) -> None:
-        if sys.platform != "darwin":
+        if sys.platform != "darwin" and not os.environ.get("AGENT_EMAIL_ENVELOPE_INDEX"):
             fail("Email querying currently requires macOS Mail.app or AGENT_EMAIL_FIXTURE", error="unsupported_platform")
         self.db_path = self._locate_envelope_index()
         self.conn = sqlite3.connect(str(self.db_path))
@@ -409,8 +442,22 @@ class MacMailSource:
                 params.append(message_id)
 
         if args.from_filter:
-            where.append("lower(COALESCE(a.address, '')) LIKE ?")
-            params.append(f"%{args.from_filter.lower()}%")
+            where.append(
+                """
+                (
+                    lower(COALESCE(a_direct.address, '')) LIKE ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM sender_addresses sax
+                        JOIN addresses ax ON sax.address = ax.ROWID
+                        WHERE sax.sender = m.sender
+                          AND lower(COALESCE(ax.address, '')) LIKE ?
+                    )
+                )
+                """
+            )
+            needle = f"%{args.from_filter.lower()}%"
+            params.extend([needle, needle])
         if args.subject_filter:
             where.append("lower(COALESCE(sub.subject, '')) LIKE ?")
             params.append(f"%{args.subject_filter.lower()}%")
@@ -432,23 +479,34 @@ class MacMailSource:
             SELECT
                 m.ROWID AS rowid,
                 m.message_id AS message_id_value,
-                COALESCE(a.address, '') AS sender_address,
+                COALESCE(
+                    a_direct.address,
+                    (
+                        SELECT group_concat(addr.address, ', ')
+                        FROM sender_addresses sax
+                        JOIN addresses addr ON sax.address = addr.ROWID
+                        WHERE sax.sender = m.sender
+                    ),
+                    ''
+                ) AS sender_address,
                 COALESCE(sub.subject, '') AS subject_text,
                 COALESCE(sumry.summary, '') AS summary_text,
                 COALESCE(m.read, 0) AS is_read,
                 COALESCE(m.date_received, m.date_sent, 0) AS display_date,
                 mb.url AS mailbox_url,
                 COALESCE(att.attachment_count, 0) AS attachment_count,
+                COALESCE(att.attachment_names, '') AS attachment_names,
                 COALESCE(sm.message_body_indexed, 0) AS message_body_indexed
             FROM messages m
             JOIN mailboxes mb ON m.mailbox = mb.ROWID
-            LEFT JOIN sender_addresses sa ON m.sender = sa.ROWID
-            LEFT JOIN addresses a ON sa.address = a.ROWID
+            LEFT JOIN addresses a_direct ON m.sender = a_direct.ROWID
             LEFT JOIN subjects sub ON m.subject = sub.ROWID
             LEFT JOIN summaries sumry ON m.summary = sumry.ROWID
             LEFT JOIN searchable_messages sm ON sm.message = m.ROWID
             LEFT JOIN (
-                SELECT message, COUNT(*) AS attachment_count
+                SELECT message,
+                       COUNT(*) AS attachment_count,
+                       group_concat(COALESCE(name, ''), char(29)) AS attachment_names
                 FROM attachments
                 GROUP BY message
             ) att ON att.message = m.ROWID
@@ -464,7 +522,15 @@ class MacMailSource:
             attachments: list[dict[str, Any]] = []
             attachment_count = int(row["attachment_count"] or 0)
             if attachment_count:
-                attachments = [{"name": f"attachment-{i+1}", "mime_type": ""} for i in range(attachment_count)]
+                attachment_names = [item for item in str(row["attachment_names"] or "").split(ATTACH_SEP)]
+                attachments = [
+                    {
+                        "name": normalize_text(attachment_names[i] if i < len(attachment_names) else "") or f"attachment-{i+1}",
+                        "mime_type": "",
+                        "download_available": False,
+                    }
+                    for i in range(attachment_count)
+                ]
             summary_text = normalize_text(row["summary_text"])
             body = summary_text if summary_text else ""
             availability = {
@@ -472,7 +538,11 @@ class MacMailSource:
                 "body_available": bool(body),
                 "source_available": False,
                 "attachment_count": attachment_count,
-                "state": "hydrated" if (body or attachment_count > 0) else "metadata_only",
+                "attachment_metadata_available": attachment_count > 0,
+                "attachment_download_available": False,
+                "body_kind": "summary" if body else "none",
+                "body_is_full": False,
+                "state": "summary_only" if body else ("attachment_metadata" if attachment_count else "metadata_only"),
             }
             matches_list.append(
                 normalize_message(
@@ -660,6 +730,133 @@ def extract_link(message: dict[str, Any], args: argparse.Namespace) -> str:
     return links[0]
 
 
+def message_text_for_export(message: dict[str, Any], args: argparse.Namespace) -> str:
+    availability = message.get("availability", {}) or {}
+    state = str(availability.get("state") or "")
+    body = str(message.get("body") or "")
+    source = str(message.get("source") or "")
+    if body:
+        if state == "summary_only" and not getattr(args, "allow_summary", False):
+            fail(
+                "Message only has an Apple Mail index summary; full body/source is unavailable",
+                error="summary_only",
+                extra={
+                    "message_id": message.get("id"),
+                    "availability": availability,
+                    "hint": "Use --allow-summary to export the non-authoritative Mail index summary.",
+                },
+            )
+        return body
+    if source:
+        return source
+    fail(
+        "Message content is unavailable; only metadata was found",
+        error="metadata_only",
+        extra={
+            "message_id": message.get("id"),
+            "availability": availability,
+            "hydration": {
+                "attempted": ["apple_mail_envelope_index"],
+                "available": False,
+                "next": "Configure a remote provider fallback or export/forward the message.",
+            },
+        },
+    )
+
+
+def message_headers_text(message: dict[str, Any]) -> str:
+    headers = [
+        ("Subject", message.get("subject", "")),
+        ("From", message.get("from", "")),
+        ("Date", message.get("date", "")),
+        ("Account", message.get("account", "")),
+        ("Mailbox", message.get("mailbox", "")),
+        ("Message-ID", message.get("id", "")),
+    ]
+    return "\n".join(f"{name}: {normalize_text(value)}" for name, value in headers if normalize_text(value))
+
+
+def render_text_export(message: dict[str, Any], args: argparse.Namespace) -> str:
+    return f"{message_headers_text(message)}\n\n{message_text_for_export(message, args)}\n"
+
+
+def render_html_export(message: dict[str, Any], args: argparse.Namespace) -> str:
+    availability = message.get("availability", {}) or {}
+    warning = ""
+    if availability.get("state") == "summary_only":
+        warning = "<p><strong>Availability:</strong> Apple Mail index summary only; full body/source is unavailable.</p>\n"
+    rows = "\n".join(
+        f"<tr><th>{html.escape(name)}</th><td>{html.escape(normalize_text(value))}</td></tr>"
+        for name, value in [
+            ("Subject", message.get("subject", "")),
+            ("From", message.get("from", "")),
+            ("Date", message.get("date", "")),
+            ("Account", message.get("account", "")),
+            ("Mailbox", message.get("mailbox", "")),
+            ("Message ID", message.get("id", "")),
+            ("Availability", availability.get("state", "")),
+        ]
+        if normalize_text(value)
+    )
+    text = html.escape(message_text_for_export(message, args))
+    return (
+        "<!doctype html>\n"
+        "<html><head><meta charset=\"utf-8\"><title>Email Export</title>"
+        "<style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;line-height:1.45;margin:32px;}"
+        "table{border-collapse:collapse;margin-bottom:20px;}th{text-align:left;padding:4px 12px 4px 0;}"
+        "td{padding:4px 0;}pre{white-space:pre-wrap;border-top:1px solid #ddd;padding-top:16px;}</style>"
+        "</head><body>\n"
+        "<h1>Email Export</h1>\n"
+        f"{warning}<table>{rows}</table>\n"
+        f"<pre>{text}</pre>\n"
+        "</body></html>\n"
+    )
+
+
+def render_eml_export(message: dict[str, Any]) -> str:
+    source = str(message.get("source") or "")
+    if source.strip():
+        return source
+    fail(
+        "Raw email source is unavailable for this message",
+        error="source_unavailable",
+        extra={"message_id": message.get("id"), "availability": message.get("availability", {})},
+    )
+
+
+def write_text_export(content: str, args: argparse.Namespace) -> str | None:
+    output = normalize_text(getattr(args, "output", ""))
+    if not output:
+        return None
+    path = Path(output).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return str(path)
+
+
+def write_pdf_export(message: dict[str, Any], args: argparse.Namespace) -> str:
+    output = normalize_text(getattr(args, "output", ""))
+    if not output:
+        fail("--output is required for pdf export", error="missing_output")
+    textutil = shutil.which("textutil")
+    if not textutil:
+        fail("pdf export requires macOS textutil", error="pdf_unavailable")
+    path = Path(output).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        html_path = Path(tmpdir) / "message.html"
+        html_path.write_text(render_html_export(message, args), encoding="utf-8")
+        proc = subprocess.run(
+            [textutil, "-convert", "pdf", "-output", str(path), str(html_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    if proc.returncode != 0:
+        fail(proc.stderr.strip() or proc.stdout.strip() or "pdf export failed", error="pdf_export_failed")
+    return str(path)
+
+
 def wait_for_message(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any], tuple[int, int]]:
     deadline = time.time() + max(1, args.timeout)
     last_count = 0
@@ -758,6 +955,56 @@ def handle_get(source: FixtureSource | MacMailSource, args: argparse.Namespace) 
     emit(payload, raw=json.dumps(project_message(message, include_source=True, include_attachments=True), indent=2))
 
 
+def handle_export(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> None:
+    selected = source.selected_mailboxes(args)
+    message = source.get_message(selected, args.message_id)
+    if message is None:
+        fail(
+            "No email found for the requested message id",
+            error="message_not_found",
+            extra={"message_id": args.message_id, "scope": scope_payload(args, selected)},
+        )
+
+    export_format = normalize_key(args.format)
+    content: str | None = None
+    output_path: str | None = None
+    if export_format == "json":
+        content = json.dumps(project_message(message, include_source=True, include_attachments=True), indent=2) + "\n"
+        output_path = write_text_export(content, args)
+    elif export_format == "txt":
+        content = render_text_export(message, args)
+        output_path = write_text_export(content, args)
+    elif export_format == "html":
+        content = render_html_export(message, args)
+        output_path = write_text_export(content, args)
+    elif export_format == "eml":
+        content = render_eml_export(message)
+        output_path = write_text_export(content, args)
+    elif export_format == "pdf":
+        output_path = write_pdf_export(message, args)
+    else:
+        fail(f"unsupported export format: {args.format}", error="unsupported_format")
+
+    payload = {
+        "ok": True,
+        "message": project_message(message),
+        "export": {
+            "format": export_format,
+            "output": output_path or "",
+            "summary_only": bool((message.get("availability") or {}).get("state") == "summary_only"),
+        },
+    }
+    if OUTPUT_JSON:
+        if output_path is None and content is not None:
+            payload["content"] = content
+        emit(payload)
+    else:
+        if output_path:
+            print(output_path)
+        elif content is not None:
+            print(content, end="")
+
+
 def handle_count(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> None:
     selected = source.selected_mailboxes(args)
     counts = source.count_messages(selected)
@@ -834,6 +1081,13 @@ def build_parser() -> argparse.ArgumentParser:
     get_parser.add_argument("--id", dest="message_id", required=True)
     add_scope_args(get_parser)
 
+    export = sub.add_parser("export")
+    export.add_argument("--id", dest="message_id", required=True)
+    export.add_argument("--format", choices=["json", "txt", "html", "eml", "pdf"], default="html")
+    export.add_argument("--output")
+    export.add_argument("--allow-summary", action="store_true")
+    add_scope_args(export)
+
     count = sub.add_parser("count")
     add_scope_args(count)
 
@@ -863,6 +1117,8 @@ def main() -> None:
         handle_link(source, args)
     elif args.command == "get":
         handle_get(source, args)
+    elif args.command == "export":
+        handle_export(source, args)
     elif args.command == "count":
         handle_count(source, args)
     elif args.command == "mailboxes":
