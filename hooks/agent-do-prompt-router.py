@@ -361,7 +361,9 @@ def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
         readiness = get_tool_readiness(info) if get_tool_readiness else {}
 
         primary = None
-        if tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", prompt.lower()):
+        if tool == "gh" and re.search(r"\b(?:awaiting|waiting)\b.*\breview\b|\breview\b.*\b(?:awaiting|waiting)\b", prompt.lower()):
+            primary = "agent-do gh awaiting --owner <owner>"
+        elif tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", prompt.lower()):
             primary = "agent-do gh inbox"
         else:
             for command in commands:

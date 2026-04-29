@@ -59,6 +59,23 @@ elif args[:3] == ["api", "--paginate", "--slurp"]:
     emit([[{{"name": "agent-do", "full_name": "ovachiever/agent-do", "owner": {{"login": "ovachiever"}}, "private": False, "visibility": "public", "archived": False, "default_branch": "main", "html_url": "https://github.com/ovachiever/agent-do"}}]])
 elif args[:2] == ["search", "prs"]:
     reason = "generic"
+    if "--review-requested" in args and "--owner" in args:
+        emit([])
+        sys.exit(0)
+    if "--owner" in args:
+        emit([{{
+            "number": 9,
+            "title": "PR 9",
+            "state": "open",
+            "url": "https://github.com/Versova-Intelligence-Division/vms.io/pull/9",
+            "repository": {{"nameWithOwner": "Versova-Intelligence-Division/vms.io"}},
+            "author": {{"login": "ctyrrell-versova"}},
+            "isDraft": False,
+            "updatedAt": "2026-04-29T12:00:00Z",
+            "commentsCount": 2,
+            "labels": [{{"name": "bug"}}],
+        }}])
+        sys.exit(0)
     if "--review-requested" in args:
         reason = "review"
     elif "--checks" in args:
@@ -81,8 +98,35 @@ elif args[:2] == ["search", "prs"]:
         "labels": [{{"name": "bug"}}],
     }}])
 elif args[:2] == ["pr", "view"]:
+    number = args[2]
+    repo = args[args.index("--repo") + 1] if "--repo" in args else "ovachiever/agent-do"
+    if number == "9":
+        emit({{
+            "number": 9,
+            "title": "PR 9",
+            "state": "OPEN",
+            "isDraft": False,
+            "author": {{"login": "ctyrrell-versova"}},
+            "baseRefName": "main",
+            "headRefName": "fix/rls",
+            "headRefOid": "cafe",
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": "",
+            "changedFiles": 1,
+            "additions": 99,
+            "deletions": 0,
+            "reviewRequests": [],
+            "latestReviews": [],
+            "files": [{{"path": "db/migrations/001.sql", "additions": 99, "deletions": 0}}],
+            "statusCheckRollup": [],
+            "createdAt": "2026-04-27T20:37:55Z",
+            "updatedAt": "2026-04-29T12:00:00Z",
+            "url": f"https://github.com/{{repo}}/pull/9",
+        }})
+        sys.exit(0)
     emit({{
-        "number": 3,
+        "number": int(number),
         "title": "Escape JSON control chars",
         "state": "OPEN",
         "isDraft": False,
@@ -96,13 +140,13 @@ elif args[:2] == ["pr", "view"]:
         "changedFiles": 3,
         "additions": 29,
         "deletions": 1,
-        "reviewRequests": [{{"requestedReviewer": {{"login": "ovachiever"}}}}],
+        "reviewRequests": [{{"__typename": "User", "login": "ovachiever"}}],
         "latestReviews": [{{"author": {{"login": "ovachiever"}}, "state": "CHANGES_REQUESTED", "submittedAt": "2026-04-29T12:01:00Z"}}],
         "files": [{{"path": "lib/snapshot.sh", "additions": 5, "deletions": 1}}],
         "statusCheckRollup": [{{"name": "test", "state": "SUCCESS", "conclusion": "SUCCESS"}}],
         "createdAt": "2026-04-27T20:37:55Z",
         "updatedAt": "2026-04-29T12:00:00Z",
-        "url": "https://github.com/ovachiever/agent-do/pull/3",
+        "url": f"https://github.com/{{repo}}/pull/{{number}}",
     }})
 elif args[:2] == ["pr", "checks"]:
     emit([{{"name": "test", "state": "SUCCESS", "conclusion": "SUCCESS", "bucket": "pass", "link": "https://example.com", "description": ""}}])
@@ -154,6 +198,7 @@ else:
         require(pr.returncode == 0, f"pr failed: {pr.stderr}")
         pr_payload = json.loads(pr.stdout)
         require(pr_payload["pr"]["merge_state"] == "DIRTY", f"unexpected pr detail: {pr_payload}")
+        require(pr_payload["pr"]["review_requests"] == ["ovachiever"], f"unexpected review request normalization: {pr_payload}")
 
         inbox = run([str(AGENT_DO), "gh", "inbox", "--json"], cwd=ROOT, env=env)
         require(inbox.returncode == 0, f"inbox failed: {inbox.stderr}")
@@ -161,6 +206,25 @@ else:
         refs = {item["ref"]: item["reasons"] for item in inbox_payload["items"]}
         require("review_requested" in refs["ovachiever/agent-do#3"], f"missing review inbox reason: {inbox_payload}")
         require("authored_failed_checks" in refs["ovachiever/agent-do#4"], f"missing failed checks reason: {inbox_payload}")
+
+        awaiting = run(
+            [
+                str(AGENT_DO),
+                "gh",
+                "awaiting",
+                "--owner",
+                "Versova-Intelligence-Division",
+                "--author",
+                "ctyrrell-versova",
+                "--json",
+            ],
+            cwd=ROOT,
+            env=env,
+        )
+        require(awaiting.returncode == 0, f"awaiting failed: {awaiting.stderr}")
+        awaiting_payload = json.loads(awaiting.stdout)
+        require(awaiting_payload["items"][0]["ref"] == "Versova-Intelligence-Division/vms.io#9", f"unexpected awaiting refs: {awaiting_payload}")
+        require("not_reviewed_by_me" in awaiting_payload["items"][0]["reasons"], f"missing awaiting reason: {awaiting_payload}")
 
         threads = run([str(AGENT_DO), "gh", "threads", "ovachiever/agent-do#3", "--json"], cwd=ROOT, env=env)
         require(threads.returncode == 0, f"threads failed: {threads.stderr}")

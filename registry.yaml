@@ -1452,6 +1452,7 @@ tools:
       whoami: Show authenticated GitHub user
       repos: List or sync accessible repositories
       inbox: Show actionable PR work across repositories
+      awaiting: Show open PRs likely awaiting your review by broad review heuristics
       prs: Search pull requests
       pr: Show PR details
       diff: Show PR diff
@@ -1467,6 +1468,8 @@ tools:
     examples:
     - intent: show GitHub pull requests that need me
       command: agent-gh inbox
+    - intent: show PRs awaiting my review in VID repos
+      command: agent-gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova
     - intent: list open PRs across my repos
       command: agent-gh prs --state open
     - intent: review pull request 3 in agent-do
@@ -1479,6 +1482,7 @@ tools:
       default_command: inbox
       recommended_entrypoints:
       - agent-do gh inbox
+      - agent-do gh awaiting --owner <owner>
       - agent-do gh prs --state open
       - agent-do gh review owner/repo#123 --summary
       discover_keywords:
@@ -1488,12 +1492,15 @@ tools:
       - review comments
       - unresolved threads
       - requested review
+      - awaiting review
+      - waiting for my review
       - approve pr
       - merge pr
       - github inbox
       prompt_patterns:
       - '\b(?:github|gh)\b.*\b(?:pull request|pr|review|merge|approve|checks?)\b'
       - '\b(?:what|which)\s+prs?\s+(?:need|needs|want|wants)\s+me\b'
+      - '\bprs?\b.*\b(?:awaiting|waiting)\b.*\b(?:my|me)\b.*\breview\b'
       - '\bunresolved\s+(?:review\s+)?comments?\b'
       raw_cli_equivalents:
       - pattern: '^\s*gh\s+(?:search\s+prs|pr\s+(?:view|diff|checks|review|merge|ready))\b'

@@ -188,7 +188,9 @@ def registry_prompt_match(intent: str, registry: dict) -> Optional[dict]:
     if not best_cmd and commands:
         best_cmd = commands[0]
 
-    if tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", intent_lower):
+    if tool == "gh" and re.search(r"\b(?:awaiting|waiting)\b.*\breview\b|\breview\b.*\b(?:awaiting|waiting)\b", intent_lower):
+        best_cmd = "awaiting"
+    elif tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", intent_lower):
         best_cmd = "inbox"
     else:
         for cmd in commands:

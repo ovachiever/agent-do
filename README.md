@@ -414,6 +414,7 @@ When you need GitHub pull request and review state across repos:
 
 ```bash
 agent-do gh inbox
+agent-do gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova
 agent-do gh prs --state open
 agent-do gh review ovachiever/agent-do#3 --summary
 agent-do gh threads ovachiever/agent-do#3

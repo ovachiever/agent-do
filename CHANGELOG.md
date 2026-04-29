@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- `agent-do gh` for GitHub repository, pull request, review, and merge work-state across accessible repos, with `inbox`, `prs`, `pr`, `diff`, `threads`, `checks`, `review`, `approve`, `request-changes`, `comment`, `merge`, `ready`, and `draft` commands.
+- `agent-do gh` for GitHub repository, pull request, review, and merge work-state across accessible repos, with `inbox`, `awaiting`, `prs`, `pr`, `diff`, `threads`, `checks`, `review`, `approve`, `request-changes`, `comment`, `merge`, `ready`, and `draft` commands.
 - `agent-do notify` as a root-level notification contract over `sms`, `email`, `slack`, `messenger`, and local `pipe`, backed by `bin/notify` and `lib/notify.py` instead of another registry tool.
 - Rule-driven notification emission through `agent-do notify set-rule` and `agent-do notify emit`, with exact fact matching, message templates, fingerprints, and cooldown-aware delivery state.
 - `agent-do notify delete-rule` and `agent-do notify reset-state` for rule cleanup and cooldown-state hygiene.
@@ -63,6 +63,7 @@
 - `agent-do macos` and `agent-do screen` now require explicit `+live(...)` approval, or a matching active live lease, before performing direct visible-machine control actions like click, type, scroll, focus, open, or dialog clicks.
 
 ### Fixed
+- `agent-do gh` now distinguishes strict GitHub review requests from broader awaiting-review PRs, and it normalizes direct `gh pr view` reviewer objects instead of reporting `[null]`.
 - `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.
 - `agent-do namecheap dns-add` no longer crashes after successful writes because of the bare `host` reference in its success path.
 - `agent-do render` commands now resolve services by name again; `resolve_service` was querying an invalid `name[]=` filter that the Render API rejects as "not a valid field," so every name-based lookup fell through to the not-found branch and only `srv-xxx` IDs worked.

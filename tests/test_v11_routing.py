@@ -96,6 +96,16 @@ def main() -> int:
     gh_context = gh_prompt_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do gh inbox" in gh_context, f"expected gh inbox routing context, got: {gh_context}")
 
+    gh_awaiting_prompt = run(
+        "python3",
+        "hooks/agent-do-prompt-router.py",
+        input_text='{"prompt":"which PRs are awaiting my review on GitHub"}',
+    )
+    require(gh_awaiting_prompt.returncode == 0, f"gh awaiting prompt-router failed: {gh_awaiting_prompt.stderr}")
+    gh_awaiting_prompt_payload = json.loads(gh_awaiting_prompt.stdout)
+    gh_awaiting_context = gh_awaiting_prompt_payload["hookSpecificOutput"]["additionalContext"]
+    require("agent-do gh awaiting" in gh_awaiting_context, f"expected gh awaiting routing context, got: {gh_awaiting_context}")
+
     spec_prompt_result = run(
         "python3",
         "hooks/agent-do-prompt-router.py",
@@ -161,6 +171,12 @@ def main() -> int:
     gh_payload = json.loads(gh_offline.stdout)
     require(gh_payload["tool"] == "gh", f"unexpected gh offline tool: {gh_payload}")
     require(gh_payload["command"] == "inbox", f"expected gh inbox for actionable PR prompt: {gh_payload}")
+
+    gh_awaiting = run("python3", "bin/pattern-matcher", "--json", "which PRs are awaiting my review")
+    require(gh_awaiting.returncode == 0, f"gh awaiting pattern matcher failed: {gh_awaiting.stderr}")
+    gh_awaiting_payload = json.loads(gh_awaiting.stdout)
+    require(gh_awaiting_payload["tool"] == "gh", f"unexpected gh awaiting tool: {gh_awaiting_payload}")
+    require(gh_awaiting_payload["command"] == "awaiting", f"expected gh awaiting for awaiting-review prompt: {gh_awaiting_payload}")
 
     suggest = run("./agent-do", "suggest", "deploy this on vercel", "--json")
     require(suggest.returncode == 0, f"suggest failed: {suggest.stderr}")

@@ -70,6 +70,15 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def parse_github_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def ensure_state_dir() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -254,6 +263,13 @@ def normalize_pr(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def review_request_label(request: dict[str, Any]) -> str | None:
+    reviewer = request.get("requestedReviewer")
+    if not isinstance(reviewer, dict):
+        reviewer = request
+    return reviewer.get("login") or reviewer.get("slug") or reviewer.get("name")
+
+
 def search_prs(args: argparse.Namespace) -> list[dict[str, Any]]:
     gh_args = ["search", "prs", "--json", PR_SEARCH_FIELDS, "--limit", str(args.limit)]
     has_explicit_scope = bool(
@@ -315,10 +331,11 @@ def normalize_pr_detail(ref: PrRef, payload: dict[str, Any]) -> dict[str, Any]:
         "additions": payload.get("additions"),
         "deletions": payload.get("deletions"),
         "review_requests": [
-            (request.get("requestedReviewer") or {}).get("login")
-            or (request.get("requestedReviewer") or {}).get("name")
+            label
             for request in review_requests
             if isinstance(request, dict)
+            for label in [review_request_label(request)]
+            if label
         ],
         "latest_reviews": [
             {
@@ -484,6 +501,116 @@ def build_inbox(limit: int) -> list[dict[str, Any]]:
     return list(items.values())[:limit]
 
 
+def is_bot_login(login: str | None) -> bool:
+    if not login:
+        return False
+    lower = login.lower()
+    return lower.endswith("[bot]") or lower in {"dependabot", "dependabot-preview"}
+
+
+def search_candidates_for_awaiting(args: argparse.Namespace) -> list[dict[str, Any]]:
+    items: dict[str, dict[str, Any]] = {}
+
+    def add(prs: list[dict[str, Any]]) -> None:
+        for pr in prs:
+            key = pr.get("ref") or pr.get("url")
+            if key:
+                items.setdefault(key, pr)
+
+    base = argparse.Namespace(
+        limit=args.limit,
+        state="open",
+        repo=args.repo or [],
+        owner=args.owner or [],
+        author=None,
+        review_requested=None,
+        review=None,
+        checks=None,
+        query=args.query,
+    )
+
+    strict = argparse.Namespace(**{**vars(base), "review_requested": "me"})
+    add(search_prs(strict))
+
+    has_broad_scope = bool(args.repo or args.owner or args.author or args.query)
+    if has_broad_scope:
+        authors = args.author or [None]
+        for author in authors:
+            broad = argparse.Namespace(**{**vars(base), "author": author})
+            add(search_prs(broad))
+
+    return list(items.values())
+
+
+def awaiting_reasons(detail: dict[str, Any], viewer: str, *, include_reviewed: bool) -> list[str]:
+    reasons: list[str] = []
+    review_requests = set(detail.get("review_requests") or [])
+    if viewer in review_requests:
+        reasons.append("review_requested")
+
+    viewer_reviews = [
+        review
+        for review in detail.get("latest_reviews", [])
+        if isinstance(review, dict) and review.get("author") == viewer
+    ]
+    latest_review = max(
+        viewer_reviews,
+        key=lambda review: review.get("submitted_at") or "",
+        default=None,
+    )
+    if latest_review is None:
+        reasons.append("not_reviewed_by_me")
+        return reasons
+
+    review_state = latest_review.get("state")
+    submitted_at = parse_github_time(latest_review.get("submitted_at"))
+    updated_at = parse_github_time(detail.get("updated_at"))
+    if submitted_at and updated_at and updated_at > submitted_at:
+        reasons.append("updated_after_my_review")
+    elif review_state == "COMMENTED":
+        reasons.append("commented_not_decisive")
+    elif include_reviewed:
+        reasons.append(f"reviewed_by_me:{review_state or 'unknown'}")
+
+    return reasons
+
+
+def build_awaiting(args: argparse.Namespace) -> dict[str, Any]:
+    viewer = current_user().get("login") or ""
+    candidates = search_candidates_for_awaiting(args)
+    details: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        repo = candidate.get("repo")
+        number = candidate.get("number")
+        if not repo or not number:
+            continue
+        ref = f"{repo}#{number}"
+        if ref in seen:
+            continue
+        seen.add(ref)
+        detail = pr_detail(PrRef(repo=repo, number=str(number), original=ref))
+        if str(detail.get("state") or "").upper() != "OPEN":
+            continue
+        if detail.get("draft") and not args.include_drafts:
+            continue
+        if detail.get("author") == viewer:
+            continue
+        if is_bot_login(detail.get("author")) and not args.include_bots:
+            continue
+        reasons = awaiting_reasons(detail, viewer, include_reviewed=args.include_reviewed)
+        if not reasons:
+            continue
+        details.append({**detail, "reasons": reasons})
+
+    details.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+    scope_note = None
+    if not (args.repo or args.owner or args.author or args.query):
+        scope_note = "Unscoped awaiting uses strict review requests only. Add --owner, --repo, --author, or a query for broader not-yet-reviewed PR discovery."
+    return {"viewer": viewer, "count": len(details), "items": details[: args.limit], "scope_note": scope_note}
+
+
 def print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
@@ -562,6 +689,16 @@ def cmd_inbox(args: argparse.Namespace) -> None:
         print_table(entries, ["ref", "reasons", "state", "author", "updated_at", "title"])
 
 
+def cmd_awaiting(args: argparse.Namespace) -> None:
+    payload = build_awaiting(args)
+    if args.json:
+        print_json(payload)
+    else:
+        print_table(payload["items"], ["ref", "reasons", "state", "author", "updated_at", "title"])
+        if payload.get("scope_note"):
+            print(f"\nNote: {payload['scope_note']}")
+
+
 def cmd_pr(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
     detail = pr_detail(ref)
@@ -605,7 +742,7 @@ def cmd_checks(args: argparse.Namespace) -> None:
     if args.json:
         print_json(payload)
     else:
-        print_table(checks, ["name", "state", "conclusion", "bucket", "link"])
+        print_table(checks, ["name", "state", "bucket", "link"])
 
 
 def cmd_review_summary(args: argparse.Namespace) -> None:
@@ -715,6 +852,18 @@ def build_parser() -> argparse.ArgumentParser:
     inbox.add_argument("--limit", type=int, default=30)
     inbox.set_defaults(func=cmd_inbox)
 
+    awaiting = sub.add_parser("awaiting", help="Show open PRs likely awaiting your review")
+    awaiting.add_argument("query", nargs="?")
+    awaiting.add_argument("--json", action="store_true")
+    awaiting.add_argument("--limit", type=int, default=50)
+    awaiting.add_argument("--repo", action="append")
+    awaiting.add_argument("--owner", action="append")
+    awaiting.add_argument("--author", action="append")
+    awaiting.add_argument("--include-bots", action="store_true")
+    awaiting.add_argument("--include-drafts", action="store_true")
+    awaiting.add_argument("--include-reviewed", action="store_true")
+    awaiting.set_defaults(func=cmd_awaiting)
+
     pr = sub.add_parser("pr", help="Show PR detail")
     pr.add_argument("pr", nargs="?")
     pr.add_argument("--json", action="store_true")
@@ -784,6 +933,7 @@ Commands:
   whoami                         Show authenticated GitHub user
   repos [sync]                   List or sync accessible repositories
   inbox                          Show actionable PR work across repositories
+  awaiting                       Show open PRs likely awaiting your review
   prs [query]                    Search pull requests
   pr <repo#num|url|num>          Show PR details
   diff <pr>                      Show PR diff
@@ -799,6 +949,7 @@ Commands:
 
 Examples:
   agent-do gh inbox
+  agent-do gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova
   agent-do gh prs --review-requested
   agent-do gh pr ovachiever/agent-do#3 --json
   agent-do gh threads ovachiever/agent-do#3
