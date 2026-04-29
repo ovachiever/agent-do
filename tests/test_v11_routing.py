@@ -18,13 +18,18 @@ from registry import load_registry, match_prompt_tools, find_raw_cli_equivalent 
 
 
 def run(*args: str, input_text: str | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    run_env = os.environ.copy()
+    if env:
+        run_env.update(env)
+    run_env.setdefault("AGENT_DO_SUGGEST_AI", "0")
+    run_env.setdefault("AGENT_DO_HOOK_AI", "0")
     return subprocess.run(
         list(args),
         cwd=ROOT,
         input=input_text,
         text=True,
         capture_output=True,
-        env=env,
+        env=run_env,
         check=False,
     )
 
@@ -272,6 +277,26 @@ def main() -> int:
         second_additional = second_payload["hookSpecificOutput"]["additionalContext"]
         require("Coord Focus Reminder" in second_additional, f"expected coord focus reminder, got: {second_additional}")
         require("agent-do coord focus set" in second_additional, f"expected coord focus hint, got: {second_additional}")
+
+        quiet_prompt = run(
+            "python3",
+            "hooks/agent-do-prompt-router.py",
+            input_text=json.dumps({"prompt": "could you tell me whether agent-do suggest uses an AI model?", "cwd": str(project)}),
+            env=second_env,
+        )
+        require(quiet_prompt.returncode == 0, f"quiet coord prompt-router failed: {quiet_prompt.stderr}")
+        require(quiet_prompt.stdout.strip() == "", f"did not expect coord noise for discussion prompt, got: {quiet_prompt.stdout}")
+
+        work_prompt = run(
+            "python3",
+            "hooks/agent-do-prompt-router.py",
+            input_text=json.dumps({"prompt": "fix the render config in this repo", "cwd": str(project)}),
+            env=second_env,
+        )
+        require(work_prompt.returncode == 0, f"work coord prompt-router failed: {work_prompt.stderr}")
+        work_prompt_payload = json.loads(work_prompt.stdout)
+        work_prompt_context = work_prompt_payload["hookSpecificOutput"]["additionalContext"]
+        require("Coord Focus Reminder" in work_prompt_context, f"expected coord focus for work prompt, got: {work_prompt_context}")
 
         subprocess.run(
             [str(ROOT / "agent-do"), "coord", "focus", "set", "render work", "--path", "recognition-oracle/render.yaml", "--json"],

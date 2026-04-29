@@ -20,6 +20,7 @@ from registry import (  # noqa: E402
     get_tool_readiness,
     rank_tools_for_project_signals,
 )
+from ai_router import call_json_model  # noqa: E402
 
 
 PROJECT_MARKERS = (
@@ -110,17 +111,30 @@ def infer_primary_entrypoint(tool: str, info: dict, query: str) -> str:
     query_lower = query.lower()
     entrypoints = get_recommended_entrypoints(info)
 
+    command_hits = []
     for command in commands:
-        if command.lower() in query_lower:
-            for entry in entrypoints:
-                if entry.startswith(f"agent-do {tool} {command}"):
-                    return entry
-            return f"agent-do {tool} {command}"
+        variants = {command.lower(), command.lower().replace("-", " ")}
+        if command.endswith("s"):
+            variants.add(command[:-1].lower())
+        for variant in variants:
+            match = re.search(rf"(?<!\w){re.escape(variant)}(?!\w)", query_lower)
+            if match:
+                command_hits.append((match.start(), -len(variant), command))
+                break
+
+    if command_hits:
+        _pos, _length, command = sorted(command_hits)[0]
+        prefix = f"agent-do {tool} {command}"
+        for entry in entrypoints:
+            if entry == prefix or entry.startswith(f"{prefix} "):
+                return entry
+        return f"agent-do {tool} {command}"
 
     default_command = get_default_command(info)
     if default_command:
+        prefix = f"agent-do {tool} {default_command}"
         for entry in entrypoints:
-            if entry.startswith(f"agent-do {tool} {default_command}"):
+            if entry == prefix or entry.startswith(f"{prefix} "):
                 return entry
         if entrypoints:
             return entrypoints[0]
@@ -149,17 +163,142 @@ def build_item(tool: str, info: dict, query: str, source: str, score: int | floa
     }
 
 
-def suggest(query: str, limit: int) -> list[dict]:
+def compact_candidate(item: dict) -> dict:
+    info = item.get("_info") or {}
+    commands = list((info.get("commands") or {}).keys())
+    examples = []
+    for example in info.get("examples", [])[:4]:
+        intent = example.get("intent")
+        command = example.get("command")
+        if intent and command:
+            examples.append({"intent": intent, "command": command})
+
+    return {
+        "tool": item["tool"],
+        "description": item.get("description", ""),
+        "commands": commands[:30],
+        "recommended_entrypoints": get_recommended_entrypoints(info),
+        "current_primary": item.get("primary"),
+        "examples": examples,
+    }
+
+
+def command_is_safe_for_tool(command: str, tool: str) -> bool:
+    if not command:
+        return False
+    if "\n" in command or "&&" in command or ";" in command or "|" in command:
+        return False
+    prefix = f"agent-do {tool}"
+    return command == prefix or command.startswith(f"{prefix} ")
+
+
+def apply_ai_suggestion(query: str, items: list[dict], ai_mode: str | None) -> list[dict]:
+    if not items:
+        return items
+
+    candidates = [compact_candidate(item) for item in items[:8]]
+    prompt = f"""You improve `agent-do suggest` results.
+
+The registry is the source of truth. Choose exactly one listed tool and one best first command for the user request.
+
+User request:
+{query}
+
+Candidate tools:
+{json.dumps(candidates, indent=2)}
+
+Respond with JSON only:
+{{
+  "tool": "one listed tool name",
+  "primary": "one command, starting with agent-do <tool>",
+  "entrypoints": ["primary command", "optional next command"],
+  "confidence": 0.0,
+  "reason": "short reason"
+}}
+
+Rules:
+- Do not invent tool names.
+- Do not invent shell pipelines or chained commands.
+- Prefer the most action-specific command over a generic list/status command.
+- Use placeholders like <project> only when the real value is unknown.
+"""
+
+    result = call_json_model(
+        prompt,
+        flag_name="AGENT_DO_SUGGEST_AI",
+        flag_override=ai_mode,
+        system=(
+            "You are a senior CLI routing engineer. Return strict JSON only. "
+            "Be engineering-ready, clear, and concise. Use the fewest words that preserve correctness; "
+            "do not omit necessary operational detail."
+        ),
+    )
+    if not result:
+        return items
+
+    chosen_tool = str(result.get("tool") or "").strip()
+    if not chosen_tool:
+        return items
+
+    chosen_idx = next((idx for idx, item in enumerate(items) if item["tool"] == chosen_tool), None)
+    if chosen_idx is None:
+        return items
+
+    chosen = dict(items[chosen_idx])
+    primary = str(result.get("primary") or "").strip()
+    if command_is_safe_for_tool(primary, chosen_tool):
+        chosen["primary"] = primary
+
+    result_entrypoints = result.get("entrypoints") or []
+    if isinstance(result_entrypoints, str):
+        result_entrypoints = [result_entrypoints]
+
+    entrypoints = []
+    for entry in result_entrypoints:
+        entry = str(entry).strip()
+        if command_is_safe_for_tool(entry, chosen_tool) and entry not in entrypoints:
+            entrypoints.append(entry)
+    for entry in chosen.get("entrypoints", []):
+        if entry not in entrypoints:
+            entrypoints.append(entry)
+    if chosen.get("primary") and chosen["primary"] not in entrypoints:
+        entrypoints.insert(0, chosen["primary"])
+    chosen["entrypoints"] = entrypoints[:4]
+    chosen["source"] = "ai"
+    chosen["ai"] = {
+        "model": result.get("_model"),
+        "confidence": result.get("confidence"),
+        "reason": result.get("reason"),
+    }
+
+    reordered = [chosen] + [item for idx, item in enumerate(items) if idx != chosen_idx]
+    return reordered
+
+
+def public_item(item: dict) -> dict:
+    clean = dict(item)
+    clean.pop("_info", None)
+    return clean
+
+
+def suggest(query: str, limit: int, ai_mode: str | None = None) -> list[dict]:
     registry = load_registry()
-    shared_matches = match_prompt_tools(registry, query, limit=limit)
+    candidate_limit = max(limit, 8)
+    shared_matches = match_prompt_tools(registry, query, limit=candidate_limit)
     if shared_matches:
-        return [
+        items = [
             build_item(match["tool"], match["info"], query, "routing", match["score"])
             for match in shared_matches
         ]
+        for item, match in zip(items, shared_matches):
+            item["_info"] = match["info"]
+        return [public_item(item) for item in apply_ai_suggestion(query, items, ai_mode)[:limit]]
 
-    search_matches = search_tools(registry, query)[:limit]
-    return [build_item(tool, info, query, "search", 0) for tool, info in search_matches]
+    search_matches = search_tools(registry, query)[:candidate_limit]
+    items = [build_item(tool, info, query, "search", 0) for tool, info in search_matches]
+    for item, (_tool, info) in zip(items, search_matches):
+        item["_info"] = info
+    return [public_item(item) for item in apply_ai_suggestion(query, items, ai_mode)[:limit]]
 
 
 def find(query: str, limit: int) -> list[dict]:
@@ -207,6 +346,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=5, help="Maximum number of results")
     parser.add_argument("--project", action="store_true", help="Suggest tools for the current project instead of a query")
     parser.add_argument("--cwd", default=".", help="Project path for --project mode")
+    parser.add_argument("--ai", choices=["auto", "on", "off"], default=None, help="Use the fast AI router for command selection")
     args = parser.parse_args()
 
     if args.project:
@@ -238,7 +378,7 @@ def main() -> int:
     if not query:
         parser.error("query is required unless --project is used")
 
-    items = suggest(query, args.limit) if args.mode == "suggest" else find(query, args.limit)
+    items = suggest(query, args.limit, ai_mode=args.ai) if args.mode == "suggest" else find(query, args.limit)
 
     if args.json:
         print(json.dumps({"mode": args.mode, "query": query, "results": items}, indent=2))

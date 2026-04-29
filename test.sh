@@ -66,6 +66,7 @@ check_output "--offline routes iOS screenshot intent" "agent-ios screenshot" "$A
 check_output "--offline routes network scan intent" "agent-network scan --port 3000" "$AGENT_DO" --offline "what's using port 3000"
 check_output "pattern matcher JSON uses iOS tool" '"tool": "ios"' "$SCRIPT_DIR/bin/pattern-matcher" --json "screenshot the iOS simulator"
 check_cmd "v1.1 routing foundation tests" python3 "$SCRIPT_DIR/tests/test_v11_routing.py"
+check_cmd "suggest AI routing tests" python3 "$SCRIPT_DIR/tests/test_suggest_ai.py"
 check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
 check_cmd "dispatch tests" python3 "$SCRIPT_DIR/tests/test_dispatch.py"
 check_cmd "auth tests" python3 "$SCRIPT_DIR/tests/test_auth.py"

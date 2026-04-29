@@ -36,6 +36,11 @@ try:
 except ModuleNotFoundError:
     record_nudge_event = None
 
+try:
+    from ai_router import call_json_model
+except ModuleNotFoundError:
+    call_json_model = None
+
 # Keywords/phrases that map to agent-do tools
 PROMPT_ROUTES = {
     'ios': {
@@ -326,6 +331,22 @@ COORD_PATTERNS = [
     r"\bcoordinate\b.*\bagent\b",
 ]
 
+COORD_WORK_PATTERNS = [
+    r"\b(build|implement|fix|edit|change|update|refactor|write|add|remove|delete)\b",
+    r"\b(run|test|debug|repair|review|merge|commit|push|deploy|ship)\b",
+    r"\b(open|create)\s+(a\s+)?pr\b",
+    r"\baddress\s+(comments?|feedback|review)\b",
+    r"\bdo\s+it\b",
+    r"\bgo\b.*\b(do|implement|fix|build|ship)\b",
+]
+
+COORD_DISCUSSION_PATTERNS = [
+    r"\b(could|can)\s+you\s+(tell|explain|discuss)\b",
+    r"\b(what|why|how|does|do|is|are)\b.*\?",
+    r"\b(thoughts?|opinion|recommend|pick|choose|compare)\b",
+    r"\b(let'?s|lets)\s+(talk|discuss|think|pick|choose)\b",
+]
+
 
 def analyze_prompt(prompt: str, skip_tools: set[str] | None = None) -> list[tuple[str, str]]:
     """Analyze prompt with the legacy route table."""
@@ -366,10 +387,20 @@ def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
         elif tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", prompt.lower()):
             primary = "agent-do gh inbox"
         else:
+            command_hits = []
+            prompt_lower = prompt.lower()
             for command in commands:
-                if command.lower() in prompt.lower():
-                    primary = f"agent-do {tool} {command}"
-                    break
+                variants = {command.lower(), command.lower().replace("-", " ")}
+                if command.endswith("s"):
+                    variants.add(command[:-1].lower())
+                for variant in variants:
+                    match = re.search(rf"(?<!\w){re.escape(variant)}(?!\w)", prompt_lower)
+                    if match:
+                        command_hits.append((match.start(), -len(variant), command))
+                        break
+            if command_hits:
+                _pos, _length, command = sorted(command_hits)[0]
+                primary = f"agent-do {tool} {command}"
 
         if primary is None and get_default_command is not None:
             default_command = get_default_command(info)
@@ -452,6 +483,111 @@ def detect_coord_prompt(prompt: str) -> bool:
     return any(re.search(pattern, prompt_lower) for pattern in COORD_PATTERNS)
 
 
+def prompt_looks_like_coord_work(prompt: str) -> bool:
+    prompt_lower = prompt.lower()
+    work = any(re.search(pattern, prompt_lower) for pattern in COORD_WORK_PATTERNS)
+    if not work:
+        return False
+
+    discussion = any(re.search(pattern, prompt_lower) for pattern in COORD_DISCUSSION_PATTERNS)
+    if discussion and not re.search(r"\b(do\s+it|go|now|please\s+(build|fix|implement|update))\b", prompt_lower):
+        return False
+
+    return True
+
+
+def ai_should_emit_coord_context(
+    prompt: str,
+    *,
+    active_peers: list[dict],
+    focus_goal: str,
+    interrupts: list[dict],
+    explicit: bool,
+    local_work_signal: bool,
+) -> bool | None:
+    if call_json_model is None:
+        return None
+
+    interrupt_summaries = [
+        {"kind": item.get("kind"), "summary": item.get("summary")}
+        for item in interrupts[:3]
+    ]
+    peer_summaries = [
+        {
+            "agent": peer.get("alias") or peer.get("agent_id"),
+            "goal": ((peer.get("focus") or {}).get("goal")) or "",
+        }
+        for peer in active_peers[:5]
+    ]
+    prompt_text = f"""Decide whether a UserPromptSubmit hook should show agent-do coordination context.
+
+Show coord context only when it is useful now:
+- yes for prompts asking the assistant to edit files, run tests, review code/PRs, commit, push, deploy, or coordinate with other agents
+- yes for real coord interrupts that affect the requested work
+- no for discussion, model choice, explanation, planning, or "tell me" questions where no work is starting yet
+
+Input:
+{json.dumps({
+    "prompt": prompt,
+    "explicit_coord_request": explicit,
+    "local_work_signal": local_work_signal,
+    "current_agent_has_focus": bool(focus_goal),
+    "active_peers": peer_summaries,
+    "interrupts": interrupt_summaries,
+}, indent=2)}
+
+Respond with JSON only:
+{{
+  "emit_coord_context": true,
+  "reason": "short reason"
+}}
+"""
+    decision = call_json_model(
+        prompt_text,
+        flag_name="AGENT_DO_HOOK_AI",
+        system=(
+            "You are a precise hook gate for coding-agent prompts. Return strict JSON only. "
+            "Be engineering-ready, clear, and concise. Use the fewest words that preserve correctness; "
+            "do not omit necessary operational detail."
+        ),
+    )
+    if not isinstance(decision, dict):
+        return None
+    value = decision.get("emit_coord_context")
+    return value if isinstance(value, bool) else None
+
+
+def should_emit_coord_context(
+    prompt: str,
+    *,
+    active_peers: list[dict],
+    focus_goal: str,
+    interrupts: list[dict],
+    explicit: bool,
+) -> bool:
+    if explicit:
+        return True
+    if not active_peers and not interrupts:
+        return False
+
+    local_work_signal = prompt_looks_like_coord_work(prompt)
+    if not local_work_signal and not interrupts:
+        return False
+
+    ai_decision = ai_should_emit_coord_context(
+        prompt,
+        active_peers=active_peers,
+        focus_goal=focus_goal,
+        interrupts=interrupts,
+        explicit=explicit,
+        local_work_signal=local_work_signal,
+    )
+    if ai_decision is not None:
+        return ai_decision
+
+    return local_work_signal
+
+
 def resolve_agent_do_binary() -> str | None:
     direct = which("agent-do")
     if direct:
@@ -508,7 +644,7 @@ def load_coord_context(prompt: str, cwd: str | None) -> tuple[str, list[str]]:
     focus_goal = ((touch_payload.get("focus") or {}).get("goal")) or ""
 
     interrupts_run = subprocess.run(
-        [agent_do, "coord", "interrupts", "--json", "--mark-seen", "--limit", "5"],
+        [agent_do, "coord", "interrupts", "--json", "--limit", "5"],
         cwd=cwd,
         text=True,
         capture_output=True,
@@ -520,7 +656,24 @@ def load_coord_context(prompt: str, cwd: str | None) -> tuple[str, list[str]]:
         interrupts_payload = json.loads(interrupts_run.stdout)
 
     interrupts = interrupts_payload.get("interrupts", [])
+    should_emit = should_emit_coord_context(
+        prompt,
+        active_peers=active_peers,
+        focus_goal=focus_goal,
+        interrupts=interrupts,
+        explicit=explicit,
+    )
+    if not should_emit:
+        return "", []
+
     if interrupts:
+        subprocess.run(
+            [agent_do, "coord", "interrupts", "--json", "--mark-seen", "--limit", "5"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
         lines = []
         for item in interrupts:
             prefix = "[new] " if item.get("new") else ""
