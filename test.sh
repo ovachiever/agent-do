@@ -109,6 +109,100 @@ else
     fail "snapshot compact mode emits single-line JSON" "output: $snapshot_compact_output"
 fi
 
+# lib/snapshot.sh: snapshot_field encodes the full RFC 8259 control range
+# (all of U+0000..U+001F plus backslash and double-quote) when python3 is
+# available. Exercises named controls plus arbitrary control bytes (SOH, ESC,
+# DEL) that the previous manual-escape implementation passed through raw.
+snapshot_encode_output=$(
+    bash -c '
+        source "$0/lib/snapshot.sh"
+        snapshot_begin encode-test
+        snapshot_field tab        "$(printf "a\tb")"
+        snapshot_field cr         "$(printf "a\rb")"
+        snapshot_field bs         "$(printf "a\bb")"
+        snapshot_field ff         "$(printf "a\fb")"
+        snapshot_field lf         "$(printf "a\nb")"
+        snapshot_field soh        "$(printf "a\x01b")"
+        snapshot_field esc        "$(printf "a\x1bb")"
+        snapshot_field del        "$(printf "a\x7fb")"
+        snapshot_field unicode    "Unicode: 日本語 🌟"
+        snapshot_field backslash  "C:\\Users\\ct"
+        snapshot_field quote      "she said \"hi\""
+        snapshot_field empty      ""
+        snapshot_end
+    ' "$SCRIPT_DIR" 2>&1
+)
+if echo "$snapshot_encode_output" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+# Round-trip values that include named C0 controls, arbitrary controls,
+# unicode, backslash, quote, and empty string.
+assert d["tab"] == "a\tb"
+assert d["soh"] == "a\x01b"
+assert d["esc"] == "a\x1bb"
+assert d["unicode"] == "Unicode: 日本語 🌟"
+assert d["empty"] == ""
+' 2>/dev/null; then
+    pass "snapshot_field encodes full RFC 8259 control range"
+else
+    fail "snapshot_field encodes full RFC 8259 control range" "invalid or wrong JSON: $snapshot_encode_output"
+fi
+
+# lib/snapshot.sh: snapshot_error encodes its message via the same path,
+# so messages containing quotes, controls, or backslashes round-trip cleanly.
+snapshot_error_output=$(
+    bash -c '
+        source "$0/lib/snapshot.sh"
+        snapshot_begin err-test
+        snapshot_error "boom: \"quoted\" with$(printf "\ttab")$(printf "\nlf")"
+    ' "$SCRIPT_DIR" 2>&1
+)
+if echo "$snapshot_error_output" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d["error"] == "boom: \"quoted\" with\ttab\nlf"
+' 2>/dev/null; then
+    pass "snapshot_error encodes message via JSON encoder"
+else
+    fail "snapshot_error encodes message via JSON encoder" "invalid or wrong JSON: $snapshot_error_output"
+fi
+
+# lib/snapshot.sh: invalid UTF-8 in one field must not poison sibling fields.
+# Pre-fix behavior: a single bad-UTF-8 value caused python encoding to abort,
+# the whole snapshot fell back to manual escaping, and unrelated control bytes
+# in other fields silently lost their \u-escaping (and the snapshot's overall
+# bytes were no longer valid UTF-8). Post-fix: the bad value is encoded via
+# errors="replace" (U+FFFD substitution) and other fields keep full encoder.
+snapshot_bounded_output=$(
+    bash -c '
+        source "$0/lib/snapshot.sh"
+        snapshot_begin bounded-test
+        snapshot_field ascii   "hello"
+        snapshot_field ctrl    "$(printf "a\x01b")"
+        snapshot_field bad     "$(printf "before\xc3\x28after")"
+        snapshot_field other   "$(printf "x\x02y")"
+        AGENT_DO_SNAPSHOT_COMPACT=1 snapshot_end
+    ' "$SCRIPT_DIR" 2>&1
+)
+if printf '%s' "$snapshot_bounded_output" | python3 -c '
+import sys, json
+data = sys.stdin.buffer.read()
+# Snapshot output must be valid UTF-8 even when a value contains invalid bytes.
+text = data.decode("utf-8")
+d = json.loads(text)
+# Clean fields must keep full encoder semantics (control chars escaped).
+assert d["ctrl"] == "a\x01b"
+assert d["other"] == "x\x02y"
+# Bad-bytes field gets U+FFFD substitution; we just verify it round-trips and
+# the surrounding text is intact.
+assert d["bad"].startswith("before")
+assert d["bad"].endswith("(after")
+' 2>/dev/null; then
+    pass "snapshot bad-UTF-8 field does not poison siblings"
+else
+    fail "snapshot bad-UTF-8 field does not poison siblings" "invalid or wrong JSON: $snapshot_bounded_output"
+fi
+
 BOOTSTRAP_PROJECT="$TEST_HOME/bootstrap-project"
 mkdir -p "$BOOTSTRAP_PROJECT"
 cat > "$BOOTSTRAP_PROJECT/CLAUDE.md" <<'EOF'

@@ -30,6 +30,8 @@
 - `lib/snapshot.sh` honors `AGENT_DO_SNAPSHOT_COMPACT=1` to emit single-line JSON instead of pretty-printed output, for piping to jq, log lines, or other tools that prefer one document per line.
 
 ### Changed
+- `lib/snapshot.sh` `snapshot_field` now encodes string values via `python3`'s `json` module when available, covering the full RFC 8259 control range (`U+0000`–`U+001F` plus `\\` and `\"`); a manual fallback covering the named C0 controls is used when `python3` is unavailable. `snapshot_error` now routes its message through the same encoder so error JSON is consistent with snapshot JSON.
+- `lib/snapshot.sh` `snapshot_end` now bounds invalid-UTF-8 failures to the offending value: each string is tried with strict UTF-8 decode and, on failure, re-decoded with `errors="replace"` so its bad bytes become U+FFFD. Sibling string fields keep full encoder semantics, snapshot output remains valid UTF-8 and valid JSON, and the helper no longer silently downgrades the whole snapshot to manual fallback when one value contains invalid bytes.
 - Session-start bootstrap handling now uses a native macOS prompt in the global Claude/Codex hook path instead of relying on the model to remember to ask in conversation.
 - `agent-do email` discovery now uses Apple Mail's local Envelope Index for account, mailbox, and message lookup, so large live mailboxes no longer block on AppleScript enumeration timeouts.
 - `agent-do email` now exposes `search`, `get --id`, and `mailboxes` on top of a unified structured query path, with explicit `metadata_only` message states and scoped unread counts that distinguish all-mailbox totals from inbox-only unread totals.
