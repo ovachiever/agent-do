@@ -76,6 +76,10 @@ Successful routes are cached and then scored by later outcomes, so the router ca
 
 `bin/suggest` remains registry-first. It builds candidate tools and commands from `registry.yaml`, then can optionally ask Claude Sonnet 4.6 with adaptive thinking to choose the best first command from those candidates. The model is not allowed to invent tools or shell pipelines; if the call is unavailable or returns an unsafe command, `suggest` falls back to deterministic local matching.
 
+### Prompt Hook AI
+
+`hooks/agent-do-prompt-router.py` uses the same Sonnet 4.6 adaptive-thinking helper for UserPromptSubmit routing, but with a different contract: it sends a compact full catalog to the model and asks whether any tool suggestion is worth surfacing. The hook emits nothing for weak matches, exact `agent-do <tool> ...` guidance for high-confidence matches, and non-blocking coord focus context when active peers exist and the current agent has no focus.
+
 ### Offline Pattern Matching
 
 `bin/pattern-matcher` now uses shared routing metadata from `registry.yaml` before falling back to legacy regex patterns. No API key needed. Handles common intents like "screenshot iOS", "list docker containers", and migrated discovery cases like "deploy this on vercel".
@@ -106,7 +110,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── lib/
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
 │   ├── registry.py         # Registry loader + shared routing helpers
-│   ├── ai_router.py        # Optional Claude JSON helper for suggest and hook gating
+│   ├── ai_router.py        # Optional Claude JSON helper for suggest and prompt-hook routing
 │   ├── cache.py            # Project-aware route memory + fuzzy matching
 │   ├── telemetry.py        # JSONL telemetry for suggestions and hard nudges
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for bash tools
@@ -279,7 +283,7 @@ agent-do works with any AI coding assistant that can execute shell commands:
 
 ### Hook Example (PreToolUse)
 
-Block raw commands and suggest agent-do alternatives:
+Nudge raw commands toward agent-do alternatives:
 
 ```python
 AGENT_DO_PATTERNS = {
@@ -289,6 +293,8 @@ AGENT_DO_PATTERNS = {
     r'\bplaywright\b|\bpuppeteer\b': ('browse', 'Use agent-do browse instead'),
 }
 ```
+
+Claude can consume the shared PreToolUse hook directly because it accepts `additionalContext`. Codex should use `hooks/agent-do-pretooluse-codex.py`, which runs the same check for telemetry but suppresses stdout because Codex rejects PreToolUse `additionalContext`.
 
 ## Exit Codes
 

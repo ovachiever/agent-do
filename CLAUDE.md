@@ -106,7 +106,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │   ├── state.py            # Session state CRUD (~/.agent-do/state.yaml)
 │   ├── registry.py         # Tool registry loader (merges user/bundled/plugin registries)
 │   ├── cache.py            # Project-aware route memory + fuzzy matching
-│   ├── ai_router.py        # Optional Claude JSON helper for suggest and hook gating
+│   ├── ai_router.py        # Optional Claude JSON helper for suggest and full-catalog prompt-hook routing
 │   ├── telemetry.py        # JSONL telemetry for nudges/suggestions
 │   ├── snapshot.sh         # Shared JSON snapshot helpers for tools
 │   ├── json-output.sh      # Shared --json flag and structured output for tools
@@ -198,7 +198,7 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 
 1. Create executable at `tools/agent-<name>` (must support `--help` flag)
 2. Add entry to `registry.yaml` with `description`, `capabilities`, `commands`, `examples`
-   - add `routing` metadata for discovery keywords, raw CLI equivalents, readiness hints, and project signals when the tool should participate in `suggest`, prompt nudges, or PreToolUse hard nudges
+   - add `routing` metadata for discovery keywords, raw CLI equivalents, readiness hints, and project signals when the tool should participate in `suggest`, UserPromptSubmit AI catalog routing, or PreToolUse hard nudges
 3. `--list` auto-discovers tools via filesystem scan of `tools/agent-*`
 
 ## Dependencies
@@ -212,9 +212,9 @@ All tools follow: **Connect → Snapshot → Interact → Verify → Save**
 ## Environment
 
 - `AGENT_DO_HOME`: Config/state directory (default: `~/.agent-do`)
-- `ANTHROPIC_API_KEY`: Required for natural language mode and optional AI-backed suggest/hook gating
+- `ANTHROPIC_API_KEY`: Required for natural language mode and optional AI-backed suggest/UserPromptSubmit routing
 - `AGENT_DO_SUGGEST_AI`: `auto|on|off` for AI-backed suggest command selection
-- `AGENT_DO_HOOK_AI`: `auto|on|off` for AI-backed UserPromptSubmit gating
+- `AGENT_DO_HOOK_AI`: `auto|on|off` for AI-backed UserPromptSubmit full-catalog routing
 - `AGENT_DO_AI_MODEL`: Defaults to `claude-sonnet-4-6`
 - `AGENT_DO_AI_EFFORT`: Defaults to `max` for Sonnet 4.6 adaptive thinking
 - `AGENT_DO_AI_MAX_TOKENS`: Defaults to `64000`, the API-required output ceiling

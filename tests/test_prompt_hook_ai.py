@@ -159,12 +159,14 @@ class Anthropic:
         current_env["AGENT_DO_HOME"] = str(coord_home)
         current_env["CODEX_THREAD_ID"] = "peer-two"
 
-        block = run_hook("fix the render config in this repo", cwd=project, env=current_env)
-        require(block.returncode == 0, f"coord AI block failed: {block.stderr}")
-        block_payload = json.loads(block.stdout)
-        require(block_payload.get("decision") == "block", f"expected coord block: {block_payload}")
-        require("agent-do coord focus set" in block_payload.get("reason", ""), f"expected focus command: {block_payload}")
-        require("render.yaml" in block_payload.get("reason", ""), f"expected AI focus path: {block_payload}")
+        focus = run_hook("fix the render config in this repo", cwd=project, env=current_env)
+        require(focus.returncode == 0, f"coord AI focus context failed: {focus.stderr}")
+        focus_payload = json.loads(focus.stdout)
+        focus_context = focus_payload["hookSpecificOutput"]["additionalContext"]
+        require(focus_payload.get("decision") != "block", f"did not expect blocking hook output: {focus_payload}")
+        require("Coord Focus Required" in focus_context, f"expected coord focus context: {focus_context}")
+        require("agent-do coord focus set" in focus_context, f"expected focus command: {focus_context}")
+        require("render.yaml" in focus_context, f"expected AI focus path: {focus_context}")
 
         discussion = run_hook("wait what was pr 6?", cwd=project, env=current_env)
         require(discussion.returncode == 0, f"discussion hook failed: {discussion.stderr}")

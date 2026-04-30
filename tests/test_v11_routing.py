@@ -148,6 +148,17 @@ def main() -> int:
     ios_context = ios_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do ios screenshot" in ios_context, f"expected ios replacement, got: {ios_context}")
 
+    codex_prewrap = run(
+        "python3",
+        "hooks/agent-do-pretooluse-codex.py",
+        input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
+    )
+    require(codex_prewrap.returncode == 0, f"codex pretool wrapper failed: {codex_prewrap.stderr}")
+    require(
+        codex_prewrap.stdout.strip() == "",
+        f"codex pretool wrapper must suppress unsupported additionalContext, got: {codex_prewrap.stdout}",
+    )
+
     offline = run("python3", "bin/pattern-matcher", "--json", "deploy this on vercel")
     require(offline.returncode == 0, f"pattern matcher failed: {offline.stderr}")
     offline_payload = json.loads(offline.stdout)
@@ -281,9 +292,11 @@ def main() -> int:
             env=second_env,
         )
         require(work_prompt.returncode == 0, f"work coord prompt-router failed: {work_prompt.stderr}")
-        work_block = json.loads(work_prompt.stdout)
-        require(work_block.get("decision") == "block", f"expected coord block for work prompt, got: {work_prompt.stdout}")
-        require("agent-do coord focus set" in work_block.get("reason", ""), f"expected focus command, got: {work_block}")
+        work_payload = json.loads(work_prompt.stdout)
+        work_context = work_payload["hookSpecificOutput"]["additionalContext"]
+        require("Coord Focus Required" in work_context, f"expected coord focus context, got: {work_context}")
+        require("agent-do coord focus set" in work_context, f"expected focus command, got: {work_context}")
+        require(work_payload.get("decision") != "block", f"did not expect blocking hook output: {work_payload}")
 
         docs_prompt = run(
             "python3",
@@ -292,9 +305,11 @@ def main() -> int:
             env=second_env,
         )
         require(docs_prompt.returncode == 0, f"docs prompt-router failed: {docs_prompt.stderr}")
-        docs_block = json.loads(docs_prompt.stdout)
-        require(docs_block.get("decision") == "block", f"expected coord block for docs work prompt, got: {docs_prompt.stdout}")
-        require("agent-do context search" not in docs_block.get("reason", ""), f"did not expect context nudge in block reason: {docs_block}")
+        docs_payload = json.loads(docs_prompt.stdout)
+        docs_context = docs_payload["hookSpecificOutput"]["additionalContext"]
+        require("Coord Focus Required" in docs_context, f"expected coord focus context for docs work prompt, got: {docs_prompt.stdout}")
+        require("agent-do context search" not in docs_context, f"did not expect context nudge in coord context: {docs_context}")
+        require(docs_payload.get("decision") != "block", f"did not expect blocking hook output: {docs_payload}")
 
         subprocess.run(
             [str(ROOT / "agent-do"), "coord", "focus", "set", "render work", "--path", "recognition-oracle/render.yaml", "--json"],
@@ -341,8 +356,10 @@ def main() -> int:
         )
         require(coord_prompt.returncode == 0, f"coord prompt-router failed: {coord_prompt.stderr}")
         coord_prompt_payload = json.loads(coord_prompt.stdout)
-        require(coord_prompt_payload.get("decision") == "block", f"expected coord block, got: {coord_prompt.stdout}")
-        require("coord interrupt is active" in coord_prompt_payload.get("reason", ""), f"expected interrupt reason, got: {coord_prompt_payload}")
+        coord_prompt_context = coord_prompt_payload["hookSpecificOutput"]["additionalContext"]
+        require("Coord Focus Required" in coord_prompt_context, f"expected coord focus context, got: {coord_prompt_context}")
+        require("coord interrupt is active" in coord_prompt_context, f"expected interrupt reason, got: {coord_prompt_context}")
+        require(coord_prompt_payload.get("decision") != "block", f"did not expect blocking hook output: {coord_prompt_payload}")
 
     with tempfile.TemporaryDirectory() as telemetry_home:
         env = os.environ.copy()

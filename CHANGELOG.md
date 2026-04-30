@@ -20,6 +20,7 @@
 - `agent-do meetings` as a family-level meeting surface over Zoom, Google Meet, and Microsoft Teams, with provider snapshots, auto-detected join routing, active-provider controls, and explicit passthroughs.
 - `agent-do coord` as a project-local state-and-interrupt broker for parallel agents, with presence leases, focus declarations, advisory claims, dependency tracking, published artifacts, and derived contention/dependency/novelty interrupts.
 - interrupt-aware coord nudges at session start and prompt time, so agents only get coordination context when a real interrupt exists or when active peers exist and the current agent has not declared focus yet.
+- `hooks/agent-do-pretooluse-codex.py` as a Codex-compatible PreToolUse wrapper that runs the shared check for telemetry while suppressing unsupported PreToolUse `additionalContext` output.
 - Internal `lib/live/` runtime substrate for explicit local-machine control approval, leases, and rerun hints behind the new `agent-do +live(...) ...` execution modifier.
 - `lib/creds-helper.sh` as a shared secure-store backend for macOS Keychain, Linux Secret Service, and a Windows DPAPI-backed per-user store.
 - Registry-level `credentials` metadata so tools can declare which secret env vars they need.
@@ -31,8 +32,9 @@
 - `lib/snapshot.sh` honors `AGENT_DO_SNAPSHOT_COMPACT=1` to emit single-line JSON instead of pretty-printed output, for piping to jq, log lines, or other tools that prefer one document per line.
 
 ### Changed
-- UserPromptSubmit coord nudges now stay quiet for ordinary work prompts and only inject coord context for explicit coordination requests or blocking coord interrupts.
-- UserPromptSubmit no longer suggests `agent-do context search` just because a prompt asks to edit local docs, README, or changelog files.
+- UserPromptSubmit tool suggestions now use Sonnet 4.6 adaptive-thinking routing over the compact full `agent-do` catalog and stay silent unless the model returns a high-confidence exact command.
+- UserPromptSubmit coord focus reminders are non-blocking `additionalContext` for active-peer/no-focus workspace prompts, so agents can set focus and continue instead of being stopped by the hook.
+- UserPromptSubmit no longer suggests weak deterministic matches like `agent-do context search` just because a prompt asks to edit local docs, README, or changelog files.
 - Python dependency floor for `anthropic` is now `>=0.97.0` so Sonnet 4.6 adaptive-thinking request fields are supported.
 - Session-start bootstrap handling now uses a native macOS prompt in the global Claude/Codex hook path instead of relying on the model to remember to ask in conversation.
 - `agent-do email` discovery now uses Apple Mail's local Envelope Index for account, mailbox, and message lookup, so large live mailboxes no longer block on AppleScript enumeration timeouts.

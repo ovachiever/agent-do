@@ -469,13 +469,17 @@ For task suggestions, `suggest` is grounded in registry metadata first. When `AN
 
 ### Nudges
 
-When Claude Code hooks are installed:
+When agent hooks are installed:
 
 - SessionStart injects project-aware tool guidance
-- UserPromptSubmit suggests likely `agent-do` tools from shared routing metadata, adds a short completion-check reminder on fuzzy status/continue prompts like `continue`, `what's left`, or `where we at`, and only injects coord context for explicit coordination requests or blocking coord interrupts
-- PreToolUse emits hard nudges when Claude reaches for raw commands that already have an `agent-do` equivalent
+- UserPromptSubmit uses Sonnet 4.6 adaptive-thinking routing, when enabled, over the compact full `agent-do` catalog and only emits high-confidence, exact tool suggestions
+- UserPromptSubmit adds a short completion-check reminder on fuzzy status/continue prompts like `continue`, `what's left`, or `where we at`
+- UserPromptSubmit emits non-blocking `Coord Focus Required` context when another active peer exists, the current agent has no focus, and the prompt is starting workspace work
+- PreToolUse emits Claude-compatible hard nudges when an agent reaches for raw commands that already have an `agent-do` equivalent
 
 Those nudges are non-blocking by default. They are meant to bend behavior, not break flow.
+
+Codex currently rejects `additionalContext` from PreToolUse hooks. Use `hooks/agent-do-pretooluse-codex.py` for Codex PreToolUse wiring; it runs the same shared check for telemetry but suppresses unsupported PreToolUse output.
 
 ```bash
 agent-do nudges stats
@@ -568,9 +572,9 @@ The richer layers sit beside that core:
 - `bin/pattern-matcher` handles offline matching
 - `bin/suggest` and `bin/nudges` handle discovery, optional Sonnet-backed command selection, and local telemetry
 - `bin/bootstrap` and `bin/health` handle setup and readiness
-- `lib/ai_router.py` provides optional Claude JSON calls for grounded suggestions and prompt-hook gating
+- `lib/ai_router.py` provides optional Claude JSON calls for grounded suggestions and full-catalog prompt-hook routing
 - `lib/cache.py` stores project-aware route memory
-- `hooks/` gives Claude Code a way to prefer `agent-do` without forcing block mode
+- `hooks/` gives Claude Code and Codex a way to prefer `agent-do` without forcing block mode
 
 That architecture is simple on purpose. The point is not to hide the tool surface. The point is to make it consistent.
 
@@ -586,9 +590,9 @@ That architecture is simple on purpose. The point is not to hide the tool surfac
 
 ```bash
 AGENT_DO_HOME         # Config and state directory, default: ~/.agent-do
-ANTHROPIC_API_KEY     # Required for natural-language mode and optional AI-backed suggest/hook gating
+ANTHROPIC_API_KEY     # Required for natural-language mode and optional AI-backed suggest/UserPromptSubmit routing
 AGENT_DO_SUGGEST_AI   # auto|on|off for AI-backed suggest command selection
-AGENT_DO_HOOK_AI      # auto|on|off for AI-backed UserPromptSubmit gating
+AGENT_DO_HOOK_AI      # auto|on|off for AI-backed UserPromptSubmit full-catalog routing
 AGENT_DO_AI_MODEL     # Default: claude-sonnet-4-6
 AGENT_DO_AI_EFFORT    # Default: max for Sonnet 4.6 adaptive thinking
 AGENT_DO_AI_MAX_TOKENS # Default: 64000, the API-required output ceiling

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-UserPromptSubmit hook: route prompts to coord enforcement or precise agent-do suggestions.
+UserPromptSubmit hook: route prompts to coord requirements or precise agent-do suggestions.
 
-Coord is the only blocking behavior. Tool suggestions are AI-gated, advisory, and emitted only
-when the model selects high-confidence commands from the full agent-do catalog.
+Coord requirements are emitted as hard context, not blocking hook decisions. Tool suggestions
+are AI-gated, advisory, and emitted only when the model selects high-confidence commands from
+the full agent-do catalog.
 """
 
 import json
@@ -454,7 +455,7 @@ def ai_coord_payload(decision: dict | None) -> dict:
     return coord if isinstance(coord, dict) else {}
 
 
-def format_coord_block(
+def format_coord_requirement(
     *,
     prompt: str,
     cwd: str | None,
@@ -474,15 +475,17 @@ def format_coord_block(
     peers = "\n".join(peer_lines) if peer_lines else "- active peer present"
 
     return (
-        "Coord focus required before starting workspace work.\n\n"
+        "## Coord Focus Required\n\n"
+        "Before starting workspace work, set coord focus. This is not a blocking hook decision, "
+        "but it is required workflow context.\n\n"
         f"Reason: {reason}\n\n"
-        f"Run:\n{command}\n\n"
+        f"Run before editing/testing/reviewing:\n`{command}`\n\n"
         f"Active peers:\n{peers}\n\n"
-        "Then retry the prompt."
+        "After focus is set, continue with the user request."
     )
 
 
-def coord_block_reason(prompt: str, cwd: str | None, coord_state: dict, decision: dict | None) -> str | None:
+def coord_required_context(prompt: str, cwd: str | None, coord_state: dict, decision: dict | None) -> str | None:
     starts_work = decision_starts_work(prompt, decision)
     coord = ai_coord_payload(decision)
     ai_requested_block = bool(coord.get("block")) if isinstance(coord.get("block"), bool) else False
@@ -492,7 +495,7 @@ def coord_block_reason(prompt: str, cwd: str | None, coord_state: dict, decision
 
     if blockers and (starts_work or ai_requested_block):
         summary = "; ".join(str(item.get("summary") or item.get("kind")) for item in blockers[:3])
-        return format_coord_block(
+        return format_coord_requirement(
             prompt=prompt,
             cwd=cwd,
             coord_state=coord_state,
@@ -502,7 +505,7 @@ def coord_block_reason(prompt: str, cwd: str | None, coord_state: dict, decision
 
     if active_peers and not focus_goal and (starts_work or ai_requested_block):
         reason = str(coord.get("reason") or "another active peer exists and this agent has no declared focus")
-        return format_coord_block(
+        return format_coord_requirement(
             prompt=prompt,
             cwd=cwd,
             coord_state=coord_state,
@@ -645,31 +648,32 @@ def main():
     registry = load_registry() if load_registry is not None else {"tools": {}}
     coord_state = load_coord_state(cwd)
     ai_decision = ai_route_prompt(prompt, cwd=cwd, coord_state=coord_state, registry=registry)
-    block_reason = coord_block_reason(prompt, cwd, coord_state, ai_decision)
-    if block_reason:
-        if record_nudge_event is not None:
-            try:
-                record_nudge_event(
-                    "prompt_coord_block",
-                    "prompt_router",
-                    tools=["coord"],
-                    prompt=prompt[:240],
-                )
-            except Exception:
-                pass
-        print(json.dumps({"decision": "block", "reason": block_reason}))
-        sys.exit(0)
-
+    coord_required = coord_required_context(prompt, cwd, coord_state, ai_decision)
     tool_context, tool_tools = ai_tool_suggestion_context(ai_decision, registry)
     coord_context, coord_tools = coord_advisory_context(prompt, coord_state)
     is_design = detect_frontend_design(prompt)
 
     needs_completion = needs_completion_check(prompt)
 
-    if tool_context or is_design or needs_completion or coord_context:
+    if coord_required or tool_context or is_design or needs_completion or coord_context:
         context = ""
 
+        if coord_required:
+            context += coord_required
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "prompt_coord_required",
+                        "prompt_router",
+                        tools=["coord"],
+                        prompt=prompt[:240],
+                    )
+                except Exception:
+                    pass
+
         if tool_context:
+            if context:
+                context += "\n"
             context += tool_context
             if record_nudge_event is not None:
                 try:

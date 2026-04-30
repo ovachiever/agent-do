@@ -1,6 +1,6 @@
-# Claude Code Integration
+# Claude Code And Codex Integration
 
-agent-do ships 3 hooks that teach Claude Code to prefer `agent-do` tools over raw CLI commands. The hooks use a nudge approach: they add context reminders but never block commands.
+agent-do ships hooks that teach coding agents to prefer `agent-do` tools over raw CLI commands. The hooks use a nudge approach: they add context reminders but do not block commands by default.
 
 ## Quick Setup
 
@@ -36,50 +36,34 @@ Path auto-detection chain (no hardcoded paths):
 
 **File:** `hooks/agent-do-prompt-router.py`
 
-Analyzes every user prompt and suggests relevant agent-do tools. It now uses shared routing metadata from `registry.yaml`, so prompt nudges, PreToolUse nudges, and offline matching can converge on the same native suggestions instead of drifting.
+Analyzes every user prompt and suggests relevant agent-do tools only when the match is strong enough to be useful. When `ANTHROPIC_API_KEY` is available, the hook can use Sonnet 4.6 adaptive thinking over the compact full `agent-do` catalog. The model chooses from real registered tools and returns concise, exact commands; weak matches stay silent.
 
-Prompt-time coordination is intentionally narrow. UserPromptSubmit injects coord context for explicit coordination prompts or blocking coord interrupts; it does not emit active-peer focus reminders for ordinary work prompts. SessionStart remains the place for broad project-level coordination reminders.
+Prompt-time coordination is targeted. UserPromptSubmit emits `Coord Focus Required` context when active peers exist, the current agent has no focus, and the prompt is starting workspace work. The reminder is non-blocking because blocking hooks stop the agent turn instead of letting the model satisfy the requirement.
 
-When `ANTHROPIC_API_KEY` is available, the hook can use the shared Sonnet 4.6 adaptive-thinking JSON helper to decide whether coord context is useful. The deterministic fallback stays conservative.
+The deterministic fallback stays conservative: completion/status prompts still get completion-check context, design-quality prompts still get the DPT path, and generic tool suggestions stay silent instead of guessing.
 
-It still has broad fallback coverage across these categories:
+AI prompt routing receives the catalog, not a deterministic shortlist. This keeps the hook from duplicating local matcher effort before the model has decided which tool, if any, is worth surfacing.
 
-| Category | Trigger Examples |
-|----------|-----------------|
-| ios | "screenshot the simulator", "tap on the button in iOS" |
-| android | "android emulator", "adb shell" |
-| macos | "click the button in Finder", "desktop automation" |
-| gcp | "GCP project", "google cloud", "oauth credentials" |
-| tui | "interactive terminal", "run vim" |
-| browser | "open website", "web scraping", "playwright" |
-| db | "database query", "SQL command" |
-| k8s | "kubernetes", "kubectl", "pods" |
-| docker | "docker container", "docker compose" |
-| slack | "post to slack", "slack message" |
-| email | "send email", "inbox" |
-| image | "resize image", "convert png" |
-| video | "convert video", "ffmpeg video" |
-| audio | "transcribe audio", "whisper" |
-| calendar | "create event", "schedule meeting" |
-| cloud | "aws s3", "gcloud", "azure" |
-| vercel | "vercel deploy", "vercel project" |
-| render | "render.com", "render service" |
-| supabase | "supabase project", "supabase database" |
+Use `AGENT_DO_HOOK_AI=off` for deterministic-only hook behavior, `auto` for best effort, or `on` to require the AI path.
 
 ### Layer 3: PreToolUse: Command Interception
 
-**File:** `hooks/agent-do-pretooluse-check.py`
+**Claude file:** `hooks/agent-do-pretooluse-check.py`
 
-Watches every `Bash` tool call. When Claude tries to run a raw command that has an agent-do equivalent (e.g., `xcrun simctl`, `vercel deploy`, `kubectl`), it injects a hard nudge with the closest native replacement command and any relevant setup hint.
+**Codex file:** `hooks/agent-do-pretooluse-codex.py`
 
-**Nudge mode (default):** Adds `additionalContext`. Claude sees the reminder but the command still runs.
+Watches every `Bash` tool call. When an agent tries to run a raw command that has an agent-do equivalent (e.g., `xcrun simctl`, `vercel deploy`, `kubectl`), it injects a hard nudge with the closest native replacement command and any relevant setup hint where the host supports that output.
+
+**Claude nudge mode (default):** Adds `additionalContext`. Claude sees the reminder but the command still runs.
+
+**Codex compatibility mode:** Runs the same shared PreToolUse check and records the same telemetry, but suppresses stdout because Codex rejects `additionalContext` for PreToolUse.
 
 Examples:
 - `npx playwright test` → `agent-do browse ...` + browser-install hint when relevant
 - `xcrun simctl io booted screenshot` → `agent-do ios screenshot`
 - `psql ...` → `agent-do db ...`
 
-**Block mode (opt-in):** Change `additionalContext` to `permissionDecision: "deny"` in the hook output to block raw commands entirely. See the comment at the top of the hook file.
+**Block mode (opt-in, Claude only):** Change `additionalContext` to `permissionDecision: "deny"` in the hook output to block raw commands entirely. Use this carefully; blocking stops the current agent turn.
 
 Intercepted commands include:
 - `vercel`, `npx vercel`, `curl api.vercel.com`
@@ -144,6 +128,27 @@ Claude Code hooks must be registered in `~/.claude/settings.json`. They are NOT 
 
 If you already have hooks in `settings.json`, merge the agent-do entries into the existing arrays for each event.
 
+For Codex PreToolUse, point the Bash matcher at the tracked compatibility wrapper:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/agent-do/hooks/agent-do-pretooluse-codex.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ## CLAUDE.md Integration
 
 Add this to your project's `CLAUDE.md` so Claude knows about agent-do even without hooks:
@@ -176,33 +181,33 @@ docker, k8s, cloud, ssh, excel, slack, image, video, audio, git, gh, ci, zpc
 
 ## Nudge vs Block Mode
 
-By default, all hooks use **nudge mode**: they add context reminders but never prevent Claude from running commands. This is still the recommended approach because:
+By default, hooks use **nudge mode** where the host supports it: they add context reminders but do not prevent commands from running. This is still the recommended approach because:
 
 - Claude learns the pattern over a session (the reminder accumulates)
 - No false positives blocking legitimate commands
 - Users can override when agent-do isn't appropriate
 
 The difference in `v1.1` is that the nudges are now more exact:
-- prompt-time suggestions can name a concrete `agent-do <tool> <command>`
+- prompt-time suggestions are AI-ranked from the full registered catalog and only surface concrete `agent-do <tool> <command>` paths when confidence is high
 - PreToolUse nudges can point at the closest raw-command replacement
 - SessionStart can suggest likely tools for the current repo instead of a generic static list
 - local telemetry is available through `agent-do nudges stats|recent`
 
-To switch to **block mode**, edit `hooks/agent-do-pretooluse-check.py` and change the output from `additionalContext` to `permissionDecision: "deny"`. See the docstring at the top of that file.
+To switch Claude PreToolUse to **block mode**, edit `hooks/agent-do-pretooluse-check.py` and change the output from `additionalContext` to `permissionDecision: "deny"`. Do not use block mode for coord focus reminders; those need to be seen by the agent so it can set focus and continue.
 
 ## Architecture
 
 ```
-Claude Code Session
+Coding Agent Session
     │
     ├─ SessionStart ──→ agent-do-session-start.sh
     │   └─ Adds agent-do to PATH + injects project-aware tool reminder
     │
     ├─ UserPromptSubmit ──→ agent-do-prompt-router.py
-    │   └─ Suggests agent-do tools from shared routing metadata + fallbacks
+    │   └─ AI-ranks the full catalog and emits only exact high-confidence suggestions
     │
-    └─ PreToolUse (Bash) ──→ agent-do-pretooluse-check.py
-        └─ Hard-nudges when raw CLI commands have agent-do equivalents
+    └─ PreToolUse (Bash) ──→ agent-do-pretooluse-check.py        # Claude
+        └─ agent-do-pretooluse-codex.py                         # Codex
 ```
 
 All three hooks work independently. You can install any subset.
