@@ -67,6 +67,7 @@
 - `agent-do macos` and `agent-do screen` now require explicit `+live(...)` approval, or a matching active live lease, before performing direct visible-machine control actions like click, type, scroll, focus, open, or dialog clicks.
 
 ### Fixed
+- `agent-do dpt score` now targets the current agent-scoped browse session and probes socket liveness before scoring, so stale sockets no longer produce raw `ConnectionRefusedError` tracebacks.
 - `agent-do gh` now distinguishes strict GitHub review requests from broader awaiting-review PRs, and it normalizes direct `gh pr view` reviewer objects instead of reporting `[null]`.
 - `agent-do browse get text|html|value|attr` now emits the correct browser protocol actions instead of invalid discriminator values.
 - `agent-do namecheap dns-add` no longer crashes after successful writes because of the bare `host` reference in its success path.

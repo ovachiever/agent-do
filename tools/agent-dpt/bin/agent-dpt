@@ -28,6 +28,44 @@ DPT_DIR="$(dirname "$SCRIPT_DIR")"
 DPT_ENGINE="$DPT_DIR/dist/dpt-engine.js"
 DPT_REPORT="$DPT_DIR/bin/dpt-report"
 TMPDIR_ACTUAL="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')"
+BROWSE_SESSION="${AGENT_BROWSER_SESSION:-$(python3 <<'PY'
+import os
+import re
+
+def sanitize(value: str) -> str:
+    value = re.sub(r'[^a-zA-Z0-9._-]+', '-', value).strip('-_.').lower()
+    return value[:24]
+
+def compact(value: str) -> str:
+    value = re.sub(r'[^a-zA-Z0-9]+', '', value).lower()
+    return value[:16]
+
+candidates = [
+    ("codex", os.environ.get("CODEX_THREAD_ID")),
+    ("claude", os.environ.get("CLAUDE_THREAD_ID")),
+    ("claude", os.environ.get("CLAUDE_SESSION_ID")),
+    ("claude", os.environ.get("CLAUDE_AGENT_ID")),
+]
+
+for prefix, value in candidates:
+    if not value:
+        continue
+    short = compact(value)
+    if short:
+        print(f"{prefix}-{short}")
+        raise SystemExit(0)
+
+tmux_pane = os.environ.get("TMUX_PANE")
+if tmux_pane:
+    short = sanitize(tmux_pane).lstrip("%")
+    if short:
+        print(f"tmux-{short}")
+        raise SystemExit(0)
+
+print("default")
+PY
+)}"
+BROWSE_SOCKET_PATH="${TMPDIR_ACTUAL}/agent-browser-${BROWSE_SESSION}.sock"
 BASELINE_FILE="/tmp/dpt-baseline.json"
 DPT_RESULT_FILE=$(mktemp "${TMPDIR_ACTUAL}/dpt-result-XXXXXX")
 
@@ -78,11 +116,37 @@ EOF
 # CORE
 # ============================================================================
 
+probe_socket() {
+    local sock="$1"
+    python3 - "$sock" <<'PY' >/dev/null 2>&1
+import json
+import socket
+import sys
+
+sock_path = sys.argv[1]
+msg = json.dumps({"id": "dpt-probe", "action": "url"}).encode("utf-8") + b"\n"
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(3)
+s.connect(sock_path)
+s.sendall(msg)
+raw = b""
+while True:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    raw += chunk
+    if b"\n" in raw:
+        break
+s.close()
+resp = json.loads(raw.decode("utf-8").strip())
+if not resp.get("success"):
+    raise SystemExit(1)
+PY
+}
+
 find_socket() {
-    local sock="${TMPDIR_ACTUAL}/agent-browser-default.sock"
-    [[ -S "$sock" ]] && { echo "$sock"; return 0; }
-    sock=$(find "$TMPDIR_ACTUAL" -name 'agent-browser-*.sock' -type s 2>/dev/null | head -1)
-    [[ -n "$sock" && -S "$sock" ]] && { echo "$sock"; return 0; }
+    local sock="$BROWSE_SOCKET_PATH"
+    [[ -S "$sock" ]] && probe_socket "$sock" && { echo "$sock"; return 0; }
     return 1
 }
 
@@ -105,7 +169,7 @@ set_viewport_if_requested() {
 
 inject_engine() {
     local sock
-    sock=$(find_socket) || { echo "No agent-browser daemon. Start: agent-do browse open <url>" >&2; return 1; }
+    sock=$(find_socket) || { echo "No responsive agent-browser daemon for session '${BROWSE_SESSION}'. Start: agent-do browse open <url>" >&2; return 1; }
     [[ -f "$DPT_ENGINE" ]] || { echo "Engine not found. Run: agent-dpt build" >&2; return 1; }
 
     python3 -c "

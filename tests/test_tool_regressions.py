@@ -43,6 +43,16 @@ def main() -> int:
     require("indexedDB: true" in browser_js, "expected browser persistence paths to request IndexedDB")
     session_js = (ROOT / "tools/agent-browse/session.js").read_text()
     require("storageState({ indexedDB: true })" in session_js, "expected session save to request IndexedDB")
+    dpt_source = (ROOT / "tools/agent-dpt/bin/agent-dpt").read_text()
+    require("BROWSE_SOCKET_PATH=" in dpt_source, "expected DPT to target the current browse session socket")
+    require("probe_socket()" in dpt_source, "expected DPT to probe socket liveness before scoring")
+    require(
+        "head -1" not in dpt_source,
+        "DPT must not pick the first browser socket on disk; that can belong to another agent",
+    )
+    dpt_hook = (ROOT / "tools/agent-dpt/hooks/dpt-post-edit.sh").read_text()
+    require("agent-do browse status --json" in dpt_hook, "expected DPT hook to check current browse session status")
+    require("agent-do dpt score --current --quiet" in dpt_hook, "expected DPT hook to reuse canonical score command")
 
     browse_script = f"""
 set -euo pipefail
