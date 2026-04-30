@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-UserPromptSubmit hook: Route prompts to appropriate agent-do tools.
-Part of the agent-do hook trinity.
+UserPromptSubmit hook: route prompts to coord enforcement or precise agent-do suggestions.
 
-Analyzes user prompts and suggests specific agent-do tools when applicable.
-Non-blocking — injects additionalContext only, never denies.
+Coord is the only blocking behavior. Tool suggestions are AI-gated, advisory, and emitted only
+when the model selects high-confidence commands from the full agent-do catalog.
 """
 
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 from shutil import which
@@ -19,17 +20,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 try:
     from registry import (
         load_registry,
-        match_prompt_tools,
-        get_default_command,
         get_recommended_entrypoints,
-        get_tool_readiness,
     )
 except ModuleNotFoundError:
     load_registry = None
-    match_prompt_tools = None
-    get_default_command = None
     get_recommended_entrypoints = None
-    get_tool_readiness = None
 
 try:
     from telemetry import record_nudge_event
@@ -40,195 +35,6 @@ try:
     from ai_router import call_json_model
 except ModuleNotFoundError:
     call_json_model = None
-
-# Keywords/phrases that map to agent-do tools
-PROMPT_ROUTES = {
-    'ios': {
-        'patterns': [
-            r'\b(ios|iphone|ipad)\s+(sim|simulator|emulator)\b',
-            r'\bsimulator\b(?!.*android)',
-            r'\bxcode\s*(sim|preview)?\b',
-            r'\bmobile\s*app\b.*\b(ios|iphone|apple)\b',
-            r'\btap\b.*\b(simulator|app)\b',
-            r'\bswipe\b.*\b(simulator|app)\b',
-            r'\blaunch\s*(app|application)\b.*\b(simulator|ios)\b',
-            r'\bscreenshot\b.*\b(simulator|ios|iphone)\b',
-            r'\bios\s+(app|build|deploy|test|run|debug)\b',
-            r'\b(build|deploy|test|run)\s+(for|on)\s+ios\b',
-        ],
-        'suggestion': 'This looks like iOS Simulator work. Use: `agent-do ios --help` or `agent-do "your iOS task"`'
-    },
-    'android': {
-        'patterns': [
-            r'\bandroid\s+(emulator|device|app)\b',
-            r'\bavd\b',
-            r'\bpixel\s*(emulator)?\b',
-            r'\badb\b',
-            r'\bmobile\s*app\b.*\bandroid\b',
-        ],
-        'suggestion': 'This looks like Android Emulator work. Use: `agent-do android --help` or `agent-do "your Android task"`'
-    },
-    'macos': {
-        'patterns': [
-            r'\b(click|press)\s*(button|menu)\b.*\b(app|application|finder|safari|photoshop)\b',
-            r'\bdesktop\s*(app|automation)\b',
-            r'\b(macos|mac\s*os)\s*(app|automation)\b',
-            r'\bui\s*element\b',
-            r'\b(native|desktop)\s*app\b',
-            r'\bfocus\s*(window|app)\b',
-            r'\bmenu\s*item\b',
-        ],
-        'suggestion': 'This looks like desktop GUI automation. Use: `agent-do macos --help` or `agent-do "your GUI task"`'
-    },
-    'gcp': {
-        'patterns': [
-            r'\bgcp\s*(project|api|secret|service.account|oauth)\b',
-            r'\bgoogle\s*cloud\b',
-            r'\b(gcloud|googleapis)\b',
-            r'\boauth\s*(client|credential|consent)\b.*\bgoogle\b',
-        ],
-        'suggestion': 'Use `agent-do gcp` for GCP operations (NOT gcloud CLI). Run: `agent-do gcp --help`'
-    },
-    'tui': {
-        'patterns': [
-            r'\binteractive\s*(cli|terminal|repl)\b',
-            r'\b(vim|nvim|nano|htop|top)\b.*\b(run|open|use)\b',
-            r'\bterminal\s*(app|ui)\b',
-            r'\bcurses\b',
-            r'\btui\b',
-        ],
-        'suggestion': 'This looks like terminal UI automation. Use: `agent-do tui --help` or `agent-do "your TUI task"`'
-    },
-    'browser': {
-        'patterns': [
-            r'\b(browse|navigate|open)\s*(website|url|page|web)\b',
-            r'\bweb\s*(scrape|scraping|automation)\b',
-            r'\bfill\s*(form|input)\b.*\bweb\b',
-            r'\bclick\b.*\b(link|button)\b.*\bweb\b',
-            r'\bselenium\b',
-            r'\bplaywright\b',
-            r'\bpuppeteer\b',
-        ],
-        'suggestion': 'This looks like browser automation. Use: `agent-do browse --help` or `agent-do browse open <url>`'
-    },
-    'db': {
-        'patterns': [
-            r'\b(database|db)\s*(query|select|insert|update|delete)\b',
-            r'\bsql\s*(query|command)\b',
-            r'\b(postgres|mysql|sqlite)\s*(query|connect)\b',
-            r'\btable\s*(schema|structure)\b',
-        ],
-        'suggestion': 'This looks like database work. Use: `agent-do db --help` or `agent-do "your DB query"`'
-    },
-    'k8s': {
-        'patterns': [
-            r'\bkubernetes\b',
-            r'\bk8s\b',
-            r'\bkubectl\b',
-            r'\bpods?\b.*\b(list|logs|exec|describe)\b',
-            r'\bdeployment\b.*\b(scale|rollout)\b',
-            r'\bhelm\b',
-        ],
-        'suggestion': 'This looks like Kubernetes work. Use: `agent-do k8s --help` or `agent-do "your k8s task"`'
-    },
-    'docker': {
-        'patterns': [
-            r'\bdocker\s*(container|image|compose|logs)\b',
-            r'\bcontainer\s*(start|stop|logs|exec)\b',
-        ],
-        'suggestion': 'This looks like Docker work. Use: `agent-do docker --help` or `agent-do "your Docker task"`'
-    },
-    'slack': {
-        'patterns': [
-            r'\bslack\s*(message|post|send|notification)\b',
-            r'\b(post|send)\s*(to|on)\s*slack\b',
-            r'\b#\w+\b.*\bslack\b',
-        ],
-        'suggestion': 'This looks like Slack messaging. Use: `agent-do slack --help` or `agent-do "post X to #channel"`'
-    },
-    'email': {
-        'patterns': [
-            r'\b(send|compose|read)\s*email\b',
-            r'\bemail\s*(to|from)\b',
-            r'\b(check|read|open|search)\s*(my\s*)?mail\b',
-            r'\binbox\b',
-        ],
-        'suggestion': 'This looks like email work. Use: `agent-do email --help` or `agent-do "your email task"`'
-    },
-    'image': {
-        'patterns': [
-            r'\b(resize|crop|convert|compress)\s*(image|photo|picture|png|jpg)\b',
-            r'\bimage\s*(resize|crop|convert|compress|thumbnail)\b',
-            r'\b(png|jpg|jpeg|gif|webp)\b.*\b(resize|crop|convert)\b',
-        ],
-        'suggestion': 'This looks like image processing. Use: `agent-do image --help` or `agent-do "your image task"`'
-    },
-    'video': {
-        'patterns': [
-            r'\b(convert|trim|merge|compress)\s*(video|mp4|mkv|mov)\b',
-            r'\bvideo\s*(convert|trim|merge|compress|gif)\b',
-            r'\bffmpeg\b.*\bvideo\b',
-        ],
-        'suggestion': 'This looks like video processing. Use: `agent-do video --help` or `agent-do "your video task"`'
-    },
-    'audio': {
-        'patterns': [
-            r'\b(convert|trim|transcribe)\s*(audio|mp3|wav)\b',
-            r'\baudio\s*(convert|trim|transcribe|merge)\b',
-            r'\btranscribe\b',
-            r'\bwhisper\b',
-        ],
-        'suggestion': 'This looks like audio processing. Use: `agent-do audio --help` or `agent-do "your audio task"`'
-    },
-    'calendar': {
-        'patterns': [
-            r'\b(calendar|schedule|event|meeting)\s*(create|add|list|show)\b',
-            r'\b(create|add|show)\s*(event|meeting|appointment)\b',
-        ],
-        'suggestion': 'This looks like calendar work. Use: `agent-do calendar --help` or `agent-do "your calendar task"`'
-    },
-    'cloud': {
-        'patterns': [
-            r'\b(aws|gcp|azure)\s*(s3|ec2|lambda|compute|storage)\b',
-            r'\bcloud\s*(instance|bucket|function)\b',
-        ],
-        'suggestion': 'This looks like cloud operations. Use: `agent-do cloud --help` or `agent-do "your cloud task"`'
-    },
-    'vercel': {
-        'patterns': [
-            r'\bvercel\b',
-            r'\bvercel\s*(deploy|project|domain|env|log|promotion)\b',
-            r'\bdeploy\b.*\bvercel\b',
-        ],
-        'suggestion': 'Use `agent-do vercel` for Vercel operations (NOT the vercel CLI). Run: `agent-do vercel --help`'
-    },
-    'render': {
-        'patterns': [
-            r'\brender\.com\b',
-            r'\brender\s*(service|deploy|web\s*service|database)\b',
-            r'\bdeploy\b.*\brender\b',
-        ],
-        'suggestion': 'Use `agent-do render` for Render.com operations (NOT curl to the Render API). Run: `agent-do render --help`'
-    },
-    'supabase': {
-        'patterns': [
-            r'\bsupabase\b',
-            r'\bsupabase\s*(project|database|function|auth|storage|migration)\b',
-        ],
-        'suggestion': 'Use `agent-do supabase` for Supabase operations (NOT the supabase CLI). Run: `agent-do supabase --help`'
-    },
-    'zpc': {
-        'patterns': [
-            r'\b(lesson|lessons)\s*(log|capture|record)\b',
-            r'\b(decision|decisions)\s*(log|record|track)\b',
-            r'\bproject\s*memory\b',
-            r'\bpatterns?\s*(consolidat|harvest|extract)\b',
-            r'\b\.zpc\b',
-            r'\bzpc\b',
-        ],
-        'suggestion': 'This looks like project memory work. Use: `agent-do zpc --help` or `agent-do zpc status`'
-    },
-}
 
 # Frontend/design intent detection — two-stage: UI keywords + action keywords
 # If both present, it's a design task. Also catches direct design phrases.
@@ -347,107 +153,138 @@ COORD_DISCUSSION_PATTERNS = [
     r"\b(let'?s|lets)\s+(talk|discuss|think|pick|choose)\b",
 ]
 
-
-def analyze_prompt(prompt: str, skip_tools: set[str] | None = None) -> list[tuple[str, str]]:
-    """Analyze prompt with the legacy route table."""
-    prompt_lower = prompt.lower()
-    matches = []
-    skip_tools = skip_tools or set()
-
-    for tool, config in PROMPT_ROUTES.items():
-        if tool in skip_tools:
-            continue
-        for pattern in config['patterns']:
-            if re.search(pattern, prompt_lower):
-                matches.append((tool, config['suggestion']))
-                break  # Only match each tool once
-
-    return matches
+BLOCKING_INTERRUPT_KINDS = {"contention", "dependency"}
+DEFAULT_HOOK_AI_CONFIDENCE = 0.86
 
 
-def analyze_registry_prompt(prompt: str) -> list[tuple[str, str]]:
-    """Analyze prompt using shared routing metadata from the registry."""
-    if load_registry is None or match_prompt_tools is None:
+def build_ai_catalog(registry: dict) -> list[dict]:
+    """Return the full agent-do catalog in a compact form suitable for hook routing."""
+    catalog = []
+    for tool, info in sorted(registry.get("tools", {}).items()):
+        commands = list((info.get("commands") or {}).keys())
+        examples = []
+        for example in (info.get("examples") or [])[:3]:
+            intent = example.get("intent")
+            command = example.get("command")
+            if intent and command:
+                examples.append({"intent": intent, "command": command})
+
+        catalog.append(
+            {
+                "tool": tool,
+                "description": info.get("description", ""),
+                "capabilities": [str(item) for item in (info.get("capabilities") or [])[:6]],
+                "commands": commands,
+                "recommended_entrypoints": get_recommended_entrypoints(info) if get_recommended_entrypoints else [],
+                "examples": examples,
+            }
+        )
+    return catalog
+
+
+def command_has_shell_control(command: str) -> bool:
+    return any(token in command for token in ("\n", "\r", "&&", ";", "|", "`", "$("))
+
+
+def command_parts(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
         return []
 
-    registry = load_registry()
-    matches = match_prompt_tools(registry, prompt, limit=5)
-    suggestions = []
 
-    for match in matches:
-        tool = match['tool']
-        if should_suppress_tool_suggestion(tool, prompt):
-            continue
-
-        info = match['info']
-        commands = list(info.get('commands', {}).keys())
-        entrypoints = get_recommended_entrypoints(info) if get_recommended_entrypoints else []
-        readiness = get_tool_readiness(info) if get_tool_readiness else {}
-
-        primary = None
-        if tool == "gh" and re.search(r"\b(?:awaiting|waiting)\b.*\breview\b|\breview\b.*\b(?:awaiting|waiting)\b", prompt.lower()):
-            primary = "agent-do gh awaiting --owner <owner>"
-        elif tool == "gh" and re.search(r"\b(?:need|needs|requested|review|reviewing|approve|merge|blocked|inbox)\b", prompt.lower()):
-            primary = "agent-do gh inbox"
-        else:
-            command_hits = []
-            prompt_lower = prompt.lower()
-            for command in commands:
-                variants = {command.lower(), command.lower().replace("-", " ")}
-                if command.endswith("s"):
-                    variants.add(command[:-1].lower())
-                for variant in variants:
-                    match = re.search(rf"(?<!\w){re.escape(variant)}(?!\w)", prompt_lower)
-                    if match:
-                        command_hits.append((match.start(), -len(variant), command))
-                        break
-            if command_hits:
-                _pos, _length, command = sorted(command_hits)[0]
-                primary = f"agent-do {tool} {command}"
-
-        if primary is None and get_default_command is not None:
-            default_command = get_default_command(info)
-            if default_command:
-                primary = f"agent-do {tool} {default_command}"
-
-        if primary is None:
-            primary = entrypoints[0] if entrypoints else f"agent-do {tool} --help"
-
-        extra = entrypoints[1] if len(entrypoints) > 1 else None
-
-        suggestion = f"Start with `{primary}`."
-        if extra:
-            suggestion += f" Next likely step: `{extra}`."
-
-        fix = readiness.get('fix')
-        note = readiness.get('note')
-        if fix and note:
-            suggestion += f" If setup is missing: `{fix}`. {note}"
-        elif note:
-            suggestion += f" {note}"
-
-        suggestions.append((tool, suggestion))
-
-    return suggestions
+def valid_agent_do_command(command: str, registry: dict, expected_tool: str | None = None) -> bool:
+    command = command.strip()
+    if not command or command_has_shell_control(command):
+        return False
+    parts = command_parts(command)
+    if len(parts) < 2 or parts[0] != "agent-do":
+        return False
+    tool = parts[1]
+    if tool not in registry.get("tools", {}):
+        return False
+    return expected_tool is None or tool == expected_tool
 
 
-def should_suppress_tool_suggestion(tool: str, prompt: str) -> bool:
-    """Avoid nudges that are technically matched but operationally unhelpful."""
+def valid_focus_command(command: str) -> bool:
+    command = command.strip()
+    if not command or command_has_shell_control(command):
+        return False
+    parts = command_parts(command)
+    return len(parts) >= 5 and parts[:4] == ["agent-do", "coord", "focus", "set"]
+
+
+def infer_focus_goal(prompt: str) -> str:
     prompt_lower = prompt.lower()
+    if "userprompt" in prompt_lower or "prompt submit" in prompt_lower or "prompt-router" in prompt_lower:
+        return "fix UserPromptSubmit coordination enforcement"
+    if "global agents" in prompt_lower or "global agents file" in prompt_lower:
+        return "update global AGENTS workflow policy"
 
-    if tool == "context":
-        local_docs_work = re.search(
-            r"\b(update|edit|write|fix|clean|change|document|docs?|readme|changelog)\b",
-            prompt_lower,
-        )
-        external_reference_work = re.search(
-            r"\b(search|fetch|look\s+up|reference|external|upstream|official|llms\.txt|what\s+do(?:es)?\s+the\s+docs?)\b",
-            prompt_lower,
-        )
-        if local_docs_work and not external_reference_work:
-            return True
+    words = re.findall(r"[A-Za-z0-9_./-]+", prompt)
+    goal = " ".join(words[:10]).strip()
+    return goal or "repo work"
 
-    return False
+
+def infer_focus_paths(prompt: str, cwd: str | None) -> list[str]:
+    prompt_lower = prompt.lower()
+    paths: list[str] = []
+
+    if "global agents" in prompt_lower or "global agents file" in prompt_lower:
+        paths.append(str(Path.home() / ".codex" / "AGENTS.md"))
+
+    if "userprompt" in prompt_lower or "prompt submit" in prompt_lower or "prompt-router" in prompt_lower or "hook" in prompt_lower:
+        paths.extend(["hooks/agent-do-prompt-router.py", "tests/test_v11_routing.py"])
+
+    if not paths:
+        paths.append(".")
+
+    return paths
+
+
+def fallback_focus_command(prompt: str, cwd: str | None) -> str:
+    command = f"agent-do coord focus set {shlex.quote(infer_focus_goal(prompt))}"
+    for path in infer_focus_paths(prompt, cwd):
+        command += f" --path {shlex.quote(path)}"
+    return command
+
+
+def compact_peers(active_peers: list[dict]) -> list[dict]:
+    return [
+        {
+            "agent": peer.get("alias") or peer.get("agent_id"),
+            "goal": ((peer.get("focus") or {}).get("goal")) or "",
+            "paths": ((peer.get("focus") or {}).get("paths")) or [],
+        }
+        for peer in active_peers[:8]
+    ]
+
+
+def compact_interrupts(interrupts: list[dict]) -> list[dict]:
+    return [
+        {"kind": item.get("kind"), "summary": item.get("summary"), "new": bool(item.get("new"))}
+        for item in interrupts[:8]
+    ]
+
+
+def parse_confidence(value) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, confidence))
+
+
+def hook_confidence_threshold() -> float:
+    value = os.environ.get("AGENT_DO_HOOK_AI_CONFIDENCE")
+    if value:
+        try:
+            parsed = float(value)
+            if 0 <= parsed <= 1:
+                return parsed
+        except ValueError:
+            pass
+    return DEFAULT_HOOK_AI_CONFIDENCE
 
 
 def detect_frontend_design(prompt: str) -> bool:
@@ -518,100 +355,204 @@ def prompt_looks_like_coord_work(prompt: str) -> bool:
     return True
 
 
-def ai_should_emit_coord_context(
+def ai_route_prompt(
     prompt: str,
     *,
-    active_peers: list[dict],
-    focus_goal: str,
-    interrupts: list[dict],
-    explicit: bool,
-    local_work_signal: bool,
-) -> bool | None:
+    cwd: str | None,
+    coord_state: dict,
+    registry: dict,
+) -> dict | None:
     if call_json_model is None:
         return None
 
-    interrupt_summaries = [
-        {"kind": item.get("kind"), "summary": item.get("summary")}
-        for item in interrupts[:3]
-    ]
-    peer_summaries = [
-        {
-            "agent": peer.get("alias") or peer.get("agent_id"),
-            "goal": ((peer.get("focus") or {}).get("goal")) or "",
-        }
-        for peer in active_peers[:5]
-    ]
-    prompt_text = f"""Decide whether a UserPromptSubmit hook should show agent-do coordination context.
+    payload = {
+        "prompt": prompt,
+        "cwd": cwd,
+        "coord": {
+            "current_agent_has_focus": bool(coord_state.get("focus_goal")),
+            "current_focus_goal": coord_state.get("focus_goal") or "",
+            "active_peers": compact_peers(coord_state.get("active_peers") or []),
+            "interrupts": compact_interrupts(coord_state.get("interrupts") or []),
+        },
+        "path_hints": {
+            "global_agents": str(Path.home() / ".codex" / "AGENTS.md"),
+            "repo_userprompt_hook": "hooks/agent-do-prompt-router.py",
+            "repo_userprompt_tests": "tests/test_v11_routing.py",
+        },
+        "catalog": build_ai_catalog(registry),
+    }
+    prompt_text = f"""Classify a Codex UserPromptSubmit prompt and decide whether to emit anything.
 
-Show coord context only when it is useful now:
-- yes for prompts asking the assistant to edit files, run tests, review code/PRs, commit, push, deploy, or coordinate with other agents
-- yes for real coord interrupts that affect the requested work
-- no for discussion, model choice, explanation, planning, or "tell me" questions where no work is starting yet
+Two products share this hook:
+1. Coordination enforcement. This is the only thing that may block.
+2. agent-do tool suggestions. These are advisory only and should be rare.
 
-Input:
+Rules:
+- If another active peer exists, this agent has no focus, and the prompt starts workspace work, require a coord focus block.
+- Workspace work includes editing files, debugging, testing, reviewing code/PRs, committing, pushing, deploying, or "do it/go" continuation of work.
+- Pure discussion, status questions, explanations, model choice, and "no touching" prompts should not be blocked.
+- For tool suggestions, inspect the full catalog and emit only if one or two agent-do commands are clearly stellar and exact.
+- Do not emit generic setup/search/status suggestions unless the prompt directly asks for that operation.
+- It is good to emit nothing.
+- Never invent tools. Commands must start with `agent-do <tool>`.
+
+Input JSON:
 {json.dumps({
-    "prompt": prompt,
-    "explicit_coord_request": explicit,
-    "local_work_signal": local_work_signal,
-    "current_agent_has_focus": bool(focus_goal),
-    "active_peers": peer_summaries,
-    "interrupts": interrupt_summaries,
+    "prompt": payload["prompt"],
+    "cwd": payload["cwd"],
+    "coord": payload["coord"],
+    "path_hints": payload["path_hints"],
+    "catalog": payload["catalog"],
 }, indent=2)}
 
 Respond with JSON only:
 {{
-  "emit_coord_context": true,
-  "reason": "short reason"
+  "prompt_kind": "work_starting|discussion|coordination|status|other",
+  "starts_work": true,
+  "coord": {{
+    "block": true,
+    "reason": "short reason",
+    "focus_command": "agent-do coord focus set \\"goal\\" --path path"
+  }},
+  "emit_tools": true,
+  "tool_suggestions": [
+    {{
+      "tool": "tool-name-from-catalog",
+      "command": "agent-do tool-name command",
+      "why": "short reason",
+      "confidence": 0.0
+    }}
+  ]
 }}
 """
-    decision = call_json_model(
+    return call_json_model(
         prompt_text,
         flag_name="AGENT_DO_HOOK_AI",
         system=(
-            "You are a precise hook gate for coding-agent prompts. Return strict JSON only. "
+            "You are a fast, high-precision routing gate for Codex UserPromptSubmit hooks. "
+            "Return strict JSON only. "
             "Be engineering-ready, clear, and concise. Use the fewest words that preserve correctness; "
             "do not omit necessary operational detail."
         ),
     )
+
+
+def decision_starts_work(prompt: str, decision: dict | None) -> bool:
+    if isinstance(decision, dict) and isinstance(decision.get("starts_work"), bool):
+        return bool(decision["starts_work"])
+    return prompt_looks_like_coord_work(prompt)
+
+
+def blocking_interrupts(interrupts: list[dict]) -> list[dict]:
+    return [item for item in interrupts if item.get("kind") in BLOCKING_INTERRUPT_KINDS]
+
+
+def ai_coord_payload(decision: dict | None) -> dict:
     if not isinstance(decision, dict):
-        return None
-    value = decision.get("emit_coord_context")
-    return value if isinstance(value, bool) else None
+        return {}
+    coord = decision.get("coord")
+    return coord if isinstance(coord, dict) else {}
 
 
-def should_emit_coord_context(
-    prompt: str,
+def format_coord_block(
     *,
-    active_peers: list[dict],
-    focus_goal: str,
-    interrupts: list[dict],
-    explicit: bool,
-) -> bool:
-    if explicit:
-        return True
-    if not interrupts:
-        return False
+    prompt: str,
+    cwd: str | None,
+    coord_state: dict,
+    decision: dict | None,
+    reason: str,
+) -> str:
+    coord = ai_coord_payload(decision)
+    command = str(coord.get("focus_command") or "").strip()
+    if not valid_focus_command(command):
+        command = fallback_focus_command(prompt, cwd)
 
-    blocking_interrupt = any(item.get("kind") in {"contention", "dependency"} for item in interrupts)
-    if blocking_interrupt:
-        return True
+    peer_lines = []
+    for peer in compact_peers(coord_state.get("active_peers") or []):
+        suffix = f" goal: {peer['goal']}" if peer.get("goal") else ""
+        peer_lines.append(f"- {peer.get('agent')}{suffix}")
+    peers = "\n".join(peer_lines) if peer_lines else "- active peer present"
 
-    local_work_signal = prompt_looks_like_coord_work(prompt)
-    if not local_work_signal:
-        return False
-
-    ai_decision = ai_should_emit_coord_context(
-        prompt,
-        active_peers=active_peers,
-        focus_goal=focus_goal,
-        interrupts=interrupts,
-        explicit=explicit,
-        local_work_signal=local_work_signal,
+    return (
+        "Coord focus required before starting workspace work.\n\n"
+        f"Reason: {reason}\n\n"
+        f"Run:\n{command}\n\n"
+        f"Active peers:\n{peers}\n\n"
+        "Then retry the prompt."
     )
-    if ai_decision is not None:
-        return ai_decision
 
-    return False
+
+def coord_block_reason(prompt: str, cwd: str | None, coord_state: dict, decision: dict | None) -> str | None:
+    starts_work = decision_starts_work(prompt, decision)
+    coord = ai_coord_payload(decision)
+    ai_requested_block = bool(coord.get("block")) if isinstance(coord.get("block"), bool) else False
+    active_peers = coord_state.get("active_peers") or []
+    focus_goal = coord_state.get("focus_goal") or ""
+    blockers = blocking_interrupts(coord_state.get("interrupts") or [])
+
+    if blockers and (starts_work or ai_requested_block):
+        summary = "; ".join(str(item.get("summary") or item.get("kind")) for item in blockers[:3])
+        return format_coord_block(
+            prompt=prompt,
+            cwd=cwd,
+            coord_state=coord_state,
+            decision=decision,
+            reason=f"coord interrupt is active: {summary}",
+        )
+
+    if active_peers and not focus_goal and (starts_work or ai_requested_block):
+        reason = str(coord.get("reason") or "another active peer exists and this agent has no declared focus")
+        return format_coord_block(
+            prompt=prompt,
+            cwd=cwd,
+            coord_state=coord_state,
+            decision=decision,
+            reason=reason,
+        )
+
+    return None
+
+
+def ai_tool_suggestion_context(decision: dict | None, registry: dict) -> tuple[str, list[str]]:
+    if not isinstance(decision, dict) or decision.get("emit_tools") is not True:
+        return "", []
+
+    threshold = hook_confidence_threshold()
+    raw_suggestions = decision.get("tool_suggestions") or []
+    if not isinstance(raw_suggestions, list):
+        return "", []
+
+    lines = []
+    tools = []
+    seen_commands = set()
+    for item in raw_suggestions:
+        if not isinstance(item, dict):
+            continue
+        tool = str(item.get("tool") or "").strip()
+        command = str(item.get("command") or "").strip()
+        confidence = parse_confidence(item.get("confidence"))
+        why = str(item.get("why") or "").strip()
+        if confidence < threshold:
+            continue
+        if not valid_agent_do_command(command, registry, expected_tool=tool):
+            continue
+        if command in seen_commands:
+            continue
+        seen_commands.add(command)
+        tools.append(tool)
+        suffix = f" - {why}" if why else ""
+        lines.append(f"- `{command}`{suffix}")
+
+    if not lines:
+        return "", []
+
+    return (
+        "## agent-do Tool Suggestion\n\n"
+        "High-confidence agent-do path:\n"
+        + "\n".join(lines)
+        + "\n",
+        tools,
+    )
 
 
 def resolve_agent_do_binary() -> str | None:
@@ -637,23 +578,13 @@ def resolve_agent_do_binary() -> str | None:
     return None
 
 
-def load_coord_context(prompt: str, cwd: str | None) -> tuple[str, list[str]]:
-    explicit = detect_coord_prompt(prompt)
+def load_coord_state(cwd: str | None) -> dict:
+    state = {"active_peers": [], "focus_goal": "", "interrupts": []}
     if not cwd:
-        if not explicit:
-            return "", []
-        return (
-            "## Coord Suggestion\n\n"
-            "This sounds like multi-agent coordination. Start with:\n"
-            "- `agent-do coord status`\n"
-            "- `agent-do coord interrupts`\n"
-            "- `agent-do coord focus set \"<goal>\" --path <path>`\n",
-            ["coord"],
-        )
-
+        return state
     agent_do = resolve_agent_do_binary()
     if not agent_do:
-        return "", []
+        return state
 
     touched = subprocess.run(
         [agent_do, "coord", "touch", "--json"],
@@ -663,11 +594,11 @@ def load_coord_context(prompt: str, cwd: str | None) -> tuple[str, list[str]]:
         check=False,
     )
     if touched.returncode != 0 or not touched.stdout.strip():
-        return "", []
+        return state
 
     touch_payload = json.loads(touched.stdout)
-    active_peers = touch_payload.get("active_peers", [])
-    focus_goal = ((touch_payload.get("focus") or {}).get("goal")) or ""
+    state["active_peers"] = touch_payload.get("active_peers", [])
+    state["focus_goal"] = ((touch_payload.get("focus") or {}).get("goal")) or ""
 
     interrupts_run = subprocess.run(
         [agent_do, "coord", "interrupts", "--json", "--limit", "5"],
@@ -681,54 +612,12 @@ def load_coord_context(prompt: str, cwd: str | None) -> tuple[str, list[str]]:
     else:
         interrupts_payload = json.loads(interrupts_run.stdout)
 
-    interrupts = interrupts_payload.get("interrupts", [])
-    should_emit = should_emit_coord_context(
-        prompt,
-        active_peers=active_peers,
-        focus_goal=focus_goal,
-        interrupts=interrupts,
-        explicit=explicit,
-    )
-    if not should_emit:
-        return "", []
+    state["interrupts"] = interrupts_payload.get("interrupts", [])
+    return state
 
-    if interrupts:
-        subprocess.run(
-            [agent_do, "coord", "interrupts", "--json", "--mark-seen", "--limit", "5"],
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        lines = []
-        for item in interrupts:
-            prefix = "[new] " if item.get("new") else ""
-            lines.append(f"- {prefix}{item.get('kind')}: {item.get('summary')}")
-        context = (
-            "## Coord Interrupts\n\n"
-            "Relevant coordination interrupts are active in this repo:\n"
-            f"{chr(10).join(lines)}\n\n"
-            "Use `agent-do coord status`, `agent-do coord interrupts`, or `agent-do coord focus show`.\n"
-        )
-        return context, ["coord"]
 
-    if active_peers and not focus_goal:
-        peer_lines = []
-        for peer in active_peers:
-            label = peer.get("alias") or peer.get("agent_id")
-            goal = ((peer.get("focus") or {}).get("goal")) or ""
-            suffix = f" goal: {goal}" if goal else ""
-            peer_lines.append(f"- {label}{suffix}")
-        context = (
-            "## Coord Focus Reminder\n\n"
-            "Other active peers exist in this repo, and you have not declared focus yet.\n"
-            f"{chr(10).join(peer_lines)}\n\n"
-            "Set focus before overlapping work starts with "
-            "`agent-do coord focus set \"<goal>\" --path <path> [--path <path> ...]`.\n"
-        )
-        return context, ["coord"]
-
-    if explicit:
+def coord_advisory_context(prompt: str, coord_state: dict) -> tuple[str, list[str]]:
+    if detect_coord_prompt(prompt):
         return (
             "## Coord Suggestion\n\n"
             "This sounds like multi-agent coordination. Start with:\n"
@@ -753,27 +642,41 @@ def main():
         sys.exit(0)
     cwd = input_data.get("cwd")
 
-    shared_matches = analyze_registry_prompt(prompt)
-    matches = shared_matches + analyze_prompt(prompt, skip_tools={tool for tool, _ in shared_matches})
+    registry = load_registry() if load_registry is not None else {"tools": {}}
+    coord_state = load_coord_state(cwd)
+    ai_decision = ai_route_prompt(prompt, cwd=cwd, coord_state=coord_state, registry=registry)
+    block_reason = coord_block_reason(prompt, cwd, coord_state, ai_decision)
+    if block_reason:
+        if record_nudge_event is not None:
+            try:
+                record_nudge_event(
+                    "prompt_coord_block",
+                    "prompt_router",
+                    tools=["coord"],
+                    prompt=prompt[:240],
+                )
+            except Exception:
+                pass
+        print(json.dumps({"decision": "block", "reason": block_reason}))
+        sys.exit(0)
+
+    tool_context, tool_tools = ai_tool_suggestion_context(ai_decision, registry)
+    coord_context, coord_tools = coord_advisory_context(prompt, coord_state)
     is_design = detect_frontend_design(prompt)
 
     needs_completion = needs_completion_check(prompt)
-    coord_context, coord_tools = load_coord_context(prompt, cwd)
 
-    if matches or is_design or needs_completion or coord_context:
+    if tool_context or is_design or needs_completion or coord_context:
         context = ""
 
-        if matches:
-            context += "## agent-do Tool Suggestion\n\nBased on your request, consider using agent-do tools:\n\n"
-            for tool, suggestion in matches:
-                context += f"**{tool}**: {suggestion}\n\n"
-            context += "Reference: `agent-do suggest \"task\"` | `agent-do suggest --project` | `agent-do find <keyword>` | `agent-do --list` | `agent-do <tool> --help`\n"
+        if tool_context:
+            context += tool_context
             if record_nudge_event is not None:
                 try:
                     record_nudge_event(
                         "prompt_tool_suggestion",
                         "prompt_router",
-                        tools=[tool for tool, _ in matches],
+                        tools=tool_tools,
                         prompt=prompt[:240],
                     )
                 except Exception:

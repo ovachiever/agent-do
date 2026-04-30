@@ -64,12 +64,7 @@ def main() -> int:
         input_text='{"prompt":"deploy this on vercel and check logs"}',
     )
     require(prompt_result.returncode == 0, f"prompt-router failed: {prompt_result.stderr}")
-    prompt_payload = json.loads(prompt_result.stdout)
-    prompt_context = prompt_payload["hookSpecificOutput"]["additionalContext"]
-    require(
-        "agent-do vercel deploy" in prompt_context,
-        f"expected concrete vercel deploy suggestion, got: {prompt_context}",
-    )
+    require(prompt_result.stdout.strip() == "", f"expected no non-AI tool suggestion, got: {prompt_result.stdout}")
 
     dpt_result = run(
         "python3",
@@ -87,9 +82,7 @@ def main() -> int:
         input_text='{"prompt":"check my mail inbox for the latest verification code"}',
     )
     require(mail_result.returncode == 0, f"mail prompt-router failed: {mail_result.stderr}")
-    mail_payload = json.loads(mail_result.stdout)
-    mail_context = mail_payload["hookSpecificOutput"]["additionalContext"]
-    require("agent-do email" in mail_context, f"expected email routing context for mail prompt, got: {mail_context}")
+    require(mail_result.stdout.strip() == "", f"expected no non-AI email suggestion, got: {mail_result.stdout}")
 
     gh_prompt = run(
         "python3",
@@ -97,9 +90,7 @@ def main() -> int:
         input_text='{"prompt":"what PRs need me on GitHub"}',
     )
     require(gh_prompt.returncode == 0, f"gh prompt-router failed: {gh_prompt.stderr}")
-    gh_prompt_payload = json.loads(gh_prompt.stdout)
-    gh_context = gh_prompt_payload["hookSpecificOutput"]["additionalContext"]
-    require("agent-do gh inbox" in gh_context, f"expected gh inbox routing context, got: {gh_context}")
+    require(gh_prompt.stdout.strip() == "", f"expected no non-AI gh suggestion, got: {gh_prompt.stdout}")
 
     gh_awaiting_prompt = run(
         "python3",
@@ -107,9 +98,7 @@ def main() -> int:
         input_text='{"prompt":"which PRs are awaiting my review on GitHub"}',
     )
     require(gh_awaiting_prompt.returncode == 0, f"gh awaiting prompt-router failed: {gh_awaiting_prompt.stderr}")
-    gh_awaiting_prompt_payload = json.loads(gh_awaiting_prompt.stdout)
-    gh_awaiting_context = gh_awaiting_prompt_payload["hookSpecificOutput"]["additionalContext"]
-    require("agent-do gh awaiting" in gh_awaiting_context, f"expected gh awaiting routing context, got: {gh_awaiting_context}")
+    require(gh_awaiting_prompt.stdout.strip() == "", f"expected no non-AI gh awaiting suggestion, got: {gh_awaiting_prompt.stdout}")
 
     spec_prompt_result = run(
         "python3",
@@ -117,9 +106,7 @@ def main() -> int:
         input_text='{"prompt":"write a change proposal and spec package for this feature"}',
     )
     require(spec_prompt_result.returncode == 0, f"spec prompt-router failed: {spec_prompt_result.stderr}")
-    spec_prompt_payload = json.loads(spec_prompt_result.stdout)
-    spec_prompt_context = spec_prompt_payload["hookSpecificOutput"]["additionalContext"]
-    require("agent-do spec" in spec_prompt_context, f"expected spec routing context, got: {spec_prompt_context}")
+    require(spec_prompt_result.stdout.strip() == "", f"expected no non-AI spec suggestion, got: {spec_prompt_result.stdout}")
 
     completion_prompts = [
         "continue",
@@ -294,7 +281,9 @@ def main() -> int:
             env=second_env,
         )
         require(work_prompt.returncode == 0, f"work coord prompt-router failed: {work_prompt.stderr}")
-        require("Coord Focus Reminder" not in work_prompt.stdout, f"did not expect active-peer coord noise, got: {work_prompt.stdout}")
+        work_block = json.loads(work_prompt.stdout)
+        require(work_block.get("decision") == "block", f"expected coord block for work prompt, got: {work_prompt.stdout}")
+        require("agent-do coord focus set" in work_block.get("reason", ""), f"expected focus command, got: {work_block}")
 
         docs_prompt = run(
             "python3",
@@ -303,8 +292,9 @@ def main() -> int:
             env=second_env,
         )
         require(docs_prompt.returncode == 0, f"docs prompt-router failed: {docs_prompt.stderr}")
-        require("Coord Focus Reminder" not in docs_prompt.stdout, f"did not expect coord reminder for normal work prompt: {docs_prompt.stdout}")
-        require("agent-do context search" not in docs_prompt.stdout, f"did not expect context nudge for local docs work: {docs_prompt.stdout}")
+        docs_block = json.loads(docs_prompt.stdout)
+        require(docs_block.get("decision") == "block", f"expected coord block for docs work prompt, got: {docs_prompt.stdout}")
+        require("agent-do context search" not in docs_block.get("reason", ""), f"did not expect context nudge in block reason: {docs_block}")
 
         subprocess.run(
             [str(ROOT / "agent-do"), "coord", "focus", "set", "render work", "--path", "recognition-oracle/render.yaml", "--json"],
@@ -351,9 +341,8 @@ def main() -> int:
         )
         require(coord_prompt.returncode == 0, f"coord prompt-router failed: {coord_prompt.stderr}")
         coord_prompt_payload = json.loads(coord_prompt.stdout)
-        coord_prompt_context = coord_prompt_payload["hookSpecificOutput"]["additionalContext"]
-        require("Coord Interrupts" in coord_prompt_context, f"expected coord prompt context, got: {coord_prompt_context}")
-        require("agent-do coord status" in coord_prompt_context, f"expected coord status hint, got: {coord_prompt_context}")
+        require(coord_prompt_payload.get("decision") == "block", f"expected coord block, got: {coord_prompt.stdout}")
+        require("coord interrupt is active" in coord_prompt_payload.get("reason", ""), f"expected interrupt reason, got: {coord_prompt_payload}")
 
     with tempfile.TemporaryDirectory() as telemetry_home:
         env = os.environ.copy()
@@ -384,7 +373,7 @@ def main() -> int:
         stats = run("./agent-do", "nudges", "stats", "--json", env=env)
         require(stats.returncode == 0, f"nudges stats failed: {stats.stderr}")
         stats_payload = json.loads(stats.stdout)
-        require(stats_payload["total_events"] >= 3, f"expected telemetry events, got: {stats_payload}")
+        require(stats_payload["total_events"] >= 2, f"expected telemetry events, got: {stats_payload}")
         require("prompt_router" in stats_payload["sources"], f"missing prompt router telemetry: {stats_payload}")
         require("pretool" in stats_payload["sources"], f"missing pretool telemetry: {stats_payload}")
 
