@@ -41,6 +41,7 @@ def write_envelope_index_fixture(path: Path) -> None:
         CREATE TABLE addresses (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '');
         CREATE TABLE subjects (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT NOT NULL);
         CREATE TABLE summaries (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, summary TEXT NOT NULL);
+        CREATE TABLE message_global_data (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, message_id_header TEXT);
         CREATE TABLE messages (
             ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
             message_id INTEGER NOT NULL DEFAULT 0,
@@ -84,14 +85,23 @@ def write_envelope_index_fixture(path: Path) -> None:
     conn.execute("INSERT INTO addresses (ROWID, address, comment) VALUES (20, 'sender@example.com', '')")
     conn.execute("INSERT INTO sender_addresses (address, sender) VALUES (20, 10)")
     conn.execute("INSERT INTO subjects (ROWID, subject) VALUES (30, 'Indexed invoice')")
+    conn.execute("INSERT INTO subjects (ROWID, subject) VALUES (31, 'Remote hydration row')")
     conn.execute("INSERT INTO summaries (ROWID, summary) VALUES (40, 'Invoice summary contains 731902')")
+    conn.execute("INSERT INTO message_global_data (ROWID, message_id_header) VALUES (9002, '<remote-hydrate@example.test>')")
     conn.execute(
         """
         INSERT INTO messages (ROWID, message_id, global_message_id, sender, subject, summary, date_received, mailbox, read, deleted)
         VALUES (100, 9001, 9001, 10, 30, 40, 1770000000, 1, 0, 0)
         """
     )
+    conn.execute(
+        """
+        INSERT INTO messages (ROWID, message_id, global_message_id, remote_id, sender, subject, summary, date_received, mailbox, read, deleted)
+        VALUES (101, 9002, 9002, 4242, 10, 31, NULL, 1770000100, 1, 0, 0)
+        """
+    )
     conn.execute("INSERT INTO searchable_messages (message_id, message, message_body_indexed) VALUES (100, 100, 1)")
+    conn.execute("INSERT INTO searchable_messages (message_id, message, message_body_indexed) VALUES (101, 101, 0)")
     conn.execute("INSERT INTO attachments (message, attachment_id, name) VALUES (100, 'att-1', 'invoice.pdf')")
     conn.commit()
     conn.close()
@@ -175,6 +185,10 @@ def main() -> int:
 
         env = os.environ.copy()
         env["AGENT_EMAIL_FIXTURE"] = str(fixture)
+
+        export_help = run(str(AGENT_DO), "email", "export", "--help", cwd=ROOT, env=env)
+        require(export_help.returncode == 0, f"email export help failed: {export_help.stderr}")
+        require("--format" in export_help.stdout, f"unexpected export help: {export_help.stdout}")
 
         snapshot = run(str(AGENT_DO), "email", "snapshot", "--json", cwd=ROOT, env=env)
         require(snapshot.returncode == 0, f"email snapshot failed: {snapshot.stderr}")
@@ -464,6 +478,87 @@ def main() -> int:
         )
         require(summary_export_allowed.returncode == 0, f"summary export failed: {summary_export_allowed.stderr}")
         require("Apple Mail index summary only" in summary_html_path.read_text(encoding="utf-8"), "summary export missing warning")
+
+        fake_imap_dir = tmp / "fake_imap"
+        fake_imap_dir.mkdir()
+        (fake_imap_dir / "imaplib.py").write_text(
+            """
+RAW = b"From: Provider <provider@example.com>\\r\\nTo: recipient@example.com\\r\\nSubject: Remote invoice\\r\\nMessage-ID: <remote-hydrate@example.test>\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\nRemote provider body invoice 117172125.\\r\\n"
+
+class IMAP4_SSL:
+    def __init__(self, host, port=None, timeout=None):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+
+    def login(self, user, password):
+        return "OK", [b"logged in"]
+
+    def select(self, mailbox="INBOX", readonly=False):
+        return "OK", [b"1"]
+
+    def search(self, charset, *criteria):
+        joined = " ".join(str(item) for item in criteria)
+        if "remote-hydrate@example.test" in joined:
+            return "OK", [b"42"]
+        return "OK", [b""]
+
+    def fetch(self, message_id, query):
+        return "OK", [(b"42 (RFC822)", RAW)]
+
+    def logout(self):
+        return "OK", [b"logged out"]
+
+IMAP4 = IMAP4_SSL
+""",
+            encoding="utf-8",
+        )
+        remote_env = live_env.copy()
+        remote_env["PYTHONPATH"] = str(fake_imap_dir)
+        remote_env["AGENT_EMAIL_PROVIDER"] = "imap"
+        remote_env["AGENT_EMAIL_IMAP_HOST"] = "imap.example.test"
+        remote_env["AGENT_EMAIL_IMAP_USER"] = "robot@example.test"
+        remote_env["AGENT_EMAIL_IMAP_PASS"] = "test-password"
+        remote_get = run(
+            str(AGENT_DO),
+            "email",
+            "get",
+            "--id",
+            "db:101",
+            "--all-mailboxes",
+            "--json",
+            cwd=ROOT,
+            env=remote_env,
+        )
+        require(remote_get.returncode == 0, f"remote hydration get failed: {remote_get.stderr}")
+        remote_get_payload = json.loads(remote_get.stdout)
+        remote_message = remote_get_payload["message"]
+        require("Remote provider body invoice 117172125." in remote_message["body"], f"unexpected remote body: {remote_get_payload}")
+        require(remote_message["availability"]["state"] == "raw_source", f"unexpected remote availability: {remote_get_payload}")
+        require(remote_message["availability"]["source_available"] is True, f"expected source after hydration: {remote_get_payload}")
+        require(remote_message["availability"]["hydration"]["available"] is True, f"expected hydration success: {remote_get_payload}")
+        require(remote_message["availability"]["hydration"]["provider"] == "imap", f"unexpected provider: {remote_get_payload}")
+
+        remote_eml_path = tmp / "remote.eml"
+        remote_export = run(
+            str(AGENT_DO),
+            "email",
+            "export",
+            "--id",
+            "db:101",
+            "--all-mailboxes",
+            "--format",
+            "eml",
+            "--output",
+            str(remote_eml_path),
+            "--json",
+            cwd=ROOT,
+            env=remote_env,
+        )
+        require(remote_export.returncode == 0, f"remote hydration export failed: {remote_export.stderr}")
+        remote_eml = remote_eml_path.read_text(encoding="utf-8")
+        require("Message-ID: <remote-hydrate@example.test>" in remote_eml, "remote eml missing Message-ID")
+        require("Remote provider body invoice 117172125." in remote_eml, "remote eml missing body")
 
     print("email tests passed")
     return 0

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import imaplib
 import json
 import os
 import re
@@ -15,6 +16,9 @@ import sys
 import tempfile
 import time
 from datetime import datetime, timezone
+from email import policy
+from email.message import Message
+from email.parser import BytesParser
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -28,6 +32,7 @@ RECORD_SEP = chr(30)
 ATTACH_SEP = chr(29)
 ATTACH_FIELD_SEP = chr(28)
 INBOX_NAMES = {"inbox", "in box", "inbox/"}
+REMOTE_HYDRATION_DISABLED = os.environ.get("AGENT_EMAIL_DISABLE_REMOTE_HYDRATION") == "1"
 
 
 def emit(payload: dict[str, Any], *, raw: str | None = None) -> None:
@@ -162,6 +167,7 @@ def normalize_message(item: dict[str, Any], index: int) -> dict[str, Any]:
     body = str(item.get("body") or item.get("content") or "")
     source = str(item.get("source") or "")
     attachments = normalize_attachments(item.get("attachments"))
+    provider = item.get("provider") if isinstance(item.get("provider"), dict) else {}
     availability = availability_from_message(
         body=body,
         source=source,
@@ -179,6 +185,7 @@ def normalize_message(item: dict[str, Any], index: int) -> dict[str, Any]:
         "body": body,
         "source": source,
         "attachments": attachments,
+        "provider": dict(provider),
         "availability": availability,
     }
 
@@ -479,6 +486,8 @@ class MacMailSource:
             SELECT
                 m.ROWID AS rowid,
                 m.message_id AS message_id_value,
+                COALESCE(m.remote_id, '') AS remote_id,
+                COALESCE(mgd.message_id_header, '') AS message_id_header,
                 COALESCE(
                     a_direct.address,
                     (
@@ -499,6 +508,7 @@ class MacMailSource:
                 COALESCE(sm.message_body_indexed, 0) AS message_body_indexed
             FROM messages m
             JOIN mailboxes mb ON m.mailbox = mb.ROWID
+            LEFT JOIN message_global_data mgd ON mgd.ROWID = m.global_message_id
             LEFT JOIN addresses a_direct ON m.sender = a_direct.ROWID
             LEFT JOIN subjects sub ON m.subject = sub.ROWID
             LEFT JOIN summaries sumry ON m.summary = sumry.ROWID
@@ -557,6 +567,11 @@ class MacMailSource:
                         "body": body,
                         "source": "",
                         "attachments": attachments,
+                        "provider": {
+                            "mailbox_url": row["mailbox_url"],
+                            "remote_id": row["remote_id"],
+                            "message_id_header": row["message_id_header"],
+                        },
                         "availability": availability,
                     },
                     index,
@@ -730,6 +745,302 @@ def extract_link(message: dict[str, Any], args: argparse.Namespace) -> str:
     return links[0]
 
 
+class RemoteHydrationError(Exception):
+    """Raised when a configured remote provider cannot hydrate a message."""
+
+
+def truthy_env(name: str, *, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return normalize_key(value) not in {"", "0", "false", "no", "off"}
+
+
+def remote_provider_config(message: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if REMOTE_HYDRATION_DISABLED:
+        return None, None
+    provider = normalize_key(os.environ.get("AGENT_EMAIL_PROVIDER", ""))
+    if not provider and os.environ.get("AGENT_EMAIL_IMAP_HOST"):
+        provider = "imap"
+    if not provider:
+        return None, None
+    if provider not in {"imap", "gmail", "exchange", "outlook", "office365", "ews"}:
+        return None, {
+            "attempted": ["apple_mail_envelope_index", provider],
+            "available": False,
+            "provider": provider,
+            "error": "unsupported_provider",
+            "next": "Use AGENT_EMAIL_PROVIDER=imap, gmail, exchange, outlook, office365, or ews.",
+        }
+
+    host = normalize_text(os.environ.get("AGENT_EMAIL_IMAP_HOST"))
+    if not host and provider == "gmail":
+        host = "imap.gmail.com"
+    if not host and provider in {"exchange", "outlook", "office365", "ews"}:
+        host = "outlook.office365.com"
+    user = normalize_text(os.environ.get("AGENT_EMAIL_IMAP_USER") or os.environ.get("EMAIL_USER"))
+    password = str(os.environ.get("AGENT_EMAIL_IMAP_PASS") or os.environ.get("EMAIL_PASS") or "")
+    missing = [
+        name
+        for name, value in [
+            ("AGENT_EMAIL_IMAP_HOST", host),
+            ("AGENT_EMAIL_IMAP_USER", user),
+            ("AGENT_EMAIL_IMAP_PASS", password),
+        ]
+        if not value
+    ]
+    if missing:
+        return None, {
+            "attempted": ["apple_mail_envelope_index", provider],
+            "available": False,
+            "provider": provider,
+            "error": "provider_not_configured",
+            "missing": missing,
+            "next": "Configure IMAP provider env vars, or leave remote hydration disabled.",
+        }
+
+    port = int(os.environ.get("AGENT_EMAIL_IMAP_PORT") or "993")
+    timeout = int(os.environ.get("AGENT_EMAIL_IMAP_TIMEOUT") or "20")
+    mailboxes_env = normalize_text(os.environ.get("AGENT_EMAIL_IMAP_MAILBOXES") or os.environ.get("AGENT_EMAIL_IMAP_MAILBOX"))
+    mailboxes = [normalize_text(item) for item in mailboxes_env.split(",") if normalize_text(item)] if mailboxes_env else []
+    for candidate in [normalize_text(message.get("mailbox")), "INBOX"]:
+        if candidate and candidate not in mailboxes:
+            mailboxes.append(candidate)
+    return {
+        "provider": provider,
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "ssl": truthy_env("AGENT_EMAIL_IMAP_SSL", default=True),
+        "timeout": timeout,
+        "mailboxes": mailboxes or ["INBOX"],
+    }, None
+
+
+def message_id_candidates(value: Any) -> list[str]:
+    raw = normalize_text(value)
+    if not raw:
+        return []
+    stripped = raw.strip()
+    inner = stripped[1:-1].strip() if stripped.startswith("<") and stripped.endswith(">") else stripped
+    candidates = [stripped]
+    if inner and inner != stripped:
+        candidates.append(inner)
+    if inner and not stripped.startswith("<"):
+        candidates.insert(0, f"<{inner}>")
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            normalized.append(candidate)
+    return normalized
+
+
+def decode_mime_part(part: Message) -> str:
+    payload = part.get_payload(decode=True)
+    if payload is None:
+        raw_payload = part.get_payload()
+        return raw_payload if isinstance(raw_payload, str) else ""
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="replace")
+    except LookupError:
+        return payload.decode("utf-8", errors="replace")
+
+
+def html_body_to_text(value: str) -> str:
+    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", value)
+    text = re.sub(r"(?s)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?s)</p\s*>", "\n\n", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    return re.sub(r"[ \t]+\n", "\n", re.sub(r"\n{3,}", "\n\n", text)).strip()
+
+
+def extract_remote_body(parsed: Message) -> str:
+    plain_parts: list[str] = []
+    html_parts: list[str] = []
+    for part in parsed.walk():
+        if part.is_multipart():
+            continue
+        disposition = normalize_key(part.get_content_disposition() or "")
+        if disposition == "attachment" or part.get_filename():
+            continue
+        content_type = normalize_key(part.get_content_type())
+        if content_type == "text/plain":
+            text = decode_mime_part(part).strip()
+            if text:
+                plain_parts.append(text)
+        elif content_type == "text/html":
+            text = html_body_to_text(decode_mime_part(part))
+            if text:
+                html_parts.append(text)
+    if plain_parts:
+        return "\n\n".join(plain_parts).strip()
+    return "\n\n".join(html_parts).strip()
+
+
+def extract_remote_attachments(parsed: Message) -> list[dict[str, Any]]:
+    attachments: list[dict[str, Any]] = []
+    for index, part in enumerate(parsed.walk(), start=1):
+        if part.is_multipart():
+            continue
+        disposition = normalize_key(part.get_content_disposition() or "")
+        filename = normalize_text(part.get_filename())
+        if disposition != "attachment" and not filename:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        attachments.append(
+            {
+                "name": filename or f"attachment-{index}",
+                "mime_type": normalize_text(part.get_content_type()),
+                "size": len(payload),
+                "download_available": False,
+            }
+        )
+    return attachments
+
+
+def imap_client(config: dict[str, Any]) -> imaplib.IMAP4:
+    cls = imaplib.IMAP4_SSL if config["ssl"] else imaplib.IMAP4
+    try:
+        return cls(config["host"], config["port"], timeout=config["timeout"])
+    except TypeError:
+        return cls(config["host"], config["port"])
+
+
+def response_ok(status: Any) -> bool:
+    return normalize_key(status.decode("utf-8", errors="replace") if isinstance(status, bytes) else str(status)) == "ok"
+
+
+def first_fetch_payload(data: list[Any]) -> bytes | None:
+    for item in data:
+        if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+            return bytes(item[1])
+    return None
+
+
+def fetch_remote_source_by_message_id(config: dict[str, Any], candidates: list[str]) -> tuple[bytes, dict[str, Any]]:
+    client = imap_client(config)
+    try:
+        status, _ = client.login(config["user"], config["password"])
+        if not response_ok(status):
+            raise RemoteHydrationError("IMAP login failed")
+        for mailbox in config["mailboxes"]:
+            status, _ = client.select(mailbox, readonly=True)
+            if not response_ok(status):
+                continue
+            for candidate in candidates:
+                status, data = client.search(None, "HEADER", "Message-ID", candidate)
+                if not response_ok(status):
+                    continue
+                raw_ids = data[0] if data else b""
+                if isinstance(raw_ids, str):
+                    raw_ids = raw_ids.encode("utf-8")
+                ids = [item for item in bytes(raw_ids).split() if item]
+                if not ids:
+                    continue
+                status, fetch_data = client.fetch(ids[-1], "(RFC822)")
+                if not response_ok(status):
+                    continue
+                payload = first_fetch_payload(fetch_data)
+                if payload:
+                    return payload, {"mailbox": mailbox, "matched_by": "message_id_header", "message_id": candidate}
+        raise RemoteHydrationError("No remote message matched the Apple Mail Message-ID")
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def with_hydration_status(message: dict[str, Any], hydration: dict[str, Any]) -> dict[str, Any]:
+    cloned = dict(message)
+    availability = dict(cloned.get("availability") or {})
+    availability["hydration"] = hydration
+    cloned["availability"] = availability
+    return cloned
+
+
+def hydrate_remote_message(message: dict[str, Any]) -> dict[str, Any]:
+    availability = message.get("availability", {}) or {}
+    if availability.get("source_available") or (availability.get("body_available") and availability.get("body_is_full")):
+        return message
+    provider_meta = message.get("provider") if isinstance(message.get("provider"), dict) else {}
+    candidates = message_id_candidates(provider_meta.get("message_id_header"))
+    if not candidates:
+        return with_hydration_status(
+            message,
+            {
+                "attempted": ["apple_mail_envelope_index"],
+                "available": False,
+                "error": "missing_message_id_header",
+                "next": "Remote hydration needs Apple Mail's RFC822 Message-ID metadata.",
+            },
+        )
+    config, config_error = remote_provider_config(message)
+    if config_error:
+        return with_hydration_status(message, config_error)
+    if not config:
+        return with_hydration_status(
+            message,
+            {
+                "attempted": ["apple_mail_envelope_index"],
+                "available": False,
+                "next": "Configure AGENT_EMAIL_PROVIDER plus IMAP env vars to fetch remote body/source.",
+            },
+        )
+    try:
+        raw_source, match = fetch_remote_source_by_message_id(config, candidates)
+        source = raw_source.decode("utf-8", errors="replace")
+        parsed = BytesParser(policy=policy.default).parsebytes(raw_source)
+        body = extract_remote_body(parsed)
+        attachments = extract_remote_attachments(parsed) or list(message.get("attachments") or [])
+        hydration = {
+            "attempted": ["apple_mail_envelope_index", config["provider"]],
+            "available": True,
+            "provider": config["provider"],
+            "host": config["host"],
+            "mailbox": match.get("mailbox", ""),
+            "matched_by": match.get("matched_by", ""),
+        }
+        hydrated = dict(message)
+        hydrated["body"] = body or message.get("body", "")
+        hydrated["source"] = source
+        hydrated["attachments"] = attachments
+        hydrated["availability"] = availability_from_message(
+            body=str(hydrated["body"] or ""),
+            source=source,
+            attachments=attachments,
+            override={
+                "metadata_found": True,
+                "body_kind": "full" if body else "none",
+                "body_is_full": bool(body),
+                "source_available": True,
+                "attachment_metadata_available": bool(attachments),
+                "attachment_download_available": False,
+                "state": "raw_source",
+            },
+        )
+        hydrated["availability"]["hydration"] = hydration
+        return hydrated
+    except Exception as exc:
+        return with_hydration_status(
+            message,
+            {
+                "attempted": ["apple_mail_envelope_index", config["provider"]],
+                "available": False,
+                "provider": config["provider"],
+                "host": config["host"],
+                "error": exc.__class__.__name__,
+                "message": str(exc),
+                "next": "Verify provider credentials, mailbox scope, and Message-ID search support.",
+            },
+        )
+
+
 def message_text_for_export(message: dict[str, Any], args: argparse.Namespace) -> str:
     availability = message.get("availability", {}) or {}
     state = str(availability.get("state") or "")
@@ -755,7 +1066,8 @@ def message_text_for_export(message: dict[str, Any], args: argparse.Namespace) -
         extra={
             "message_id": message.get("id"),
             "availability": availability,
-            "hydration": {
+            "hydration": availability.get("hydration")
+            or {
                 "attempted": ["apple_mail_envelope_index"],
                 "available": False,
                 "next": "Configure a remote provider fallback or export/forward the message.",
@@ -951,6 +1263,7 @@ def handle_get(source: FixtureSource | MacMailSource, args: argparse.Namespace) 
             error="message_not_found",
             extra={"message_id": args.message_id, "scope": scope_payload(args, selected)},
         )
+    message = hydrate_remote_message(message)
     payload = {"ok": True, "message": project_message(message, include_source=True, include_attachments=True)}
     emit(payload, raw=json.dumps(project_message(message, include_source=True, include_attachments=True), indent=2))
 
@@ -964,6 +1277,7 @@ def handle_export(source: FixtureSource | MacMailSource, args: argparse.Namespac
             error="message_not_found",
             extra={"message_id": args.message_id, "scope": scope_payload(args, selected)},
         )
+    message = hydrate_remote_message(message)
 
     export_format = normalize_key(args.format)
     content: str | None = None
@@ -1045,7 +1359,7 @@ def add_filter_args(subparser: argparse.ArgumentParser, *, allow_all_mailboxes: 
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser(description="Query and export local Mail index messages.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     snapshot = sub.add_parser("snapshot")
