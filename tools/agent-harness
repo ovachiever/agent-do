@@ -1,0 +1,855 @@
+#!/usr/bin/env python3
+"""agent-harness - inspect the observable agent-do harness."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def rel(path: Path) -> str:
+    try:
+        return path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def parse_since(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    now = datetime.now(timezone.utc)
+    match = re.fullmatch(r"(\d+)([dhm])", value.strip())
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2)
+        if unit == "d":
+            return now - timedelta(days=amount)
+        if unit == "h":
+            return now - timedelta(hours=amount)
+        return now - timedelta(minutes=amount)
+    return parse_iso(value)
+
+
+def agent_do_home() -> Path:
+    return Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                events.append(payload)
+    return events
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def write_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for event in events:
+            handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+def run_cmd(args: list[str], cwd: Path | None = None, timeout: int = 10) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            args,
+            cwd=cwd or Path.cwd(),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            args,
+            124,
+            stdout=exc.stdout or "",
+            stderr=f"Command timed out after {timeout}s",
+        )
+
+
+def agent_do_cmd(*args: str, cwd: Path | None = None, timeout: int = 10) -> subprocess.CompletedProcess[str]:
+    return run_cmd([str(REPO_ROOT / "agent-do"), *args], cwd=cwd, timeout=timeout)
+
+
+def load_registry() -> dict[str, Any]:
+    sys.path.insert(0, str(REPO_ROOT / "lib"))
+    from registry import load_registry as load_agent_registry  # noqa: WPS433
+
+    return load_agent_registry().get("tools") or {}
+
+
+def git_value(args: list[str], cwd: Path) -> str | None:
+    result = subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def current_project() -> dict[str, Any]:
+    cwd = Path.cwd()
+    root = git_value(["rev-parse", "--show-toplevel"], cwd)
+    branch = git_value(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
+    commit = git_value(["rev-parse", "--short", "HEAD"], cwd)
+    return {
+        "cwd": str(cwd),
+        "git_root": root,
+        "branch": branch,
+        "commit": commit,
+    }
+
+
+def existing(paths: list[Path]) -> list[str]:
+    return [rel(path) for path in paths if path.exists()]
+
+
+def test_paths_for_tool(name: str) -> list[str]:
+    candidates = [
+        REPO_ROOT / "tests" / f"test_{name.replace('-', '_')}.py",
+        REPO_ROOT / "tests" / f"test_{name}.py",
+        REPO_ROOT / "tools" / f"agent-{name}" / "test" / "integration.sh",
+        REPO_ROOT / "tools" / f"agent-{name}" / "tests",
+    ]
+    return existing(candidates)
+
+
+def tool_files(name: str) -> list[str]:
+    tool_path = REPO_ROOT / "tools" / f"agent-{name}"
+    nested = tool_path / f"agent-{name}"
+    files = []
+    if tool_path.exists():
+        files.append(rel(tool_path))
+    if nested.exists():
+        files.append(rel(nested))
+    return files
+
+
+def state_refs_for_tool(name: str) -> list[str]:
+    refs = {
+        "context": ["~/.agent-do/context/"],
+        "zpc": [".zpc/"],
+        "spec": ["agent-do-spec/"],
+        "coord": [".git/agent-do/coord/", "~/.agent-do/coord/"],
+        "nudges": ["~/.agent-do/telemetry/nudges.jsonl"],
+        "sessions": ["~/.cache/agent-sessions/sessions.db"],
+        "eval": ["~/.agent-do/evals/"],
+        "auth": ["~/.agent-do/auth/"],
+        "creds": ["OS secure credential store"],
+        "browse": ["~/.agent-browse/sessions/", "agent-browser sockets"],
+        "tail": ["tmp/logs/"],
+    }
+    return refs.get(name, [])
+
+
+def registry_component(registry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": "registry:agent-do",
+        "type": "registry",
+        "name": "registry.yaml",
+        "files": ["registry.yaml"],
+        "tools": sorted(registry.keys()),
+        "summary": "Master tool catalog: descriptions, commands, routing, credentials, and concurrency.",
+    }
+
+
+def instruction_components() -> list[dict[str, Any]]:
+    candidates = [
+        ("instructions:agents", "AGENTS.md", "Repo-scoped agent operating guide."),
+        ("instructions:claude", "CLAUDE.md", "Claude-facing repo guidance and tool map."),
+        ("docs:integration", "INTEGRATION.md", "Hook integration and host compatibility guidance."),
+        ("docs:architecture", "ARCHITECTURE.md", "Harness architecture and routing flow."),
+    ]
+    components = []
+    for component_id, filename, summary in candidates:
+        path = REPO_ROOT / filename
+        if not path.exists():
+            continue
+        components.append(
+            {
+                "id": component_id,
+                "type": "instructions",
+                "name": filename,
+                "files": [filename],
+                "summary": summary,
+            }
+        )
+    return components
+
+
+def hook_components() -> list[dict[str, Any]]:
+    hooks = [
+        (
+            "hook:session-start",
+            "SessionStart",
+            ["hooks/agent-do-session-start.sh"],
+            "Injects project-aware tool guidance and bootstrap context.",
+        ),
+        (
+            "hook:user-prompt-submit",
+            "UserPromptSubmit",
+            ["hooks/agent-do-prompt-router.py"],
+            "Routes prompts to high-confidence tool suggestions and coord focus context.",
+        ),
+        (
+            "hook:pretooluse-claude",
+            "PreToolUse Claude",
+            ["hooks/agent-do-pretooluse-check.py"],
+            "Emits Claude-compatible raw-command nudges.",
+        ),
+        (
+            "hook:pretooluse-codex",
+            "PreToolUse Codex",
+            ["hooks/agent-do-pretooluse-codex.py"],
+            "Runs the shared PreToolUse check while suppressing Codex-unsupported output.",
+        ),
+    ]
+    components = []
+    for component_id, name, files, summary in hooks:
+        existing_files = [item for item in files if (REPO_ROOT / item).exists()]
+        if not existing_files:
+            continue
+        components.append(
+            {
+                "id": component_id,
+                "type": "hook",
+                "name": name,
+                "files": existing_files,
+                "state": ["~/.agent-do/telemetry/nudges.jsonl"],
+                "tests": existing(
+                    [
+                        REPO_ROOT / "tests" / "test_v11_routing.py",
+                        REPO_ROOT / "tests" / "test_prompt_hook_ai.py",
+                    ]
+                ),
+                "summary": summary,
+            }
+        )
+    return components
+
+
+def library_components() -> list[dict[str, Any]]:
+    libs = [
+        ("lib:registry", "registry helpers", ["lib/registry.py"], "Registry loading and routing metadata helpers."),
+        ("lib:ai-router", "AI router", ["lib/ai_router.py"], "Shared Sonnet JSON helper for suggest and prompt hooks."),
+        ("lib:telemetry", "telemetry", ["lib/telemetry.py", "bin/nudges"], "Local nudge telemetry writer and viewer."),
+        ("lib:credentials", "credential preload", ["lib/creds-helper.sh", "tools/agent-creds"], "Secure credential resolution substrate."),
+        ("lib:json-output", "JSON output", ["lib/json-output.sh"], "Structured JSON output helpers for shell tools."),
+        ("lib:snapshot", "snapshot", ["lib/snapshot.sh"], "Snapshot JSON helpers for shell tools."),
+    ]
+    components = []
+    for component_id, name, files, summary in libs:
+        existing_files = [item for item in files if (REPO_ROOT / item).exists()]
+        if existing_files:
+            components.append(
+                {
+                    "id": component_id,
+                    "type": "library",
+                    "name": name,
+                    "files": existing_files,
+                    "summary": summary,
+                }
+            )
+    return components
+
+
+def tool_components(registry: dict[str, Any]) -> list[dict[str, Any]]:
+    components = []
+    sys.path.insert(0, str(REPO_ROOT / "lib"))
+    from registry import get_tool_secret_envs  # noqa: WPS433
+
+    for name, info in sorted(registry.items()):
+        files = tool_files(name)
+        commands = sorted((info.get("commands") or {}).keys())
+        credentials = sorted(get_tool_secret_envs(info))
+        component = {
+            "id": f"tool:{name}",
+            "type": "tool",
+            "name": name,
+            "description": info.get("description", ""),
+            "files": files,
+            "registry": "registry.yaml",
+            "commands": commands,
+            "capabilities": info.get("capabilities") or [],
+            "concurrency": info.get("concurrency", "mixed"),
+            "credentials": credentials,
+            "routing": bool(info.get("routing")),
+            "tests": test_paths_for_tool(name),
+            "state": state_refs_for_tool(name),
+        }
+        components.append(component)
+    return components
+
+
+def inspect_harness() -> dict[str, Any]:
+    registry = load_registry()
+    components: list[dict[str, Any]] = []
+    components.append(registry_component(registry))
+    components.extend(instruction_components())
+    components.extend(hook_components())
+    components.extend(library_components())
+    components.extend(tool_components(registry))
+
+    by_type = Counter(component["type"] for component in components)
+    tools_with_tests = sum(1 for component in components if component["type"] == "tool" and component.get("tests"))
+    tools_with_routing = sum(1 for component in components if component["type"] == "tool" and component.get("routing"))
+
+    return {
+        "ok": True,
+        "tool": "harness",
+        "command": "inspect",
+        "generated_at": now_iso(),
+        "repo_root": str(REPO_ROOT),
+        "project": current_project(),
+        "summary": {
+            "components": len(components),
+            "by_type": dict(sorted(by_type.items())),
+            "tools": len(registry),
+            "tools_with_tests": tools_with_tests,
+            "tools_with_routing": tools_with_routing,
+        },
+        "components": components,
+    }
+
+
+def render_inspect_text(payload: dict[str, Any]) -> None:
+    summary = payload["summary"]
+    print("agent-do harness")
+    print(f"  Repo: {payload['repo_root']}")
+    print(f"  Components: {summary['components']}")
+    print(f"  Tools: {summary['tools']}")
+    print(f"  Tools with tests: {summary['tools_with_tests']}")
+    print(f"  Tools with routing: {summary['tools_with_routing']}")
+    print("  Component types:")
+    for kind, count in summary["by_type"].items():
+        print(f"    - {kind}: {count}")
+    print()
+    print("Use `agent-do harness inspect --json` for the full inventory graph.")
+
+
+def nudge_events(since: str | None = None) -> list[dict[str, Any]]:
+    cutoff = parse_since(since)
+    events = read_jsonl(agent_do_home() / "telemetry" / "nudges.jsonl")
+    if cutoff is None:
+        return events
+    filtered = []
+    for event in events:
+        timestamp = parse_iso(str(event.get("timestamp") or ""))
+        if timestamp and timestamp >= cutoff:
+            filtered.append(event)
+    return filtered
+
+
+def nudge_effectiveness(since: str | None = None) -> dict[str, Any]:
+    events = nudge_events(since)
+    by_type = Counter(str(event.get("event_type") or "unknown") for event in events)
+    by_source = Counter(str(event.get("source") or "unknown") for event in events)
+    by_tool: Counter[str] = Counter()
+    emitted = 0
+    suppressed = 0
+
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        if any(token in event_type for token in ("suppress", "silent", "skip")):
+            suppressed += 1
+        else:
+            emitted += 1
+        if event.get("tool"):
+            by_tool[str(event["tool"])] += 1
+        for tool in event.get("tools", []) or []:
+            by_tool[str(tool)] += 1
+
+    return {
+        "ok": True,
+        "tool": "harness",
+        "command": "nudges effectiveness",
+        "generated_at": now_iso(),
+        "since": since,
+        "log": str(agent_do_home() / "telemetry" / "nudges.jsonl"),
+        "summary": {
+            "events": len(events),
+            "emitted": emitted,
+            "suppressed": suppressed,
+            "by_type": dict(by_type.most_common()),
+            "by_source": dict(by_source.most_common()),
+            "by_tool": dict(by_tool.most_common()),
+        },
+        "compliance": {
+            "status": "not_yet_available",
+            "reason": "Current telemetry records hook emissions but does not yet join next tool calls or outcomes.",
+            "next_required_surface": "harness event stream with tool_call/tool_result events",
+        },
+        "events": events[-25:],
+    }
+
+
+def render_nudge_effectiveness(payload: dict[str, Any]) -> None:
+    summary = payload["summary"]
+    print("agent-do harness nudges effectiveness")
+    print(f"  Events: {summary['events']}")
+    print(f"  Emitted: {summary['emitted']}")
+    print(f"  Suppressed: {summary['suppressed']}")
+    if summary["by_type"]:
+        print("  Event types:")
+        for key, count in summary["by_type"].items():
+            print(f"    - {key}: {count}")
+    if summary["by_tool"]:
+        print("  Tools:")
+        for key, count in list(summary["by_tool"].items())[:10]:
+            print(f"    - {key}: {count}")
+    print(f"  Compliance: {payload['compliance']['status']}")
+    print(f"  Note: {payload['compliance']['reason']}")
+
+
+def safe_id(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-")
+    return cleaned[:120] or "run"
+
+
+def git_artifacts(project_root: Path) -> dict[str, str]:
+    status = run_cmd(["git", "status", "--short", "--branch"], cwd=project_root)
+    diff = run_cmd(["git", "diff", "--", "."], cwd=project_root, timeout=30)
+    return {
+        "status": status.stdout if status.returncode == 0 else status.stderr,
+        "diff": diff.stdout if diff.returncode == 0 else diff.stderr,
+    }
+
+
+def build_evidence(target: str, out_dir: Path | None = None) -> dict[str, Any]:
+    project = current_project()
+    project_root = Path(project["git_root"] or Path.cwd())
+    run_id = safe_id(target)
+    root = out_dir or (project_root / ".agent-do-harness" / "evidence" / run_id)
+    root.mkdir(parents=True, exist_ok=True)
+
+    events: list[dict[str, Any]] = [
+        {
+            "event_id": "event-0001",
+            "event_type": "evidence_build",
+            "timestamp": now_iso(),
+            "summary": f"Built harness evidence bundle for {target}",
+            "outcome": "unknown",
+        }
+    ]
+
+    session_context = agent_do_cmd("sessions", "context", target, "--json", cwd=project_root)
+    session_payload: dict[str, Any] = {
+        "available": session_context.returncode == 0,
+        "stdout": session_context.stdout.strip(),
+        "stderr": session_context.stderr.strip(),
+    }
+    if session_payload["available"]:
+        events.append(
+            {
+                "event_id": f"event-{len(events) + 1:04d}",
+                "event_type": "session_context",
+                "timestamp": now_iso(),
+                "summary": "Session context was available through agent-do sessions.",
+                "artifact_ref": "session_context.json",
+                "outcome": "unknown",
+            }
+        )
+
+    nudges = nudge_events()
+    if nudges:
+        events.append(
+            {
+                "event_id": f"event-{len(events) + 1:04d}",
+                "event_type": "nudges",
+                "timestamp": now_iso(),
+                "summary": f"Attached {len(nudges)} local nudge telemetry events.",
+                "artifact_ref": "nudges.jsonl",
+                "outcome": "unknown",
+            }
+        )
+
+    coord_status = agent_do_cmd("coord", "status", "--json", cwd=project_root)
+    coord_payload = {
+        "available": coord_status.returncode == 0,
+        "stdout": coord_status.stdout.strip(),
+        "stderr": coord_status.stderr.strip(),
+    }
+
+    git_data = git_artifacts(project_root)
+    (root / "git_status.txt").write_text(git_data["status"], encoding="utf-8")
+    (root / "diff.patch").write_text(git_data["diff"], encoding="utf-8")
+    write_json(root / "session_context.json", session_payload)
+    write_json(root / "coord.json", coord_payload)
+    write_jsonl(root / "nudges.jsonl", nudges)
+    write_jsonl(root / "timeline.jsonl", events)
+
+    overview = f"""# Harness Evidence: {target}
+
+Generated: {now_iso()}
+
+## Project
+
+- cwd: {project['cwd']}
+- git root: {project['git_root']}
+- branch: {project['branch']}
+- commit: {project['commit']}
+
+## Sources
+
+- session context: {'available' if session_payload['available'] else 'unavailable'}
+- nudge events: {len(nudges)}
+- coord status: {'available' if coord_payload['available'] else 'unavailable'}
+- git status: `git_status.txt`
+- git diff: `diff.patch`
+
+## Drill-Down Files
+
+- `timeline.jsonl`
+- `session_context.json`
+- `nudges.jsonl`
+- `coord.json`
+- `git_status.txt`
+- `diff.patch`
+- `root_cause.md`
+"""
+    (root / "overview.md").write_text(overview, encoding="utf-8")
+    (root / "root_cause.md").write_text(
+        "# Root Cause\n\nTBD. Summarize the observed failure pattern and cite timeline events.\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "ok": True,
+        "tool": "harness",
+        "command": "evidence build",
+        "generated_at": now_iso(),
+        "run_id": run_id,
+        "target": target,
+        "path": str(root),
+        "files": sorted(path.name for path in root.iterdir() if path.is_file()),
+        "summary": {
+            "events": len(events),
+            "nudge_events": len(nudges),
+            "session_available": session_payload["available"],
+            "coord_available": coord_payload["available"],
+        },
+    }
+
+
+def render_evidence_build(payload: dict[str, Any]) -> None:
+    print("agent-do harness evidence build")
+    print(f"  Target: {payload['target']}")
+    print(f"  Run ID: {payload['run_id']}")
+    print(f"  Path: {payload['path']}")
+    print(f"  Events: {payload['summary']['events']}")
+    print(f"  Nudge events: {payload['summary']['nudge_events']}")
+
+
+def spec_change_dir(change_id: str) -> Path:
+    return Path.cwd() / "agent-do-spec" / "changes" / safe_id(change_id)
+
+
+def manifest_template(change_id: str, args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "change_id": safe_id(change_id),
+        "status": "draft",
+        "created_at": now_iso(),
+        "component_type": args.component_type,
+        "files": args.file or [],
+        "evidence": args.evidence or [],
+        "root_cause": args.root_cause or "TBD",
+        "targeted_fix": args.targeted_fix or "TBD",
+        "predicted_fixes": args.predicted_fix or [],
+        "risk_regressions": args.risk_regression or ["unknown: define blast radius and regression checks"],
+        "verification_plan": args.verification or [],
+        "rollback_plan": args.rollback_plan or "TBD",
+        "safety_scope": args.safety_scope or "TBD",
+        "verdict": None,
+    }
+
+
+def manifest_new(args: argparse.Namespace) -> dict[str, Any]:
+    change_dir = spec_change_dir(args.change_id)
+    manifest_path = change_dir / "manifest.json"
+    if manifest_path.exists() and not args.force:
+        raise RuntimeError(f"Manifest already exists: {manifest_path}. Use --force to overwrite.")
+    payload = manifest_template(args.change_id, args)
+    write_json(manifest_path, payload)
+    return {
+        "ok": True,
+        "tool": "harness",
+        "command": "manifest new",
+        "change_id": payload["change_id"],
+        "path": str(manifest_path),
+        "manifest": payload,
+    }
+
+
+def load_json_file(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def case_id(case: dict[str, Any], index: int) -> str:
+    for key in ("id", "name", "case_id", "task", "input"):
+        value = case.get(key)
+        if value:
+            return str(value)
+    return f"case-{index + 1}"
+
+
+def case_passed(case: dict[str, Any]) -> bool | None:
+    if isinstance(case.get("passed"), bool):
+        return case["passed"]
+    status = str(case.get("status") or case.get("outcome") or case.get("result") or "").lower()
+    if status in {"pass", "passed", "success", "ok", "true"}:
+        return True
+    if status in {"fail", "failed", "failure", "error", "false"}:
+        return False
+    return None
+
+
+def extract_cases(payload: Any) -> dict[str, bool]:
+    if isinstance(payload, dict):
+        raw_cases = payload.get("cases") or payload.get("results") or payload.get("items") or []
+    elif isinstance(payload, list):
+        raw_cases = payload
+    else:
+        raw_cases = []
+    cases: dict[str, bool] = {}
+    for index, raw_case in enumerate(raw_cases):
+        if not isinstance(raw_case, dict):
+            continue
+        passed = case_passed(raw_case)
+        if passed is None:
+            continue
+        cases[case_id(raw_case, index)] = passed
+    return cases
+
+
+def manifest_verify(args: argparse.Namespace) -> dict[str, Any]:
+    change_dir = spec_change_dir(args.change_id)
+    manifest_path = change_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise RuntimeError(f"Manifest not found: {manifest_path}")
+    manifest = load_json_file(manifest_path)
+    before = extract_cases(load_json_file(Path(args.before)))
+    after = extract_cases(load_json_file(Path(args.after)))
+    shared = sorted(set(before) & set(after))
+
+    fail_to_pass = [case for case in shared if before[case] is False and after[case] is True]
+    pass_to_fail = [case for case in shared if before[case] is True and after[case] is False]
+    predicted_fixes = set(manifest.get("predicted_fixes") or [])
+    risk_regressions = set(manifest.get("risk_regressions") or [])
+    landed_fixes = sorted(predicted_fixes & set(fail_to_pass))
+    landed_risks = sorted(risk_regressions & set(pass_to_fail))
+    unexpected_regressions = sorted(set(pass_to_fail) - risk_regressions)
+
+    if not shared:
+        verdict = "manual"
+        reason = "No comparable case IDs were found."
+    elif unexpected_regressions:
+        verdict = "manual"
+        reason = "Unexpected regressions landed and need review."
+    elif predicted_fixes and not landed_fixes:
+        verdict = "rollback"
+        reason = "Predicted fixes did not land."
+    elif landed_fixes and not pass_to_fail:
+        verdict = "keep"
+        reason = "Predicted fixes landed with no observed regressions."
+    else:
+        verdict = "improve"
+        reason = "Signal is mixed or partial."
+
+    result = {
+        "ok": True,
+        "tool": "harness",
+        "command": "manifest verify",
+        "generated_at": now_iso(),
+        "change_id": manifest.get("change_id") or safe_id(args.change_id),
+        "verdict": verdict,
+        "reason": reason,
+        "comparison": {
+            "shared_cases": len(shared),
+            "fail_to_pass": fail_to_pass,
+            "pass_to_fail": pass_to_fail,
+            "landed_predicted_fixes": landed_fixes,
+            "landed_risk_regressions": landed_risks,
+            "unexpected_regressions": unexpected_regressions,
+        },
+    }
+    eval_dir = change_dir / "eval"
+    write_json(eval_dir / "verdict.json", result)
+    manifest["verdict"] = result
+    write_json(manifest_path, manifest)
+    return result
+
+
+def render_manifest_result(payload: dict[str, Any]) -> None:
+    if payload["command"] == "manifest new":
+        print("agent-do harness manifest new")
+        print(f"  Change: {payload['change_id']}")
+        print(f"  Path: {payload['path']}")
+        return
+    print("agent-do harness manifest verify")
+    print(f"  Change: {payload['change_id']}")
+    print(f"  Verdict: {payload['verdict']}")
+    print(f"  Reason: {payload['reason']}")
+
+
+def show_help() -> None:
+    print(
+        """agent-harness - Observable agent-do harness operations
+
+Commands:
+  inspect [--json]                                  Inventory tools, hooks, docs, libs, state, and tests
+  nudges effectiveness [--since 7d] [--json]        Summarize nudge telemetry and current compliance limits
+  evidence build <session-or-run> [--out DIR]       Build a local drill-down evidence bundle
+  manifest new <change-id> [opts]                   Create a harness change manifest
+  manifest verify <change-id> --before A --after B  Compare eval case flips against manifest predictions
+
+Examples:
+  agent-do harness inspect
+  agent-do harness inspect --json
+  agent-do harness nudges effectiveness --since 7d
+  agent-do harness evidence build 2017ab8f
+  agent-do harness manifest new email-hydration --component-type tool --file tools/agent-email
+"""
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--json", dest="global_json", action="store_true")
+    sub = parser.add_subparsers(dest="command")
+
+    inspect_parser = sub.add_parser("inspect", add_help=False)
+    inspect_parser.add_argument("--json", action="store_true")
+
+    nudges = sub.add_parser("nudges", add_help=False)
+    nudges.add_argument("nudge_command", choices=["effectiveness"])
+    nudges.add_argument("--since")
+    nudges.add_argument("--json", action="store_true")
+
+    evidence = sub.add_parser("evidence", add_help=False)
+    evidence_sub = evidence.add_subparsers(dest="evidence_command")
+    evidence_build = evidence_sub.add_parser("build", add_help=False)
+    evidence_build.add_argument("target")
+    evidence_build.add_argument("--out")
+    evidence_build.add_argument("--json", action="store_true")
+
+    manifest = sub.add_parser("manifest", add_help=False)
+    manifest_sub = manifest.add_subparsers(dest="manifest_command")
+    manifest_new_parser = manifest_sub.add_parser("new", add_help=False)
+    manifest_new_parser.add_argument("change_id")
+    manifest_new_parser.add_argument("--component-type", default="tool")
+    manifest_new_parser.add_argument("--file", action="append")
+    manifest_new_parser.add_argument("--evidence", action="append")
+    manifest_new_parser.add_argument("--root-cause")
+    manifest_new_parser.add_argument("--targeted-fix")
+    manifest_new_parser.add_argument("--predicted-fix", action="append")
+    manifest_new_parser.add_argument("--risk-regression", action="append")
+    manifest_new_parser.add_argument("--verification", action="append")
+    manifest_new_parser.add_argument("--rollback-plan")
+    manifest_new_parser.add_argument("--safety-scope")
+    manifest_new_parser.add_argument("--force", action="store_true")
+    manifest_new_parser.add_argument("--json", action="store_true")
+
+    manifest_verify_parser = manifest_sub.add_parser("verify", add_help=False)
+    manifest_verify_parser.add_argument("change_id")
+    manifest_verify_parser.add_argument("--before", required=True)
+    manifest_verify_parser.add_argument("--after", required=True)
+    manifest_verify_parser.add_argument("--json", action="store_true")
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in {"--help", "-h", "help"}:
+        show_help()
+        return 0
+
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+        json_mode = bool(getattr(args, "global_json", False) or getattr(args, "json", False))
+        if args.command == "inspect":
+            payload = inspect_harness()
+            if json_mode:
+                print(json.dumps(payload, indent=2))
+            else:
+                render_inspect_text(payload)
+            return 0
+        if args.command == "nudges":
+            payload = nudge_effectiveness(args.since)
+            if json_mode:
+                print(json.dumps(payload, indent=2))
+            else:
+                render_nudge_effectiveness(payload)
+            return 0
+        if args.command == "evidence" and args.evidence_command == "build":
+            payload = build_evidence(args.target, Path(args.out) if args.out else None)
+            if json_mode:
+                print(json.dumps(payload, indent=2))
+            else:
+                render_evidence_build(payload)
+            return 0
+        if args.command == "manifest" and args.manifest_command == "new":
+            payload = manifest_new(args)
+            if json_mode:
+                print(json.dumps(payload, indent=2))
+            else:
+                render_manifest_result(payload)
+            return 0
+        if args.command == "manifest" and args.manifest_command == "verify":
+            payload = manifest_verify(args)
+            if json_mode:
+                print(json.dumps(payload, indent=2))
+            else:
+                render_manifest_result(payload)
+            return 0
+    except Exception as exc:
+        if "--json" in argv:
+            print(json.dumps({"ok": False, "tool": "harness", "error": str(exc)}, indent=2))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    show_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

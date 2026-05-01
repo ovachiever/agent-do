@@ -9,7 +9,7 @@ agent-do is a universal automation layer that works with any AI coding agent. It
 3. **Natural Language Mode**: LLM-routed for human users
 4. **Discovery + nudge layer**: task suggestions, project-scoped tool ranking, and hook nudges
 5. **Bootstrap + health flow**: explicit setup path for stateful tools and dependency checks
-6. **88 specialized tools**: browser, iOS, database, spreadsheet, messaging, infrastructure, memory, and more
+6. **89 specialized tools**: browser, iOS, database, spreadsheet, messaging, infrastructure, memory, harness observability, and more
 
 ## Routing Flow
 
@@ -120,7 +120,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # Traffic filtering (removes static, CDN, deduplicates)
 │       ├── auth.js         # Auth extraction from captured headers/cookies
 │       └── generator.js    # Skill package writer → ~/.agent-do/skills/<name>/
-├── tools/agent-*           # 88 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 89 tools (standalone scripts + directory-based tools)
 ├── registry.yaml           # Master tool catalog
 ├── test.sh                 # Test suite
 └── requirements.txt        # Python dependencies
@@ -256,6 +256,7 @@ Directory-based tools with complex backends:
 | `tools/agent-screen/` | Bash + Python | Vision-based screen perception. Multi-display capture, OCR, element detection. Mouse and keyboard actions are now gated through the shared `lib/live/` runtime substrate and require `agent-do +live(...)` or an active live lease. |
 | `tools/agent-vision/` | Bash + Python | Visual perception with YOLO object detection, OCR, face detection. |
 | `tools/agent-coord` | Python | Project-local state-and-interrupt broker. Derives stable identities from thread/tmux context, stores agent state under `.git/agent-do/coord/` when available, tracks focus/claims/needs/publishes, and computes contention/dependency/novelty interrupts instead of relying on a mailbox. |
+| `tools/agent-harness` | Python | Observable harness front door. `inspect` exposes tools, hooks, instruction files, shared libraries, state refs, routing, credentials, concurrency, and linked tests as one JSON graph; `nudges effectiveness` summarizes hook telemetry; `evidence build` creates drill-down evidence bundles; `manifest new/verify` turns harness edits into falsifiable contracts. |
 | `tools/agent-cloudflare` | Bash + curl | Cloudflare management: zones, analytics (GraphQL), DNS, Workers, Pages, R2, firewall events. 23 commands. |
 | `tools/agent-clerk` | Bash + curl | Clerk auth platform: users, orgs, sessions, OAuth apps, enterprise SSO, JWT templates, roles. 55 commands. |
 | `tools/agent-okta` | Bash + curl | Okta tenant management: OIDC/SAML apps, SSO config, users, groups, auth servers, system logs. 34 commands. |

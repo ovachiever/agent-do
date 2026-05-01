@@ -14,7 +14,7 @@ Claude Code, Cursor, and similar agents are strong inside a codebase. They read 
 agent-do <tool> <command> [args...]
 ```
 
-That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 88 tools.
+That is the center of gravity. Around it, `agent-do` adds discovery, nudging, health checks, bootstrap flows, secure credential resolution, auth-state orchestration, repo-local spec management, harness observability, and natural-language routing. The result is simple to remember, easy to enforce through hooks, and broad enough to cover 89 tools.
 
 When a command needs permission to control the visible local machine, `agent-do` uses an explicit runtime modifier instead of a wrapper tool:
 
@@ -79,6 +79,8 @@ When you want setup and readiness:
 agent-do --health
 agent-do bootstrap --recommend
 agent-do bootstrap
+agent-do harness inspect --json
+agent-do harness nudges effectiveness --since 7d
 agent-do nudges stats
 ```
 
@@ -254,6 +256,19 @@ agent-do context budget 4000 "react hooks"
 agent-do context annotate stripe-llms "Use idempotency keys"
 ```
 
+### `harness`
+
+Observable front door for the agent-do harness: tools, hooks, instructions, shared libraries, state refs, linked tests, hook nudge telemetry, evidence bundles, and falsifiable change manifests.
+
+```bash
+agent-do harness inspect
+agent-do harness inspect --json
+agent-do harness nudges effectiveness --since 7d
+agent-do harness evidence build <session-or-run>
+agent-do harness manifest new <change-id> --component-type tool --file tools/agent-email
+agent-do harness manifest verify <change-id> --before before.json --after after.json
+```
+
 ### `auth`
 
 Site-level authentication orchestration over encrypted auth bundles, browser import, secure credentials, and provider-aware login adapters.
@@ -424,7 +439,7 @@ agent-do gh approve ovachiever/agent-do#2 --body "LGTM"
 
 ## Tool Surface
 
-There are 88 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
+There are 89 tools today. A few are deep subsystems. Many are focused adapters. Together they cover most of the operational edges an AI coding agent runs into.
 
 | Category | Tools | What They Do |
 |----------|-------|--------------|
@@ -433,6 +448,7 @@ There are 88 tools today. A few are deep subsystems. Many are focused adapters. 
 | Credentials | `creds` | Secure secret storage and tool credential checks |
 | Auth | `auth` | Site-level authenticated state orchestration and session reuse |
 | Specification | `spec` | Repo-local intended behavior specs and change packages |
+| Harness | `harness` | Observable harness inventory, nudge telemetry, evidence bundles, and change manifests |
 | Memory | `zpc` | Lessons, decisions, patterns, checkpointing |
 | Design | `dpt` | UI scoring and design critique |
 | Tracking | `manna` | Git-backed issue tracking and coordination |

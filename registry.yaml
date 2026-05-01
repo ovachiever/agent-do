@@ -1669,6 +1669,56 @@ tools:
       - agent-do hardware usb list
       default_command: snapshot
     concurrency: mixed
+  harness:
+    description: Observable agent-do harness inventory, evidence, and change-manifest front door
+    capabilities:
+    - inspect the editable agent-do harness surface across tools, hooks, instructions, libraries, tests, and state
+    - summarize hook nudge telemetry and current effectiveness measurement gaps
+    - build drill-down evidence bundles for sessions, runs, and harness changes
+    - create and verify falsifiable harness change manifests
+    - make registry, hook, tool, and memory surfaces visible as one harness instead of adjacent tools
+    commands:
+      inspect: Inventory tools, hooks, instructions, libraries, state refs, and tests
+      nudges: Summarize hook nudge telemetry and effectiveness limits
+      evidence: Build local drill-down evidence bundles
+      manifest: Create and verify harness change manifests
+    examples:
+    - intent: inspect the agent-do harness
+      command: agent-harness inspect
+    - intent: show the harness inventory as json
+      command: agent-harness inspect --json
+    - intent: check whether hook nudges are effective
+      command: agent-harness nudges effectiveness --since 7d
+    - intent: build harness evidence for this session
+      command: agent-harness evidence build latest-session
+    - intent: create a falsifiable manifest for an email hydration fix
+      command: agent-harness manifest new email-hydration --component-type tool --file tools/agent-email
+    routing:
+      discover_keywords:
+      - harness
+      - harness inventory
+      - harness observability
+      - harness evidence
+      - change manifest
+      - nudge effectiveness
+      - component observability
+      - AHE
+      prompt_patterns:
+      - \bharness\b
+      - \bharness inventory\b
+      - \bharness observability\b
+      - \bharness evidence\b
+      - \bchange manifest\b
+      - \bnudge effectiveness\b
+      - \bcomponent observability\b
+      - \bAHE\b
+      recommended_entrypoints:
+      - agent-do harness inspect --json
+      - agent-do harness nudges effectiveness --since 7d
+      - agent-do harness evidence build <session-or-run>
+      - agent-do harness manifest new <change-id>
+      default_command: inspect
+    concurrency: read
   serial:
     description: Serial port communication
     capabilities:
