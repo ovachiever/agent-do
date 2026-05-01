@@ -185,10 +185,30 @@ def main() -> int:
 
         env = os.environ.copy()
         env["AGENT_EMAIL_FIXTURE"] = str(fixture)
+        for key in [
+            "AGENT_EMAIL_PROVIDER",
+            "AGENT_EMAIL_IMAP_HOST",
+            "AGENT_EMAIL_IMAP_PORT",
+            "AGENT_EMAIL_IMAP_USER",
+            "AGENT_EMAIL_IMAP_PASS",
+            "AGENT_EMAIL_IMAP_MAILBOX",
+            "AGENT_EMAIL_IMAP_MAILBOXES",
+            "EMAIL_USER",
+            "EMAIL_PASS",
+        ]:
+            env.pop(key, None)
 
         export_help = run(str(AGENT_DO), "email", "export", "--help", cwd=ROOT, env=env)
         require(export_help.returncode == 0, f"email export help failed: {export_help.stderr}")
         require("--format" in export_help.stdout, f"unexpected export help: {export_help.stdout}")
+
+        status = run(str(AGENT_DO), "email", "status", "--json", cwd=ROOT, env=env)
+        require(status.returncode == 0, f"email status failed: {status.stderr}")
+        status_payload = json.loads(status.stdout)
+        require(status_payload["features"]["export"] is True, f"unexpected status payload: {status_payload}")
+        require(status_payload["features"]["remote_hydration"] is True, f"unexpected status payload: {status_payload}")
+        require(status_payload["provider"]["configured"] is False, f"expected unconfigured provider: {status_payload}")
+        require("AGENT_EMAIL_IMAP_PASS" in status_payload["provider"]["missing"], f"expected provider missing keys: {status_payload}")
 
         snapshot = run(str(AGENT_DO), "email", "snapshot", "--json", cwd=ROOT, env=env)
         require(snapshot.returncode == 0, f"email snapshot failed: {snapshot.stderr}")
@@ -519,6 +539,12 @@ IMAP4 = IMAP4_SSL
         remote_env["AGENT_EMAIL_IMAP_HOST"] = "imap.example.test"
         remote_env["AGENT_EMAIL_IMAP_USER"] = "robot@example.test"
         remote_env["AGENT_EMAIL_IMAP_PASS"] = "test-password"
+        remote_status = run(str(AGENT_DO), "email", "status", "--json", cwd=ROOT, env=remote_env)
+        require(remote_status.returncode == 0, f"remote status failed: {remote_status.stderr}")
+        remote_status_payload = json.loads(remote_status.stdout)
+        require(remote_status_payload["provider"]["configured"] is True, f"expected configured provider: {remote_status_payload}")
+        require(remote_status_payload["provider"]["password_present"] is True, f"expected provider password presence: {remote_status_payload}")
+
         remote_get = run(
             str(AGENT_DO),
             "email",

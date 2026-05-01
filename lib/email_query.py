@@ -818,6 +818,52 @@ def remote_provider_config(message: dict[str, Any]) -> tuple[dict[str, Any] | No
     }, None
 
 
+def remote_provider_status() -> dict[str, Any]:
+    provider = normalize_key(os.environ.get("AGENT_EMAIL_PROVIDER", ""))
+    if not provider and os.environ.get("AGENT_EMAIL_IMAP_HOST"):
+        provider = "imap"
+    config, error = remote_provider_config({"mailbox": "INBOX"})
+    if config:
+        return {
+            "configured": True,
+            "disabled": False,
+            "provider": config["provider"],
+            "mode": "imap_compatible",
+            "host": config["host"],
+            "port": config["port"],
+            "user_present": bool(config["user"]),
+            "password_present": bool(config["password"]),
+            "mailboxes": config["mailboxes"],
+        }
+    if REMOTE_HYDRATION_DISABLED:
+        return {
+            "configured": False,
+            "disabled": True,
+            "provider": provider,
+            "mode": "imap_compatible",
+            "missing": [],
+            "next": "Unset AGENT_EMAIL_DISABLE_REMOTE_HYDRATION to enable provider fallback.",
+        }
+    if error:
+        return {
+            "configured": False,
+            "disabled": False,
+            "provider": error.get("provider", provider),
+            "mode": "imap_compatible",
+            "missing": error.get("missing", []),
+            "error": error.get("error", ""),
+            "next": error.get("next", ""),
+        }
+    return {
+        "configured": False,
+        "disabled": False,
+        "provider": "",
+        "mode": "imap_compatible",
+        "missing": ["AGENT_EMAIL_PROVIDER", "AGENT_EMAIL_IMAP_HOST", "AGENT_EMAIL_IMAP_USER", "AGENT_EMAIL_IMAP_PASS"],
+        "next": "Store or export IMAP-compatible provider env vars to hydrate metadata-only Mail rows.",
+    }
+
+
 def message_id_candidates(value: Any) -> list[str]:
     raw = normalize_text(value)
     if not raw:
@@ -1341,6 +1387,29 @@ def handle_mailboxes(source: FixtureSource | MacMailSource, args: argparse.Names
     emit(payload)
 
 
+def handle_status(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> None:
+    payload: dict[str, Any] = {
+        "ok": True,
+        "platform": source.platform,
+        "features": {
+            "search_local_index": True,
+            "get_exact_message": True,
+            "export": True,
+            "remote_hydration": True,
+            "remote_body_search": False,
+        },
+        "provider": remote_provider_status(),
+    }
+    if isinstance(source, MacMailSource):
+        payload["apple_mail"] = {
+            "envelope_index": str(source.db_path),
+            "source": "metadata_index",
+        }
+    else:
+        payload["fixture"] = True
+    emit(payload)
+
+
 def add_scope_args(subparser: argparse.ArgumentParser, *, allow_all_mailboxes: bool = True) -> None:
     subparser.add_argument("--account")
     subparser.add_argument("--mailbox")
@@ -1408,6 +1477,8 @@ def build_parser() -> argparse.ArgumentParser:
     mailboxes = sub.add_parser("mailboxes")
     mailboxes.add_argument("--account")
 
+    sub.add_parser("status")
+
     return parser
 
 
@@ -1437,6 +1508,8 @@ def main() -> None:
         handle_count(source, args)
     elif args.command == "mailboxes":
         handle_mailboxes(source, args)
+    elif args.command == "status":
+        handle_status(source, args)
     else:
         fail("unknown command", error="unknown_command")
 

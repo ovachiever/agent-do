@@ -1094,9 +1094,11 @@ tools:
       latest: Show latest matching message
       wait: Wait for a matching message
       get: Fetch one exact message by id
+      export: Export one exact message as json, txt, html, eml, or pdf
       code: Extract verification code from matching email
       link: Extract magic link from matching email
       mailboxes: List available mailboxes
+      status: Show feature and provider hydration readiness
     examples:
     - intent: send email to john@example.com
       command: agent-email send john@example.com
@@ -1106,10 +1108,26 @@ tools:
       command: agent-email search invoice --all-mailboxes --json
     - intent: fetch one exact message by id
       command: agent-email get --id msg-123 --json
+    - intent: export one exact message as EML
+      command: agent-email export --id msg-123 --format eml --output message.eml
     - intent: wait for a verification code email
       command: agent-email code --from auth@example.com --subject "verification code" --account Work --mailbox Inbox
     - intent: get the latest magic link
       command: agent-email link --from login@example.com --domain app.example.com
+    credentials:
+      optional:
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USER
+      - SMTP_PASS
+      - EMAIL_FROM
+      - AGENT_EMAIL_PROVIDER
+      - AGENT_EMAIL_IMAP_HOST
+      - AGENT_EMAIL_IMAP_PORT
+      - AGENT_EMAIL_IMAP_USER
+      - AGENT_EMAIL_IMAP_PASS
+      - AGENT_EMAIL_IMAP_MAILBOX
+      - AGENT_EMAIL_IMAP_MAILBOXES
     concurrency: mixed
   calendar:
     description: Control calendar

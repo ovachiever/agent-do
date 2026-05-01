@@ -141,6 +141,10 @@ def main() -> int:
     resend_creds = get_tool_credentials(resend_info or {})
     require(resend_creds["required"] == ["RESEND_API_KEY"], f"unexpected resend credentials: {resend_creds}")
 
+    email_info = get_tool_info(registry, "email")
+    email_creds = get_tool_credentials(email_info or {})
+    require("AGENT_EMAIL_IMAP_PASS" in email_creds["optional"], f"unexpected email credentials: {email_creds}")
+
     required = run("./agent-do", "creds", "required", "render", "--json")
     require(required.returncode == 0, f"render required failed: {required.stderr}")
     required_payload = json.loads(required.stdout)
