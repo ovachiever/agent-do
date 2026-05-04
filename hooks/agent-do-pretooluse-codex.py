@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 
@@ -20,12 +21,15 @@ def main() -> int:
     if not hook.exists():
         return 0
 
+    env = os.environ.copy()
+    env["AGENT_DO_HOOK_RUNTIME"] = "codex"
     try:
         subprocess.run(
             [sys.executable, str(hook)],
             input=payload,
             text=True,
             capture_output=True,
+            env=env,
             timeout=8,
             check=False,
         )

@@ -23,6 +23,7 @@ def run(*args: str, input_text: str | None = None, env: dict[str, str] | None = 
         run_env.update(env)
     run_env.setdefault("AGENT_DO_SUGGEST_AI", "0")
     run_env.setdefault("AGENT_DO_HOOK_AI", "0")
+    run_env.setdefault("AGENT_DO_HOOK_RUNTIME", "claude")
     return subprocess.run(
         list(args),
         cwd=ROOT,
@@ -157,6 +158,18 @@ def main() -> int:
     require(
         codex_prewrap.stdout.strip() == "",
         f"codex pretool wrapper must suppress unsupported additionalContext, got: {codex_prewrap.stdout}",
+    )
+
+    codex_direct = run(
+        "python3",
+        "hooks/agent-do-pretooluse-check.py",
+        input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
+        env={"AGENT_DO_HOOK_RUNTIME": "codex"},
+    )
+    require(codex_direct.returncode == 0, f"codex direct pretool failed: {codex_direct.stderr}")
+    require(
+        codex_direct.stdout.strip() == "",
+        f"codex direct pretool must suppress unsupported additionalContext, got: {codex_direct.stdout}",
     )
 
     offline = run("python3", "bin/pattern-matcher", "--json", "deploy this on vercel")

@@ -12,6 +12,7 @@ to:
 """
 
 import json
+import os
 import sys
 import re
 from pathlib import Path
@@ -112,6 +113,33 @@ SKIP_PATTERNS = [
     r'--version\s*$',
 ]
 
+def is_codex_runtime() -> bool:
+    runtime = os.environ.get("AGENT_DO_HOOK_RUNTIME", "").strip().lower()
+    if runtime == "codex":
+        return True
+    if runtime in {"claude", "test"}:
+        return False
+    return any(
+        os.environ.get(key)
+        for key in (
+            "CODEX_CI",
+            "CODEX_THREAD_ID",
+            "CODEX_MANAGED_BY_NPM",
+        )
+    )
+
+
+def emit_context(nudge: str) -> None:
+    if is_codex_runtime():
+        return
+    output = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": nudge,
+        }
+    }
+    print(json.dumps(output))
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -153,12 +181,6 @@ def main():
                 nudge += f"{note} "
             nudge += "Proceeding with your raw command is allowed, but agent-do should be the default choice here."
 
-            output = {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "additionalContext": nudge
-                }
-            }
             if record_nudge_event is not None:
                 try:
                     record_nudge_event(
@@ -170,7 +192,7 @@ def main():
                     )
                 except Exception:
                     pass
-            print(json.dumps(output))
+            emit_context(nudge)
             sys.exit(0)
 
     for pattern, (tool, hint) in AGENT_DO_PATTERNS.items():
@@ -181,12 +203,6 @@ def main():
                 f"Run `{hint} --help` for commands. "
                 f"Proceeding with your command is fine, but next time prefer agent-do."
             )
-            output = {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "additionalContext": nudge
-                }
-            }
             if record_nudge_event is not None:
                 try:
                     record_nudge_event(
@@ -198,7 +214,7 @@ def main():
                     )
                 except Exception:
                     pass
-            print(json.dumps(output))
+            emit_context(nudge)
             sys.exit(0)
 
     sys.exit(0)
