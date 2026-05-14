@@ -42,6 +42,8 @@ def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> di
             "uncategorized": [],
         })
     except Exception:
+        # Fall back to PR label grouping if generate-notes fails
+        # (repo may not support it, or auth/network may be unavailable)
         pass
 
     # Fallback: list merged PRs since the tag and group by label

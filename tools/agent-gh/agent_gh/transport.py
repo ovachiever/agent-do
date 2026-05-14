@@ -22,15 +22,19 @@ def gh_bin() -> str:
     return found
 
 
-def run_gh(args: list[str], *, input_text: str | None = None) -> str:
+def run_gh(args: list[str], *, input_text: str | None = None, timeout: int = 60) -> str:
     cmd = [gh_bin(), *args]
-    result = subprocess.run(
-        cmd,
-        input=input_text,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            input=input_text,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GhError(f"gh {' '.join(args)} timed out after {timeout}s") from exc
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "unknown gh error"
         raise GhError(f"gh {' '.join(args)} failed: {detail}")

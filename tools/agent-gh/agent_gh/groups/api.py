@@ -34,7 +34,11 @@ def call_graphql(query: str, *, fields: list[str] | None = None,
                  paginate: bool = False, jq: str | None = None) -> dict[str, Any]:
     # Allow @file syntax for reading query from disk
     if query.startswith("@"):
-        query = Path(query[1:]).read_text()
+        path = Path(query[1:])
+        try:
+            query = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise GhError(f"failed to read GraphQL query file '{path}': {exc}") from exc
     args = ["api", "graphql", "-f", f"query={query}"]
     for f in fields or []:
         k, _, v = f.partition("=")
