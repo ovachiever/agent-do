@@ -24,10 +24,12 @@ def _home() -> Path:
 
 
 def _profiles_path() -> Path:
+    """Return path to the connection profiles JSON file."""
     return _home() / "mongo" / "connections.json"
 
 
 def _load_profiles() -> dict[str, Any]:
+    """Load connection profiles from disk, returning empty structure if absent or corrupt."""
     p = _profiles_path()
     if not p.exists():
         return {"profiles": {}, "default": None}
@@ -38,9 +40,27 @@ def _load_profiles() -> dict[str, Any]:
 
 
 def _save_profiles(data: dict[str, Any]) -> None:
+    """Write profiles atomically with owner-only permissions (credentials must not be world-readable)."""
+    import tempfile  # noqa: PLC0415
     p = _profiles_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2) + "\n")
+    content = (json.dumps(data, indent=2) + "\n").encode()
+    fd, tmp = tempfile.mkstemp(dir=p.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, content)
+        os.close(fd)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _envelope(command: str, *, ref: str | None = None, data: Any) -> dict[str, Any]:
@@ -52,10 +72,12 @@ def _envelope(command: str, *, ref: str | None = None, data: Any) -> dict[str, A
 
 
 def _print_json(payload: Any) -> None:
+    """Print payload as indented JSON to stdout, serializing unknown types via str()."""
     print(json.dumps(payload, indent=2, default=str))
 
 
 def _err(msg: str, code: int = 1) -> None:
+    """Print an error message to stderr and exit with the given code."""
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(code)
 
@@ -170,7 +192,8 @@ def cmd_connections(argv: list[str]) -> None:
                 parsed = urlparse(uri)
                 safe = uri.replace(parsed.password or "", "****") if parsed.password else uri
             except Exception:
-                safe = uri[:40] + "..." if len(uri) > 40 else uri
+                import re as _re  # noqa: PLC0415
+                safe = _re.sub(r'://[^:@/]+:[^@/]+@', '://****:****@', uri)
             print(f"  {name}{marker}  [{provider}]  {added}  {safe}")
 
     elif sub == "add":
@@ -183,11 +206,14 @@ def cmd_connections(argv: list[str]) -> None:
         i = 1
         while i < len(rest):
             if rest[i] == "--uri" and i + 1 < len(rest):
-                uri = rest[i + 1]; i += 2
+                uri = rest[i + 1]
+                i += 2
             elif rest[i] == "--provider" and i + 1 < len(rest):
-                provider = rest[i + 1]; i += 2
+                provider = rest[i + 1]
+                i += 2
             elif rest[i] == "--default":
-                is_default = True; i += 1
+                is_default = True
+                i += 1
             else:
                 i += 1
         if not uri:
@@ -232,13 +258,17 @@ def cmd_connections(argv: list[str]) -> None:
         i = 0
         while i < len(rest):
             if rest[i] == "--secret" and i + 1 < len(rest):
-                secret = rest[i + 1]; i += 2
+                secret = rest[i + 1]
+                i += 2
             elif rest[i] == "--namespace" and i + 1 < len(rest):
-                namespace = rest[i + 1]; i += 2
+                namespace = rest[i + 1]
+                i += 2
             elif rest[i] == "--key" and i + 1 < len(rest):
-                key = rest[i + 1]; i += 2
+                key = rest[i + 1]
+                i += 2
             elif rest[i] == "--profile" and i + 1 < len(rest):
-                profile_name = rest[i + 1]; i += 2
+                profile_name = rest[i + 1]
+                i += 2
             else:
                 i += 1
         if not secret:
@@ -246,18 +276,21 @@ def cmd_connections(argv: list[str]) -> None:
         if not profile_name:
             profile_name = secret
 
+        import base64  # noqa: PLC0415
         import subprocess  # noqa: PLC0415
         result = subprocess.run(
-            ["kubectl", "get", "secret", secret, "-n", namespace,
-             "-o", f"jsonpath={{.data.{key}}}"],
+            ["kubectl", "get", "secret", secret, "-n", namespace, "-o", "json"],
             capture_output=True, text=True, check=False,
         )
         if result.returncode != 0:
             _err(f"kubectl failed: {result.stderr.strip()}")
-        import base64  # noqa: PLC0415
         try:
-            uri = base64.b64decode(result.stdout.strip()).decode()
-        except Exception as exc:
+            secret_obj = json.loads(result.stdout)
+            encoded = secret_obj.get("data", {}).get(key, "")
+            if not encoded:
+                _err(f"Key '{key}' not found in secret '{secret}' (namespace: {namespace})")
+            uri = base64.b64decode(encoded).decode()
+        except (ValueError, KeyError) as exc:
             _err(f"Failed to decode secret: {exc}")
         data = _load_profiles()
         data["profiles"][profile_name] = {
@@ -282,9 +315,11 @@ def cmd_snapshot(argv: list[str]) -> None:
     i = 0
     while i < len(argv):
         if argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -332,11 +367,14 @@ def cmd_schema(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--sample" and i + 1 < len(argv):
-            sample_size = int(argv[i + 1]); i += 2
+            sample_size = int(argv[i + 1])
+            i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -398,9 +436,11 @@ def cmd_indexes(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -440,19 +480,26 @@ def cmd_query(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--where" and i + 1 < len(argv):
-            where_raw = argv[i + 1]; i += 2
+            where_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--projection" and i + 1 < len(argv):
-            projection_raw = argv[i + 1]; i += 2
+            projection_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--sort" and i + 1 < len(argv):
-            sort_raw = argv[i + 1]; i += 2
+            sort_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--limit" and i + 1 < len(argv):
-            limit = int(argv[i + 1]); i += 2
+            limit = int(argv[i + 1])
+            i += 2
         elif argv[i] == "--skip" and i + 1 < len(argv):
-            skip = int(argv[i + 1]); i += 2
+            skip = int(argv[i + 1])
+            i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -498,11 +545,14 @@ def cmd_count(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--where" and i + 1 < len(argv):
-            where_raw = argv[i + 1]; i += 2
+            where_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -533,11 +583,14 @@ def cmd_aggregate(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--pipeline" and i + 1 < len(argv):
-            pipeline_raw = argv[i + 1]; i += 2
+            pipeline_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -577,9 +630,11 @@ def cmd_explain(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--where" and i + 1 < len(argv):
-            where_raw = argv[i + 1]; i += 2
+            where_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         else:
             i += 1
 
@@ -610,13 +665,17 @@ def cmd_insert(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--doc" and i + 1 < len(argv):
-            doc_raw = argv[i + 1]; i += 2
+            doc_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--dry-run":
-            dry_run = True; i += 1
+            dry_run = True
+            i += 1
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -661,19 +720,26 @@ def cmd_update(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--where" and i + 1 < len(argv):
-            where_raw = argv[i + 1]; i += 2
+            where_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--set" and i + 1 < len(argv):
-            set_raw = argv[i + 1]; i += 2
+            set_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--upsert":
-            upsert = True; i += 1
+            upsert = True
+            i += 1
         elif argv[i] == "--multi":
-            multi = True; i += 1
+            multi = True
+            i += 1
         elif argv[i] == "--dry-run":
-            dry_run = True; i += 1
+            dry_run = True
+            i += 1
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -727,17 +793,23 @@ def cmd_delete(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--where" and i + 1 < len(argv):
-            where_raw = argv[i + 1]; i += 2
+            where_raw = argv[i + 1]
+            i += 2
         elif argv[i] == "--confirm":
-            confirm = True; i += 1
+            confirm = True
+            i += 1
         elif argv[i] == "--multi":
-            multi = True; i += 1
+            multi = True
+            i += 1
         elif argv[i] == "--dry-run":
-            dry_run = True; i += 1
+            dry_run = True
+            i += 1
         elif argv[i] == "--connection" and i + 1 < len(argv):
-            connection = argv[i + 1]; i += 2
+            connection = argv[i + 1]
+            i += 2
         elif argv[i] == "--json":
-            json_mode = True; i += 1
+            json_mode = True
+            i += 1
         else:
             i += 1
 

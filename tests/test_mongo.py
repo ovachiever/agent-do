@@ -16,14 +16,49 @@ AGENT_DO = ROOT / "agent-do"
 FIXTURES_DIR = ROOT / "tools" / "agent-mongo" / "fixtures"
 
 # Fake pymongo injected via PYTHONPATH so the real one (if installed) is shadowed.
+# FIXTURE_DOCS is the canonical in-test dataset; it includes fake BSON-typed values
+# (ObjectId, Decimal128, Int64, datetime) so _serialize_doc() is exercised on every
+# query call.  tools/agent-mongo/fixtures/sample_documents.json is a separate
+# illustrative/seed file for manual testing — it is not loaded by this test suite.
 _FAKE_PYMONGO = '''
 """Fake pymongo for agent-mongo integration tests."""
+from datetime import datetime
+
+
+# Fake BSON types whose __name__ matches what _serialize_doc() inspects.
+class ObjectId(str):
+    pass
+
+
+class Decimal128:
+    def __init__(self, val):
+        self._val = val
+
+    def __str__(self):
+        return str(self._val)
+
+
+class Int64(int):
+    pass
+
 
 FIXTURE_DOCS = [
-    {"_id": "507f1f77bcf86cd799439011", "externalId": "x001",
-     "status": "pending", "amount": 100.50},
-    {"_id": "507f1f77bcf86cd799439012", "externalId": "x002",
-     "status": "done", "amount": 200.00},
+    {
+        "_id": ObjectId("507f1f77bcf86cd799439011"),
+        "externalId": "x001",
+        "status": "pending",
+        "amount": Decimal128("100.50"),
+        "createdAt": datetime(2026, 1, 15, 9, 0, 0),
+        "retries": Int64(0),
+    },
+    {
+        "_id": ObjectId("507f1f77bcf86cd799439012"),
+        "externalId": "x002",
+        "status": "done",
+        "amount": Decimal128("200.00"),
+        "createdAt": datetime(2026, 1, 16, 12, 30, 0),
+        "retries": Int64(1),
+    },
 ]
 
 FIXTURE_INDEXES = [
@@ -220,12 +255,15 @@ def main() -> int:
         r = run([str(AGENT_DO), "mongo", "connections", "list"], env=base_env)
         check("connections remove rolls back default", "prism_bcc" in r.stdout)
 
-        # import-from-aks with a fake kubectl that echoes base64-encoded URI
+        # import-from-aks with a fake kubectl that returns -o json format.
+        # mongo_ops.py now uses kubectl -o json + Python json.loads to handle
+        # key names with hyphens or dots that jsonpath cannot express.
         aks_uri = "mongodb://cosmos:aks_secret@cosmosdb.prism.example.com:10255/?ssl=true"
         encoded = base64.b64encode(aks_uri.encode()).decode()
+        secret_json = json.dumps({"data": {"connectionString": encoded}})
         make_exec(
             fake_bin / "kubectl",
-            f"#!/usr/bin/env python3\nimport sys\nsys.stdout.write({encoded!r})\n",
+            f"#!/usr/bin/env python3\nimport sys\nsys.stdout.write({secret_json!r})\n",
         )
 
         r = run(
@@ -299,6 +337,13 @@ def main() -> int:
         check("query command", out["command"] == "query")
         check("query filter parsed", out["data"]["filter"] == {"externalId": "x001"})
         check("query returns documents", out["data"]["count"] > 0)
+        # Verify _serialize_doc converts BSON types: ObjectId→str, Decimal128→str,
+        # Int64→str, datetime→ISO string (all present in FIXTURE_DOCS).
+        first = out["data"]["documents"][0] if out["data"]["documents"] else {}
+        check("query BSON ObjectId serialized as str", isinstance(first.get("_id"), str))
+        check("query BSON Decimal128 serialized as str", isinstance(first.get("amount"), str))
+        check("query BSON Int64 serialized as str", isinstance(first.get("retries"), str))
+        check("query datetime serialized as str", isinstance(first.get("createdAt"), str))
 
         # query with JSON filter and --limit
         r = run(
