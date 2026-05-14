@@ -45,6 +45,7 @@ _NUM_RE = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?)/([A-Za-z0-9._-]+)#(
 
 
 def repo_from_git() -> str | None:
+    """Infer the owner/repo slug from the git remote origin URL, or return None."""
     result = subprocess.run(
         ["git", "remote", "get-url", "origin"],
         text=True,
@@ -61,6 +62,7 @@ def repo_from_git() -> str | None:
 
 
 def parse_pr_ref(raw: str | None) -> PrRef:
+    """Parse a PR reference from a URL, owner/repo#num, bare number, or empty string."""
     value = (raw or "").strip()
     if not value:
         repo = repo_from_git()
@@ -86,6 +88,7 @@ def parse_pr_ref(raw: str | None) -> PrRef:
 
 
 def pr_gh_args(ref: PrRef) -> list[str]:
+    """Build the gh CLI positional args for a PR reference."""
     args: list[str] = []
     if ref.number:
         args.append(ref.number)
@@ -95,6 +98,7 @@ def pr_gh_args(ref: PrRef) -> list[str]:
 
 
 def parse_repo(s: str) -> RepoRef:
+    """Parse an owner/repo string into a RepoRef, raising ValueError on bad input."""
     m = _REPO_RE.match(s.strip())
     if not m:
         raise ValueError(f"Not a valid owner/repo: {s!r}")
@@ -102,6 +106,7 @@ def parse_repo(s: str) -> RepoRef:
 
 
 def parse_issue(s: str) -> IssueRef:
+    """Parse an owner/repo#num string into an IssueRef, raising ValueError on bad input."""
     m = _NUM_RE.match(s.strip())
     if not m:
         raise ValueError(f"Not a valid owner/repo#num: {s!r}")

@@ -16,6 +16,7 @@ _RELEASE_FIELDS = "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,url,b
 # ── core data functions ────────────────────────────────────────────────────────
 
 def list_releases(repo: str, *, limit: int = 20) -> dict[str, Any]:
+    """List releases for a repo, most recent first."""
     r = parse_repo(repo)
     data = gh_json(["release", "list", "--repo", r.slug, "--limit", str(limit),
                     "--json", "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,url"])
@@ -23,12 +24,14 @@ def list_releases(repo: str, *, limit: int = 20) -> dict[str, Any]:
 
 
 def view_release(repo: str, tag: str) -> dict[str, Any]:
+    """Fetch full details for a single release by tag."""
     r = parse_repo(repo)
     data = gh_json(["release", "view", tag, "--repo", r.slug, "--json", _RELEASE_FIELDS])
     return envelope("release view", ref=f"{r.slug}@{tag}", data=data or {})
 
 
 def latest_release(repo: str) -> dict[str, Any]:
+    """Return the most recent release for a repo."""
     r = parse_repo(repo)
     data = gh_json(["release", "list", "--repo", r.slug, "--limit", "1",
                     "--json", "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,url"])
@@ -42,6 +45,7 @@ def create_release(repo: str, tag: str, *, title: str | None = None,
                    target: str | None = None, draft: bool = False,
                    prerelease: bool = False, generate_notes: bool = False,
                    assets: list[str] | None = None) -> dict[str, Any]:
+    """Create a GitHub release for a tag, returning an envelope with the release URL."""
     r = parse_repo(repo)
     args = ["release", "create", tag, "--repo", r.slug]
     if title:
@@ -68,6 +72,7 @@ def create_release(repo: str, tag: str, *, title: str | None = None,
 def edit_release(repo: str, tag: str, *, title: str | None = None,
                  notes: str | None = None, draft: bool | None = None,
                  prerelease: bool | None = None) -> dict[str, Any]:
+    """Edit metadata on an existing release."""
     r = parse_repo(repo)
     args = ["release", "edit", tag, "--repo", r.slug]
     if title is not None:
@@ -87,10 +92,12 @@ def edit_release(repo: str, tag: str, *, title: str | None = None,
 
 
 def publish_release(repo: str, tag: str) -> dict[str, Any]:
+    """Publish a draft release by clearing the draft flag."""
     return edit_release(repo, tag, draft=False)
 
 
 def delete_release(repo: str, tag: str, *, cleanup_tag: bool = False) -> dict[str, Any]:
+    """Delete a release; also deletes the git tag when cleanup_tag=True."""
     r = parse_repo(repo)
     args = ["release", "delete", tag, "--repo", r.slug, "--yes"]
     if cleanup_tag:
@@ -100,6 +107,7 @@ def delete_release(repo: str, tag: str, *, cleanup_tag: bool = False) -> dict[st
 
 
 def upload_assets(repo: str, tag: str, files: list[str]) -> dict[str, Any]:
+    """Upload binary assets to an existing release."""
     r = parse_repo(repo)
     run_gh(["release", "upload", tag, "--repo", r.slug, *files])
     return envelope("release upload", ref=f"{r.slug}@{tag}", data={"files": files})
@@ -107,6 +115,7 @@ def upload_assets(repo: str, tag: str, files: list[str]) -> dict[str, Any]:
 
 def download_assets(repo: str, tag: str, *, pattern: str | None = None,
                     output_dir: str = ".") -> dict[str, Any]:
+    """Download release assets, optionally filtered by glob pattern."""
     r = parse_repo(repo)
     args = ["release", "download", tag, "--repo", r.slug, "--dir", output_dir]
     if pattern:
@@ -116,6 +125,7 @@ def download_assets(repo: str, tag: str, *, pattern: str | None = None,
 
 
 def generate_notes_between(repo: str, since_tag: str, *, target: str | None = None) -> dict[str, Any]:
+    """Generate release notes between since_tag and HEAD (or target branch)."""
     from ..triage.release_notes import notes_between
     return notes_between(repo, since_tag, target=target)
 

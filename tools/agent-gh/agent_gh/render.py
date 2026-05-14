@@ -6,10 +6,12 @@ from typing import Any
 
 
 def print_json(payload: Any) -> None:
+    """Pretty-print payload as sorted, indented JSON."""
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def print_table(rows: list[dict[str, Any]], fields: list[str]) -> None:
+    """Print rows as a fixed-width table with auto-sized columns."""
     if not rows:
         print("No results.")
         return
@@ -23,6 +25,7 @@ def print_table(rows: list[dict[str, Any]], fields: list[str]) -> None:
 
 
 def output(payload: Any, *, json_mode: bool, table_fields: list[str] | None = None) -> None:
+    """Render payload as JSON, table, key-value pairs, or plain text based on flags."""
     if json_mode:
         print_json(payload)
         return

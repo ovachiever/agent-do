@@ -34,6 +34,7 @@ class TriageResult:
 
 
 def triage(ref: str) -> dict[str, Any]:
+    """Classify an issue, suggest labels, and draft a first response without LLM."""
     from ..groups.issue import view_issue
 
     iref = parse_issue(ref)

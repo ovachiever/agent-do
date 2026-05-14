@@ -17,6 +17,7 @@ _SECTION_LABELS: list[tuple[str, list[str]]] = [
 
 
 def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> dict[str, Any]:
+    """Generate release notes since since_tag; tries GitHub's API then falls back to PR labels."""
     r = parse_repo(repo)
 
     # Use gh api to generate notes (GitHub's own notes generation endpoint)

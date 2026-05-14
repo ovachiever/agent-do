@@ -28,6 +28,7 @@ def _read_body(args: argparse.Namespace) -> str | None:
 def list_issues(repo: str, *, state: str = "open", labels: list[str] | None = None,
                 assignee: str | None = None, author: str | None = None,
                 milestone: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """List issues in a repo, returning a structured envelope."""
     r = parse_repo(repo)
     args = ["issue", "list", "--repo", r.slug, "--state", state,
             "--limit", str(limit), "--json", _ISSUE_LIST_FIELDS]
@@ -43,6 +44,7 @@ def list_issues(repo: str, *, state: str = "open", labels: list[str] | None = No
 
 
 def view_issue(ref: str, *, comments: bool = False) -> dict[str, Any]:
+    """Fetch full details for a single issue by owner/repo#num reference."""
     i = parse_issue(ref)
     fields = _ISSUE_VIEW_FIELDS + (",comments" if comments else "")
     return envelope("issue view", ref=i.slug, data=gh_json(
@@ -54,6 +56,7 @@ def create_issue(repo: str, *, title: str, body: str | None = None,
                  body_file: str | None = None, labels: list[str] | None = None,
                  assignees: list[str] | None = None, milestone: str | None = None,
                  project: str | None = None) -> dict[str, Any]:
+    """Create a new issue in a repo; returns an envelope with the new issue URL."""
     r = parse_repo(repo)
     args = ["issue", "create", "--repo", r.slug, "--title", title]
     if body is not None:
@@ -77,6 +80,7 @@ def create_issue(repo: str, *, title: str, body: str | None = None,
 
 
 def comment_issue(ref: str, *, body: str | None = None, body_file: str | None = None) -> dict[str, Any]:
+    """Post a comment on an issue."""
     i = parse_issue(ref)
     if body is None and body_file is None:
         raise GhError("--body or --body-file is required for issue comment")
@@ -91,6 +95,7 @@ def comment_issue(ref: str, *, body: str | None = None, body_file: str | None = 
 
 
 def close_issue(ref: str, *, reason: str | None = None, comment: str | None = None) -> dict[str, Any]:
+    """Close an issue, optionally with a reason and closing comment."""
     i = parse_issue(ref)
     args = ["issue", "close", str(i.number), "--repo", i.repo_ref.slug]
     if reason:
@@ -102,6 +107,7 @@ def close_issue(ref: str, *, reason: str | None = None, comment: str | None = No
 
 
 def reopen_issue(ref: str, *, comment: str | None = None) -> dict[str, Any]:
+    """Reopen a closed issue."""
     i = parse_issue(ref)
     args = ["issue", "reopen", str(i.number), "--repo", i.repo_ref.slug]
     if comment:
@@ -111,6 +117,7 @@ def reopen_issue(ref: str, *, comment: str | None = None) -> dict[str, Any]:
 
 
 def label_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
+    """Add or remove labels on an issue."""
     i = parse_issue(ref)
     args = ["issue", "edit", str(i.number), "--repo", i.repo_ref.slug]
     for lbl in add or []:
@@ -124,6 +131,7 @@ def label_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | N
 
 
 def assign_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
+    """Add or remove assignees on an issue."""
     i = parse_issue(ref)
     args = ["issue", "edit", str(i.number), "--repo", i.repo_ref.slug]
     for a in add or []:
