@@ -711,6 +711,130 @@ def main() -> int:
                  "--doc", "{}", "--json"], env=base_env)
         check("insert empty doc {} allowed", r.returncode == 0, r.stderr)
 
+        # ── injection / operator security ─────────────────────────────────────
+        print("\n--- injection ---")
+
+        # Shell metacharacters in --where value: passed as a single Python string,
+        # never interpreted by a shell. The semicolon, backtick, and $() are literals.
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", "status=done; echo INJECTED", "--json"], env=base_env)
+        check("shell metacharacters (semicolon) in key=value: parsed as literal string",
+              r.returncode == 0, r.stderr)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("shell metacharacters: filter value is literal (not executed)",
+                  out["data"]["filter"].get("status") == "done; echo INJECTED")
+
+        r = run([str(AGENT_DO), "mongo", "insert", "prism_bcc", "expectations",
+                 "--doc", '{"cmd": "$(rm -rf /)"}', "--dry-run"], env=base_env)
+        check("$() in --doc JSON value treated as literal (dry-run)", r.returncode == 2)
+        check("$() in --doc not executed (dry-run output present)", "[dry-run]" in r.stdout)
+
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", 'externalId=`id`', "--json"], env=base_env)
+        check("backtick in key=value: parsed as literal string", r.returncode == 0, r.stderr)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("backtick value is literal (not executed)",
+                  out["data"]["filter"].get("externalId") == "`id`")
+
+        # $where JavaScript operator: passes through to pymongo (server-side concern).
+        # agent-mongo does NOT execute JavaScript locally — it passes the filter as a BSON
+        # dict to pymongo which sends it to the MongoDB server. JS execution on the server
+        # depends on the server's security settings (noScripting option).
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", '{"$where": "function() { return true; }"}', "--json"],
+                env=base_env)
+        check("$where JS operator passes through to pymongo (not executed locally)",
+              r.returncode == 0, r.stderr)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("$where filter passed to pymongo verbatim",
+                  "$where" in out["data"]["filter"])
+
+        # Universal-match operators ($exists, $ne: null) on write operations:
+        # These pass the empty-filter guard (the dict is non-empty) — this is EXPECTED.
+        # The guard catches accidental {} only. Explicit operators require the caller to
+        # use --dry-run to verify scope first, and --confirm for delete.
+        r = run([str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+                 "--where", '{"_id": {"$exists": true}}', "--set", "status=reviewed",
+                 "--multi", "--dry-run"], env=base_env)
+        check("universal-match op ($exists:true) passes filter guard, dry-run shows scope",
+              r.returncode == 2)
+        check("dry-run output contains filter",
+              "$exists" in r.stdout or "reviewed" in r.stdout)
+
+        r = run([str(AGENT_DO), "mongo", "delete", "prism_bcc", "expectations",
+                 "--where", '{"status": {"$ne": null}}', "--dry-run"], env=base_env)
+        check("$ne:null on delete shows dry-run scope (--confirm still required to execute)",
+              r.returncode == 2)
+
+        # $out stage in aggregate: BLOCKED without --confirm (fixed gap).
+        # Previously, aggregate had no confirmation requirement even for destructive stages.
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$out": "archive"}]'], env=base_env)
+        check("aggregate $out blocked without --confirm", r.returncode != 0)
+        check("aggregate $out error mentions --confirm or destructive", "confirm" in r.stderr.lower())
+
+        # $out with an object argument (cross-database write)
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$out": {"db": "other", "coll": "victims"}}]'],
+                env=base_env)
+        check("aggregate $out (object form) blocked without --confirm", r.returncode != 0)
+
+        # $merge stage: also destructive
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$group": {"_id": "$status"}}, {"$merge": {"into": "summaries"}}]'],
+                env=base_env)
+        check("aggregate $merge stage blocked without --confirm", r.returncode != 0)
+        check("aggregate $merge error mentions --confirm or destructive", "confirm" in r.stderr.lower())
+
+        # $out allowed with --confirm
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$out": "archive"}]', "--confirm", "--json"],
+                env=base_env)
+        check("aggregate $out allowed with --confirm", r.returncode == 0, r.stderr)
+
+        # $out allowed with --dry-run (previews without executing)
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$out": "archive"}]', "--dry-run"], env=base_env)
+        check("aggregate $out dry-run exits 2", r.returncode == 2)
+        check("aggregate $out dry-run shows [dry-run]", "[dry-run]" in r.stdout)
+        check("aggregate $out dry-run shows stage name", "$out" in r.stdout)
+
+        # Normal aggregate (no destructive stages) still works without --confirm
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$count": "total"}]', "--json"], env=base_env)
+        check("aggregate without destructive stages needs no --confirm", r.returncode == 0, r.stderr)
+
+        # @file path traversal: reading non-JSON system files fails cleanly.
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", "@/etc/passwd"], env=base_env)
+        check("@/etc/passwd as --pipeline fails cleanly (not valid JSON array)", r.returncode != 0)
+
+        # /dev/null is empty — _parse_json_arg errors on empty JSON
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--projection", "@/dev/null"], env=base_env)
+        check("@/dev/null as --projection fails gracefully", r.returncode != 0)
+
+        # @file with a valid JSON file (connections.json) as --pipeline must still fail
+        # the array type check (connections.json is an object, not an array).
+        conn_file = fake_home / "mongo" / "connections.json"
+        if conn_file.exists():
+            r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                     "--pipeline", f"@{conn_file}"], env=base_env)
+            check("@connections.json as --pipeline blocked (object, not array)", r.returncode != 0)
+
+        # Profile name with path-traversal characters: stored as a JSON key, never used
+        # as a filesystem path, so no directory traversal is possible.
+        r = run([str(AGENT_DO), "mongo", "connections", "add", "../../../etc/shadow",
+                 "--uri", "mongodb://localhost:27017"], env=base_env)
+        check("profile name with path traversal chars stored safely (JSON key, not path)",
+              r.returncode == 0)
+        r2 = run([str(AGENT_DO), "mongo", "connections", "list"], env=base_env)
+        check("traversal-named profile visible in list (not a file path)",
+              "../../../etc/shadow" in r2.stdout)
+
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 40}")
         if fails:

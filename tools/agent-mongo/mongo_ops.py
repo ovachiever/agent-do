@@ -593,13 +593,18 @@ def cmd_count(argv: list[str]) -> None:
         client.close()
 
 
+_DESTRUCTIVE_PIPELINE_STAGES = {"$out", "$merge"}
+
+
 def cmd_aggregate(argv: list[str]) -> None:
     """Run an aggregation pipeline."""
     if len(argv) < 2:
-        _err("Usage: aggregate <db> <collection> --pipeline <json-or-@file> [--json]")
+        _err("Usage: aggregate <db> <collection> --pipeline <json-or-@file> [--confirm] [--dry-run] [--json]")
     db_name, coll_name = argv[0], argv[1]
     pipeline_raw = None
     connection = None
+    confirm = False
+    dry_run = False
     json_mode = False
     i = 2
     while i < len(argv):
@@ -609,6 +614,12 @@ def cmd_aggregate(argv: list[str]) -> None:
         elif argv[i] == "--connection" and i + 1 < len(argv):
             connection = argv[i + 1]
             i += 2
+        elif argv[i] == "--confirm":
+            confirm = True
+            i += 1
+        elif argv[i] == "--dry-run":
+            dry_run = True
+            i += 1
         elif argv[i] == "--json":
             json_mode = True
             i += 1
@@ -620,6 +631,21 @@ def cmd_aggregate(argv: list[str]) -> None:
     pipeline = _parse_json_arg(pipeline_raw, "--pipeline")
     if not isinstance(pipeline, list):
         _err("--pipeline must be a JSON array")
+
+    # Detect destructive stages ($out / $merge write to other collections)
+    destructive = [
+        stage
+        for stage in (s for step in pipeline if isinstance(step, dict) for s in step)
+        if stage in _DESTRUCTIVE_PIPELINE_STAGES
+    ]
+    if destructive:
+        if dry_run:
+            print(f"[dry-run] would run aggregate with destructive stage(s) {destructive} on {db_name}.{coll_name}")
+            print(json.dumps(pipeline, indent=2, default=str))
+            sys.exit(2)
+        if not confirm:
+            _err(f"Pipeline contains destructive stage(s) {destructive} that write to other collections. "
+                 "Use --confirm to proceed or --dry-run to preview.")
 
     uri, provider = _get_uri(connection)
     client = _connect(uri, provider)
