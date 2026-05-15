@@ -11,13 +11,19 @@ source "${SCRIPT_DIR}/../../lib/snapshot.sh" 2>/dev/null || true
 
 # Source context libraries
 source "$LIB_DIR/common.sh"
+source "$LIB_DIR/html.sh" 2>/dev/null || true
 source "$LIB_DIR/fetch.sh" 2>/dev/null || true
 source "$LIB_DIR/search.sh" 2>/dev/null || true
+source "$LIB_DIR/refresh.sh" 2>/dev/null || true
+source "$LIB_DIR/retrieve.sh" 2>/dev/null || true
 source "$LIB_DIR/cache.sh" 2>/dev/null || true
 source "$LIB_DIR/sources.sh" 2>/dev/null || true
 source "$LIB_DIR/annotate.sh" 2>/dev/null || true
 source "$LIB_DIR/build.sh" 2>/dev/null || true
 source "$LIB_DIR/budget.sh" 2>/dev/null || true
+source "$LIB_DIR/maintenance.sh" 2>/dev/null || true
+source "$LIB_DIR/versions.sh" 2>/dev/null || true
+source "$LIB_DIR/serve.sh" 2>/dev/null || true
 
 # Parse --json flag
 parse_output_format "$@" 2>/dev/null || true
@@ -29,20 +35,34 @@ agent-context - Curated docs and context for AI agents
 
 Core:
   search <query>                    Search across all indexed content
+  retrieve <query> [--fresh]        Return token-budgeted context for agents
+    --require-fresh                 Fail if selected WAN docs cannot be verified fresh
+    --require-official              Only return official/local trusted packages
+    --prefer-latest                 Prefer packages whose version is current
+    --require-current               Fail if selected docs are known stale by version
+    --offline                       Never perform network refresh
   get <id> [--file F] [--full]      Fetch doc/skill by ID
   list [--source S] [--tags T]      List available packages
 
 Sources:
   sources                           List configured sources
+  sources sync <name|--all>         Index configured sources
   add-source <name> <url|path>      Register a content source
+    --kind url|html-page|html-site|llms|github-file|github-dir|local-project|local-skill
+    --trust official|maintainer|community|local
+    --ttl 1d|7d|30d --tags a,b --alias name --crawl-limit N --disabled
+    --ecosystem npm|pypi|crates|pub --package name --doc-version version
   remove-source <name>              Unregister a source
 
 Fetching:
-  fetch <url>                       Fetch markdown from any URL
+  fetch <url>                       Fetch markdown/text or a single HTML page
+  crawl <url>                       Crawl bounded same-origin HTML docs
   fetch-llms <domain>               Fetch llms.txt / llms-full.txt from domain
   fetch-repo <owner/repo> [path]    Fetch docs from GitHub repo
+    --register-source               Also register fetched source for sync/refresh
+  refresh <id|name|--due>           Refresh WAN-backed cached packages
   scan-local [path]                 Index project files (CLAUDE.md, etc.)
-  scan-skills                       Index ~/.claude/skills/
+  scan-skills [name ...]            Index ~/.claude/skills/ (optionally named skills)
 
 Cache:
   cache list                        Show cached packages
@@ -67,7 +87,14 @@ Build:
   validate <dir>                    Check frontmatter + structure
 
 Meta:
+  versions check [--all|id]         Check doc versions against known registries
+  versions outdated                 Show docs behind current major/minor releases
+  versions sources                  Check configured source version metadata
+  serve [--port N]                  Serve local HTML dashboard for agents/humans
   status                            Sources, cache stats, index freshness
+  stale                             Show stale or failed packages
+  maintain                          Refresh due sources and prune cache
+  maintain schedule print           Print opt-in launchd plist
   init                              Initialize ~/.agent-do/context/
 
 Global flags:
@@ -77,8 +104,13 @@ Global flags:
 Examples:
   agent-context init
   agent-context fetch https://docs.example.com/api.md
+  agent-context crawl https://docs.example.com/guide --limit 25
   agent-context fetch-llms stripe.com
   agent-context search "authentication"
+  agent-context retrieve "latest authentication docs" --fresh --prefer-latest
+  agent-context add-source tanstack https://tanstack.com/query/latest/docs --kind url --trust official
+  agent-context sources sync --all
+  agent-context maintain --limit 10
   agent-context get stripe-llms
   agent-context list
   agent-context budget 4000 "react hooks"
@@ -91,62 +123,71 @@ shift 2>/dev/null || true
 case "$CMD" in
     # Core
     search|find|query)
-        cmd_search "$@"
+        with_context_lock cmd_search "$@"
+        ;;
+    retrieve)
+        with_context_lock cmd_retrieve "$@"
         ;;
     get)
-        cmd_get "$@"
+        with_context_lock cmd_get "$@"
         ;;
     list|ls)
-        cmd_list "$@"
+        with_context_lock cmd_list "$@"
         ;;
 
     # Sources
     sources)
-        cmd_sources "$@"
+        with_context_lock cmd_sources "$@"
         ;;
     add-source)
-        cmd_add_source "$@"
+        with_context_lock cmd_add_source "$@"
         ;;
     remove-source)
-        cmd_remove_source "$@"
+        with_context_lock cmd_remove_source "$@"
         ;;
 
     # Fetching
     fetch)
-        cmd_fetch "$@"
+        with_context_lock cmd_fetch "$@"
+        ;;
+    crawl)
+        with_context_lock cmd_crawl "$@"
         ;;
     fetch-llms)
-        cmd_fetch_llms "$@"
+        with_context_lock cmd_fetch_llms "$@"
         ;;
     fetch-repo)
-        cmd_fetch_repo "$@"
+        with_context_lock cmd_fetch_repo "$@"
+        ;;
+    refresh)
+        with_context_lock cmd_refresh "$@"
         ;;
     scan-local)
-        cmd_scan_local "$@"
+        with_context_lock cmd_scan_local "$@"
         ;;
     scan-skills)
-        cmd_scan_skills "$@"
+        with_context_lock cmd_scan_skills "$@"
         ;;
 
     # Cache
     cache)
-        cmd_cache "$@"
+        with_context_lock cmd_cache "$@"
         ;;
 
     # Annotations & Feedback
     annotate)
-        cmd_annotate "$@"
+        with_context_lock cmd_annotate "$@"
         ;;
     feedback)
-        cmd_feedback "$@"
+        with_context_lock cmd_feedback "$@"
         ;;
 
     # Budget
     budget)
-        cmd_budget "$@"
+        with_context_lock cmd_budget "$@"
         ;;
     inject)
-        cmd_inject "$@"
+        with_context_lock cmd_inject "$@"
         ;;
 
     # Build
@@ -158,11 +199,23 @@ case "$CMD" in
         ;;
 
     # Meta
+    versions)
+        with_context_lock cmd_versions "$@"
+        ;;
+    serve)
+        cmd_serve "$@"
+        ;;
     status|snapshot)
-        cmd_status "$@"
+        with_context_lock cmd_status "$@"
+        ;;
+    stale)
+        with_context_lock cmd_stale "$@"
+        ;;
+    maintain)
+        with_context_lock cmd_maintain "$@"
         ;;
     init|setup)
-        cmd_init "$@"
+        with_context_lock cmd_init "$@"
         ;;
 
     help|--help|-h)

@@ -1,0 +1,1012 @@
+#!/usr/bin/env bash
+# agent-obsidian — Obsidian vault integration via the official Obsidian CLI.
+#
+# This is a thin wrapper around the `obsidian` binary that ships with the
+# Obsidian desktop app (Settings → General → Command line interface →
+# Register CLI). It does not embed any vault format knowledge of its own:
+# it adapts agent-do's structured-API conventions onto obsidian-cli's
+# `key=value` parameter grammar, adds a doctor command for one-time CLI
+# linking, and gates the powerful introspection surface (`eval`, `dev:*`,
+# `plugin:*`) behind the `+live(...)` runtime modifier.
+#
+# Requires:
+#   - Obsidian.app installed locally
+#   - Obsidian running (the CLI talks to the live app over IPC)
+#
+# Reference: https://help.obsidian.md/cli
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Optional: json-output.sh helpers for --json plumbing in doctor/snapshot.
+# Passthrough commands return the obsidian CLI's native output format.
+# shellcheck source=/dev/null
+source "$REPO_ROOT/lib/json-output.sh" 2>/dev/null || true
+
+# ─── Help ────────────────────────────────────────────────────────────────────
+
+show_help() {
+    cat << 'EOF'
+agent-obsidian — Obsidian vault integration (via the official Obsidian CLI)
+
+NOTES
+  read <name>                Read a note by wikilink-style name
+  read --path <path>         Read a note by exact vault-relative path
+  create <name> [opts]       Create a new note
+  append <name> <text>       Append text to a note
+  search <query> [opts]      Search the active vault
+
+DAILY NOTES
+  daily read                 Read today's daily note
+  daily append <text>        Append text to today's daily note
+
+PROPERTIES (YAML frontmatter)
+  prop get <name>            Get a property value
+  prop set <name> <value>    Set a property value
+
+TASKS & METADATA
+  tasks [todo|done] [opts]   List checkbox tasks
+  tags [opts]                List tags (optionally with counts)
+  backlinks <name>           List backlinks to a note
+
+INSPECTION (+live-gated — require +live(scope=desktop,app=Obsidian,ttl=15m))
+  eval <code>                Run JavaScript in the Obsidian app context
+  dev errors                 Recent errors from Obsidian's dev console
+  dev screenshot <path>      Capture an Obsidian window screenshot
+  dev dom <selector> [--text]
+                             Inspect DOM by CSS selector
+  dev console [--level L]    Tail dev console messages
+  dev css <selector> <prop>  Read a computed CSS value
+  dev mobile on|off          Toggle mobile emulation
+  plugin reload <id>         Reload a plugin by id
+
+ENVIRONMENT
+  doctor [--fix] [--json]    Check that obsidian-cli is wired up
+  snapshot [--json]          Integration state as JSON
+
+COMMON OPTIONS
+  --vault <name>             Target a specific vault (default: most recent)
+  --json                     Structured JSON output (doctor and snapshot)
+  --copy                     Copy command output to clipboard (read commands)
+  --content <text>           Inline content (create / daily append)
+  --template <name>          Use a template (create)
+  --overwrite                Allow create to overwrite an existing note
+  --open                     Reveal the note in Obsidian after create
+  --limit <n>                Result limit (search)
+  --total                    Return a count instead of items (search, tags)
+  --daily                    Limit tasks to today's daily note
+  --counts                   Show counts alongside tags
+  --sort <name|count>        Sort tags
+  --file <name>              Target file by wikilink name (prop, etc.)
+  --path                     Treat the target as an exact path (append)
+
+ENVIRONMENT VARIABLES
+  OBSIDIAN_BIN               Override path to the obsidian executable
+  AGENT_OBSIDIAN_NO_AUTO_INSTALL=1
+                             Disable the one-time symlink into ~/.local/bin
+                             when only the app bundle is detected
+
+EXAMPLES
+  agent-obsidian doctor --json
+  agent-obsidian read "Daily/2026-05-10"
+  agent-obsidian create "Inbox/Idea" --content "Pricing experiment"
+  agent-obsidian append "Inbox/Idea" "Follow-up: talk to Erik"
+  agent-obsidian search "review" --limit 5
+  agent-obsidian daily append "- [ ] Ship agent-obsidian PR"
+  agent-obsidian prop set status done --file "Projects/agent-obsidian"
+  agent-obsidian tasks todo --daily
+
+  # +live-gated examples
+  agent-do +live(scope=desktop,app=Obsidian,ttl=15m) obsidian eval 'app.vault.getFiles().length'
+  agent-do +live(scope=desktop,app=Obsidian,ttl=15m) obsidian plugin reload templater-obsidian
+
+Requires Obsidian to be installed locally; many commands also require it to
+be running. See https://help.obsidian.md/cli for the underlying CLI.
+EOF
+}
+
+# ─── Obsidian CLI resolution & auto-link ─────────────────────────────────────
+
+# Detect the Obsidian app bundle on macOS without depending on `ls /Applications`
+# behaving consistently inside sandboxes.
+_app_bundle_path() {
+    local candidates=(
+        "/Applications/Obsidian.app/Contents/MacOS/obsidian-cli"
+        "$HOME/Applications/Obsidian.app/Contents/MacOS/obsidian-cli"
+    )
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Try to find the Obsidian CLI without auto-linking.
+_find_obsidian_cli() {
+    if [[ -n "${OBSIDIAN_BIN:-}" ]]; then
+        if [[ -x "$OBSIDIAN_BIN" ]]; then
+            printf '%s\n' "$OBSIDIAN_BIN"
+            return 0
+        fi
+        return 1
+    fi
+
+    local from_path
+    if from_path="$(command -v obsidian 2>/dev/null)" && [[ -n "$from_path" ]]; then
+        printf '%s\n' "$from_path"
+        return 0
+    fi
+
+    local candidates=(
+        "/usr/local/bin/obsidian"
+        "/opt/homebrew/bin/obsidian"
+        "$HOME/.local/bin/obsidian"
+    )
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Resolve the CLI for an actual command. If absent but the app is present
+# and auto-install is allowed, create a one-time symlink at ~/.local/bin/obsidian
+# (no sudo, no downloads). Quiet by default to avoid polluting JSON callers.
+# Auto-linking is a one-time wiring step. We do it on first use when:
+#   1. The CLI isn't on PATH or in any known location.
+#   2. The Obsidian.app bundle IS present.
+#   3. ~/.local/bin/obsidian does NOT already exist (we never overwrite).
+#   4. The newly-linked binary responds to `obsidian help`.
+# If any of those fail, we emit a clear error with the explicit fix command.
+# Users who don't want this can set AGENT_OBSIDIAN_NO_AUTO_INSTALL=1.
+_resolve_obsidian_or_die() {
+    local cli
+    if cli="$(_find_obsidian_cli)"; then
+        printf '%s\n' "$cli"
+        return 0
+    fi
+
+    if [[ "${AGENT_OBSIDIAN_NO_AUTO_INSTALL:-0}" == "1" ]]; then
+        _emit_cli_not_found
+        exit 1
+    fi
+
+    local app
+    if ! app="$(_app_bundle_path)"; then
+        _emit_cli_not_found
+        exit 1
+    fi
+
+    local target="$HOME/.local/bin/obsidian"
+    # Never clobber an existing entry — that's the user's territory.
+    if [[ -e "$target" || -L "$target" ]]; then
+        _emit_cli_not_found "$target exists but is not executable; remove it or set OBSIDIAN_BIN"
+        exit 1
+    fi
+    if ! mkdir -p "$HOME/.local/bin" 2>/dev/null; then
+        _emit_cli_not_found "could not create $HOME/.local/bin"
+        exit 1
+    fi
+    if ! ln -s "$app" "$target" 2>/dev/null; then
+        _emit_cli_not_found "could not symlink $app -> $target"
+        exit 1
+    fi
+    # Verify the link actually points at a working CLI. If `obsidian help`
+    # does not exit 0, we created a bad link — remove it and bail out so
+    # the user isn't left with a footgun in their PATH.
+    if ! "$target" help </dev/null >/dev/null 2>&1; then
+        rm -f "$target" 2>/dev/null || true
+        _emit_cli_not_found "$app did not respond to 'obsidian help'; symlink reverted"
+        exit 1
+    fi
+    echo "agent-obsidian: linked obsidian CLI ($app -> $target)" >&2
+    printf '%s\n' "$target"
+}
+
+_emit_cli_not_found() {
+    local detail="${1:-}"
+    local hint
+    hint='Run: agent-do obsidian doctor --fix'
+    hint+=$'\nOr install Obsidian from https://obsidian.md/download, then'
+    hint+=$'\nopen Obsidian → Settings → General → Command line interface →'
+    hint+=$'\nRegister CLI.'
+    {
+        echo "Error: obsidian CLI not found."
+        [[ -n "$detail" ]] && echo "Detail: $detail"
+        echo "$hint"
+    } >&2
+}
+
+# ─── +live gating helper ─────────────────────────────────────────────────────
+#
+# Delegates to lib.live.policy.require_live_control so the gate semantics and
+# LIVE_APPROVAL_REQUIRED payload stay identical to Python-backed tools
+# (agent-macos, agent-screen). Exits 1 with the canonical JSON payload when
+# the modifier is absent; succeeds quietly when approved.
+_require_live_or_die() {
+    local reason="$1"
+    shift
+    python3 - "$REPO_ROOT" "$reason" "$@" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo_root, reason, *argv = sys.argv[1:]
+sys.path.insert(0, str(Path(repo_root) / "lib"))
+
+from live.errors import LiveApprovalRequiredError  # noqa: E402
+from live.policy import require_live_control  # noqa: E402
+
+try:
+    require_live_control(
+        scope="desktop",
+        tool="obsidian",
+        argv=argv,
+        app="Obsidian",
+        reason=reason,
+    )
+except LiveApprovalRequiredError as exc:
+    print(json.dumps(exc.payload(), indent=2))
+    sys.exit(1)
+PY
+}
+
+# ─── obsidian-cli invocation ─────────────────────────────────────────────────
+#
+# Build and run an obsidian-cli command. The first parameter is the
+# subcommand (e.g. `read`, `create`, `daily:append`). Subsequent positional
+# arguments are passed verbatim as `key=value` params or as boolean flags.
+# A leading `vault=NAME` is injected when --vault was provided.
+#
+# Quoting: each param is passed as a single argv element. Bash naturally
+# preserves spaces and special characters inside variables when they're
+# expanded in quotes ("$param"), so `name=$value` is safe regardless of
+# what's in $value.
+OBSIDIAN_VAULT=""
+
+_run_obsidian() {
+    local subcommand="$1"
+    shift
+    local cli
+    cli="$(_resolve_obsidian_or_die)" || exit 1
+
+    if [[ -n "$OBSIDIAN_VAULT" ]]; then
+        exec "$cli" "vault=$OBSIDIAN_VAULT" "$subcommand" "$@"
+    fi
+    exec "$cli" "$subcommand" "$@"
+}
+
+# ─── Argument helpers ────────────────────────────────────────────────────────
+#
+# Pull global --vault / --json out of an argv list. Sets OBSIDIAN_VAULT and
+# OUTPUT_FORMAT. Remaining args land in REMAINING_ARGS.
+REMAINING_ARGS=()
+
+_parse_global_args() {
+    REMAINING_ARGS=()
+    # Only consume *leading* global flags. Stop at the first token that is
+    # not a recognised global so that content arguments like "--vault" or
+    # "--json" inside note bodies are never reinterpreted as wrapper flags.
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --vault)
+                OBSIDIAN_VAULT="${2:-}"
+                shift 2
+                ;;
+            --vault=*)
+                OBSIDIAN_VAULT="${1#--vault=}"
+                shift
+                ;;
+            --json)
+                OUTPUT_FORMAT="json"
+                shift
+                ;;
+            --)
+                shift
+                REMAINING_ARGS+=("$@")
+                return
+                ;;
+            *)
+                # First non-global token — everything from here on belongs
+                # to the subcommand. Do not consume any further arguments.
+                REMAINING_ARGS+=("$@")
+                return
+                ;;
+        esac
+    done
+}
+
+# ─── doctor ──────────────────────────────────────────────────────────────────
+
+cmd_doctor() {
+    local fix=0
+    local format="${OUTPUT_FORMAT:-text}"  # inherit global --json if present
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --fix)   fix=1; shift ;;
+            --json)  format="json"; shift ;;
+            -h|--help)
+                cat <<'EOF'
+agent-obsidian doctor — Check the obsidian-cli wiring
+
+  --fix     If only the Obsidian.app bundle is present, create a symlink
+            at ~/.local/bin/obsidian. No downloads, no sudo.
+  --json    Emit JSON.
+
+Exit code: 0 when the CLI is reachable, 1 otherwise.
+EOF
+                return 0
+                ;;
+            *) echo "Error: unknown doctor flag: $1" >&2; return 2 ;;
+        esac
+    done
+
+    local cli=""
+    local cli_source="not_found"
+    local app=""
+    local app_present="false"
+    local linked="false"
+    local link_attempted="false"
+
+    if [[ -n "${OBSIDIAN_BIN:-}" ]]; then
+        if [[ -x "$OBSIDIAN_BIN" ]]; then
+            cli="$OBSIDIAN_BIN"; cli_source="env_override"
+        fi
+    fi
+
+    if [[ -z "$cli" ]]; then
+        local cli_path=""
+        if cli_path="$(_find_obsidian_cli 2>/dev/null)"; then
+            cli="$cli_path"
+            case "$cli" in
+                "$HOME/.local/bin/"*) cli_source="local_bin" ;;
+                "/usr/local/bin/"*)    cli_source="usr_local_bin" ;;
+                "/opt/homebrew/"*)     cli_source="homebrew" ;;
+                *)                     cli_source="path" ;;
+            esac
+        fi
+    fi
+
+    if app="$(_app_bundle_path 2>/dev/null)"; then
+        app_present="true"
+    fi
+
+    if [[ -z "$cli" && "$fix" -eq 1 && "$app_present" == "true" ]]; then
+        link_attempted="true"
+        local target="$HOME/.local/bin/obsidian"
+        # Never overwrite an existing entry, and verify the result before
+        # accepting it. If the linked binary does not respond to `obsidian
+        # help`, revert the symlink and leave cli unset.
+        if [[ ! -e "$target" && ! -L "$target" ]] \
+            && mkdir -p "$HOME/.local/bin" 2>/dev/null \
+            && ln -s "$app" "$target" 2>/dev/null; then
+            if "$target" help </dev/null >/dev/null 2>&1; then
+                cli="$target"
+                cli_source="local_bin"
+                linked="true"
+            else
+                rm -f "$target" 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    local cli_runs="false"
+    if [[ -n "$cli" ]]; then
+        # `obsidian help` exits 0 and prints help text even when Obsidian.app
+        # isn't running. Anything else means the binary is broken.
+        if "$cli" help </dev/null >/dev/null 2>&1; then
+            cli_runs="true"
+        fi
+    fi
+
+    if [[ "$format" == "json" ]]; then
+        python3 - "$cli" "$cli_source" "$cli_runs" "$app" "$app_present" \
+                       "$linked" "$link_attempted" "$fix" <<'PY'
+import json, sys
+cli, source, runs, app, app_present, linked, link_attempted, fix = sys.argv[1:]
+payload = {
+    "ok": bool(cli) and runs == "true",
+    "cli_path": cli or None,
+    "cli_source": source,
+    "cli_runs": runs == "true",
+    "app_bundle": app or None,
+    "app_present": app_present == "true",
+    "linked": linked == "true",
+    "link_attempted": link_attempted == "true",
+    "fix_requested": fix == "1",
+}
+if not cli:
+    if app_present == "true":
+        payload["recommendation"] = "run: agent-do obsidian doctor --fix"
+    else:
+        payload["recommendation"] = (
+            "install Obsidian from https://obsidian.md/download, then "
+            "Settings → General → Command line interface → Register CLI"
+        )
+elif runs != "true":
+    payload["recommendation"] = "open Obsidian and re-run; CLI did not respond to 'help'"
+print(json.dumps(payload, indent=2))
+PY
+        if [[ "$cli_runs" == "true" ]]; then return 0; fi
+        return 1
+    fi
+
+    # Text output
+    if [[ -n "$cli" ]]; then
+        echo "✓ obsidian CLI: $cli ($cli_source)"
+        [[ "$cli_runs" == "true" ]] || echo "⚠ obsidian binary did not respond to 'help'"
+        [[ "$linked" == "true" ]]  && echo "✓ created symlink $cli"
+        if [[ "$cli_runs" == "true" ]]; then return 0; fi
+        return 1
+    fi
+
+    if [[ "$app_present" == "true" ]]; then
+        echo "✗ obsidian CLI not on PATH"
+        echo "  app bundle: $app"
+        echo "  fix: agent-do obsidian doctor --fix"
+    else
+        echo "✗ obsidian CLI not found and Obsidian.app is not installed"
+        echo "  install from https://obsidian.md/download, then run:"
+        echo "  agent-do obsidian doctor --fix"
+    fi
+    return 1
+}
+
+# ─── snapshot ────────────────────────────────────────────────────────────────
+
+cmd_snapshot() {
+    # Snapshot is always JSON. We still accept --json (and silently no-op it)
+    # so callers can pass the same flag they use for other commands.
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) shift ;;
+            -h|--help) echo "Usage: agent-obsidian snapshot [--vault NAME]"; return 0 ;;
+            *) echo "Error: unknown snapshot flag: $1" >&2; return 2 ;;
+        esac
+    done
+
+    local cli="" cli_runs="false" tags_raw=""
+    local cli_status="missing"
+
+    if cli="$(_find_obsidian_cli 2>/dev/null)" && [[ -n "$cli" ]]; then
+        cli_status="present"
+        if "$cli" help </dev/null >/dev/null 2>&1; then
+            cli_runs="true"
+        fi
+    fi
+
+    # Tag enumeration requires the running Obsidian app (not just the CLI
+    # binary). If the tags command fails, the app isn't running — snapshot
+    # must report ok: false so orchestrators know the tool isn't usable.
+    local tags_ok="false"
+    if [[ "$cli_runs" == "true" ]]; then
+        if [[ -n "$OBSIDIAN_VAULT" ]]; then
+            if tags_raw="$("$cli" "vault=$OBSIDIAN_VAULT" tags 2>/dev/null)"; then
+                tags_ok="true"
+            fi
+        else
+            if tags_raw="$("$cli" tags 2>/dev/null)"; then
+                tags_ok="true"
+            fi
+        fi
+    fi
+
+    python3 - "$cli" "$cli_status" "$cli_runs" "$OBSIDIAN_VAULT" "$tags_raw" "$tags_ok" <<'PY'
+import json, sys
+cli, cli_status, cli_runs, vault_arg, tags_raw, tags_ok = sys.argv[1:]
+
+def lines(blob):
+    return [line for line in (blob or "").splitlines() if line.strip()]
+
+tags = lines(tags_raw)
+
+# ok requires: CLI present, CLI responds to help, AND the app is actually
+# running (verified by a successful `tags` command — help alone can succeed
+# even when Obsidian isn't running).
+ok = cli_status == "present" and cli_runs == "true" and tags_ok == "true"
+
+payload = {
+    "tool": "obsidian",
+    "ok": ok,
+    "cli": {
+        "path": cli or None,
+        "status": cli_status,
+        "responsive": cli_runs == "true",
+    },
+    "active_vault": vault_arg or None,
+    "tags": {"count": len(tags)},
+}
+if cli_status == "missing":
+    payload["recommendation"] = "run: agent-do obsidian doctor --fix"
+elif cli_runs != "true":
+    payload["recommendation"] = "open Obsidian and re-run; CLI did not respond to 'help'"
+elif tags_ok != "true":
+    payload["recommendation"] = "open Obsidian — the CLI is present but the app is not running"
+print(json.dumps(payload, indent=2))
+sys.exit(0 if payload["ok"] else 1)
+PY
+}
+
+# ─── Notes ───────────────────────────────────────────────────────────────────
+
+cmd_read() {
+    local name="" path_arg="" copy_flag=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --path)   path_arg="${2:-}"; shift 2 ;;
+            --path=*) path_arg="${1#--path=}"; shift ;;
+            --copy)   copy_flag="--copy"; shift ;;
+            -h|--help) echo "Usage: agent-obsidian read <name> | --path <path> [--vault V] [--copy]"; return 0 ;;
+            -*) echo "Error: unknown read flag: $1" >&2; return 2 ;;
+            *)
+                if [[ -z "$name" ]]; then name="$1"; else
+                    echo "Error: read takes a single positional name" >&2; return 2
+                fi
+                shift ;;
+        esac
+    done
+
+    local args=()
+    if [[ -n "$path_arg" ]]; then
+        args+=("path=$path_arg")
+    elif [[ -n "$name" ]]; then
+        args+=("file=$name")
+    fi
+    [[ -n "$copy_flag" ]] && args+=("$copy_flag")
+    _run_obsidian read "${args[@]}"
+}
+
+cmd_create() {
+    local name="" content="" template=""
+    local overwrite=0 reveal=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --content)    content="${2:-}"; shift 2 ;;
+            --content=*)  content="${1#--content=}"; shift ;;
+            --template)   template="${2:-}"; shift 2 ;;
+            --template=*) template="${1#--template=}"; shift ;;
+            --overwrite)  overwrite=1; shift ;;
+            --open)       reveal=1; shift ;;
+            -h|--help)
+                echo "Usage: agent-obsidian create <name> [--content T] [--template T] [--overwrite] [--open] [--vault V]"
+                return 0 ;;
+            -*) echo "Error: unknown create flag: $1" >&2; return 2 ;;
+            *)
+                if [[ -z "$name" ]]; then name="$1"; else
+                    echo "Error: create takes a single positional name" >&2; return 2
+                fi
+                shift ;;
+        esac
+    done
+    [[ -n "$name" ]] || { echo "Error: create requires a note name" >&2; return 2; }
+
+    local args=("name=$name")
+    [[ -n "$content" ]]  && args+=("content=$content")
+    [[ -n "$template" ]] && args+=("template=$template")
+    [[ "$overwrite" -eq 1 ]] && args+=("overwrite")
+    # The Obsidian CLI's create is silent by default; only reveal when
+    # the user explicitly passes --open.
+    [[ "$reveal" -eq 1 ]] && args+=("open")
+
+    _run_obsidian create "${args[@]}"
+}
+
+cmd_append() {
+    # Recognized flags: --path (toggle target style), --content (exact body,
+    # including newlines), --help, -- (terminator). Anything else, including
+    # dash-prefixed text like "- [ ] task", is treated as a positional:
+    # first as the target name, rest concatenated as the body. Trailing
+    # positionals are joined with a single space, which is lossy for multi-
+    # line bodies — use --content "..." (or with \n) to preserve exact text.
+    local target="" text="" explicit_content=""
+    local has_explicit_content=0
+    local target_is_path=0
+    local seen_dashdash=0
+    while [[ $# -gt 0 ]]; do
+        if [[ "$seen_dashdash" -eq 0 ]]; then
+            case "$1" in
+                --path)
+                    target_is_path=1; shift; continue ;;
+                --content)
+                    explicit_content="${2:-}"; has_explicit_content=1
+                    shift 2; continue ;;
+                --content=*)
+                    explicit_content="${1#--content=}"; has_explicit_content=1
+                    shift; continue ;;
+                -h|--help)
+                    cat <<'EOF'
+Usage: agent-obsidian append <name> [<text>...] [--content T] [--path] [--vault V]
+
+  <name>          Target note (wikilink form). With --path, treated as an
+                  exact vault-relative path.
+  <text>...       Trailing positional words become the body, joined with
+                  single spaces. Use --content to preserve exact whitespace
+                  including embedded \n sequences.
+  --content T     Exact body text. Wins over positional text if both given.
+EOF
+                    return 0 ;;
+                --) seen_dashdash=1; shift; continue ;;
+            esac
+        fi
+        if [[ -z "$target" ]]; then target="$1"
+        elif [[ -z "$text" ]]; then text="$1"
+        else
+            # Allow space-separated additional words to flow into text.
+            text="$text $1"
+        fi
+        shift
+    done
+
+    local body
+    if [[ "$has_explicit_content" -eq 1 ]]; then
+        body="$explicit_content"
+    else
+        body="$text"
+    fi
+
+    [[ -n "$target" && -n "$body" ]] || {
+        echo "Error: append requires <name> and either <text> or --content" >&2
+        return 2; }
+
+    local args=()
+    if [[ "$target_is_path" -eq 1 ]]; then
+        args+=("path=$target")
+    else
+        args+=("file=$target")
+    fi
+    args+=("content=$body")
+    _run_obsidian append "${args[@]}"
+}
+
+cmd_search() {
+    local query="" limit="" total=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --limit)   limit="${2:-}"; shift 2 ;;
+            --limit=*) limit="${1#--limit=}"; shift ;;
+            --total)   total=1; shift ;;
+            -h|--help)
+                echo "Usage: agent-obsidian search <query> [--limit N] [--total] [--vault V]"
+                return 0 ;;
+            -*) echo "Error: unknown search flag: $1" >&2; return 2 ;;
+            *)
+                if [[ -z "$query" ]]; then query="$1"; else query="$query $1"; fi
+                shift ;;
+        esac
+    done
+    [[ -n "$query" ]] || { echo "Error: search requires a query" >&2; return 2; }
+
+    local args=("query=$query")
+    [[ -n "$limit" ]]  && args+=("limit=$limit")
+    [[ "$total" -eq 1 ]] && args+=("total")
+    _run_obsidian search "${args[@]}"
+}
+
+# ─── Daily notes ─────────────────────────────────────────────────────────────
+
+cmd_daily() {
+    local sub="${1:-}"
+    [[ -n "$sub" ]] || { echo "Usage: agent-obsidian daily {read|append} ..." >&2; return 2; }
+    shift
+    case "$sub" in
+        read)
+            local copy=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --copy) copy="--copy"; shift ;;
+                    -h|--help) echo "Usage: agent-obsidian daily read [--copy] [--vault V]"; return 0 ;;
+                    *) echo "Error: unknown daily read flag: $1" >&2; return 2 ;;
+                esac
+            done
+            local args=()
+            [[ -n "$copy" ]] && args+=("$copy")
+            _run_obsidian "daily:read" "${args[@]}"
+            ;;
+        append)
+            # `daily append` takes a free-text body. --help, --content, and
+            # -- are recognized; everything else (including args starting
+            # with `-`, e.g. "- [ ] task") is concatenated into the body.
+            # --content T preserves exact whitespace including embedded
+            # \n sequences; trailing positionals join with single spaces.
+            local text="" explicit_content="" has_explicit_content=0
+            local seen_dashdash=0
+            while [[ $# -gt 0 ]]; do
+                if [[ "$seen_dashdash" -eq 0 ]]; then
+                    case "$1" in
+                        -h|--help)
+                            echo "Usage: agent-obsidian daily append [<text>...] [--content T] [--vault V]"
+                            return 0 ;;
+                        --content)
+                            explicit_content="${2:-}"; has_explicit_content=1
+                            shift 2; continue ;;
+                        --content=*)
+                            explicit_content="${1#--content=}"; has_explicit_content=1
+                            shift; continue ;;
+                        --) seen_dashdash=1; shift; continue ;;
+                    esac
+                fi
+                if [[ -z "$text" ]]; then text="$1"; else text="$text $1"; fi
+                shift
+            done
+            local body
+            if [[ "$has_explicit_content" -eq 1 ]]; then body="$explicit_content"
+            else body="$text"; fi
+            [[ -n "$body" ]] || {
+                echo "Error: daily append requires <text> or --content" >&2; return 2; }
+            _run_obsidian "daily:append" "content=$body"
+            ;;
+        *)
+            echo "Unknown daily subcommand: $sub" >&2; return 2 ;;
+    esac
+}
+
+# ─── Properties ──────────────────────────────────────────────────────────────
+
+cmd_prop() {
+    local sub="${1:-}"
+    [[ -n "$sub" ]] || { echo "Usage: agent-obsidian prop {get|set} ..." >&2; return 2; }
+    shift
+    local file_target=""
+    case "$sub" in
+        get)
+            local name=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --file)   file_target="${2:-}"; shift 2 ;;
+                    --file=*) file_target="${1#--file=}"; shift ;;
+                    -h|--help) echo "Usage: agent-obsidian prop get <name> [--file F] [--vault V]"; return 0 ;;
+                    -*) echo "Error: unknown prop get flag: $1" >&2; return 2 ;;
+                    *) name="$1"; shift ;;
+                esac
+            done
+            [[ -n "$name" ]] || { echo "Error: prop get requires <name>" >&2; return 2; }
+            local args=("name=$name")
+            [[ -n "$file_target" ]] && args+=("file=$file_target")
+            _run_obsidian "property:read" "${args[@]}"
+            ;;
+        set)
+            local name="" value=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --file)   file_target="${2:-}"; shift 2 ;;
+                    --file=*) file_target="${1#--file=}"; shift ;;
+                    -h|--help) echo "Usage: agent-obsidian prop set <name> <value> [--file F] [--vault V]"; return 0 ;;
+                    -*) echo "Error: unknown prop set flag: $1" >&2; return 2 ;;
+                    *)
+                        if [[ -z "$name" ]]; then name="$1"
+                        elif [[ -z "$value" ]]; then value="$1"
+                        else value="$value $1"
+                        fi
+                        shift ;;
+                esac
+            done
+            [[ -n "$name" && -n "$value" ]] || {
+                echo "Error: prop set requires <name> <value>" >&2; return 2; }
+            local args=("name=$name" "value=$value")
+            [[ -n "$file_target" ]] && args+=("file=$file_target")
+            _run_obsidian "property:set" "${args[@]}"
+            ;;
+        *) echo "Unknown prop subcommand: $sub (expected: get|set)" >&2; return 2 ;;
+    esac
+}
+
+# ─── Tasks ───────────────────────────────────────────────────────────────────
+
+cmd_tasks() {
+    local kind="" daily=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            todo|done) kind="$1"; shift ;;
+            --daily)   daily=1; shift ;;
+            -h|--help) echo "Usage: agent-obsidian tasks [todo|done] [--daily] [--vault V]"; return 0 ;;
+            -*) echo "Error: unknown tasks flag: $1" >&2; return 2 ;;
+            *) echo "Error: tasks accepts only todo|done as positional: $1" >&2; return 2 ;;
+        esac
+    done
+
+    local args=()
+    [[ "$daily" -eq 1 ]] && args+=("daily")
+    [[ -n "$kind" ]]     && args+=("$kind")
+    _run_obsidian tasks "${args[@]}"
+}
+
+# ─── Tags ────────────────────────────────────────────────────────────────────
+
+cmd_tags() {
+    local sort_by="" counts=0 total=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --counts) counts=1; shift ;;
+            --total)  total=1; shift ;;
+            --sort)   sort_by="${2:-}"; shift 2 ;;
+            --sort=*) sort_by="${1#--sort=}"; shift ;;
+            -h|--help) echo "Usage: agent-obsidian tags [--counts] [--total] [--sort name|count] [--vault V]"; return 0 ;;
+            *) echo "Error: unknown tags flag: $1" >&2; return 2 ;;
+        esac
+    done
+
+    local args=()
+    [[ "$counts" -eq 1 ]] && args+=("counts")
+    [[ "$total" -eq 1 ]]  && args+=("total")
+    if [[ -n "$sort_by" ]]; then
+        case "$sort_by" in
+            name|count) args+=("sort=$sort_by") ;;
+            *) echo "Error: --sort accepts name|count" >&2; return 2 ;;
+        esac
+    fi
+    _run_obsidian tags "${args[@]}"
+}
+
+# ─── Backlinks ───────────────────────────────────────────────────────────────
+
+cmd_backlinks() {
+    local name=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help) echo "Usage: agent-obsidian backlinks <name> [--vault V]"; return 0 ;;
+            -*) echo "Error: unknown backlinks flag: $1" >&2; return 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+    [[ -n "$name" ]] || { echo "Error: backlinks requires a note name" >&2; return 2; }
+    _run_obsidian backlinks "file=$name"
+}
+
+# ─── +live-gated: eval / dev / plugin ────────────────────────────────────────
+
+cmd_eval() {
+    local code=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help) echo "Usage: agent-do +live(scope=desktop,app=Obsidian,ttl=15m) obsidian eval <code>"; return 0 ;;
+            *) if [[ -z "$code" ]]; then code="$1"; else code="$code $1"; fi; shift ;;
+        esac
+    done
+    [[ -n "$code" ]] || { echo "Error: eval requires JS code" >&2; return 2; }
+    _require_live_or_die "obsidian:eval" eval "$code" || exit $?
+    _run_obsidian eval "code=$code"
+}
+
+cmd_dev() {
+    local sub="${1:-}"
+    [[ -n "$sub" ]] || { echo "Usage: agent-obsidian dev {errors|screenshot|dom|console|css|mobile} ..." >&2; return 2; }
+    shift
+    case "$sub" in
+        errors)
+            _require_live_or_die "obsidian:dev:errors" dev errors || exit $?
+            _run_obsidian "dev:errors" "$@"
+            ;;
+        screenshot)
+            local path="${1:-}"
+            [[ -n "$path" ]] || { echo "Usage: agent-obsidian dev screenshot <path>" >&2; return 2; }
+            _require_live_or_die "obsidian:dev:screenshot" dev screenshot "$path" || exit $?
+            _run_obsidian "dev:screenshot" "path=$path"
+            ;;
+        dom)
+            local selector="" want_text=0
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --text) want_text=1; shift ;;
+                    -h|--help) echo "Usage: agent-obsidian dev dom <selector> [--text]"; return 0 ;;
+                    *) selector="$1"; shift ;;
+                esac
+            done
+            [[ -n "$selector" ]] || { echo "Error: dev dom requires a CSS selector" >&2; return 2; }
+            _require_live_or_die "obsidian:dev:dom" dev dom "$selector" || exit $?
+            local args=("selector=$selector")
+            [[ "$want_text" -eq 1 ]] && args+=("text")
+            _run_obsidian "dev:dom" "${args[@]}"
+            ;;
+        console)
+            local level=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --level)   level="${2:-}"; shift 2 ;;
+                    --level=*) level="${1#--level=}"; shift ;;
+                    -h|--help) echo "Usage: agent-obsidian dev console [--level error|warn|info|log]"; return 0 ;;
+                    *) echo "Error: unknown dev console flag: $1" >&2; return 2 ;;
+                esac
+            done
+            _require_live_or_die "obsidian:dev:console" dev console || exit $?
+            local args=()
+            [[ -n "$level" ]] && args+=("level=$level")
+            _run_obsidian "dev:console" "${args[@]}"
+            ;;
+        css)
+            local selector="${1:-}" prop="${2:-}"
+            [[ -n "$selector" && -n "$prop" ]] || {
+                echo "Usage: agent-obsidian dev css <selector> <prop>" >&2; return 2; }
+            _require_live_or_die "obsidian:dev:css" dev css "$selector" "$prop" || exit $?
+            _run_obsidian "dev:css" "selector=$selector" "prop=$prop"
+            ;;
+        mobile)
+            local toggle="${1:-}"
+            case "$toggle" in
+                on|off) : ;;
+                *) echo "Usage: agent-obsidian dev mobile on|off" >&2; return 2 ;;
+            esac
+            _require_live_or_die "obsidian:dev:mobile" dev mobile "$toggle" || exit $?
+            _run_obsidian "dev:mobile" "$toggle"
+            ;;
+        -h|--help)
+            cat <<'EOF'
+agent-obsidian dev — Obsidian developer surface (requires +live)
+
+  errors                Recent errors from the dev console
+  screenshot <path>     Capture a screenshot of the Obsidian window
+  dom <selector> [--text]
+                        Inspect DOM by CSS selector
+  console [--level L]   Tail dev console (level: error|warn|info|log)
+  css <selector> <prop> Read a computed CSS value
+  mobile on|off         Toggle mobile emulation
+EOF
+            ;;
+        *) echo "Unknown dev subcommand: $sub" >&2; return 2 ;;
+    esac
+}
+
+cmd_plugin() {
+    local sub="${1:-}"
+    [[ -n "$sub" ]] || { echo "Usage: agent-obsidian plugin reload <id>" >&2; return 2; }
+    shift
+    case "$sub" in
+        reload)
+            local pid="${1:-}"
+            [[ -n "$pid" ]] || { echo "Usage: agent-obsidian plugin reload <id>" >&2; return 2; }
+            _require_live_or_die "obsidian:plugin:reload" plugin reload "$pid" || exit $?
+            _run_obsidian "plugin:reload" "id=$pid"
+            ;;
+        -h|--help)
+            echo "Usage: agent-obsidian plugin reload <id>"
+            ;;
+        *) echo "Unknown plugin subcommand: $sub" >&2; return 2 ;;
+    esac
+}
+
+# ─── Dispatch ────────────────────────────────────────────────────────────────
+
+main() {
+    # Global args (--vault, --json) must appear *before* the subcommand.
+    # The parser stops at the first non-flag token so note content is preserved.
+    _parse_global_args "$@"
+    set -- "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
+
+    local cmd="${1:-help}"
+    [[ $# -gt 0 ]] && shift
+
+    case "$cmd" in
+        help|--help|-h) show_help; return 0 ;;
+        doctor) cmd_doctor "$@"; return $? ;;
+    esac
+
+    case "$cmd" in
+        snapshot|snap)        cmd_snapshot "$@" ;;
+        read)                 cmd_read "$@" ;;
+        create|new)           cmd_create "$@" ;;
+        append|add)           cmd_append "$@" ;;
+        search|find)          cmd_search "$@" ;;
+        daily)                cmd_daily "$@" ;;
+        prop|property)        cmd_prop "$@" ;;
+        tasks)                cmd_tasks "$@" ;;
+        tags)                 cmd_tags "$@" ;;
+        backlinks|backlink)   cmd_backlinks "$@" ;;
+        eval)                 cmd_eval "$@" ;;
+        dev)                  cmd_dev "$@" ;;
+        plugin)               cmd_plugin "$@" ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Try: agent-obsidian --help" >&2
+            return 2
+            ;;
+    esac
+}
+
+main "$@"

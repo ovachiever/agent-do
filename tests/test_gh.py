@@ -177,6 +177,16 @@ elif args[:2] == ["pr", "review"]:
     print("reviewed")
 elif args[:2] == ["pr", "merge"]:
     print("merged")
+elif args[:2] == ["pr", "close"]:
+    print("closed")
+elif args[:2] == ["pr", "reopen"]:
+    print("reopened")
+elif args[:2] == ["pr", "checkout"]:
+    print("checked out")
+elif args[:2] == ["pr", "edit"]:
+    print("edited")
+elif args[:2] == ["pr", "update-branch"]:
+    print("updated")
 elif args[:2] == ["pr", "ready"]:
     print("ready")
 else:
@@ -285,6 +295,83 @@ else:
         merge = run([str(AGENT_DO), "gh", "merge", "ovachiever/agent-do#3", "--squash", "--match-head-commit", "b352"], cwd=ROOT, env=env)
         require(merge.returncode == 0, f"merge failed: {merge.stderr}")
 
+        close = run(
+            [
+                str(AGENT_DO),
+                "gh",
+                "close",
+                "ovachiever/agent-do#4",
+                "--delete-branch",
+                "--comment",
+                "Closing accidental PR",
+            ],
+            cwd=ROOT,
+            env=env,
+        )
+        require(close.returncode == 0, f"close failed: {close.stderr}")
+
+        reopen = run(
+            [
+                str(AGENT_DO),
+                "gh",
+                "reopen",
+                "ovachiever/agent-do#4",
+                "--comment",
+                "Reopening after correction",
+            ],
+            cwd=ROOT,
+            env=env,
+        )
+        require(reopen.returncode == 0, f"reopen failed: {reopen.stderr}")
+
+        checkout = run(
+            [
+                str(AGENT_DO),
+                "gh",
+                "checkout",
+                "ovachiever/agent-do#3",
+                "--branch",
+                "review/pr-3",
+                "--force",
+            ],
+            cwd=ROOT,
+            env=env,
+        )
+        require(checkout.returncode == 0, f"checkout failed: {checkout.stderr}")
+
+        edit = run(
+            [
+                str(AGENT_DO),
+                "gh",
+                "edit",
+                "ovachiever/agent-do#3",
+                "--title",
+                "Updated title",
+                "--base",
+                "main",
+                "--add-label",
+                "review-needed",
+                "--add-reviewer",
+                "@me",
+            ],
+            cwd=ROOT,
+            env=env,
+        )
+        require(edit.returncode == 0, f"edit failed: {edit.stderr}")
+
+        update_branch = run(
+            [
+                str(AGENT_DO),
+                "gh",
+                "update-branch",
+                "ovachiever/agent-do#3",
+                "--rebase",
+            ],
+            cwd=ROOT,
+            env=env,
+        )
+        require(update_branch.returncode == 0, f"update-branch failed: {update_branch.stderr}")
+
         calls = [json.loads(line) for line in log_path.read_text().splitlines()]
         require(
             ["search", "prs", "--json", "number,title,state,url,repository,author,isDraft,updatedAt,commentsCount,labels", "--limit", "30", "--state", "open", "--author", "@me"] in calls,
@@ -292,6 +379,26 @@ else:
         )
         require(["pr", "review", "3", "--repo", "ovachiever/agent-do", "--approve", "--body", "LGTM"] in calls, f"missing approve call: {calls}")
         require(["pr", "merge", "3", "--repo", "ovachiever/agent-do", "--squash", "--match-head-commit", "b352"] in calls, f"missing merge call: {calls}")
+        require(
+            ["pr", "close", "4", "--repo", "ovachiever/agent-do", "--delete-branch", "--comment", "Closing accidental PR"] in calls,
+            f"missing close call: {calls}",
+        )
+        require(
+            ["pr", "reopen", "4", "--repo", "ovachiever/agent-do", "--comment", "Reopening after correction"] in calls,
+            f"missing reopen call: {calls}",
+        )
+        require(
+            ["pr", "checkout", "3", "--repo", "ovachiever/agent-do", "--branch", "review/pr-3", "--force"] in calls,
+            f"missing checkout call: {calls}",
+        )
+        require(
+            ["pr", "edit", "3", "--repo", "ovachiever/agent-do", "--title", "Updated title", "--base", "main", "--add-label", "review-needed", "--add-reviewer", "@me"] in calls,
+            f"missing edit call: {calls}",
+        )
+        require(
+            ["pr", "update-branch", "3", "--repo", "ovachiever/agent-do", "--rebase"] in calls,
+            f"missing update-branch call: {calls}",
+        )
 
     print("gh tests passed")
     return 0

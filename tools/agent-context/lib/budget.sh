@@ -28,6 +28,36 @@ db_path, budget_str, query, cache_dir, feedback_path, output_format = sys.argv[1
 budget = int(budget_str)
 
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout = 5000")
+
+TEXT_EXTENSIONS = {
+    ".md", ".mdx", ".txt", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml",
+    ".yml", ".py", ".sh", ".css", ".html", ".sql", ".toml",
+}
+
+def quote_fts_term(term):
+    return '"' + term.replace('"', '""') + '"'
+
+def read_package_content(cache_path):
+    if not cache_path or not os.path.isdir(cache_path):
+        return ""
+
+    chunks = []
+    for dirpath, _, filenames in os.walk(cache_path):
+        for filename in sorted(filenames):
+            path = os.path.join(dirpath, filename)
+            rel = os.path.relpath(path, cache_path)
+            if rel == "meta.json":
+                continue
+            if os.path.splitext(filename)[1].lower() not in TEXT_EXTENSIONS:
+                continue
+            try:
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    content = handle.read()
+            except OSError:
+                continue
+            chunks.append(f"--- {rel} ---\n{content}")
+    return "\n\n".join(chunks)
 
 # Trust multipliers
 TRUST_MULT = {"official": 1.5, "maintainer": 1.2, "local": 1.3, "community": 1.0}
@@ -49,7 +79,7 @@ for word in query.lower().split():
             if exp != word:
                 expanded_terms.append(exp)
 
-fts_query = " OR ".join(expanded_terms)
+fts_query = " OR ".join(quote_fts_term(term) for term in expanded_terms)
 
 # Load feedback
 feedback = {}
@@ -72,8 +102,17 @@ try:
         "FROM packages WHERE packages MATCH ? ORDER BY bm25(packages) LIMIT 50",
         (fts_query,)
     ).fetchall()
-except:
-    rows = []
+except Exception as exc:
+    conn.close()
+    if output_format == "json":
+        print(json.dumps({
+            "success": False,
+            "error": f"Budget search failed: {exc}",
+            "query": query,
+        }, indent=2))
+    else:
+        print(f"Error: Budget search failed: {exc}", file=sys.stderr)
+    sys.exit(1)
 
 # Score and sort
 candidates = []
@@ -109,13 +148,7 @@ total_tokens = sum(s["token_count"] for s in selected)
 if output_format == "json":
     # Include content in JSON mode
     for s in selected:
-        cp = s["cache_path"]
-        for fname in ["content.md", "DOC.md", "SKILL.md", "README.md"]:
-            fp = os.path.join(cp, fname) if cp else ""
-            if fp and os.path.exists(fp):
-                with open(fp) as f:
-                    s["content"] = f.read()
-                break
+        s["content"] = read_package_content(s["cache_path"])
         s.pop("cache_path", None)
 
     print(json.dumps({
@@ -157,6 +190,33 @@ db_path, max_tokens_str, cache_dir, output_format = sys.argv[1:5]
 max_tokens = int(max_tokens_str)
 
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout = 5000")
+
+TEXT_EXTENSIONS = {
+    ".md", ".mdx", ".txt", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml",
+    ".yml", ".py", ".sh", ".css", ".html", ".sql", ".toml",
+}
+
+def read_package_content(cache_path):
+    if not cache_path or not os.path.isdir(cache_path):
+        return ""
+
+    chunks = []
+    for dirpath, _, filenames in os.walk(cache_path):
+        for filename in sorted(filenames):
+            path = os.path.join(dirpath, filename)
+            rel = os.path.relpath(path, cache_path)
+            if rel == "meta.json":
+                continue
+            if os.path.splitext(filename)[1].lower() not in TEXT_EXTENSIONS:
+                continue
+            try:
+                with open(path, encoding="utf-8", errors="replace") as handle:
+                    content = handle.read()
+            except OSError:
+                continue
+            chunks.append(f"--- {rel} ---\n{content}")
+    return "\n\n".join(chunks)
 
 # Get most recently accessed and most used packages
 rows = conn.execute(
@@ -173,15 +233,7 @@ for row in rows:
     if tokens == 0 or tokens > remaining:
         continue
 
-    # Read content
-    content = ""
-    if cache_path:
-        for fname in ["content.md", "DOC.md", "SKILL.md", "README.md"]:
-            fp = os.path.join(cache_path, fname)
-            if os.path.exists(fp):
-                with open(fp) as f:
-                    content = f.read()
-                break
+    content = read_package_content(cache_path)
 
     if content:
         selected.append({
