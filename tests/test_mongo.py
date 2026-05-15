@@ -859,6 +859,31 @@ def main() -> int:
                  "--uri", "mongodb://localhost:27017"], env=base_env)
         check("profile name with space/special chars rejected", r.returncode != 0)
 
+        # import-from-aks with a secret name that contains dots — should error with
+        # a hint to pass --profile rather than the generic "Invalid profile name" message.
+        r = run(
+            [str(AGENT_DO), "mongo", "connections", "import-from-aks",
+             "--secret", "cosmos.connection.string",
+             "--namespace", "prism"],
+            env=base_env,
+        )
+        check("import-from-aks dotted secret name rejected with hint", r.returncode != 0)
+        check("import-from-aks dot hint mentions --profile", "--profile" in r.stderr)
+
+        # --set @file on update: verify file-based JSON update payloads are accepted.
+        # Write a small update payload to a temp file and use it via --set @path.
+        set_file = tmp / "update_payload.json"
+        set_file.write_text(json.dumps({"status": "archived", "score": 99}))
+        r = run(
+            [str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+             "--where", "status=active",
+             "--set", f"@{set_file}",
+             "--dry-run"],
+            env=base_env,
+        )
+        check("update --set @file dry-run exits 2", r.returncode == 2)
+        check("update --set @file dry-run shows field", "archived" in r.stdout or "archived" in r.stderr)
+
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 40}")
         if fails:

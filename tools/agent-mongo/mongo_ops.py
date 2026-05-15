@@ -365,7 +365,13 @@ def cmd_connections(argv: list[str]) -> None:
             _err("--secret is required")
         if not profile_name:
             profile_name = secret
-        _validate_profile_name(profile_name)
+        if not _PROFILE_NAME_RE.match(profile_name):
+            if profile_name == secret:
+                _err(
+                    f"AKS secret name {secret!r} contains characters not allowed in a profile name. "
+                    f"Pass --profile <name> to use a valid name (letters, digits, hyphens, underscores only)."
+                )
+            _validate_profile_name(profile_name)
 
         import base64  # noqa: PLC0415
         import subprocess  # noqa: PLC0415
@@ -871,7 +877,14 @@ def cmd_update(argv: list[str]) -> None:
     if not filt:
         _err("Empty filter '{}' is not allowed for update — it would match every document. "
              "Use a specific --where clause.")
-    updates = {"$set": _parse_filter(set_raw)}
+    # @file syntax: read the update payload from a file (must contain a JSON object)
+    if set_raw and set_raw.startswith("@"):
+        set_doc = _parse_json_arg(set_raw, "--set")
+        if not isinstance(set_doc, dict):
+            _err("--set @file must contain a JSON object (dict) of field=value pairs")
+    else:
+        set_doc = _parse_filter(set_raw)
+    updates = {"$set": set_doc}
 
     if dry_run:
         print(f"[dry-run] would update {db_name}.{coll_name}")
