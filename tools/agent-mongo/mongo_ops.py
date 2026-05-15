@@ -206,15 +206,10 @@ def cmd_connections(argv: list[str]) -> None:
             marker = " *" if name == default else ""
             provider = p.get("provider", "mongodb")
             added = p.get("added_at", "")[:10]
-            # Mask URI credentials
+            # Mask entire userinfo segment (user, user:pass, user:)
             uri = p.get("uri", "")
-            try:
-                from urllib.parse import urlparse  # noqa: PLC0415
-                parsed = urlparse(uri)
-                safe = uri.replace(parsed.password or "", "****") if parsed.password else uri
-            except Exception:
-                import re as _re  # noqa: PLC0415
-                safe = _re.sub(r'://[^:@/]+:[^@/]+@', '://****:****@', uri)
+            import re as _re  # noqa: PLC0415
+            safe = _re.sub(r'://[^@/]+@', '://****@', uri)
             print(f"  {name}{marker}  [{provider}]  {added}  {safe}")
 
     elif sub == "add":
@@ -415,7 +410,8 @@ def cmd_schema(argv: list[str]) -> None:
                 if k == "_id" and not prefix:
                     fkey = "_id"
                 else:
-                    fkey = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
+                    # prefix is either "" or "parent." (trailing dot) — concatenate directly
+                    fkey = f"{prefix}{k}"
                 type_name = type(v).__name__
                 if type_name == "ObjectId":
                     type_name = "ObjectId"

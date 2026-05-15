@@ -50,6 +50,7 @@ FIXTURE_DOCS = [
         "amount": Decimal128("100.50"),
         "createdAt": datetime(2026, 1, 15, 9, 0, 0),
         "retries": Int64(0),
+        "metadata": {"source": "api", "retries": 0},
     },
     {
         "_id": ObjectId("507f1f77bcf86cd799439012"),
@@ -58,6 +59,7 @@ FIXTURE_DOCS = [
         "amount": Decimal128("200.00"),
         "createdAt": datetime(2026, 1, 16, 12, 30, 0),
         "retries": Int64(1),
+        "metadata": {"source": "batch", "retries": 1},
     },
 ]
 
@@ -191,11 +193,12 @@ def main() -> int:
 
         (fake_lib / "pymongo.py").write_text(_FAKE_PYMONGO)
 
+        pythonpath = os.pathsep.join(filter(None, [str(fake_lib), os.environ.get("PYTHONPATH", "")]))
         base_env: dict[str, str] = {
             **os.environ,
             "AGENT_DO_HOME": str(fake_home),
             "MONGO_CONNECTION_STRING": "mongodb://test:pass@localhost:27017",
-            "PYTHONPATH": str(fake_lib) + (":" + os.environ["PYTHONPATH"] if "PYTHONPATH" in os.environ else ""),
+            "PYTHONPATH": pythonpath,
             "PATH": str(fake_bin) + ":" + os.environ.get("PATH", ""),
         }
 
@@ -310,6 +313,10 @@ def main() -> int:
         field_names = [f["field"] for f in out["data"]["fields"]]
         check("schema includes externalId", "externalId" in field_names)
         check("schema includes status", "status" in field_names)
+        check("schema nested field uses single dot (not double)",
+              "metadata.source" in field_names)
+        check("schema no double-dot in any field name",
+              not any(".." in f for f in field_names))
 
         # indexes --json
         r = run(
