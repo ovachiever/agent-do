@@ -231,11 +231,18 @@ def main() -> int:
         )
         check("connections add exit 0", r.returncode == 0, r.stderr)
         check("connections add shows name+provider", "prism_bcc" in r.stdout and "cosmosdb" in r.stdout)
+        # URI must be in creds file, not in connections.json
+        conn_json = json.loads((fake_home / "mongo" / "connections.json").read_text())
+        check("connections add: URI not in connections.json",
+              "uri" not in conn_json["profiles"].get("prism_bcc", {}))
+        check("connections add: creds file exists",
+              (fake_home / "mongo" / ".creds" / "prism_bcc").exists())
 
-        # list shows profile with masked password and default marker
+        # list shows profile metadata; URI is never printed (stored in separate creds file)
         r = run([str(AGENT_DO), "mongo", "connections", "list"], env=base_env)
         check("connections list has profile", "prism_bcc" in r.stdout)
-        check("connections list masks password", "s3cr3t" not in r.stdout)
+        check("connections list does not expose URI", "s3cr3t" not in r.stdout and "cosmosdb.example.com" not in r.stdout)
+        check("connections list shows secure-store note", "stored securely" in r.stdout)
         check("connections list default marker", "*" in r.stdout)
 
         # add second profile (non-default)
@@ -278,6 +285,13 @@ def main() -> int:
         )
         check("import-from-aks exit 0", r.returncode == 0, r.stderr)
         check("import-from-aks message", "aks_cosmos" in r.stdout)
+        # Verify URI is in the creds file, NOT in connections.json
+        conn_json = json.loads((fake_home / "mongo" / "connections.json").read_text())
+        check("import-from-aks: URI not in connections.json",
+              "uri" not in conn_json["profiles"].get("aks_cosmos", {}))
+        creds_file = fake_home / "mongo" / ".creds" / "aks_cosmos"
+        check("import-from-aks: URI stored in creds file", creds_file.exists())
+        check("import-from-aks: creds file contains URI", aks_uri in creds_file.read_text())
 
         # ── discovery ─────────────────────────────────────────────────────────
         print("\n--- discovery ---")
@@ -832,15 +846,18 @@ def main() -> int:
                      "--pipeline", f"@{conn_file}"], env=base_env)
             check("@connections.json as --pipeline blocked (object, not array)", r.returncode != 0)
 
-        # Profile name with path-traversal characters: stored as a JSON key, never used
-        # as a filesystem path, so no directory traversal is possible.
+        # Profile names are now used as filenames in the creds store.
+        # Path-traversal characters (slashes, dots-dot) must be rejected upfront.
         r = run([str(AGENT_DO), "mongo", "connections", "add", "../../../etc/shadow",
                  "--uri", "mongodb://localhost:27017"], env=base_env)
-        check("profile name with path traversal chars stored safely (JSON key, not path)",
-              r.returncode == 0)
-        r2 = run([str(AGENT_DO), "mongo", "connections", "list"], env=base_env)
-        check("traversal-named profile visible in list (not a file path)",
-              "../../../etc/shadow" in r2.stdout)
+        check("profile name with path traversal chars rejected (not stored as file path)",
+              r.returncode != 0)
+        check("profile name rejection error is clear", "Invalid profile name" in r.stderr)
+
+        # Names with spaces or special chars also rejected
+        r = run([str(AGENT_DO), "mongo", "connections", "add", "bad name!",
+                 "--uri", "mongodb://localhost:27017"], env=base_env)
+        check("profile name with space/special chars rejected", r.returncode != 0)
 
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 40}")

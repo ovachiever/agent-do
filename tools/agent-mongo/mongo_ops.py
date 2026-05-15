@@ -23,13 +23,73 @@ def _home() -> Path:
     return Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
 
 
+_PROFILE_NAME_RE = __import__("re").compile(r'^[a-zA-Z0-9_\-]+$')
+
+
+def _validate_profile_name(name: str) -> None:
+    """Reject profile names that are not safe for use as filenames."""
+    if not _PROFILE_NAME_RE.match(name):
+        _err(f"Invalid profile name {name!r}. Use only letters, numbers, hyphens, and underscores.")
+
+
 def _profiles_path() -> Path:
-    """Return path to the connection profiles JSON file."""
+    """Return path to the connection profiles JSON file (metadata only — no URIs)."""
     return _home() / "mongo" / "connections.json"
 
 
+def _creds_dir() -> Path:
+    """Return directory that holds per-profile URI files (mode 0o700)."""
+    return _home() / "mongo" / ".creds"
+
+
+def _creds_store_profile(profile_name: str, uri: str) -> None:
+    """Write a connection URI atomically to a 0o600 file, separate from profile metadata."""
+    import tempfile  # noqa: PLC0415
+    d = _creds_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    target = d / profile_name
+    content = (uri + "\n").encode()
+    fd, tmp = tempfile.mkstemp(dir=d)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, content)
+        os.close(fd)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _creds_get_profile(profile_name: str) -> str:
+    """Return the URI for a profile: env var first, then the per-profile creds file."""
+    env_key = "MONGO_CONNECTION_" + profile_name.upper().replace("-", "_")
+    env_val = os.environ.get(env_key, "")
+    if env_val:
+        return env_val
+    creds_file = _creds_dir() / profile_name
+    if creds_file.exists():
+        return creds_file.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def _creds_delete_profile(profile_name: str) -> None:
+    """Remove the URI creds file for a profile (no-op if absent)."""
+    try:
+        (_creds_dir() / profile_name).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _load_profiles() -> dict[str, Any]:
-    """Load connection profiles from disk, returning empty structure if absent or corrupt."""
+    """Load connection profile metadata (no URIs) from disk."""
     p = _profiles_path()
     if not p.exists():
         return {"profiles": {}, "default": None}
@@ -40,7 +100,7 @@ def _load_profiles() -> dict[str, Any]:
 
 
 def _save_profiles(data: dict[str, Any]) -> None:
-    """Write profiles atomically with owner-only permissions (credentials must not be world-readable)."""
+    """Write profile metadata atomically with owner-only permissions."""
     import tempfile  # noqa: PLC0415
     p = _profiles_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -149,8 +209,12 @@ def _parse_json_arg(raw: str | None, name: str) -> Any:
 
 
 def _get_uri(connection: str | None) -> tuple[str, str]:
-    """Return (uri, provider) for the given profile name or env fallback."""
-    # Env var takes lowest precedence — profiles win
+    """Return (uri, provider) for the given profile name or env fallback.
+
+    Resolution order: named profile creds file → default profile creds file →
+    MONGO_CONNECTION_STRING env var.  Per-profile env vars (MONGO_CONNECTION_<NAME>)
+    are checked first inside _creds_get_profile before reading the creds file.
+    """
     env_uri = os.environ.get("MONGO_CONNECTION_STRING", "")
 
     if connection:
@@ -159,13 +223,21 @@ def _get_uri(connection: str | None) -> tuple[str, str]:
         if not profile:
             _err(f"Connection profile '{connection}' not found. "
                  f"Run: agent-do mongo connections list")
-        return profile["uri"], profile.get("provider", "mongodb")
+        uri = _creds_get_profile(connection)
+        if not uri:
+            _err(f"No URI stored for profile '{connection}'. "
+                 f"Re-add it: agent-do mongo connections add {connection} --uri <uri>")
+        return uri, profile.get("provider", "mongodb")
 
     data = _load_profiles()
     default = data.get("default")
     if default and default in data["profiles"]:
         p = data["profiles"][default]
-        return p["uri"], p.get("provider", "mongodb")
+        uri = _creds_get_profile(default)
+        if not uri:
+            _err(f"No URI stored for profile '{default}'. "
+                 f"Re-add it: agent-do mongo connections add {default} --uri <uri>")
+        return uri, p.get("provider", "mongodb")
 
     if env_uri:
         return env_uri, "mongodb"
@@ -206,16 +278,15 @@ def cmd_connections(argv: list[str]) -> None:
             marker = " *" if name == default else ""
             provider = p.get("provider", "mongodb")
             added = p.get("added_at", "")[:10]
-            # Mask entire userinfo segment (user, user:pass, user:)
-            uri = p.get("uri", "")
-            import re as _re  # noqa: PLC0415
-            safe = _re.sub(r'://[^@/]+@', '://****@', uri)
-            print(f"  {name}{marker}  [{provider}]  {added}  {safe}")
+            source = p.get("source", "")
+            source_str = f"  via {source}" if source else ""
+            print(f"  {name}{marker}  [{provider}]  {added}  (uri stored securely{source_str})")
 
     elif sub == "add":
         name = rest[0] if rest else None
         if not name:
             _err("Usage: connections add <name> --uri <uri>")
+        _validate_profile_name(name)
         uri = ""
         provider = "mongodb"
         is_default = False
@@ -235,9 +306,10 @@ def cmd_connections(argv: list[str]) -> None:
         if not uri:
             _err("--uri is required")
         data = _load_profiles()
-        data["profiles"][name] = {"uri": uri, "provider": provider, "added_at": _now()}
+        data["profiles"][name] = {"provider": provider, "added_at": _now()}
         if is_default or not data.get("default"):
             data["default"] = name
+        _creds_store_profile(name, uri)
         _save_profiles(data)
         print(f"Saved profile '{name}' [{provider}]"
               + (" (default)" if data["default"] == name else ""))
@@ -250,6 +322,7 @@ def cmd_connections(argv: list[str]) -> None:
         if name not in data["profiles"]:
             _err(f"Profile '{name}' not found")
         del data["profiles"][name]
+        _creds_delete_profile(name)
         if data.get("default") == name:
             data["default"] = next(iter(data["profiles"]), None)
         _save_profiles(data)
@@ -259,6 +332,7 @@ def cmd_connections(argv: list[str]) -> None:
         name = rest[0] if rest else None
         if not name:
             _err("Usage: connections set-default <name>")
+        _validate_profile_name(name)
         data = _load_profiles()
         if name not in data["profiles"]:
             _err(f"Profile '{name}' not found")
@@ -291,6 +365,7 @@ def cmd_connections(argv: list[str]) -> None:
             _err("--secret is required")
         if not profile_name:
             profile_name = secret
+        _validate_profile_name(profile_name)
 
         import base64  # noqa: PLC0415
         import subprocess  # noqa: PLC0415
@@ -310,11 +385,12 @@ def cmd_connections(argv: list[str]) -> None:
             _err(f"Failed to decode secret: {exc}")
         data = _load_profiles()
         data["profiles"][profile_name] = {
-            "uri": uri, "provider": "cosmosdb", "added_at": _now(),
+            "provider": "cosmosdb", "added_at": _now(),
             "source": f"aks:{namespace}/{secret}",
         }
         if not data.get("default"):
             data["default"] = profile_name
+        _creds_store_profile(profile_name, uri)
         _save_profiles(data)
         print(f"Imported '{profile_name}' from AKS secret {namespace}/{secret}")
 
