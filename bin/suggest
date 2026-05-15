@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 import re
@@ -35,6 +36,24 @@ PROJECT_MARKERS = (
     "pnpm-workspace.yaml",
     "turbo.json",
 )
+
+DOCS_RETRIEVAL_PATTERNS = [
+    re.compile(r"\b(use|check|read|look\s+up|fetch|find|get|consult)\b.{0,80}\b(latest|current|up.to.date|recent|official)\b.{0,80}\b(docs?|documentation|api|sdk|reference)\b", re.I),
+    re.compile(r"\b(latest|current|up.to.date|recent|official)\b.{0,80}\b(docs?|documentation|api|sdk|reference)\b", re.I),
+    re.compile(r"\b(docs?|documentation|api|sdk|reference)\b.{0,80}\b(latest|current|up.to.date|recent|official)\b", re.I),
+    re.compile(r"\b(v\d+|migration|upgrade|breaking changes?)\b.{0,80}\b(docs?|documentation|api|sdk|reference|library|framework|package)\b", re.I),
+]
+
+
+def looks_like_context_retrieval_query(query: str) -> bool:
+    query_lower = query.lower()
+    if re.search(r"\b(update|edit|write|clean|fix|add|remove)\b.{0,40}\b(readme|repo docs?|project docs?|documentation)\b", query_lower):
+        return False
+    return any(pattern.search(query) for pattern in DOCS_RETRIEVAL_PATTERNS)
+
+
+def context_retrieve_command(query: str) -> str:
+    return f"agent-do context retrieve {shlex.quote(query)} --fresh --prefer-latest --max-tokens 8000"
 
 
 def find_project_root(cwd: str) -> Path:
@@ -111,6 +130,9 @@ def infer_primary_entrypoint(tool: str, info: dict, query: str) -> str:
     query_lower = query.lower()
     entrypoints = get_recommended_entrypoints(info)
 
+    if tool == "context" and looks_like_context_retrieval_query(query):
+        return context_retrieve_command(query)
+
     command_hits = []
     for command in commands:
         variants = {command.lower(), command.lower().replace("-", " ")}
@@ -151,6 +173,8 @@ def build_item(tool: str, info: dict, query: str, source: str, score: int | floa
     readiness = get_tool_readiness(info)
     primary = infer_primary_entrypoint(tool, info, query)
     extra = [entry for entry in entrypoints if entry != primary][:2]
+    if tool == "context" and looks_like_context_retrieval_query(query):
+        extra = [entry for entry in ["agent-do context stale --json", "agent-do context status"] if entry != primary]
 
     return {
         "tool": tool,

@@ -7,22 +7,99 @@ _index_package() {
     local id="$1" name="$2" type="$3" description="$4" tags="$5"
     local trust="$6" token_count="$7" cache_path="$8" source="$9"
 
-    # Read first 500 chars of content for preview
-    local content_preview=""
-    for f in "$cache_path"/content.md "$cache_path"/DOC.md "$cache_path"/SKILL.md "$cache_path"/README.md; do
-        if [[ -f "$f" ]]; then
-            content_preview=$(head -c 500 "$f" | tr '\n' ' ')
-            break
-        fi
-    done
+    python3 - "$CONTEXT_INDEX_DB" "$id" "$name" "$type" "$description" "$tags" "$trust" "$token_count" "$cache_path" "$source" << 'PYTHON'
+import hashlib
+import os
+import sqlite3
+import sys
+from datetime import datetime, timedelta, timezone
 
-    python3 - "$CONTEXT_INDEX_DB" "$id" "$name" "$type" "$description" "$tags" "$trust" "$token_count" "$cache_path" "$source" "$content_preview" << 'PYTHON'
-import sqlite3, sys
-from datetime import datetime, timezone
+db, pkg_id, name, ptype, desc, tags, trust, tokens, cache_path, source = sys.argv[1:11]
 
-db, pkg_id, name, ptype, desc, tags, trust, tokens, cache_path, source, preview = sys.argv[1:12]
+TEXT_EXTENSIONS = {
+    ".md", ".mdx", ".txt", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml",
+    ".yml", ".py", ".sh", ".css", ".html", ".sql", ".toml",
+}
+MAX_INDEX_CHARS = 1_000_000
+
+def infer_source_kind(pkg_id, name, ptype, source):
+    blob = " ".join(str(item or "").lower() for item in (pkg_id, name, source))
+    if ptype in {"html", "html-page"}:
+        return "html-page"
+    if ptype in {"html-site", "html-crawl"}:
+        return "html-site"
+    if ptype == "skill":
+        return "local-skill"
+    if ptype == "local":
+        return "local-project"
+    if "llms" in blob:
+        return "llms"
+    if "github.com" in blob and "/tree/" in blob:
+        return "github-dir"
+    if "github.com" in blob:
+        return "github-file"
+    if str(source or "").startswith(("http://", "https://")):
+        return "url"
+    return "local-project"
+
+def infer_content_format(ptype, source_kind, cache_path):
+    if ptype in {"html", "html-page", "html-site", "html-crawl"} or source_kind.startswith("html"):
+        return "html"
+    if cache_path and os.path.exists(os.path.join(cache_path, "extracted.json")):
+        return "html"
+    return "text"
+
+def freshness(ptype, source_kind, fetched_at):
+    if source_kind.startswith("local") or ptype in {"skill", "local"}:
+        return "local", None, "local-mtime"
+    expires = fetched_at + timedelta(days=7)
+    return "fresh", expires.replace(microsecond=0).isoformat(), "on-use"
+
+def read_index_text(root):
+    chunks = []
+    files = []
+    total = 0
+    for dirpath, _, filenames in os.walk(root):
+        for filename in sorted(filenames):
+            path = os.path.join(dirpath, filename)
+            rel = os.path.relpath(path, root)
+            if rel == "meta.json":
+                continue
+            if rel.startswith(("raw/", "_raw/")) or rel.endswith("/raw.html") or filename in {"headers.txt", "extracted.json", "crawl.json", "metadata.json"}:
+                continue
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in TEXT_EXTENSIONS:
+                continue
+            try:
+                with open(path, "rb") as handle:
+                    raw = handle.read()
+            except OSError:
+                continue
+            content = raw.decode("utf-8", errors="replace")
+            if not content:
+                continue
+            files.append({
+                "rel_path": rel,
+                "hash": hashlib.sha256(raw).hexdigest(),
+                "tokens": int(len(content.split()) * 1.3),
+            })
+            chunk = f"\n\n--- {rel} ---\n{content}"
+            remaining = MAX_INDEX_CHARS - total
+            if remaining <= 0:
+                return "".join(chunks), files
+            chunks.append(chunk[:remaining])
+            total += min(len(chunk), remaining)
+    return "".join(chunks), files
+
+preview, files = read_index_text(cache_path)
+package_hasher = hashlib.sha256()
+for item in files:
+    package_hasher.update(item["rel_path"].encode())
+    package_hasher.update(item["hash"].encode())
+content_hash = package_hasher.hexdigest() if files else ""
 
 conn = sqlite3.connect(db)
+conn.execute("PRAGMA busy_timeout = 5000")
 
 # Remove existing entry if present
 conn.execute("DELETE FROM packages WHERE id = ?", (pkg_id,))
@@ -34,12 +111,38 @@ conn.execute(
     (pkg_id, name, desc, tags, preview, source, trust, int(tokens), cache_path, ptype)
 )
 
-# Insert into meta table
-now = datetime.now(timezone.utc).isoformat()
+now_dt = datetime.now(timezone.utc).replace(microsecond=0)
+now = now_dt.isoformat()
+source_kind = infer_source_kind(pkg_id, name, ptype, source)
+content_format = infer_content_format(ptype, source_kind, cache_path)
+refresh_status, expires_at, refresh_policy = freshness(ptype, source_kind, now_dt)
 conn.execute(
-    "INSERT INTO package_meta (id, name, type, trust, token_count, source, cache_path, fetched_at, last_accessed, access_count) VALUES (?,?,?,?,?,?,?,?,?,0)",
-    (pkg_id, name, ptype, trust, int(tokens), source, cache_path, now, now)
+    """
+    INSERT INTO package_meta (
+        id, name, type, trust, token_count, source, cache_path, fetched_at,
+        last_accessed, access_count, tags, source_kind, canonical_url,
+        content_hash, checked_at, expires_at, refresh_status, refresh_error,
+        refresh_policy, content_format, version_status, version_policy
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)
+    """,
+    (
+        pkg_id, name, ptype, trust, int(tokens), source, cache_path, now, now,
+        tags, source_kind, source, content_hash, now, expires_at, refresh_status,
+        "", refresh_policy, content_format, "unknown", "auto",
+    )
 )
+
+conn.execute("DELETE FROM package_files WHERE package_id = ?", (pkg_id,))
+for item in files:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO package_files
+        (package_id, rel_path, source_url, content_hash, token_count, fetched_at, indexed_at, content_format)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (pkg_id, item["rel_path"], source, item["hash"], item["tokens"], now, now, content_format),
+    )
 
 conn.commit()
 conn.close()
@@ -67,6 +170,7 @@ db_path, query, limit, tags_filter, feedback_path, output_format = sys.argv[1:7]
 limit = int(limit)
 
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout = 5000")
 
 # Load feedback for score boosting
 feedback = {}
@@ -114,8 +218,12 @@ for word in query.lower().split():
             if exp != word:
                 expanded_terms.append(exp)
 
-# Build FTS5 query: OR of all terms
-fts_query = " OR ".join(expanded_terms)
+def quote_fts_term(term):
+    return '"' + term.replace('"', '""') + '"'
+
+# Build FTS5 query: OR of all terms. Quote each term so hyphenated package and
+# API names are treated as searchable phrases instead of FTS operators.
+fts_query = " OR ".join(quote_fts_term(term) for term in expanded_terms)
 
 try:
     cursor = conn.execute(
@@ -127,7 +235,7 @@ try:
 except Exception as e:
     # Fallback: simple LIKE query
     rows = conn.execute(
-        "SELECT id, name, description, tags, trust, token_count, type, cache_path, 0 "
+        "SELECT p.id, p.name, p.description, p.tags, p.trust, p.token_count, p.type, p.cache_path, 0 "
         "FROM package_meta pm JOIN packages p ON pm.id = p.id "
         "WHERE p.name LIKE ? OR p.description LIKE ? LIMIT ?",
         (f"%{query}%", f"%{query}%", limit)
@@ -204,6 +312,7 @@ cmd_get() {
 import sqlite3, sys, json
 
 conn = sqlite3.connect(sys.argv[1])
+conn.execute("PRAGMA busy_timeout = 5000")
 pkg_id = sys.argv[2]
 
 row = conn.execute(
@@ -289,12 +398,31 @@ PYTHON
         if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
             _get_json_full "$pkg_id" "$name" "$trust" "$token_count" "$cache_path"
         else
-            for f in "$cache_path"/*.md "$cache_path"/*.txt; do
-                [[ -f "$f" ]] || continue
-                echo "--- $(basename "$f") ---"
-                cat "$f"
-                echo ""
-            done
+            python3 - "$cache_path" << 'PYTHON'
+import os
+import sys
+
+root = sys.argv[1]
+extensions = {
+    ".md", ".mdx", ".txt", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml",
+    ".yml", ".py", ".sh", ".css", ".html", ".sql", ".toml",
+}
+
+for dirpath, _, filenames in os.walk(root):
+    for filename in sorted(filenames):
+        path = os.path.join(dirpath, filename)
+        rel = os.path.relpath(path, root)
+        if rel == "meta.json":
+            continue
+        if rel.startswith(("raw/", "_raw/")) or rel.endswith("/raw.html") or filename in {"headers.txt", "extracted.json", "crawl.json", "metadata.json"}:
+            continue
+        if os.path.splitext(filename)[1].lower() not in extensions:
+            continue
+        print(f"--- {rel} ---")
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            print(handle.read())
+        print()
+PYTHON
         fi
     else
         # Main content file
@@ -320,15 +448,18 @@ PYTHON
             _show_annotations "$pkg_id"
             # Show additional files hint
             local extra_files
-            extra_files=$(find "$cache_path" -name "*.md" -o -name "*.txt" 2>/dev/null | wc -l | tr -d ' ')
+            extra_files=$(find "$cache_path" -type f \( -name "*.md" -o -name "*.mdx" -o -name "*.txt" -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.py" -o -name "*.sh" -o -name "*.css" -o -name "*.html" -o -name "*.sql" -o -name "*.toml" \) 2>/dev/null | wc -l | tr -d ' ')
             if [[ "$extra_files" -gt 1 ]]; then
                 echo ""
                 echo "---"
                 echo "Additional files available (use --file or --full):"
-                for f in "$cache_path"/*.md "$cache_path"/*.txt; do
-                    [[ -f "$f" ]] || continue
+                find "$cache_path" -type f \( -name "*.md" -o -name "*.mdx" -o -name "*.txt" -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.py" -o -name "*.sh" -o -name "*.css" -o -name "*.html" -o -name "*.sql" -o -name "*.toml" \) 2>/dev/null | sort | while IFS= read -r f; do
                     [[ "$f" == "$main_file" ]] && continue
-                    echo "  $(basename "$f")"
+                    python3 - "$cache_path" "$f" << 'PYTHON'
+import os
+import sys
+print("  " + os.path.relpath(sys.argv[2], sys.argv[1]))
+PYTHON
                 done
             fi
         fi
@@ -379,10 +510,23 @@ import json, sys, os, glob
 pkg_id, name, trust, tokens, cache_path = sys.argv[1:6]
 
 files = {}
-for pattern in ["*.md", "*.txt"]:
-    for fp in glob.glob(os.path.join(cache_path, pattern)):
-        with open(fp) as f:
-            files[os.path.basename(fp)] = f.read()
+extensions = {
+    ".md", ".mdx", ".txt", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml",
+    ".yml", ".py", ".sh", ".css", ".html", ".sql", ".toml",
+}
+
+for dirpath, _, filenames in os.walk(cache_path):
+    for filename in sorted(filenames):
+        fp = os.path.join(dirpath, filename)
+        rel = os.path.relpath(fp, cache_path)
+        if rel == "meta.json":
+            continue
+        if rel.startswith(("raw/", "_raw/")) or rel.endswith("/raw.html") or filename in {"headers.txt", "extracted.json", "crawl.json", "metadata.json"}:
+            continue
+        if os.path.splitext(filename)[1].lower() not in extensions:
+            continue
+        with open(fp, encoding="utf-8", errors="replace") as f:
+            files[rel] = f.read()
 
 result = {
     "id": pkg_id,
@@ -436,11 +580,33 @@ cmd_list() {
     ensure_init
 
     python3 - "$CONTEXT_INDEX_DB" "$source_filter" "$tags_filter" "${OUTPUT_FORMAT:-text}" << 'PYTHON'
-import sqlite3, sys, json
+import json
+import sqlite3
+import sys
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 db_path, source_filter, tags_filter, output_format = sys.argv[1:5]
+SECRET_NAMES = ("token", "key", "secret", "signature", "sig", "password", "passwd", "auth", "credential")
+
+def redact_url(url):
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if not parsed.scheme:
+        return url
+    netloc = parsed.netloc
+    if "@" in netloc:
+        netloc = "[redacted]@" + netloc.rsplit("@", 1)[1]
+    query = []
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if any(secret in key.lower() for secret in SECRET_NAMES):
+            query.append((key, "[redacted]"))
+        else:
+            query.append((key, value))
+    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, urlencode(query), parsed.fragment))
 
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout = 5000")
 
 query = "SELECT id, name, type, trust, token_count, source, fetched_at FROM package_meta ORDER BY name"
 rows = conn.execute(query).fetchall()
@@ -458,7 +624,7 @@ for row in rows:
         "type": ptype,
         "trust": trust,
         "token_count": int(tokens) if tokens else 0,
-        "source": source or "",
+        "source": redact_url(source or ""),
     })
 
 if output_format == "json":

@@ -35,6 +35,7 @@ import os, sys, json, sqlite3
 cache_dir, db_path, output_format = sys.argv[1:4]
 
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout = 5000")
 rows = conn.execute(
     "SELECT id, name, type, trust, token_count, cache_path, fetched_at, last_accessed, access_count "
     "FROM package_meta ORDER BY last_accessed DESC"
@@ -102,16 +103,24 @@ _cache_clear() {
 
     if [[ -n "$target" ]]; then
         # Clear specific package
-        local cache_path
-        cache_path=$(python3 -c "
-import sqlite3, sys
-conn = sqlite3.connect(sys.argv[1])
-row = conn.execute('SELECT cache_path FROM package_meta WHERE id = ? OR name = ?', (sys.argv[2], sys.argv[2])).fetchone()
-print(row[0] if row else '')
-conn.close()
-" "$CONTEXT_INDEX_DB" "$target")
+        local pkg_id cache_path
+        IFS=$'\t' read -r pkg_id cache_path < <(python3 - "$CONTEXT_INDEX_DB" "$target" << 'PYTHON'
+import sqlite3
+import sys
 
-        if [[ -z "$cache_path" || ! -d "$cache_path" ]]; then
+conn = sqlite3.connect(sys.argv[1])
+conn.execute("PRAGMA busy_timeout = 5000")
+row = conn.execute(
+    "SELECT id, cache_path FROM package_meta WHERE id = ? OR name = ?",
+    (sys.argv[2], sys.argv[2]),
+).fetchone()
+if row:
+    print(f"{row[0]}\t{row[1] or ''}")
+conn.close()
+PYTHON
+        )
+
+        if [[ -z "$pkg_id" ]]; then
             if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
                 json_error "Package not found: $target"
             else
@@ -120,23 +129,30 @@ conn.close()
             return 1
         fi
 
-        rm -rf "$cache_path"
+        if [[ -n "$cache_path" && -d "$cache_path" ]]; then
+            rm -rf "$cache_path"
+        fi
 
         # Remove from index
-        python3 -c "
-import sqlite3, sys
+        python3 - "$CONTEXT_INDEX_DB" "$pkg_id" << 'PYTHON'
+import sqlite3
+import sys
+
 conn = sqlite3.connect(sys.argv[1])
+conn.execute("PRAGMA busy_timeout = 5000")
 pkg_id = sys.argv[2]
-conn.execute('DELETE FROM packages WHERE id = ?', (pkg_id,))
-conn.execute('DELETE FROM package_meta WHERE id = ?', (pkg_id,))
+conn.execute("DELETE FROM packages WHERE id = ?", (pkg_id,))
+conn.execute("DELETE FROM package_meta WHERE id = ?", (pkg_id,))
+conn.execute("DELETE FROM package_files WHERE package_id = ?", (pkg_id,))
+conn.execute("DELETE FROM package_currency WHERE package_id = ?", (pkg_id,))
 conn.commit()
 conn.close()
-" "$CONTEXT_INDEX_DB" "$target"
+PYTHON
 
         if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
-            json_success "Cleared: $target"
+            json_success "Cleared: $pkg_id"
         else
-            echo "Cleared: $target"
+            echo "Cleared: $pkg_id"
         fi
     else
         # Clear all
@@ -144,14 +160,19 @@ conn.close()
         mkdir -p "$CONTEXT_CACHE_DIR"
 
         # Rebuild empty index
-        python3 -c "
-import sqlite3, sys
+        python3 - "$CONTEXT_INDEX_DB" << 'PYTHON'
+import sqlite3
+import sys
+
 conn = sqlite3.connect(sys.argv[1])
-conn.execute('DELETE FROM packages')
-conn.execute('DELETE FROM package_meta')
+conn.execute("PRAGMA busy_timeout = 5000")
+conn.execute("DELETE FROM packages")
+conn.execute("DELETE FROM package_meta")
+conn.execute("DELETE FROM package_files")
+conn.execute("DELETE FROM package_currency")
 conn.commit()
 conn.close()
-" "$CONTEXT_INDEX_DB"
+PYTHON
 
         if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
             json_success "Cache cleared"
@@ -201,6 +222,7 @@ import os, sys, json, sqlite3
 cache_dir, db_path, output_format = sys.argv[1:4]
 
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout = 5000")
 
 total = conn.execute("SELECT COUNT(*) FROM package_meta").fetchone()[0]
 total_tokens = conn.execute("SELECT COALESCE(SUM(token_count), 0) FROM package_meta").fetchone()[0]

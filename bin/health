@@ -173,6 +173,29 @@ check_tool() {
                     status="CONF"; note="OKTA_DOMAIN not set"
                 fi
                 ;;
+            obsidian)
+                # The obsidian CLI either lives on PATH (via Obsidian's
+                # "Register CLI" symlink), inside Obsidian.app's bundle,
+                # or has been wired up by `agent-do obsidian doctor --fix`.
+                # bin/health does not auto-link — that's an explicit action
+                # the user opts into via doctor.
+                if [[ -n "${OBSIDIAN_BIN:-}" && -x "${OBSIDIAN_BIN}" ]]; then
+                    status="OK"; note="OBSIDIAN_BIN=$OBSIDIAN_BIN"
+                elif command -v obsidian &>/dev/null; then
+                    status="OK"
+                elif [[ -x "/usr/local/bin/obsidian" ]]; then
+                    status="OK"; note="/usr/local/bin/obsidian"
+                elif [[ -x "/opt/homebrew/bin/obsidian" ]]; then
+                    status="OK"; note="/opt/homebrew/bin/obsidian"
+                elif [[ -x "$HOME/.local/bin/obsidian" ]]; then
+                    status="OK"; note="$HOME/.local/bin/obsidian"
+                elif [[ -x "/Applications/Obsidian.app/Contents/MacOS/obsidian-cli" || \
+                        -x "$HOME/Applications/Obsidian.app/Contents/MacOS/obsidian-cli" ]]; then
+                    status="WARN"; note="Obsidian.app present — run: agent-do obsidian doctor --fix"
+                else
+                    status="WARN"; note="obsidian CLI not found — install Obsidian then run doctor --fix"
+                fi
+                ;;
             tui)
                 command -v tmux &>/dev/null && { status="OK"; } || { status="WARN"; note="tmux not found"; }
                 ;;

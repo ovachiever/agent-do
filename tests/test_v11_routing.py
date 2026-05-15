@@ -149,6 +149,16 @@ def main() -> int:
     ios_context = ios_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do ios screenshot" in ios_context, f"expected ios replacement, got: {ios_context}")
 
+    docs_fetch_nudge = run(
+        "python3",
+        "hooks/agent-do-pretooluse-check.py",
+        input_text='{"tool_name":"Bash","tool_input":{"command":"curl https://raw.githubusercontent.com/example/project/main/docs/api.md"}}',
+    )
+    require(docs_fetch_nudge.returncode == 0, f"docs fetch pretool hook failed: {docs_fetch_nudge.stderr}")
+    docs_fetch_payload = json.loads(docs_fetch_nudge.stdout)
+    docs_fetch_context = docs_fetch_payload["hookSpecificOutput"]["additionalContext"]
+    require("agent-do context fetch https://raw.githubusercontent.com/example/project/main/docs/api.md" in docs_fetch_context, f"expected context fetch nudge, got: {docs_fetch_context}")
+
     codex_prewrap = run(
         "python3",
         "hooks/agent-do-pretooluse-codex.py",
@@ -199,6 +209,31 @@ def main() -> int:
     suggest_payload = json.loads(suggest.stdout)
     require(suggest_payload["results"], f"expected suggest results, got: {suggest_payload}")
     require(suggest_payload["results"][0]["tool"] == "vercel", f"unexpected suggest result: {suggest_payload}")
+
+    docs_suggest = run("./agent-do", "suggest", "use latest TanStack Query docs", "--json")
+    require(docs_suggest.returncode == 0, f"docs suggest failed: {docs_suggest.stderr}")
+    docs_suggest_payload = json.loads(docs_suggest.stdout)
+    require(docs_suggest_payload["results"], f"expected docs suggest results, got: {docs_suggest_payload}")
+    docs_top = docs_suggest_payload["results"][0]
+    require(docs_top["tool"] == "context", f"expected context suggestion, got: {docs_suggest_payload}")
+    require(
+        docs_top["primary"] == "agent-do context retrieve 'use latest TanStack Query docs' --fresh --prefer-latest --max-tokens 8000",
+        f"expected query-specific retrieve command, got: {docs_top}",
+    )
+
+    docs_prompt = run(
+        "python3",
+        "hooks/agent-do-prompt-router.py",
+        input_text=json.dumps({"prompt": "use latest TanStack Query docs"}),
+    )
+    require(docs_prompt.returncode == 0, f"docs prompt-router failed: {docs_prompt.stderr}")
+    docs_prompt_payload = json.loads(docs_prompt.stdout)
+    docs_context = docs_prompt_payload["hookSpecificOutput"]["additionalContext"]
+    require("agent-do Context Retrieval" in docs_context, f"expected context retrieval nudge, got: {docs_context}")
+    require(
+        "agent-do context retrieve 'use latest TanStack Query docs' --fresh --prefer-latest --max-tokens 8000" in docs_context,
+        f"expected query-specific retrieve nudge, got: {docs_context}",
+    )
 
     find = run("./agent-do", "find", "playwright", "--json")
     require(find.returncode == 0, f"find failed: {find.stderr}")

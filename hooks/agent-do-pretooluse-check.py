@@ -16,6 +16,7 @@ import os
 import sys
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
@@ -100,6 +101,12 @@ AGENT_DO_PATTERNS = {
     r'\bwhisper\b': ('audio', 'agent-do audio'),
 }
 
+DOCS_FETCH_PATTERN = re.compile(
+    r"\bcurl\b.*\b(llms(?:-full)?\.txt|docs?|documentation|reference|raw\.githubusercontent\.com|github\.com/.+/(?:blob|raw)/)",
+    re.IGNORECASE,
+)
+URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
+
 # Skip these entirely — no nudge needed
 SKIP_PATTERNS = [
     r'(^|/)agent-do\b',
@@ -143,6 +150,18 @@ def emit_context(nudge: str) -> None:
     print(json.dumps(output))
 
 
+def context_fetch_command_for_raw_docs(command: str) -> str:
+    match = URL_PATTERN.search(command)
+    if not match:
+        return "agent-do context fetch <url>"
+
+    url = match.group(0)
+    parsed = urlparse(url)
+    if re.search(r"/llms(?:-full)?\.txt$", parsed.path, re.IGNORECASE) and parsed.netloc:
+        return f"agent-do context fetch-llms {parsed.netloc}"
+    return f"agent-do context fetch {url}"
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -167,6 +186,42 @@ def main():
             sys.exit(0)
 
     # Check for agent-do matches
+    if DOCS_FETCH_PATTERN.search(command):
+        replacement = context_fetch_command_for_raw_docs(command)
+        nudge = (
+            "HARD NUDGE: `agent-do context` is the native path for fetching and indexing docs/reference content. "
+            f"Closest replacement: `{replacement}`. "
+            "It stores provenance and freshness metadata so later agents can use `agent-do context retrieve ... --fresh` instead of ad hoc downloaded files. "
+            "Proceeding with your raw command is allowed, but agent-do context should be the default choice here."
+        )
+        if record_hook_decision is not None:
+            try:
+                record_hook_decision(
+                    "PreToolUse",
+                    "pretool",
+                    "emit",
+                    tools=["context"],
+                    commands=[replacement],
+                    reason="raw_docs_fetch",
+                )
+            except Exception:
+                pass
+        if record_nudge_event is not None:
+            try:
+                record_nudge_event(
+                    "pretool_context_fetch_nudge",
+                    "pretool",
+                    tool="context",
+                    tools=["context"],
+                    commands=[replacement],
+                    replacement=replacement,
+                    command=command[:240],
+                )
+            except Exception:
+                pass
+        emit_context(nudge)
+        sys.exit(0)
+
     if load_registry is not None and find_raw_cli_equivalent is not None:
         registry = load_registry()
         shared_match = find_raw_cli_equivalent(registry, command)

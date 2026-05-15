@@ -2,8 +2,13 @@ tools:
   context:
     description: Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal).
     capabilities:
-    - fetch documentation from any URL, llms.txt, or GitHub repo
+    - fetch documentation from markdown/text URLs, HTML pages/sites, llms.txt, or GitHub repos
     - search across all indexed content with FTS5 BM25 + trust-tier ranking
+    - retrieve query-specific context with freshness, provenance, trust, and version-currency metadata
+    - refresh stale WAN-backed packages with conditional HTTP, ETag/Last-Modified, and last-good cache preservation
+    - preserve raw HTML while indexing extracted readable content
+    - check package documentation currency against npm, PyPI, crates.io, pub.dev, or GitHub releases
+    - serve a local read-only HTML dashboard for agents and humans
     - index local project files and Claude skills
     - token-aware context budgeting for agents (knapsack packing)
     - persistent annotations and feedback-influenced search ranking
@@ -12,15 +17,18 @@ tools:
     - global storage at ~/.agent-do/context/ (per-user, not per-project)
     commands:
       search: Search across all indexed content
+      retrieve: 'Return token-budgeted context for agents: retrieve <query> [--fresh|--require-fresh|--require-official|--prefer-latest|--require-current|--offline]'
       get: 'Fetch doc/skill by ID: get <id> [--file F] [--full]'
       list: 'List available packages: list [--source S] [--tags T]'
-      fetch: 'Fetch markdown from URL: fetch <url>'
-      fetch-llms: 'Fetch llms.txt from domain: fetch-llms <domain>'
-      fetch-repo: 'Fetch docs from GitHub: fetch-repo <owner/repo> [path]'
+      fetch: 'Fetch markdown/text or single HTML page from URL: fetch <url> [--register-source]'
+      crawl: 'Crawl bounded same-origin HTML docs: crawl <url> [--limit N]'
+      fetch-llms: 'Fetch llms.txt from domain: fetch-llms <domain> [--register-source]'
+      fetch-repo: 'Fetch docs from GitHub: fetch-repo <owner/repo> [path] [--register-source]'
+      refresh: 'Refresh WAN-backed packages: refresh <id|name> | --due | --all'
       scan-local: 'Index project files: scan-local [path]'
       scan-skills: Index ~/.claude/skills/
-      sources: List configured content sources
-      add-source: 'Register a source: add-source <name> <url|path>'
+      sources: 'List/sync configured content sources: sources [sync <name|--all>]'
+      add-source: 'Register a source: add-source <name> <url|path> [--kind K] [--trust T] [--ttl 7d] [--ecosystem npm --package name --doc-version latest]'
       remove-source: 'Unregister a source: remove-source <name>'
       cache: 'Cache management: cache [list|clear|pin|stats]'
       annotate: 'Attach note: annotate <id> <note>'
@@ -30,12 +38,20 @@ tools:
       build: 'Package content directory: build <dir> [-o output]'
       validate: 'Check frontmatter + structure: validate <dir>'
       status: Sources, cache stats, index freshness
+      stale: Show stale or failed packages
+      versions: 'Check/list version currency: versions check [--all|--due|id] | versions outdated'
+      serve: 'Serve local context dashboard: serve [--port N]'
+      maintain: 'Run bounded maintenance: maintain [--limit N] [--max-mb N]'
       init: Initialize ~/.agent-do/context/
     examples:
     - intent: fetch stripe documentation
       command: agent-context fetch-llms stripe.com
     - intent: search for authentication docs
       command: agent-context search authentication
+    - intent: retrieve fresh context for latest auth docs
+      command: agent-context retrieve "latest auth docs" --fresh --prefer-latest --max-tokens 8000
+    - intent: crawl an HTML docs site
+      command: agent-context crawl https://docs.example.com --limit 25
     - intent: get the supabase docs
       command: agent-context get supabase-llms
     - intent: what docs do I have
@@ -45,7 +61,13 @@ tools:
     - intent: index my claude skills
       command: agent-context scan-skills
     - intent: fetch docs from a github repo
-      command: agent-context fetch-repo vercel/next.js docs/README.md
+      command: agent-context fetch-repo vercel/next.js docs/ --register-source
+    - intent: keep docs fresh
+      command: agent-context maintain --limit 10
+    - intent: show outdated docs
+      command: agent-context versions outdated
+    - intent: sync configured docs sources
+      command: agent-context sources sync --all
     - intent: add a note to a doc
       command: agent-context annotate stripe-llms 'Use idempotency keys for POST'
     routing:
@@ -63,10 +85,11 @@ tools:
       - \breference docs?\b
       - \bknowledge library\b
       recommended_entrypoints:
-      - agent-do context search authentication
+      - agent-do context retrieve "<query>" --fresh --prefer-latest --max-tokens 8000
+      - agent-do context sources sync --all
+      - agent-do context maintain --limit 10
       - agent-do context fetch-llms stripe.com
-      - agent-do context status
-      default_command: search
+      default_command: retrieve
       project_signals:
       - docs
       - knowledge
@@ -74,7 +97,7 @@ tools:
         check: agent-do context status
         fix: agent-do context init
         note: Global context storage may need initialization
-    concurrency: read
+    concurrency: mixed
   creds:
     description: Secure credential storage and resolution for agent-do tools
     capabilities:
@@ -1181,6 +1204,90 @@ tools:
       required:
       - LINEAR_API_KEY
     concurrency: mixed
+  obsidian:
+    description: Obsidian vault integration via the official Obsidian CLI — notes, daily notes, search, tasks, tags, properties, backlinks, and (under +live) eval / dev tools / plugin reload
+    capabilities:
+    - read, create, append, and search notes in the active vault
+    - manage daily notes (read, append)
+    - read and write YAML frontmatter properties (get, set)
+    - list checkbox tasks, tags, and backlinks
+    - target a specific vault with --vault, or use the most-recently-focused vault
+    - emit structured JSON snapshots and doctor output
+    - one-time CLI link from the Obsidian.app bundle into ~/.local/bin
+    - +live-gated eval / dev / plugin surface for plugin and theme development
+    # concurrency: mixed — read-only: doctor, snapshot, read, search, tasks,
+    # tags, backlinks, prop get. Write/state-changing: create, append,
+    # daily append, prop set, eval, dev:* (some), plugin reload.
+    commands:
+      doctor: 'Check obsidian-cli wiring: doctor [--fix] [--json]'
+      snapshot: 'Integration state as JSON: snapshot [--vault V]'
+      read: 'Read a note: read <name> | --path <path> [--copy] [--vault V]'
+      create: 'Create a note: create <name> [--content T] [--template T] [--overwrite] [--open] [--vault V]'
+      append: 'Append text to a note: append <name> [<text>...] [--content T] [--path] [--vault V]'
+      search: 'Search notes: search <query> [--limit N] [--total] [--vault V]'
+      daily: 'Daily notes: daily read | daily append [<text>...] [--content T]'
+      prop: 'Frontmatter properties: prop get|set [--file F]'
+      tasks: 'List checkbox tasks: tasks [todo|done] [--daily]'
+      tags: 'List tags: tags [--counts] [--sort name|count]'
+      backlinks: 'Backlinks for a note: backlinks <name>'
+      eval: '+live: run JavaScript in Obsidian: eval <code>'
+      dev: '+live: developer surface: dev {errors|screenshot|dom|console|css|mobile}'
+      plugin: '+live: plugin management: plugin reload <id>'
+    examples:
+    - intent: check that the obsidian CLI is wired up
+      command: agent-do obsidian doctor --json
+    - intent: read today's daily note
+      command: agent-do obsidian daily read
+    - intent: append a task to today's daily note
+      command: agent-do obsidian daily append "- [ ] Review PR"
+    - intent: create a new note silently
+      command: agent-do obsidian create "Inbox/Idea" --content "Pricing experiment"
+    - intent: search the active vault
+      command: agent-do obsidian search "review" --limit 5
+    - intent: mark a project as done
+      command: agent-do obsidian prop set status done --file "Projects/agent-obsidian"
+    - intent: list backlinks for a note
+      command: agent-do obsidian backlinks "agent-do roadmap"
+    - intent: run obsidian dev tools (requires +live)
+      command: agent-do +live(scope=desktop,app=Obsidian,ttl=15m) obsidian dev errors
+    routing:
+      discover_keywords:
+      - obsidian
+      - obsidian vault
+      - obsidian note
+      - daily note
+      - backlinks
+      - markdown vault
+      - yaml frontmatter
+      prompt_patterns:
+      - \bobsidian\b
+      - \bdaily note\b
+      - \bbacklinks?\b
+      - \bvault\b
+      - \bfrontmatter\b
+      recommended_entrypoints:
+      - agent-do obsidian doctor
+      - agent-do obsidian snapshot
+      - agent-do obsidian daily read
+      - agent-do obsidian search <query>
+      default_command: snapshot
+      raw_cli_equivalents:
+      - pattern: \bobsidian\s+(read|create|append|search|daily|tasks|tags|backlinks)\b
+        replacement: agent-do obsidian
+        example: agent-do obsidian search "review"
+        reason: agent-do wraps the obsidian CLI with structured discovery, doctor diagnostics, and +live gating
+      - pattern: \bobsidian\s+--help\b
+        replacement: agent-do obsidian --help
+        example: agent-do obsidian --help
+        reason: agent-do obsidian surfaces all commands with consistent help formatting
+      project_signals:
+      - .obsidian
+      - obsidian
+      readiness:
+        check: agent-do obsidian doctor
+        fix: agent-do obsidian doctor --fix
+        note: Requires the Obsidian desktop app; doctor --fix links the bundled CLI into ~/.local/bin
+    concurrency: mixed
   figma:
     description: Control Figma
     capabilities:
@@ -1466,7 +1573,7 @@ tools:
     - list actionable pull requests across repos
     - inspect pull request details, diffs, checks, and unresolved review threads
     - audit PR review risks and generate fix-oriented engineering review replies
-    - approve, comment, request changes, mark ready/draft, and merge pull requests
+    - approve, comment, request changes, close/reopen, edit, check out, update branches, mark ready/draft, and merge pull requests
     commands:
       whoami: Show authenticated GitHub user
       repos: List or sync accessible repositories
@@ -1482,6 +1589,11 @@ tools:
       approve: Approve a PR
       request-changes: Request changes on a PR
       comment: Comment on a PR
+      close: Close a PR
+      reopen: Reopen a PR
+      checkout: Check out a PR locally
+      edit: Edit PR metadata
+      update-branch: Update a PR branch from its base branch
       merge: Merge a PR
       ready: Mark a PR ready for review
       draft: Convert a PR to draft
@@ -1502,6 +1614,12 @@ tools:
       command: agent-gh threads ovachiever/agent-do#3
     - intent: approve this GitHub PR
       command: agent-gh approve ovachiever/agent-do#3 --body "LGTM"
+    - intent: close accidental pull request and delete branch
+      command: agent-gh close ovachiever/agent-do#4 --delete-branch --comment "Closing accidental PR"
+    - intent: check out pull request for local review
+      command: agent-gh checkout ovachiever/agent-do#5 --branch review/pr-5
+    - intent: add reviewer and label to pull request
+      command: agent-gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-needed
     routing:
       default_command: inbox
       recommended_entrypoints:

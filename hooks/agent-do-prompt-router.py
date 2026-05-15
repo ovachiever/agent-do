@@ -158,6 +158,13 @@ COORD_DISCUSSION_PATTERNS = [
 BLOCKING_INTERRUPT_KINDS = {"contention", "dependency"}
 DEFAULT_HOOK_AI_CONFIDENCE = 0.86
 
+DOCS_RETRIEVAL_PATTERNS = [
+    re.compile(r"\b(use|check|read|look\s+up|fetch|find|get|consult)\b.{0,80}\b(latest|current|up.to.date|recent|official)\b.{0,80}\b(docs?|documentation|api|sdk|reference)\b", re.I),
+    re.compile(r"\b(latest|current|up.to.date|recent|official)\b.{0,80}\b(docs?|documentation|api|sdk|reference)\b", re.I),
+    re.compile(r"\b(docs?|documentation|api|sdk|reference)\b.{0,80}\b(latest|current|up.to.date|recent|official)\b", re.I),
+    re.compile(r"\b(v\d+|migration|upgrade|breaking changes?)\b.{0,80}\b(docs?|documentation|api|sdk|reference|library|framework|package)\b", re.I),
+]
+
 
 def build_ai_catalog(registry: dict) -> list[dict]:
     """Return the full agent-do catalog in a compact form suitable for hook routing."""
@@ -302,6 +309,32 @@ def detect_frontend_design(prompt: str) -> bool:
         if re.search(pattern, prompt_lower):
             return True
     return False
+
+
+def looks_like_context_retrieval_prompt(prompt: str) -> bool:
+    prompt_lower = prompt.lower()
+    if re.search(r"\b(update|edit|write|clean|fix|add|remove)\b.{0,40}\b(readme|repo docs?|project docs?|documentation)\b", prompt_lower):
+        return False
+    return any(pattern.search(prompt) for pattern in DOCS_RETRIEVAL_PATTERNS)
+
+
+def context_retrieve_command(prompt: str) -> str:
+    return f"agent-do context retrieve {shlex.quote(prompt.strip())} --fresh --prefer-latest --max-tokens 8000"
+
+
+def context_retrieval_context(prompt: str) -> tuple[str, list[str], list[str]]:
+    if not looks_like_context_retrieval_prompt(prompt):
+        return "", [], []
+
+    command = context_retrieve_command(prompt)
+    return (
+        "## agent-do Context Retrieval\n\n"
+        "This prompt depends on current external docs/API/library behavior. Before answering or implementing, run:\n"
+        f"- `{command}`\n\n"
+        "Use the returned provenance and freshness metadata. If retrieval fails, say what remains stale instead of guessing.\n",
+        ["context"],
+        [command],
+    )
 
 
 def needs_completion_check(prompt: str) -> bool:
@@ -659,12 +692,13 @@ def main():
     ai_decision = ai_route_prompt(prompt, cwd=cwd, coord_state=coord_state, registry=registry)
     coord_required = coord_required_context(prompt, cwd, coord_state, ai_decision)
     tool_context, tool_tools, tool_commands = ai_tool_suggestion_context(ai_decision, registry)
+    context_retrieve, context_tools, context_commands = context_retrieval_context(prompt)
     coord_context, coord_tools = coord_advisory_context(prompt, coord_state)
     is_design = detect_frontend_design(prompt)
 
     needs_completion = needs_completion_check(prompt)
 
-    should_emit = bool(coord_required or tool_context or is_design or needs_completion or coord_context)
+    should_emit = bool(coord_required or tool_context or context_retrieve or is_design or needs_completion or coord_context)
     if record_hook_decision is not None:
         try:
             decision_tools = []
@@ -674,6 +708,9 @@ def main():
             if tool_tools:
                 decision_tools.extend(tool_tools)
                 decision_commands.extend(tool_commands)
+            if context_tools:
+                decision_tools.extend(context_tools)
+                decision_commands.extend(context_commands)
             if is_design:
                 decision_tools.extend(["browse", "dpt"])
             record_hook_decision(
@@ -717,6 +754,23 @@ def main():
                         "prompt_router",
                         tools=tool_tools,
                         commands=tool_commands,
+                        prompt=prompt[:240],
+                        cwd=cwd,
+                    )
+                except Exception:
+                    pass
+
+        if context_retrieve:
+            if context:
+                context += "\n"
+            context += context_retrieve
+            if record_nudge_event is not None:
+                try:
+                    record_nudge_event(
+                        "prompt_context_retrieve",
+                        "prompt_router",
+                        tools=context_tools,
+                        commands=context_commands,
                         prompt=prompt[:240],
                         cwd=cwd,
                     )
