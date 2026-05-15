@@ -83,10 +83,17 @@ def _err(msg: str, code: int = 1) -> None:
 
 
 def _parse_filter(raw: str | None) -> dict[str, Any]:
-    """Parse a filter from JSON string or key=value shorthand."""
+    """Parse a filter from JSON string or key=value shorthand.
+
+    Supported value coercions for key=value shorthand:
+      null/none → None, true/false → bool, integers, floats, else string.
+    Whitespace-only input is treated the same as no filter (returns {}).
+    """
     if not raw:
         return {}
     raw = raw.strip()
+    if not raw:
+        return {}
     if raw.startswith("{"):
         try:
             return json.loads(raw)
@@ -95,10 +102,12 @@ def _parse_filter(raw: str | None) -> dict[str, Any]:
     # key=value shorthand — supports simple scalar values
     if "=" in raw:
         key, _, val = raw.partition("=")
-        # Attempt to coerce numerics/booleans
         coerced: Any = val
-        if val.lower() in ("true", "false"):
-            coerced = val.lower() == "true"
+        low = val.lower()
+        if low in ("null", "none"):
+            coerced = None
+        elif low in ("true", "false"):
+            coerced = low == "true"
         else:
             try:
                 coerced = int(val)
@@ -110,6 +119,18 @@ def _parse_filter(raw: str | None) -> dict[str, Any]:
         return {key.strip(): coerced}
     _err(f"Cannot parse filter: {raw!r}. Use JSON or key=value.")
     return {}  # unreachable
+
+
+def _parse_int(value: str, flag: str, *, min_val: int = 0) -> int:
+    """Parse a CLI integer argument with a clear error on bad input or out-of-range value."""
+    try:
+        n = int(value)
+    except ValueError:
+        _err(f"{flag} must be an integer, got: {value!r}")
+        return 0  # unreachable
+    if n < min_val:
+        _err(f"{flag} must be >= {min_val}, got: {n}")
+    return n
 
 
 def _parse_json_arg(raw: str | None, name: str) -> Any:
@@ -367,7 +388,7 @@ def cmd_schema(argv: list[str]) -> None:
     i = 2
     while i < len(argv):
         if argv[i] == "--sample" and i + 1 < len(argv):
-            sample_size = int(argv[i + 1])
+            sample_size = _parse_int(argv[i + 1], "--sample", min_val=1)
             i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
             connection = argv[i + 1]
@@ -489,10 +510,10 @@ def cmd_query(argv: list[str]) -> None:
             sort_raw = argv[i + 1]
             i += 2
         elif argv[i] == "--limit" and i + 1 < len(argv):
-            limit = int(argv[i + 1])
+            limit = _parse_int(argv[i + 1], "--limit", min_val=0)
             i += 2
         elif argv[i] == "--skip" and i + 1 < len(argv):
-            skip = int(argv[i + 1])
+            skip = _parse_int(argv[i + 1], "--skip", min_val=0)
             i += 2
         elif argv[i] == "--connection" and i + 1 < len(argv):
             connection = argv[i + 1]

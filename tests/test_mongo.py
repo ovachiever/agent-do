@@ -570,6 +570,147 @@ def main() -> int:
         r = run([str(AGENT_DO), "mongo", "notacommand"], env=base_env)
         check("unknown command fails", r.returncode != 0)
 
+        # ── filter parsing edge cases ──────────────────────────────────────────
+        print("\n--- filter edge cases ---")
+
+        # bare string (no = no {) → error
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", "juststring"], env=base_env)
+        check("filter bare string errors", r.returncode != 0)
+
+        # whitespace-only --where → treated as no filter (same as omitting it)
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", "   ", "--json"], env=base_env)
+        check("filter whitespace-only → no filter for reads", r.returncode == 0, r.stderr)
+
+        # whitespace --where blocked for writes (resolves to empty filter)
+        r = run([str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+                 "--where", "   ", "--set", "x=y", "--dry-run"], env=base_env)
+        check("filter whitespace blocked for writes", r.returncode != 0)
+
+        # key=null → None (not string "null")
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", "deletedAt=null", "--json"], env=base_env)
+        check("filter key=null exits 0", r.returncode == 0, r.stderr)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("filter key=null coerced to None",
+                  out["data"]["filter"].get("deletedAt") is None)
+
+        # key=NULL (case-insensitive)
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", "deletedAt=NULL", "--json"], env=base_env)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("filter key=NULL coerced to None",
+                  out["data"]["filter"].get("deletedAt") is None)
+
+        # falsy filter values must pass write guard (dict is non-empty)
+        r = run([str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+                 "--where", "count=0", "--set", "x=y", "--dry-run"], env=base_env)
+        check("filter count=0 allowed for writes", r.returncode == 2, r.stderr)
+
+        r = run([str(AGENT_DO), "mongo", "delete", "prism_bcc", "expectations",
+                 "--where", "active=false", "--dry-run"], env=base_env)
+        check("filter active=false allowed for writes", r.returncode == 2, r.stderr)
+
+        # {} filter allowed for reads
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--where", "{}", "--json"], env=base_env)
+        check("query {} filter allowed for reads", r.returncode == 0, r.stderr)
+
+        r = run([str(AGENT_DO), "mongo", "count", "prism_bcc", "expectations",
+                 "--where", "{}", "--json"], env=base_env)
+        check("count {} filter allowed for reads", r.returncode == 0, r.stderr)
+
+        # ── numeric arg validation ─────────────────────────────────────────────
+        print("\n--- numeric arg validation ---")
+
+        # non-numeric --limit → clean error (not raw Python ValueError)
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--limit", "abc"], env=base_env)
+        check("--limit non-numeric fails", r.returncode != 0)
+        check("--limit non-numeric gives clear error", "--limit" in r.stderr, r.stderr.strip())
+
+        # non-numeric --skip
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--skip", "abc"], env=base_env)
+        check("--skip non-numeric fails", r.returncode != 0)
+        check("--skip non-numeric gives clear error", "--skip" in r.stderr, r.stderr.strip())
+
+        # non-numeric --sample
+        r = run([str(AGENT_DO), "mongo", "schema", "prism_bcc", "expectations",
+                 "--sample", "abc"], env=base_env)
+        check("--sample non-numeric fails", r.returncode != 0)
+        check("--sample non-numeric gives clear error", "--sample" in r.stderr, r.stderr.strip())
+
+        # negative --limit
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--limit", "-1"], env=base_env)
+        check("--limit -1 rejected", r.returncode != 0)
+
+        # negative --skip
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--skip", "-1"], env=base_env)
+        check("--skip -1 rejected", r.returncode != 0)
+
+        # --sample 0 rejected (MongoDB $sample requires size >= 1)
+        r = run([str(AGENT_DO), "mongo", "schema", "prism_bcc", "expectations",
+                 "--sample", "0"], env=base_env)
+        check("--sample 0 rejected", r.returncode != 0)
+
+        # --sample negative rejected
+        r = run([str(AGENT_DO), "mongo", "schema", "prism_bcc", "expectations",
+                 "--sample", "-5"], env=base_env)
+        check("--sample negative rejected", r.returncode != 0)
+
+        # ── projection / sort validation ───────────────────────────────────────
+        print("\n--- projection / sort ---")
+
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--projection", "notjson"], env=base_env)
+        check("--projection invalid JSON fails", r.returncode != 0)
+
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--sort", "notjson"], env=base_env)
+        check("--sort invalid JSON fails", r.returncode != 0)
+
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+                 "--projection", '{"_id":0,"externalId":1}',
+                 "--sort", '{"createdAt":-1}', "--json"], env=base_env)
+        check("valid projection+sort exits 0", r.returncode == 0, r.stderr)
+
+        # ── aggregate edge cases ───────────────────────────────────────────────
+        print("\n--- aggregate edge cases ---")
+
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", "[]", "--json"], env=base_env)
+        check("aggregate empty pipeline [] exits 0", r.returncode == 0, r.stderr)
+
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", "{}"], env=base_env)
+        check("aggregate pipeline {} (not array) fails", r.returncode != 0)
+
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", "@/nonexistent/path.json"], env=base_env)
+        check("aggregate @nonexistent file fails", r.returncode != 0)
+
+        # ── insert edge cases ──────────────────────────────────────────────────
+        print("\n--- insert edge cases ---")
+
+        r = run([str(AGENT_DO), "mongo", "insert", "prism_bcc", "expectations",
+                 "--doc", "[]"], env=base_env)
+        check("insert --doc array fails", r.returncode != 0)
+
+        r = run([str(AGENT_DO), "mongo", "insert", "prism_bcc", "expectations",
+                 "--doc", "null"], env=base_env)
+        check("insert --doc null fails", r.returncode != 0)
+
+        # empty doc {} is valid MongoDB — allowed
+        r = run([str(AGENT_DO), "mongo", "insert", "prism_bcc", "expectations",
+                 "--doc", "{}", "--json"], env=base_env)
+        check("insert empty doc {} allowed", r.returncode == 0, r.stderr)
+
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 40}")
         if fails:
