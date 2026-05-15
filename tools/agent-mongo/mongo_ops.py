@@ -749,6 +749,9 @@ def cmd_update(argv: list[str]) -> None:
         _err("--set is required for update")
 
     filt = _parse_filter(where_raw)
+    if not filt:
+        _err("Empty filter '{}' is not allowed for update — it would match every document. "
+             "Use a specific --where clause.")
     updates = {"$set": _parse_filter(set_raw)}
 
     if dry_run:
@@ -817,6 +820,9 @@ def cmd_delete(argv: list[str]) -> None:
         _err("--where is required for delete (never delete without a filter)")
 
     filt = _parse_filter(where_raw)
+    if not filt:
+        _err("Empty filter '{}' is not allowed for delete — it would match every document. "
+             "Use a specific --where clause.")
 
     if dry_run:
         print(f"[dry-run] would delete from {db_name}.{coll_name}")

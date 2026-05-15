@@ -516,6 +516,38 @@ def main() -> int:
         )
         check("update no-where fails", r.returncode != 0)
 
+        # empty filter '{}' is rejected for update and delete — even with --dry-run —
+        # because '{}' matches every document and is too dangerous for an agent-facing tool.
+        r = run(
+            [str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+             "--where", "{}", "--set", "status=done"],
+            env=base_env,
+        )
+        check("update empty-filter fails", r.returncode != 0)
+        check("update empty-filter error mentions document", "every document" in r.stderr)
+
+        r = run(
+            [str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+             "--where", "{}", "--set", "status=done", "--dry-run"],
+            env=base_env,
+        )
+        check("update empty-filter dry-run also fails", r.returncode != 0)
+
+        r = run(
+            [str(AGENT_DO), "mongo", "delete", "prism_bcc", "expectations",
+             "--where", "{}", "--confirm"],
+            env=base_env,
+        )
+        check("delete empty-filter fails", r.returncode != 0)
+        check("delete empty-filter error mentions document", "every document" in r.stderr)
+
+        r = run(
+            [str(AGENT_DO), "mongo", "delete", "prism_bcc", "expectations",
+             "--where", "{}", "--dry-run"],
+            env=base_env,
+        )
+        check("delete empty-filter dry-run also fails", r.returncode != 0)
+
         # no connection configured and no env var
         no_conn_env = {
             **base_env,
