@@ -89,6 +89,7 @@ check_cmd "render tests" python3 "$SCRIPT_DIR/tests/test_render.py"
 check_cmd "vector tests" python3 "$SCRIPT_DIR/tests/test_vector.py"
 check_output "vector --help" "today" "$AGENT_DO" vector --help
 check_cmd "gh tests" python3 "$SCRIPT_DIR/tests/test_gh.py"
+check_cmd "gh pr compat tests" python3 "$SCRIPT_DIR/tests/test_gh_pr_compat.py"
 check_cmd "gh phase1 tests" python3 "$SCRIPT_DIR/tests/test_gh_phase1.py"
 check_cmd "gh refs unit tests" python3 "$SCRIPT_DIR/tools/agent-gh/test/unit/test_refs.py"
 check_cmd "gh triage unit tests" python3 "$SCRIPT_DIR/tools/agent-gh/test/unit/test_triage.py"

@@ -623,3 +623,93 @@ def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
         gh_args.append("--undo")
     run_gh(gh_args)
     print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
+
+
+def read_comment(args: argparse.Namespace) -> str | None:
+    """Read a comment string from --comment or --comment-file (- for stdin)."""
+    if args.comment_file:
+        if args.comment_file == "-":
+            return sys.stdin.read()
+        return Path(args.comment_file).read_text()
+    if args.comment:
+        return args.comment
+    return None
+
+
+def cmd_close(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    gh_args = ["pr", "close", *pr_gh_args(ref)]
+    if args.delete_branch:
+        gh_args.append("--delete-branch")
+    comment = read_comment(args)
+    if comment:
+        gh_args.extend(["--comment", comment])
+    run_gh(gh_args)
+    print(f"Closed {ref.repo}#{ref.number}")
+
+
+def cmd_reopen(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    gh_args = ["pr", "reopen", *pr_gh_args(ref)]
+    comment = read_comment(args)
+    if comment:
+        gh_args.extend(["--comment", comment])
+    run_gh(gh_args)
+    print(f"Reopened {ref.repo}#{ref.number}")
+
+
+def cmd_checkout(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    gh_args = ["pr", "checkout", *pr_gh_args(ref)]
+    if args.branch:
+        gh_args.extend(["--branch", args.branch])
+    if args.detach:
+        gh_args.append("--detach")
+    if args.force:
+        gh_args.append("--force")
+    if args.recurse_submodules:
+        gh_args.append("--recurse-submodules")
+    run_gh(gh_args)
+    print(f"Checked out {ref.repo}#{ref.number}")
+
+
+def append_repeated_flag(gh_args: list[str], flag: str, values: list[str] | None) -> None:
+    """Append a repeated CLI flag for each value in the list."""
+    for value in values or []:
+        gh_args.extend([flag, value])
+
+
+def cmd_edit(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    gh_args = ["pr", "edit", *pr_gh_args(ref)]
+    if args.title:
+        gh_args.extend(["--title", args.title])
+    if args.body:
+        gh_args.extend(["--body", args.body])
+    if args.body_file:
+        gh_args.extend(["--body-file", args.body_file])
+    if args.base:
+        gh_args.extend(["--base", args.base])
+    if args.milestone:
+        gh_args.extend(["--milestone", args.milestone])
+    if args.remove_milestone:
+        gh_args.append("--remove-milestone")
+    append_repeated_flag(gh_args, "--add-label", args.add_label)
+    append_repeated_flag(gh_args, "--remove-label", args.remove_label)
+    append_repeated_flag(gh_args, "--add-assignee", args.add_assignee)
+    append_repeated_flag(gh_args, "--remove-assignee", args.remove_assignee)
+    append_repeated_flag(gh_args, "--add-reviewer", args.add_reviewer)
+    append_repeated_flag(gh_args, "--remove-reviewer", args.remove_reviewer)
+    append_repeated_flag(gh_args, "--add-project", args.add_project)
+    append_repeated_flag(gh_args, "--remove-project", args.remove_project)
+    run_gh(gh_args)
+    print(f"Edited {ref.repo}#{ref.number}")
+
+
+def cmd_update_branch(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    gh_args = ["pr", "update-branch", *pr_gh_args(ref)]
+    if args.rebase:
+        gh_args.append("--rebase")
+    run_gh(gh_args)
+    print(f"Updated branch for {ref.repo}#{ref.number}")

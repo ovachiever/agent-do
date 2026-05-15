@@ -21,7 +21,7 @@ def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> di
     r = parse_repo(repo)
 
     # Use gh api to generate notes (GitHub's own notes generation endpoint)
-    body: dict[str, Any] = {"tag_name": f"__preview__", "previous_tag_name": since_tag}
+    body: dict[str, Any] = {"tag_name": "__preview__", "previous_tag_name": since_tag}
     if target:
         body["target_commitish"] = target
 
@@ -30,8 +30,8 @@ def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> di
         payload = gh_json([
             "api", "--method", "POST",
             f"/repos/{r.slug}/releases/generate-notes",
-            "--field", f"tag_name=__preview__",
-            "--field", f"previous_tag_name={since_tag}",
+            "--field", "tag_name=__preview__",
+            "--field", f"previous_tag_name={since_tag}",  # since_tag is a variable
             *(["--field", f"target_commitish={target}"] if target else []),
         ])
         raw_body = (payload or {}).get("body", "")
@@ -42,10 +42,11 @@ def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> di
             "sections": {},
             "uncategorized": [],
         })
-    except Exception:
-        # Fall back to PR label grouping if generate-notes fails
-        # (repo may not support it, or auth/network may be unavailable)
-        pass
+    except Exception as exc:
+        # Fall back to PR label grouping below. generate-notes can fail legitimately
+        # (repo too new for a tag, auth scope, network); we intentionally continue.
+        import logging  # noqa: PLC0415
+        logging.getLogger(__name__).debug("generate-notes endpoint failed, using fallback: %s", exc)
 
     # Fallback: list merged PRs since the tag and group by label
     prs = gh_json([

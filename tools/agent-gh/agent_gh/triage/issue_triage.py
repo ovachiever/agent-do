@@ -124,5 +124,5 @@ def _search_related(repo_slug: str, title: str) -> list[dict[str, Any]]:
     import json
     try:
         return json.loads(res) or []
-    except Exception:
+    except json.JSONDecodeError:
         return []

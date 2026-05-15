@@ -129,6 +129,51 @@ def build_parser() -> argparse.ArgumentParser:
     draft.add_argument("pr")
     draft.set_defaults(func=lambda ns: pr_group.cmd_ready(ns, draft=True))
 
+    # ── v1.2 PR actions (ported from flat script) ──────────────────────────────
+    close = sub.add_parser("close", help="Close a pull request")
+    close.add_argument("pr")
+    close.add_argument("--delete-branch", action="store_true")
+    close.add_argument("--comment")
+    close.add_argument("--comment-file")
+    close.set_defaults(func=pr_group.cmd_close)
+
+    reopen = sub.add_parser("reopen", help="Reopen a pull request")
+    reopen.add_argument("pr")
+    reopen.add_argument("--comment")
+    reopen.add_argument("--comment-file")
+    reopen.set_defaults(func=pr_group.cmd_reopen)
+
+    checkout = sub.add_parser("checkout", aliases=["co"], help="Check out a pull request locally")
+    checkout.add_argument("pr")
+    checkout.add_argument("--branch")
+    checkout.add_argument("--detach", action="store_true")
+    checkout.add_argument("--force", action="store_true")
+    checkout.add_argument("--recurse-submodules", action="store_true")
+    checkout.set_defaults(func=pr_group.cmd_checkout)
+
+    edit = sub.add_parser("edit", help="Edit pull request metadata")
+    edit.add_argument("pr")
+    edit.add_argument("--title")
+    edit.add_argument("--body")
+    edit.add_argument("--body-file")
+    edit.add_argument("--base")
+    edit.add_argument("--milestone")
+    edit.add_argument("--remove-milestone", action="store_true")
+    edit.add_argument("--add-label", action="append")
+    edit.add_argument("--remove-label", action="append")
+    edit.add_argument("--add-assignee", action="append")
+    edit.add_argument("--remove-assignee", action="append")
+    edit.add_argument("--add-reviewer", action="append")
+    edit.add_argument("--remove-reviewer", action="append")
+    edit.add_argument("--add-project", action="append")
+    edit.add_argument("--remove-project", action="append")
+    edit.set_defaults(func=pr_group.cmd_edit)
+
+    update_branch = sub.add_parser("update-branch", help="Update a PR branch from its base branch")
+    update_branch.add_argument("pr")
+    update_branch.add_argument("--rebase", action="store_true")
+    update_branch.set_defaults(func=pr_group.cmd_update_branch)
+
     # ── Phase 1: issue ─────────────────────────────────────────────────────────
     _build_issue_parser(sub)
 
