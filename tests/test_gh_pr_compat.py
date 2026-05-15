@@ -164,6 +164,37 @@ sys.exit(0)
         check("gh update-branch --rebase exits 0", r.returncode == 0, r.stderr)
         check("gh update-branch --rebase: flag forwarded", "--rebase" in last_gh_call())
 
+        # ── --dry-run tests: no gh call made, output previews the command ──────
+        print("\n--- --dry-run tests ---")
+
+        for cmd_name, pr_ref, extra_args in [
+            ("close", "ovachiever/agent-do#3", ["--delete-branch"]),
+            ("reopen", "ovachiever/agent-do#3", []),
+            ("edit", "ovachiever/agent-do#5", ["--add-label", "review-needed"]),
+            ("update-branch", "ovachiever/agent-do#3", ["--rebase"]),
+        ]:
+            clear_log()
+            r = run(
+                [str(AGENT_DO), "gh", cmd_name, pr_ref, "--dry-run", *extra_args],
+                env=base_env,
+            )
+            check(f"gh {cmd_name} --dry-run exits 0", r.returncode == 0, r.stderr)
+            check(f"gh {cmd_name} --dry-run: no gh call made", not log_path.exists() or not log_path.read_text().strip())
+            check(f"gh {cmd_name} --dry-run: prints [dry-run]", "[dry-run]" in r.stdout)
+
+        # ── multi-value --add-label: all values forwarded ─────────────────────
+        print("\n--- multi-value flag tests ---")
+
+        clear_log()
+        r = run(
+            [str(AGENT_DO), "gh", "edit", "ovachiever/agent-do#5",
+             "--add-label", "bug", "--add-label", "review-needed", "--dry-run"],
+            env=base_env,
+        )
+        check("gh edit multi --add-label exits 0", r.returncode == 0, r.stderr)
+        check("gh edit multi --add-label: both labels in preview",
+              "bug" in r.stdout and "review-needed" in r.stdout)
+
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 45}")
         if fails:

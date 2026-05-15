@@ -644,6 +644,9 @@ def cmd_close(args: argparse.Namespace) -> None:
     comment = read_comment(args)
     if comment:
         gh_args.extend(["--comment", comment])
+    if args.dry_run:
+        print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
     print(f"Closed {ref.repo}#{ref.number}")
 
@@ -654,6 +657,9 @@ def cmd_reopen(args: argparse.Namespace) -> None:
     comment = read_comment(args)
     if comment:
         gh_args.extend(["--comment", comment])
+    if args.dry_run:
+        print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
     print(f"Reopened {ref.repo}#{ref.number}")
 
@@ -702,6 +708,9 @@ def cmd_edit(args: argparse.Namespace) -> None:
     append_repeated_flag(gh_args, "--remove-reviewer", args.remove_reviewer)
     append_repeated_flag(gh_args, "--add-project", args.add_project)
     append_repeated_flag(gh_args, "--remove-project", args.remove_project)
+    if args.dry_run:
+        print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
     print(f"Edited {ref.repo}#{ref.number}")
 
@@ -711,5 +720,8 @@ def cmd_update_branch(args: argparse.Namespace) -> None:
     gh_args = ["pr", "update-branch", *pr_gh_args(ref)]
     if args.rebase:
         gh_args.append("--rebase")
+    if args.dry_run:
+        print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
     print(f"Updated branch for {ref.repo}#{ref.number}")
