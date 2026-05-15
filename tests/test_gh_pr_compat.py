@@ -170,6 +170,7 @@ sys.exit(0)
         for cmd_name, pr_ref, extra_args in [
             ("close", "ovachiever/agent-do#3", ["--delete-branch"]),
             ("reopen", "ovachiever/agent-do#3", []),
+            ("checkout", "ovachiever/agent-do#5", ["--branch", "review/pr-5"]),
             ("edit", "ovachiever/agent-do#5", ["--add-label", "review-needed"]),
             ("update-branch", "ovachiever/agent-do#3", ["--rebase"]),
         ]:

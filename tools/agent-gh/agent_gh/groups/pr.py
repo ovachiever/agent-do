@@ -675,6 +675,9 @@ def cmd_checkout(args: argparse.Namespace) -> None:
         gh_args.append("--force")
     if args.recurse_submodules:
         gh_args.append("--recurse-submodules")
+    if args.dry_run:
+        print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
     print(f"Checked out {ref.repo}#{ref.number}")
 

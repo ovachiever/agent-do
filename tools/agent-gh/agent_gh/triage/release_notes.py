@@ -16,6 +16,30 @@ _SECTION_LABELS: list[tuple[str, list[str]]] = [
 ]
 
 
+def _tag_date(repo_slug: str, tag: str) -> str | None:
+    """Return the ISO 8601 date string for a git tag via the GitHub API, or None on failure.
+
+    Handles both lightweight tags (points to a commit) and annotated tags (points to a tag
+    object which then points to a commit).  Returns None rather than raising so callers
+    can fall back to including all PRs.
+    """
+    try:
+        ref_obj = gh_json(["api", f"/repos/{repo_slug}/git/ref/tags/{tag}"]) or {}
+        obj = ref_obj.get("object") or {}
+        obj_type = obj.get("type")
+        sha = obj.get("sha", "")
+        if not sha:
+            return None
+        if obj_type == "tag":
+            tag_obj = gh_json(["api", f"/repos/{repo_slug}/git/tags/{sha}"]) or {}
+            return (tag_obj.get("tagger") or {}).get("date")
+        # lightweight tag — points directly to a commit
+        commit_obj = gh_json(["api", f"/repos/{repo_slug}/git/commits/{sha}"]) or {}
+        return (commit_obj.get("committer") or {}).get("date")
+    except Exception:
+        return None
+
+
 def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> dict[str, Any]:
     """Generate release notes since since_tag; tries GitHub's API then falls back to PR labels."""
     r = parse_repo(repo)
@@ -57,7 +81,10 @@ def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> di
         "--limit", "100",
     ]) or []
 
-    # Filter PRs merged after since_tag commit date (best-effort: just use all)
+    tag_date = _tag_date(r.slug, since_tag)
+    if tag_date:
+        prs = [pr for pr in prs if (pr.get("mergedAt") or "") > tag_date]
+
     sections: dict[str, list[str]] = {name: [] for name, _ in _SECTION_LABELS}
     uncategorized: list[str] = []
 

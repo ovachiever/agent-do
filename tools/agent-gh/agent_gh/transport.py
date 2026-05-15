@@ -37,6 +37,8 @@ def run_gh(args: list[str], *, input_text: str | None = None, timeout: int = 60)
         )
     except subprocess.TimeoutExpired as exc:
         raise GhError(f"gh {' '.join(args)} timed out after {timeout}s") from exc
+    except OSError as exc:
+        raise GhError(f"gh {' '.join(args)} failed to start: {exc}") from exc
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "unknown gh error"
         raise GhError(f"gh {' '.join(args)} failed: {detail}")

@@ -151,6 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     checkout.add_argument("--detach", action="store_true")
     checkout.add_argument("--force", action="store_true")
     checkout.add_argument("--recurse-submodules", action="store_true")
+    checkout.add_argument("--dry-run", action="store_true")
     checkout.set_defaults(func=pr_group.cmd_checkout)
 
     edit = sub.add_parser("edit", help="Edit pull request metadata")

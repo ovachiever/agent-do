@@ -46,12 +46,15 @@ _NUM_RE = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?)/([A-Za-z0-9._-]+)#(
 
 def repo_from_git() -> str | None:
     """Infer the owner/repo slug from the git remote origin URL, or return None."""
-    result = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
     if result.returncode != 0:
         return None
     remote = result.stdout.strip()

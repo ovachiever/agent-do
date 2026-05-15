@@ -174,7 +174,7 @@ def cmd_issue_view(args: argparse.Namespace) -> None:
         d = result["data"]
         print(f"#{d.get('number')} {d.get('title')}")
         print(f"State: {d.get('state')}  Author: {(d.get('author') or {}).get('login')}")
-        print(f"Labels: {', '.join(l.get('name','') for l in d.get('labels') or [])}")
+        print(f"Labels: {', '.join(label.get('name', '') for label in d.get('labels') or [])}")
         if d.get("body"):
             print()
             print(d["body"])
