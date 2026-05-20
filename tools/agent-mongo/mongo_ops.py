@@ -303,6 +303,7 @@ def cmd_connections(argv: list[str]) -> None:
                 i += 1
             else:
                 i += 1
+        uri = uri.strip()
         if not uri:
             _err("--uri is required")
         data = _load_profiles()
@@ -375,10 +376,13 @@ def cmd_connections(argv: list[str]) -> None:
 
         import base64  # noqa: PLC0415
         import subprocess  # noqa: PLC0415
-        result = subprocess.run(
-            ["kubectl", "get", "secret", secret, "-n", namespace, "-o", "json"],
-            capture_output=True, text=True, check=False,
-        )
+        try:
+            result = subprocess.run(
+                ["kubectl", "get", "secret", secret, "-n", namespace, "-o", "json"],
+                capture_output=True, text=True, check=False,
+            )
+        except OSError as exc:
+            _err(f"kubectl not found or not executable: {exc}")
         if result.returncode != 0:
             _err(f"kubectl failed: {result.stderr.strip()}")
         try:
@@ -884,6 +888,8 @@ def cmd_update(argv: list[str]) -> None:
             _err("--set @file must contain a JSON object (dict) of field=value pairs")
     else:
         set_doc = _parse_filter(set_raw)
+    if not set_doc:
+        _err("--set must specify at least one field to update (got empty object)")
     updates = {"$set": set_doc}
 
     if dry_run:

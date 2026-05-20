@@ -103,6 +103,7 @@ check_cmd "obsidian tests" python3 "$SCRIPT_DIR/tests/test_obsidian.py"
 check_cmd "browser import tests" python3 "$SCRIPT_DIR/tests/test_browser_import.py"
 check_cmd "browse session default tests" python3 "$SCRIPT_DIR/tests/test_browse_session_defaults.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
+check_cmd "mongo tests" python3 "$SCRIPT_DIR/tests/test_mongo.py"
 
 # lib/snapshot.sh: AGENT_DO_SNAPSHOT_COMPACT=1 produces single-line JSON.
 snapshot_compact_output=$(

@@ -884,6 +884,31 @@ def main() -> int:
         check("update --set @file dry-run exits 2", r.returncode == 2)
         check("update --set @file dry-run shows field", "archived" in r.stdout or "archived" in r.stderr)
 
+        # --set '{}' (empty object) must be rejected — it would be a silent no-op
+        r = run([str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+                 "--where", "status=active", "--set", "{}"], env=base_env)
+        check("update --set '{}' empty object rejected", r.returncode != 0)
+        check("update --set '{}' error is clear", "field" in r.stderr.lower() or "empty" in r.stderr.lower())
+
+        # --uri with whitespace only must be rejected — not stored as garbage creds
+        r = run([str(AGENT_DO), "mongo", "connections", "add", "wstest",
+                 "--uri", "   "], env=base_env)
+        check("connections add whitespace-only --uri rejected", r.returncode != 0)
+
+        # import-from-aks when kubectl not installed gives clean error (not unhandled exception).
+        # Inject a fake kubectl that exits 127 (command not found) to simulate missing binary
+        # while keeping python3 and agent-do reachable.
+        make_exec(fake_bin / "kubectl",
+                  "#!/bin/sh\necho 'kubectl: command not found' >&2\nexit 127\n")
+        r = run([str(AGENT_DO), "mongo", "connections", "import-from-aks",
+                 "--secret", "my-secret", "--namespace", "default", "--profile", "myprofile"],
+                env=base_env)
+        check("import-from-aks missing kubectl gives clean error", r.returncode != 0)
+        check("import-from-aks missing kubectl error is readable",
+              "kubectl" in r.stderr.lower() or "failed" in r.stderr.lower())
+        # clean up fake kubectl so it doesn't affect other tests
+        (fake_bin / "kubectl").unlink(missing_ok=True)
+
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 40}")
         if fails:
