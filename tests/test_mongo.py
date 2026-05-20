@@ -237,6 +237,8 @@ def main() -> int:
               "uri" not in conn_json["profiles"].get("prism_bcc", {}))
         check("connections add: creds file exists",
               (fake_home / "mongo" / ".creds" / "prism_bcc").exists())
+        check("connections add: creds file mode is 0o600",
+              stat.S_IMODE((fake_home / "mongo" / ".creds" / "prism_bcc").stat().st_mode) == 0o600)
 
         # list shows profile metadata; URI is never printed (stored in separate creds file)
         r = run([str(AGENT_DO), "mongo", "connections", "list"], env=base_env)
@@ -291,6 +293,8 @@ def main() -> int:
               "uri" not in conn_json["profiles"].get("aks_cosmos", {}))
         creds_file = fake_home / "mongo" / ".creds" / "aks_cosmos"
         check("import-from-aks: URI stored in creds file", creds_file.exists())
+        check("import-from-aks: creds file mode is 0o600",
+              stat.S_IMODE(creds_file.stat().st_mode) == 0o600)
         check("import-from-aks: creds file contains URI", aks_uri in creds_file.read_text())
 
         # ── discovery ─────────────────────────────────────────────────────────
@@ -621,6 +625,7 @@ def main() -> int:
         # key=NULL (case-insensitive)
         r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
                  "--where", "deletedAt=NULL", "--json"], env=base_env)
+        check("filter key=NULL exits 0", r.returncode == 0, r.stderr)
         if r.returncode == 0:
             out = json.loads(r.stdout)
             check("filter key=NULL coerced to None",
