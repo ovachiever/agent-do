@@ -16,7 +16,9 @@ import sys
 from shutil import which
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+# File lives at <repo>/hooks/claude/agent-do-prompt-router.py, so the repo
+# root is two parents up and lib/ is its sibling.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "lib"))
 
 try:
     from registry import (
@@ -38,27 +40,14 @@ try:
 except ModuleNotFoundError:
     call_json_model = None
 
-# Frontend/design intent detection — two-stage: UI keywords + action keywords
-# If both present, it's a design task. Also catches direct design phrases.
-_UI_KEYWORDS = re.compile(
-    r'\b(ui|ux|visual|design|styling|css|scss|tailwind|layout|spacing|padding|margin|'
-    r'color|colour|font|typography|hierarchy|theme|palette|appearance|aesthetic|'
-    r'dashboard|sidebar|navbar|header|footer|card|modal|form|page|screen|component|'
-    r'landing.page|homepage|frontend|front.end)\b', re.IGNORECASE
-)
-_ACTION_KEYWORDS = re.compile(
-    r'\b(improv|fix|updat|redesign|refactor|polish|refine|beautif|overhaul|'
-    r'make.{0,20}(look|prettier|better|beautiful|modern|cleaner|nicer)|'
-    r'chang|adjust|tweak|enhance|redo|rework|clean.up|revamp)\w*\b', re.IGNORECASE
-)
-# Direct match patterns that don't need two-stage
-FRONTEND_DESIGN_DIRECT = [
-    r'\b(ugly|bad.looking|needs.work|looks\s*(bad|wrong|off|weird|terrible|awful))\b',
-    r'\bdpt\s*(score|audit|check|review|baseline)\b',
-    r'\bartful\b',
-    r'\bdesign\s*(system|token|review|audit|score|quality)\b',
-    r'\b(screenshot|browse).*(before|after|baseline|compare)\b',
-]
+# Intent classification (docs-retrieval, design-work, coord-discussion) is
+# routed through the AI classifier in ai_route_prompt(). Keyword-only paths
+# were removed because regex cannot distinguish "user wants X done now" from
+# "user is discussing X as a topic" or "user is forwarding a handoff that
+# describes X." Misfires from those false positives motivated this design.
+# When the AI router is unavailable, the hook stays silent on intent-bound
+# nudges rather than guessing. State-grounded paths (coord_required,
+# needs_completion_check) still fire because they don't require classification.
 
 COMPLETION_DIRECT_WORDS = {
     "continue",
@@ -126,19 +115,6 @@ Screenshots = visual truth. Snapshots = structural truth. Both, in that order.
 Never ship UI changes without this verification loop.
 """
 
-COORD_PATTERNS = [
-    r"\banother agent\b",
-    r"\bother agent\b",
-    r"\bhandoff\b",
-    r"\bdon't conflict\b",
-    r"\bdo not conflict\b",
-    r"\breview .*agent\b",
-    r"\bother session\b",
-    r"\bseparate tmux sessions?\b",
-    r"\bwhat is the other agent doing\b",
-    r"\bcoordinate\b.*\bagent\b",
-]
-
 COORD_WORK_PATTERNS = [
     r"\b(build|implement|fix|edit|change|update|refactor|write|add|remove|delete)\b",
     r"\b(run|test|debug|repair|review|merge|commit|push|deploy|ship)\b",
@@ -158,12 +134,7 @@ COORD_DISCUSSION_PATTERNS = [
 BLOCKING_INTERRUPT_KINDS = {"contention", "dependency"}
 DEFAULT_HOOK_AI_CONFIDENCE = 0.86
 
-DOCS_RETRIEVAL_PATTERNS = [
-    re.compile(r"\b(use|check|read|look\s+up|fetch|find|get|consult)\b.{0,80}\b(latest|current|up.to.date|recent|official)\b.{0,80}\b(docs?|documentation|api|sdk|reference)\b", re.I),
-    re.compile(r"\b(latest|current|up.to.date|recent|official)\b.{0,80}\b(docs?|documentation|api|sdk|reference)\b", re.I),
-    re.compile(r"\b(docs?|documentation|api|sdk|reference)\b.{0,80}\b(latest|current|up.to.date|recent|official)\b", re.I),
-    re.compile(r"\b(v\d+|migration|upgrade|breaking changes?)\b.{0,80}\b(docs?|documentation|api|sdk|reference|library|framework|package)\b", re.I),
-]
+CONTEXT_RETRIEVE_QUERY_MAX_CHARS = 280
 
 
 def build_ai_catalog(registry: dict) -> list[dict]:
@@ -177,6 +148,21 @@ def build_ai_catalog(registry: dict) -> list[dict]:
             command = example.get("command")
             if intent and command:
                 examples.append({"intent": intent, "command": command})
+        routing_intents = []
+        routing = info.get("routing") or {}
+        for item in (routing.get("intents") or [])[:8]:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("label")
+            if not label:
+                continue
+            routing_intents.append(
+                {
+                    "label": str(label),
+                    "examples": [str(ex) for ex in (item.get("examples") or [])[:4]],
+                    "recommended_entrypoint": str(item.get("recommended_entrypoint") or ""),
+                }
+            )
 
         catalog.append(
             {
@@ -186,6 +172,7 @@ def build_ai_catalog(registry: dict) -> list[dict]:
                 "commands": commands,
                 "recommended_entrypoints": get_recommended_entrypoints(info) if get_recommended_entrypoints else [],
                 "examples": examples,
+                "routing_intents": routing_intents,
             }
         )
     return catalog
@@ -296,45 +283,50 @@ def hook_confidence_threshold() -> float:
     return DEFAULT_HOOK_AI_CONFIDENCE
 
 
-def detect_frontend_design(prompt: str) -> bool:
-    """Detect if prompt involves frontend/design/visual work."""
-    # Two-stage: UI keyword + action keyword = design intent
-    has_ui = bool(_UI_KEYWORDS.search(prompt))
-    has_action = bool(_ACTION_KEYWORDS.search(prompt))
-    if has_ui and has_action:
-        return True
-    # Direct match patterns
-    prompt_lower = prompt.lower()
-    for pattern in FRONTEND_DESIGN_DIRECT:
-        if re.search(pattern, prompt_lower):
-            return True
-    return False
+def build_context_retrieve_command(query: str) -> str:
+    """Build the suggested context retrieve command from a short, focused query.
+
+    The query is provided by the AI classifier as a distilled phrase describing
+    what the user actually wants retrieved. The hook caps the query length so
+    we never emit multi-kilobyte shell-quoted blobs, but the AI is expected to
+    return something already short and specific.
+    """
+    query = (query or "").strip()
+    if not query:
+        return ""
+    if len(query) > CONTEXT_RETRIEVE_QUERY_MAX_CHARS:
+        query = query[:CONTEXT_RETRIEVE_QUERY_MAX_CHARS].rstrip() + "..."
+    return f"agent-do context retrieve {shlex.quote(query)} --fresh --prefer-latest --max-tokens 8000"
 
 
-def looks_like_context_retrieval_prompt(prompt: str) -> bool:
-    prompt_lower = prompt.lower()
-    if re.search(r"\b(update|edit|write|clean|fix|add|remove)\b.{0,40}\b(readme|repo docs?|project docs?|documentation)\b", prompt_lower):
-        return False
-    return any(pattern.search(prompt) for pattern in DOCS_RETRIEVAL_PATTERNS)
-
-
-def context_retrieve_command(prompt: str) -> str:
-    return f"agent-do context retrieve {shlex.quote(prompt.strip())} --fresh --prefer-latest --max-tokens 8000"
-
-
-def context_retrieval_context(prompt: str) -> tuple[str, list[str], list[str]]:
-    if not looks_like_context_retrieval_prompt(prompt):
+def ai_context_retrieval_context(decision: dict | None) -> tuple[str, list[str], list[str]]:
+    """Emit a context-retrieval nudge only when the AI classifier says the user
+    is requesting external docs RIGHT NOW (intent, not topic). The classifier
+    also supplies the focused retrieval query; the hook never derives the query
+    from prompt text directly.
+    """
+    if not isinstance(decision, dict) or decision.get("needs_docs_retrieval") is not True:
         return "", [], []
 
-    command = context_retrieve_command(prompt)
+    query = str(decision.get("docs_query") or "").strip()
+    command = build_context_retrieve_command(query)
+    if not command:
+        return "", [], []
+
     return (
         "## agent-do Context Retrieval\n\n"
-        "This prompt depends on current external docs/API/library behavior. Before answering or implementing, run:\n"
+        "This prompt asks for external docs/API/library behavior. Before answering or implementing, run:\n"
         f"- `{command}`\n\n"
         "Use the returned provenance and freshness metadata. If retrieval fails, say what remains stale instead of guessing.\n",
         ["context"],
         [command],
     )
+
+
+def ai_is_design_work(decision: dict | None) -> bool:
+    """The AI classifier says the user is performing UI/design work right now
+    (not merely discussing design as a topic)."""
+    return isinstance(decision, dict) and decision.get("is_design_work") is True
 
 
 def needs_completion_check(prompt: str) -> bool:
@@ -370,11 +362,6 @@ def needs_completion_check(prompt: str) -> bool:
             return True
 
     return False
-
-
-def detect_coord_prompt(prompt: str) -> bool:
-    prompt_lower = prompt.lower()
-    return any(re.search(pattern, prompt_lower) for pattern in COORD_PATTERNS)
 
 
 def prompt_looks_like_coord_work(prompt: str) -> bool:
@@ -418,18 +405,32 @@ def ai_route_prompt(
     }
     prompt_text = f"""Classify a Codex UserPromptSubmit prompt and decide whether to emit anything.
 
-Two products share this hook:
-1. Coordination enforcement. This is the only thing that may block.
-2. agent-do tool suggestions. These are advisory only and should be rare.
+Four products share this hook. All of them must be classified by INTENT, not by topic keywords. A prompt that discusses a topic is not the same as a prompt that asks the agent to act on that topic right now.
+
+1. Coordination enforcement. The only product that may block. Fires when another active peer exists, this agent has no focus, and the prompt starts workspace work.
+2. agent-do tool suggestions. Advisory. Emit at most one or two when an exact agent-do command is clearly the right first move for the user's immediate ask.
+3. External docs/API retrieval (needs_docs_retrieval). Emit ONLY when the user is asking the agent to use, check, or rely on external docs/APIs/SDKs to perform the current task. A long handoff or design discussion that MENTIONS docs as a topic is NOT this intent. Mere occurrence of "docs," "api," "sdk," "library" is not enough; the user must be requesting their use right now.
+4. Frontend/design work toolkit (is_design_work). Emit ONLY when the user is asking the agent to perform UI/visual/design work right now (build a page, score a UI, improve styling, audit visuals, screenshot-and-verify). A prompt that discusses design as a topic or reviews a design plan is NOT this intent.
 
 Rules:
-- If another active peer exists, this agent has no focus, and the prompt starts workspace work, require a coord focus block.
-- Workspace work includes editing files, debugging, testing, reviewing code/PRs, committing, pushing, deploying, or "do it/go" continuation of work.
+- "Workspace work" for coord includes editing files, debugging, testing, reviewing code/PRs, committing, pushing, deploying, or "do it/go" continuation of work.
 - Pure discussion, status questions, explanations, model choice, and "no touching" prompts should not be blocked.
 - For tool suggestions, inspect the full catalog and emit only if one or two agent-do commands are clearly stellar and exact.
+- Tools may declare routing_intents with labels and examples. Treat those as classifier labels, not keyword rules. If a prompt matches one, suggest the recommended entrypoint only when it is the right immediate action.
 - Do not emit generic setup/search/status suggestions unless the prompt directly asks for that operation.
-- It is good to emit nothing.
+- It is good to emit nothing. Be conservative on every classification. False positives are worse than false negatives.
 - Never invent tools. Commands must start with `agent-do <tool>`.
+
+Specific guidance for needs_docs_retrieval:
+- True only if the prompt's primary ask depends on current external API/library/SDK behavior the agent doesn't already know.
+- Examples that ARE this intent: "use the latest Stripe webhook docs to fix our handler," "check the current Anthropic API for cache_control format," "look up the v11 better-auth migration guide and apply it."
+- Examples that are NOT this intent: "review this handoff that discusses docs retrieval," "explain how agent-do context works," "the README mentions docs," forwarded narrative prose that incidentally contains the word "docs" or "api."
+- If true, also produce docs_query: a SHORT focused phrase (max 200 chars) describing what should be retrieved. Not the full prompt. Not a question. Just the topic, e.g., "Anthropic prompt caching with cache_control," "Stripe webhook idempotency 2024."
+
+Specific guidance for is_design_work:
+- True only when the user is asking the agent to perform UI/visual/design work as the primary action of this turn.
+- Examples that ARE this intent: "the landing page looks bad, fix it," "score this screenshot," "redesign the dashboard header," "audit the form's spacing."
+- Examples that are NOT this intent: "review this design plan," "discuss the design system," any prompt where the agent will be editing backend code, infra, hooks, docs, or anything non-visual, even if the word "design" appears in the prompt.
 
 Input JSON:
 {json.dumps({
@@ -449,6 +450,10 @@ Respond with JSON only:
     "reason": "short reason",
     "focus_command": "agent-do coord focus set \\"goal\\" --path path"
   }},
+  "needs_docs_retrieval": false,
+  "docs_query": "",
+  "is_design_work": false,
+  "matched_intents": ["optional catalog routing intent labels"],
   "emit_tools": true,
   "tool_suggestions": [
     {{
@@ -661,20 +666,6 @@ def load_coord_state(cwd: str | None) -> dict:
     return state
 
 
-def coord_advisory_context(prompt: str, coord_state: dict) -> tuple[str, list[str]]:
-    if detect_coord_prompt(prompt):
-        return (
-            "## Coord Suggestion\n\n"
-            "This sounds like multi-agent coordination. Start with:\n"
-            "- `agent-do coord status`\n"
-            "- `agent-do coord interrupts`\n"
-            "- `agent-do coord focus set \"<goal>\" --path <path>`\n",
-            ["coord"],
-        )
-
-    return "", []
-
-
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -692,18 +683,16 @@ def main():
     ai_decision = ai_route_prompt(prompt, cwd=cwd, coord_state=coord_state, registry=registry)
     coord_required = coord_required_context(prompt, cwd, coord_state, ai_decision)
     tool_context, tool_tools, tool_commands = ai_tool_suggestion_context(ai_decision, registry)
-    context_retrieve, context_tools, context_commands = context_retrieval_context(prompt)
-    coord_context, coord_tools = coord_advisory_context(prompt, coord_state)
-    is_design = detect_frontend_design(prompt)
-
+    context_retrieve, context_tools, context_commands = ai_context_retrieval_context(ai_decision)
+    is_design = ai_is_design_work(ai_decision)
     needs_completion = needs_completion_check(prompt)
 
-    should_emit = bool(coord_required or tool_context or context_retrieve or is_design or needs_completion or coord_context)
+    should_emit = bool(coord_required or tool_context or context_retrieve or is_design or needs_completion)
     if record_hook_decision is not None:
         try:
             decision_tools = []
             decision_commands = []
-            if coord_required or coord_context:
+            if coord_required:
                 decision_tools.append("coord")
             if tool_tools:
                 decision_tools.extend(tool_tools)
@@ -800,22 +789,6 @@ def main():
                     record_nudge_event(
                         "prompt_completion_check",
                         "prompt_router",
-                        prompt=prompt[:240],
-                        cwd=cwd,
-                    )
-                except Exception:
-                    pass
-
-        if coord_context:
-            if context:
-                context += "\n"
-            context += coord_context
-            if record_nudge_event is not None:
-                try:
-                    record_nudge_event(
-                        "prompt_coord_context",
-                        "prompt_router",
-                        tools=coord_tools,
                         prompt=prompt[:240],
                         cwd=cwd,
                     )

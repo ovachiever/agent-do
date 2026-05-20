@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     yaml = None
 
 AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
+CONTRACT_BEATS = ("connect", "snapshot", "interact", "verify", "save")
 
 
 def _load_yaml_data(path: Path) -> dict:
@@ -131,7 +132,7 @@ def get_tool_readiness(info: dict) -> dict:
 def get_tool_credentials(info: dict) -> dict:
     """Return credential metadata for a tool."""
     credentials = info.get('credentials') or {}
-    return {
+    result = {
         'required': [item for item in credentials.get('required', []) if item],
         'optional': [item for item in credentials.get('optional', []) if item],
         'one_of': [
@@ -140,6 +141,13 @@ def get_tool_credentials(info: dict) -> dict:
             if group
         ],
     }
+    features = credentials.get('features')
+    if isinstance(features, dict):
+        result['features'] = features
+    notes = credentials.get('notes')
+    if isinstance(notes, list):
+        result['notes'] = [str(note) for note in notes if str(note).strip()]
+    return result
 
 
 def get_tool_secret_envs(info: dict) -> list[str]:
@@ -157,6 +165,106 @@ def get_tool_secret_envs(info: dict) -> list[str]:
             if key not in envs:
                 envs.append(key)
     return envs
+
+
+def get_tool_contracts(info: dict) -> dict:
+    """Return normalized contract declarations for a tool."""
+    contracts = info.get("contracts") or {}
+    if not isinstance(contracts, dict):
+        return {}
+    normalized = {}
+    for beat, verbs in contracts.items():
+        if isinstance(verbs, list):
+            normalized[str(beat)] = [str(verb) for verb in verbs if str(verb).strip()]
+        elif verbs:
+            normalized[str(beat)] = [str(verbs)]
+        else:
+            normalized[str(beat)] = []
+    return normalized
+
+
+def _contract_command_exists(verb: str, commands: dict) -> bool:
+    if not commands:
+        return True
+    if verb in commands:
+        return True
+    return verb.split()[0] in commands
+
+
+def validate_tool_contracts(tool_name: str, info: dict) -> dict:
+    """Validate one tool's contract declaration against registry commands.
+
+    This is intentionally registry-shape validation, not live behavior grading.
+    Live checks belong in the contract audit once declarations exist.
+    """
+    contracts_raw = info.get("contracts")
+    commands = info.get("commands") or {}
+    result = {
+        "tool": tool_name,
+        "declared": isinstance(contracts_raw, dict),
+        "beats": {},
+        "errors": [],
+        "warnings": [],
+    }
+    if not isinstance(contracts_raw, dict):
+        result["warnings"].append({
+            "code": "missing_contracts",
+            "message": "tool has no contracts block",
+        })
+        result["ok"] = True
+        return result
+
+    seen: dict[str, list[str]] = {}
+    contracts = get_tool_contracts(info)
+    for beat, verbs in contracts.items():
+        if beat not in CONTRACT_BEATS:
+            result["errors"].append({
+                "code": "unknown_beat",
+                "beat": beat,
+                "message": f"unknown contract beat: {beat}",
+            })
+            continue
+        result["beats"][beat] = verbs
+        for verb in verbs:
+            seen.setdefault(verb, []).append(beat)
+            if not _contract_command_exists(verb, commands):
+                result["errors"].append({
+                    "code": "unknown_command",
+                    "beat": beat,
+                    "verb": verb,
+                    "message": f"contract verb does not match declared commands: {verb}",
+                })
+
+    for verb, beats in sorted(seen.items()):
+        if len(beats) > 1:
+            result["warnings"].append({
+                "code": "multi_beat_verb",
+                "verb": verb,
+                "beats": beats,
+                "message": "verb is declared under multiple beats; keep only if intentionally context-dependent",
+            })
+
+    result["ok"] = not result["errors"]
+    return result
+
+
+def validate_registry_contracts(registry: dict) -> dict:
+    """Validate contract coverage and registry-shape consistency."""
+    tools = registry.get("tools") or {}
+    results = [
+        validate_tool_contracts(tool, info)
+        for tool, info in sorted(tools.items())
+        if isinstance(info, dict)
+    ]
+    return {
+        "tools": len(results),
+        "declared": sum(1 for item in results if item["declared"]),
+        "missing": sum(1 for item in results if not item["declared"]),
+        "errors": sum(len(item["errors"]) for item in results),
+        "warnings": sum(len(item["warnings"]) for item in results),
+        "ok": all(item["ok"] for item in results),
+        "results": results,
+    }
 
 
 def get_recommended_entrypoints(info: dict) -> list[str]:

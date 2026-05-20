@@ -18,7 +18,9 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+# File lives at <repo>/hooks/claude/agent-do-pretooluse-check.py, so the repo
+# root is two parents up and lib/ is its sibling.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "lib"))
 
 try:
     from registry import load_registry, find_raw_cli_equivalent, get_tool_readiness
@@ -122,6 +124,12 @@ SKIP_PATTERNS = [
 ]
 
 
+# Codex now supports `hookSpecificOutput.additionalContext` on PreToolUse
+# (May 2026 hooks release). Previous versions of this hook suppressed output
+# when AGENT_DO_HOOK_RUNTIME=codex because Codex rejected the field; that
+# suppression is now obsolete. The hook emits the nudge regardless of
+# runtime. The `is_codex_runtime` helper is preserved for any downstream
+# callers that still want to branch on runtime for other reasons.
 def is_codex_runtime() -> bool:
     runtime = os.environ.get("AGENT_DO_HOOK_RUNTIME", "").strip().lower()
     if runtime == "codex":
@@ -139,8 +147,6 @@ def is_codex_runtime() -> bool:
 
 
 def emit_context(nudge: str) -> None:
-    if is_codex_runtime():
-        return
     output = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

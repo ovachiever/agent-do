@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 90 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 91 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` (instant, no LLM)
 - **Natural Language** (humans): `agent-do -n "what you want"` (LLM-routed via Claude)
 
@@ -27,6 +27,8 @@ agent-do is a universal automation CLI for AI agents with 90 specialized tools. 
 ./agent-do notify emit build --fact service=api --fact status=failed
 ./agent-do notify reset-state build_failed
 ./agent-do notify delete-rule build_failed
+./agent-do slack dm --as-user teammate@example.com "Deploy complete"  # Send a Slack DM as the authenticated user
+./agent-do slack send --as-bot "#engineering" "Deploy complete"       # Send via bot/app token
 ./agent-do creds check --tool render   # Check a tool's declared credentials
 ./agent-do creds required namecheap    # Show which secrets a tool expects
 ./agent-do auth ensure github          # Reuse saved auth or import browser cookies/storage
@@ -38,6 +40,12 @@ agent-do is a universal automation CLI for AI agents with 90 specialized tools. 
 ./agent-do harness nudges effectiveness --since 7d  # Review hook follow/ignore/expire telemetry
 ./agent-do harness evidence build <session-or-run>  # Build drill-down evidence bundle
 ./agent-do harness manifest new <change-id>         # Start falsifiable harness change manifest
+AGENT_OBSIDIAN_VAULT_PATH=/path/to/vault ./agent-do obsidian refresh --full --json  # Build local vault index
+./agent-do obsidian embed status --json                                             # Check semantic index freshness
+./agent-do obsidian search "query" --mode hybrid --json                             # Hybrid keyword + semantic vault retrieval
+./agent-do obsidian context build "query" --json                                    # Build cited agent context
+./agent-do obsidian save --content "New idea" --related auto --json                 # Save through vault conventions
+./agent-do obsidian tasks next --horizon today --json                               # Ranked Obsidian tasks
 ./agent-do nudges stats                # Local nudge telemetry summary
 ./agent-do <tool> --help               # Tool-specific help
 ./agent-do --status                    # Active sessions and state
@@ -119,7 +127,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # filterEntries: removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth: identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill: writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 90 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 91 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog: tool descriptions, commands, examples
 ```
 
@@ -160,8 +168,10 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-resend` | Python | Resend domain management and DNS verification. Exact DKIM/SPF record retrieval, verification triggering, and public DNS comparison without UI truncation. Requires `RESEND_API_KEY`. |
 | `agent-hardware` | Bash | Unified hardware family surface over serial, bluetooth, USB, printers, and MIDI. `snapshot` gives one combined view, and `hardware <serial|bluetooth|usb|printer|midi> ...` delegates through a stable family tool without breaking the legacy leaf commands. |
 | `agent-meetings` | Bash | Unified enterprise meeting surface over Zoom, Google Meet, and Microsoft Teams. `snapshot` reports provider readiness and active meeting state, `join` auto-detects meeting URLs and codes, generic controls like `mute` and `share` route to the active provider, and provider passthroughs stay available under one family tool. |
+| `agent-slack` | Python | Slack messaging over user tokens, bot tokens, and incoming webhooks. `dm --as-user` resolves people by name, email, user ID, or existing DM ID, opens one-to-one conversations, and posts as the authenticated Slack user. `send --as-bot` preserves channel/app delivery, while `resolve-user`, `channels`, `snapshot`, `upload`, and `webhook` keep the Slack surface scriptable. |
 | `agent-gh` | Python | GitHub repository, pull request, review, and merge work-state across accessible repos. Uses the GitHub CLI as transport, caches accessible repo inventory under `~/.agent-do/gh/`, supports `inbox`, `awaiting`, `prs`, `pr`, `diff`, `threads`, `checks`, `review`, `approve`, `request-changes`, `comment`, `merge`, `ready`, and `draft`, and keeps GitHub PR/review operations separate from local `agent-git` and workflow-level `agent-ci`. |
 | `agent-coord` | Python | Project-local state-and-interrupt broker for parallel agents. Derives stable identities from thread/tmux context, renews short presence leases, tracks focus/claims/needs/publishes under the current repo’s local coord store, and computes contention/dependency/novelty interrupts instead of using an agent mailbox. |
+| `agent-obsidian` | Bash + Python | Obsidian vault surface with obsidian-cli fallback plus local SQLite FTS5 and semantic chunk index mode. With `AGENT_OBSIDIAN_VAULT_PATH` or `--vault /path/to/vault`, supports `refresh`, `embed status|refresh`, keyword/semantic/hybrid `search`, `context build`, `chat`, structured `read/query/relate/summarize`, conventions-backed `save/save-group`, unified tasks, graph/audit, templates, journaled move/delete, and `+live` eval/dev/plugin escape hatches. |
 | `bin/notify` + `lib/notify.py` | Python | Root notification contract over `sms`, `email`, `slack`, `messenger`, and `pipe`. Supports recipient aliases and groups under `~/.agent-do/notify/recipients.json`, event rules under `~/.agent-do/notify/rules.json`, cooldown state under `~/.agent-do/notify/state.json`, append-only delivery history in `~/.agent-do/notify/history.jsonl`, built-in templates for common rule types, provider preference order, fallback routing, cooldown-aware `emit`, `history`, `reset-state`, `delete-rule`, dry-run planning, and live-gated Messenger delivery without adding another public registry tool. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor: visual quality scoring across 5 perception layers (72 rules, 0-100 score). |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, HTML sites, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier and version-currency ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring, bounded HTML crawl, version checks, and local HTML dashboard. Storage: `~/.agent-do/context/` (global, per-user). |

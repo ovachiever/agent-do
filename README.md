@@ -1,7 +1,7 @@
 # agent-do
 
 <p align="center">
-  <img src="assets/agent-do-logo.png" alt="agent-do logo" width="720" />
+  <img src="assets/agent-do-logo.png" alt="agent-do logo" width="360" />
 </p>
 
 <p align="center"><strong>The outer harness for AI coding agents.</strong></p>
@@ -128,6 +128,10 @@ agent-do creds store RENDER_API_KEY --stdin
 agent-do creds check --tool render
 ```
 
+`creds required` is the public setup contract for every tool. It shows required
+keys, optional keys, and feature-specific notes when a tool can run partially
+without a key.
+
 When a human or harness wants natural-language routing:
 
 ```bash
@@ -159,6 +163,37 @@ agent-do browse login https://app.example.com
 agent-do browse login done --save mysite
 agent-do browse session load mysite
 ```
+
+### Obsidian Vaults
+
+`agent-do obsidian` can run in local-index mode without the Obsidian app or
+CLI. Point it at a vault path, build the SQLite/FTS index, then add semantic
+embeddings if you want hybrid retrieval.
+
+```bash
+export AGENT_OBSIDIAN_VAULT_PATH="$HOME/path/to/My Vault"
+
+agent-do obsidian doctor --json
+agent-do obsidian refresh --full --json
+agent-do obsidian search "project decision" --mode keyword --json
+```
+
+API keys are feature-specific:
+
+```bash
+agent-do creds required obsidian
+
+# Recommended for semantic search and reranking
+agent-do creds store VOYAGE_API_KEY --stdin
+agent-do obsidian embed refresh --json
+
+# Required for vault chat and OpenAI embedding fallback
+agent-do creds store OPENAI_API_KEY --stdin
+```
+
+No API key is needed for read, save, keyword search, tasks, graph, audit,
+templates, or local indexing. The Obsidian CLI is only needed for named live
+vault fallback and `+live` app/plugin/dev commands.
 
 ### External Docs And Project Memory
 
@@ -216,6 +251,31 @@ agent-do zpc learn "deploying" "missing env var" "added .env.example" "always sh
 agent-do zpc decide "Which DB?" --options "postgres,sqlite" --chosen postgres --rationale "team expertise" --confidence 0.9
 ```
 
+### Obsidian Vault Management
+
+`obsidian` is the agent-facing vault surface. With a local vault path it builds a
+SQLite FTS5 index under `<vault>/.agent-do/obsidian/index.db`, then reads,
+searches, saves, queries, audits, and rewrites notes without requiring
+Obsidian.app to be open. It also supports a semantic chunk index: `embed refresh`
+stores Voyage `voyage-4-large` embeddings by default, `search --mode hybrid`
+combines keyword and semantic retrieval with Voyage `rerank-2.5` when available,
+and `context build` returns cited chunks for an agent. If no local vault path is
+available, legacy commands fall back to the official Obsidian CLI.
+
+```bash
+AGENT_OBSIDIAN_VAULT_PATH="$HOME/Obsidian/Main" agent-do obsidian refresh --full --json
+agent-do obsidian embed status --json
+agent-do obsidian embed refresh --json
+agent-do obsidian search "Trinity Site" --json
+agent-do obsidian search "what did I decide about voice" --mode hybrid --json
+agent-do obsidian context build "what did I decide about voice" --json
+agent-do obsidian chat "what is on my plate today?" --json
+agent-do obsidian save --content "New idea" --related auto --tags idea --json
+agent-do obsidian tasks next --horizon today --json
+agent-do obsidian query "FROM #project WHERE status=active SORT due ASC" --json
+agent-do obsidian audit --scope "Projects" --json
+```
+
 ### Cloud And Service Operations
 
 ```bash
@@ -269,6 +329,17 @@ agent-do notify set-recipient me --sms +15551234567 --email me@example.com --pre
 agent-do notify me "Deploy complete" --via sms
 agent-do notify templates
 agent-do notify apply-template build_failed --recipient me
+```
+
+Slack supports both app/bot delivery and user-token delivery. Store a Slack User
+OAuth token once, then `slack dm --as-user` can resolve a person by name, email,
+user ID, or existing DM ID and post as the authenticated Slack user.
+
+```bash
+agent-do creds store SLACK_USER_TOKEN --stdin
+agent-do slack resolve-user --as-user teammate@example.com
+agent-do slack dm --as-user teammate@example.com "Deploy complete"
+agent-do slack send --as-bot "#engineering" "Deploy complete"
 ```
 
 For visible desktop control, use the explicit live modifier:

@@ -109,6 +109,29 @@ agent-do zpc decide "Which DB?" --options "postgres,sqlite" --chosen postgres --
 agent-do zpc harvest --auto
 ```
 
+## Obsidian Vaults
+
+Use `obsidian` for local vault reads, saves, keyword and semantic retrieval,
+queries, tasks, graph hygiene, and audits. Local mode uses a derived SQLite FTS5
+index under the vault and can build a semantic chunk index for hybrid search,
+cited context, related-note discovery, and vault-grounded chat. Legacy commands
+fall back to obsidian-cli when only a live named vault is available.
+
+```bash
+AGENT_OBSIDIAN_VAULT_PATH="$HOME/Obsidian/Main" agent-do obsidian refresh --full --json
+agent-do obsidian embed status --json
+agent-do obsidian embed refresh --json
+agent-do obsidian search "Trinity Site" --mode hybrid --json
+agent-do obsidian context build "what did I decide about voice" --json
+agent-do obsidian chat "what is on my plate today?" --json
+agent-do obsidian save --content "New idea" --related auto --tags idea --json
+agent-do obsidian save-group "Hub" --child "Child A:body" --child "Child B:body" --scope team --json
+agent-do obsidian tasks next --horizon today --json
+agent-do obsidian query "FROM #project WHERE status=active SORT due ASC" --json
+agent-do obsidian move "Old Name" "Projects/New Name" --update-links --json
+agent-do obsidian audit --scope "Projects" --json
+```
+
 ## GitHub Review Work
 
 `gh` is for PR and review state across accessible GitHub repos.
@@ -195,6 +218,17 @@ agent-do notify me "Deploy complete" --via sms
 agent-do notify templates
 agent-do notify apply-template build_failed --recipient me
 agent-do notify history --limit 10
+```
+
+Slack supports direct user-token delivery as well as bot and webhook delivery.
+Store `SLACK_USER_TOKEN` for messages sent as the authenticated user, or
+`SLACK_BOT_TOKEN` for app/bot messages.
+
+```bash
+agent-do creds store SLACK_USER_TOKEN --stdin
+agent-do slack resolve-user --as-user teammate@example.com
+agent-do slack dm --as-user teammate@example.com "Deploy complete"
+agent-do slack send --as-bot "#engineering" "Deploy complete"
 ```
 
 ## Coordination And Specs

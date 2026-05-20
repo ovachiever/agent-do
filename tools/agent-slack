@@ -1,248 +1,547 @@
-#!/usr/bin/env bash
-# agent-slack - Slack integration
+#!/usr/bin/env python3
+"""Slack messaging tool for agent-do."""
 
-set -euo pipefail
+from __future__ import annotations
 
-show_help() {
-    cat << 'EOF'
-agent-slack - Slack messaging
+import argparse
+import json
+import mimetypes
+import os
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from typing import Any
+
+
+DEFAULT_API_BASE = "https://slack.com/api"
+USER_ID_RE = re.compile(r"^[UW][A-Z0-9]+$")
+CONVERSATION_ID_RE = re.compile(r"^[CDG][A-Z0-9]+$")
+
+
+class SlackError(RuntimeError):
+    def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.payload = payload or {}
+
+
+@dataclass
+class Token:
+    value: str
+    source: str
+    identity: str
+
+
+class SlackClient:
+    def __init__(self, token: Token) -> None:
+        self.token = token
+        self.base_url = os.environ.get("SLACK_API_BASE_URL", DEFAULT_API_BASE).rstrip("/")
+        self.timeout = float(os.environ.get("SLACK_API_TIMEOUT", "20"))
+
+    def get(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        query = urllib.parse.urlencode(params or {})
+        url = f"{self.base_url}/{method}"
+        if query:
+            url = f"{url}?{query}"
+        request = urllib.request.Request(url, headers=self._headers())
+        return self._read_json(request, method)
+
+    def post(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/{method}",
+            data=data,
+            method="POST",
+            headers={**self._headers(), "Content-Type": "application/json; charset=utf-8"},
+        )
+        return self._read_json(request, method)
+
+    def post_multipart(self, method: str, fields: dict[str, str], file_field: str, file_path: str) -> dict[str, Any]:
+        boundary = "agentdo-slack-boundary"
+        body_parts: list[bytes] = []
+        for key, value in fields.items():
+            body_parts.extend(
+                [
+                    f"--{boundary}\r\n".encode(),
+                    f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
+                    value.encode("utf-8"),
+                    b"\r\n",
+                ]
+            )
+
+        filename = os.path.basename(file_path)
+        content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+        with open(file_path, "rb") as handle:
+            file_bytes = handle.read()
+
+        body_parts.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode(),
+                f"Content-Type: {content_type}\r\n\r\n".encode(),
+                file_bytes,
+                b"\r\n",
+                f"--{boundary}--\r\n".encode(),
+            ]
+        )
+
+        request = urllib.request.Request(
+            f"{self.base_url}/{method}",
+            data=b"".join(body_parts),
+            method="POST",
+            headers={**self._headers(), "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        return self._read_json(request, method)
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token.value}"}
+
+    def _read_json(self, request: urllib.request.Request, method: str) -> dict[str, Any]:
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise SlackError(f"{method} HTTP {exc.code}: {raw}") from exc
+        except urllib.error.URLError as exc:
+            raise SlackError(f"{method} network error: {exc.reason}") from exc
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SlackError(f"{method} returned non-JSON response: {raw}") from exc
+
+        if not payload.get("ok", False):
+            error = str(payload.get("error") or "unknown_error")
+            details = []
+            if payload.get("needed"):
+                details.append(f"needed={payload['needed']}")
+            if payload.get("provided"):
+                details.append(f"provided={payload['provided']}")
+            suffix = f" ({', '.join(details)})" if details else ""
+            raise SlackError(f"{method} failed: {error}{suffix}", payload=payload)
+        return payload
+
+
+def show_help() -> None:
+    print(
+        """agent-slack - Slack messaging
 
 Commands:
-  send <channel> <message>   Send message to channel
-  webhook <message>          Send via webhook URL
-  upload <channel> <file>    Upload file to channel
-  snapshot                   Workspace state as JSON (channels, unread, recent messages)
-  channels                   List channels
+  send [--as-user|--as-bot] <target> <message>
+      Send to a channel, conversation ID, or @user target.
+  dm [--as-user|--as-bot] <person|email|user-id|dm-id> <message>
+      Resolve/open a 1:1 DM and send a message.
+  resolve-user [--as-user|--as-bot] <name|email|user-id>
+      Resolve a Slack user to a user ID.
+  webhook <message>
+      Send via incoming webhook URL.
+  upload [--as-user|--as-bot] <target> <file>
+      Upload a file to a channel or conversation ID.
+  snapshot
+      Workspace state as JSON (channels and unread counts).
+  channels
+      List public/private channels visible to the token.
 
 Environment:
-  SLACK_TOKEN                Bot token (xoxb-...)
-  SLACK_WEBHOOK_URL          Incoming webhook URL
+  SLACK_USER_TOKEN       User OAuth token (xoxp-...) for sending as you.
+  SLACK_TOKEN            Existing token name; may be user or bot.
+  SLACK_BOT_TOKEN        Bot User OAuth token (xoxb-...).
+  SLACK_WEBHOOK_URL      Incoming webhook URL.
 
 Examples:
-  agent-slack send "#general" "Hello from agent-do!"
-  agent-slack send "@user" "Direct message"
+  agent-slack dm --as-user "Dana Example" "Message from me"
+  agent-slack dm --as-user dana@example.com "Message from me"
+  agent-slack send "#general" "Hello from agent-do"
+  agent-slack send D1234567890 "Hello existing DM"
   agent-slack webhook "Build completed successfully"
-  agent-slack upload "#dev" ./report.pdf
-EOF
-}
+"""
+    )
 
-# Send message via API
-send_api() {
-    local channel="$1"
-    local message="$2"
-    local token="${SLACK_TOKEN:-}"
 
-    if [[ -z "$token" ]]; then
-        echo "Error: SLACK_TOKEN not set"
-        return 1
-    fi
+def token_from_env(*, as_user: bool = False, as_bot: bool = False) -> Token:
+    candidates: list[tuple[str, str, str]]
+    if as_user:
+        candidates = [("SLACK_USER_TOKEN", "user"), ("SLACK_TOKEN", "auto")]
+    elif as_bot:
+        candidates = [("SLACK_BOT_TOKEN", "bot"), ("SLACK_TOKEN", "auto")]
+    else:
+        candidates = [
+            ("SLACK_USER_TOKEN", "user"),
+            ("SLACK_TOKEN", "auto"),
+            ("SLACK_BOT_TOKEN", "bot"),
+        ]
 
-    curl -s -X POST "https://slack.com/api/chat.postMessage" \
-        -H "Authorization: Bearer $token" \
-        -H "Content-Type: application/json" \
-        -d "{\"channel\": \"$channel\", \"text\": \"$message\"}" | \
-        python3 -c "import sys,json; r=json.load(sys.stdin); print('Sent!' if r.get('ok') else f'Error: {r.get(\"error\")}')"
-}
+    for key, identity in candidates:
+        value = os.environ.get(key, "").strip()
+        if not value:
+            continue
+        if identity == "auto":
+            identity = "user" if value.startswith("xoxp-") else "bot"
+        if as_user and identity != "user":
+            continue
+        if as_bot and identity == "user":
+            continue
+        return Token(value=value, source=key, identity=identity)
 
-# Send message via webhook
-send_webhook() {
-    local message="$1"
-    local webhook="${SLACK_WEBHOOK_URL:-}"
+    if as_user:
+        raise SlackError("SLACK_USER_TOKEN is required for --as-user")
+    if as_bot:
+        raise SlackError("SLACK_BOT_TOKEN or SLACK_TOKEN is required for --as-bot")
+    raise SlackError("SLACK_USER_TOKEN, SLACK_TOKEN, or SLACK_BOT_TOKEN is required")
 
-    if [[ -z "$webhook" ]]; then
-        echo "Error: SLACK_WEBHOOK_URL not set"
-        return 1
-    fi
 
-    local response
-    response=$(curl -s -X POST "$webhook" \
-        -H "Content-Type: application/json" \
-        -d "{\"text\": \"$message\"}")
+def is_email(value: str) -> bool:
+    return "@" in value and "." in value.rsplit("@", 1)[-1]
 
-    if [[ "$response" == "ok" ]]; then
-        echo "Sent!"
-    else
-        echo "Error: $response"
-        return 1
-    fi
-}
 
-cmd_send() {
-    local channel="${1:-}"
-    shift || true
-    local message="$*"
+def normalize_person(person: str) -> str:
+    return person[1:] if person.startswith("@") else person
 
-    if [[ -z "$channel" ]] || [[ -z "$message" ]]; then
-        echo "Error: Channel and message required"
-        echo "Usage: agent-slack send <channel> <message>"
-        return 1
-    fi
 
-    # Normalize channel name
-    [[ ! "$channel" =~ ^[#@] ]] && channel="#$channel"
+def user_display(user: dict[str, Any]) -> str:
+    profile = user.get("profile") or {}
+    candidates = [
+        profile.get("display_name"),
+        profile.get("real_name"),
+        user.get("real_name"),
+        user.get("name"),
+        user.get("id"),
+    ]
+    return next((str(item) for item in candidates if item), "unknown")
 
-    send_api "$channel" "$message"
-}
 
-cmd_webhook() {
-    local message="$*"
+def resolve_user(client: SlackClient, query: str) -> dict[str, Any]:
+    query = normalize_person(query.strip())
+    if USER_ID_RE.match(query):
+        return {"id": query, "resolved_from": "id"}
 
-    if [[ -z "$message" ]]; then
-        echo "Error: Message required"
-        return 1
-    fi
+    if is_email(query):
+        try:
+            payload = client.get("users.lookupByEmail", {"email": query})
+            user = payload.get("user") or {}
+            if user.get("id"):
+                user["resolved_from"] = "email"
+                return user
+        except SlackError as exc:
+            if exc.payload.get("error") not in {"missing_scope", "users_not_found"}:
+                raise
 
-    send_webhook "$message"
-}
+    wanted = query.casefold()
+    matches: list[dict[str, Any]] = []
+    cursor = ""
+    while True:
+        payload = client.get("users.list", {"limit": 200, "cursor": cursor})
+        for user in payload.get("members", []):
+            if user.get("deleted") or user.get("is_bot"):
+                continue
+            profile = user.get("profile") or {}
+            fields = [
+                user.get("id"),
+                user.get("name"),
+                user.get("real_name"),
+                profile.get("real_name"),
+                profile.get("display_name"),
+                profile.get("real_name_normalized"),
+                profile.get("display_name_normalized"),
+                profile.get("email"),
+            ]
+            normalized = [str(field).casefold() for field in fields if field]
+            if wanted in normalized:
+                item = dict(user)
+                item["resolved_from"] = "users.list"
+                return item
+            if any(wanted in value for value in normalized):
+                matches.append(user)
 
-cmd_upload() {
-    local channel="${1:-}"
-    local file="${2:-}"
-    local token="${SLACK_TOKEN:-}"
+        metadata = payload.get("response_metadata") or {}
+        cursor = str(metadata.get("next_cursor") or "")
+        if not cursor:
+            break
 
-    if [[ -z "$token" ]]; then
-        echo "Error: SLACK_TOKEN not set"
-        return 1
-    fi
+    if len(matches) == 1:
+        item = dict(matches[0])
+        item["resolved_from"] = "users.list-partial"
+        return item
+    if matches:
+        choices = ", ".join(f"{user_display(user)} ({user.get('id')})" for user in matches[:8])
+        raise SlackError(f"ambiguous user '{query}': {choices}")
+    raise SlackError(f"user not found: {query}")
 
-    if [[ -z "$channel" ]] || [[ -z "$file" ]]; then
-        echo "Error: Channel and file required"
-        echo "Usage: agent-slack upload <channel> <file>"
-        return 1
-    fi
 
-    if [[ ! -f "$file" ]]; then
-        echo "Error: File not found: $file"
-        return 1
-    fi
+def open_dm(client: SlackClient, user_id: str) -> str:
+    payload = client.post("conversations.open", {"users": user_id, "return_im": True})
+    channel = payload.get("channel") or {}
+    channel_id = channel.get("id")
+    if not channel_id:
+        raise SlackError("conversations.open did not return a channel ID", payload=payload)
+    return str(channel_id)
 
-    # Normalize channel name
-    [[ ! "$channel" =~ ^[#@] ]] && channel="#$channel"
 
-    curl -s -X POST "https://slack.com/api/files.upload" \
-        -H "Authorization: Bearer $token" \
-        -F "channels=$channel" \
-        -F "file=@$file" | \
-        python3 -c "import sys,json; r=json.load(sys.stdin); print('Uploaded!' if r.get('ok') else f'Error: {r.get(\"error\")}')"
-}
+def target_to_channel(client: SlackClient, target: str, *, force_dm: bool = False) -> tuple[str, str]:
+    target = target.strip()
+    if not target:
+        raise SlackError("target is required")
 
-cmd_channels() {
-    local token="${SLACK_TOKEN:-}"
-    if [[ -z "$token" ]]; then
-        echo "Error: SLACK_TOKEN not set"
-        return 1
-    fi
+    if CONVERSATION_ID_RE.match(target):
+        return target, "conversation"
 
-    curl -s "https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=100&exclude_archived=true" \
-        -H "Authorization: Bearer $token" | \
-        python3 -c "
-import sys, json
-r = json.load(sys.stdin)
-if r.get('ok'):
-    for ch in sorted(r['channels'], key=lambda c: c.get('name', '')):
-        prefix = '#' if not ch.get('is_private') else '🔒'
-        members = ch.get('num_members', 0)
-        print(f'{prefix}{ch[\"name\"]}  ({members} members)')
-else:
-    print(f'Error: {r.get(\"error\", \"unknown\")}')
-"
-}
+    if USER_ID_RE.match(target):
+        return open_dm(client, target), "dm"
 
-cmd_snapshot() {
-    local token="${SLACK_TOKEN:-}"
-    if [[ -z "$token" ]]; then
-        echo '{"error": "SLACK_TOKEN not set"}'
-        return 1
-    fi
+    if force_dm or target.startswith("@") or is_email(target) or " " in target:
+        user = resolve_user(client, target)
+        return open_dm(client, str(user["id"])), "dm"
 
-    python3 -c "
-import urllib.request, json, os
+    if target.startswith("#"):
+        return target, "channel"
 
-token = os.environ.get('SLACK_TOKEN', '')
-headers = {'Authorization': f'Bearer {token}'}
+    # Preserve legacy behavior: a bare send target means a channel name.
+    return f"#{target}", "channel"
 
-def slack_get(endpoint, params=''):
-    url = f'https://slack.com/api/{endpoint}?{params}'
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
 
-# Get channels
-channels_resp = slack_get('conversations.list', 'types=public_channel,private_channel&limit=50&exclude_archived=true')
-channels = []
-unread_total = 0
-if channels_resp.get('ok'):
-    for ch in channels_resp.get('channels', []):
+def join_message(parts: list[str]) -> str:
+    message = " ".join(parts).strip()
+    if not message:
+        raise SlackError("message is required")
+    return message
+
+
+def cmd_send(args: argparse.Namespace, *, force_dm: bool = False) -> None:
+    token = token_from_env(as_user=args.as_user, as_bot=args.as_bot)
+    client = SlackClient(token)
+    message = join_message(args.message)
+    channel, target_type = target_to_channel(client, args.target, force_dm=force_dm)
+    payload = client.post("chat.postMessage", {"channel": channel, "text": message})
+    result = {
+        "ok": True,
+        "channel": payload.get("channel", channel),
+        "ts": payload.get("ts"),
+        "target_type": target_type,
+        "identity": token.identity,
+        "token_source": token.source,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"Sent to {result['channel']} as {token.identity}")
+
+
+def cmd_resolve_user(args: argparse.Namespace) -> None:
+    token = token_from_env(as_user=args.as_user, as_bot=args.as_bot)
+    client = SlackClient(token)
+    user = resolve_user(client, args.query)
+    profile = user.get("profile") or {}
+    result = {
+        "ok": True,
+        "id": user.get("id"),
+        "name": user.get("name"),
+        "real_name": user.get("real_name") or profile.get("real_name"),
+        "display_name": profile.get("display_name"),
+        "email": profile.get("email"),
+        "resolved_from": user.get("resolved_from"),
+        "identity": token.identity,
+        "token_source": token.source,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"{result['id']}  {user_display(user)}")
+
+
+def cmd_webhook(args: argparse.Namespace) -> None:
+    webhook = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+    if not webhook:
+        raise SlackError("SLACK_WEBHOOK_URL is required")
+    message = join_message(args.message)
+    data = json.dumps({"text": message}).encode("utf-8")
+    request = urllib.request.Request(
+        webhook,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=float(os.environ.get("SLACK_API_TIMEOUT", "20"))) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise SlackError(f"webhook HTTP {exc.code}: {body}") from exc
+    if body.strip() != "ok":
+        raise SlackError(f"webhook failed: {body}")
+    print("Sent!")
+
+
+def cmd_upload(args: argparse.Namespace) -> None:
+    if not os.path.isfile(args.file):
+        raise SlackError(f"file not found: {args.file}")
+    token = token_from_env(as_user=args.as_user, as_bot=args.as_bot)
+    client = SlackClient(token)
+    channel, target_type = target_to_channel(client, args.target)
+    payload = client.post_multipart("files.upload", {"channels": channel}, "file", args.file)
+    result = {
+        "ok": True,
+        "channel": channel,
+        "target_type": target_type,
+        "file": payload.get("file", {}).get("id"),
+        "identity": token.identity,
+        "token_source": token.source,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"Uploaded to {channel} as {token.identity}")
+
+
+def cmd_channels(args: argparse.Namespace) -> None:
+    token = token_from_env(as_user=args.as_user, as_bot=args.as_bot)
+    client = SlackClient(token)
+    cursor = ""
+    channels: list[dict[str, Any]] = []
+    while True:
+        payload = client.get(
+            "conversations.list",
+            {"types": "public_channel,private_channel", "limit": 200, "exclude_archived": "true", "cursor": cursor},
+        )
+        channels.extend(payload.get("channels", []))
+        cursor = str((payload.get("response_metadata") or {}).get("next_cursor") or "")
+        if not cursor:
+            break
+    if args.json:
+        print(json.dumps({"ok": True, "channels": channels}, indent=2))
+    else:
+        for channel in sorted(channels, key=lambda item: item.get("name", "")):
+            prefix = "#" if not channel.get("is_private") else "private:"
+            print(f"{prefix}{channel['name']}  ({channel.get('num_members', 0)} members)")
+
+
+def cmd_snapshot(args: argparse.Namespace) -> None:
+    token = token_from_env(as_user=args.as_user, as_bot=args.as_bot)
+    client = SlackClient(token)
+    channels_payload = client.get(
+        "conversations.list",
+        {"types": "public_channel,private_channel", "limit": 50, "exclude_archived": "true"},
+    )
+    auth_payload = client.get("auth.test")
+    channels = []
+    unread_total = 0
+    for channel in channels_payload.get("channels", []):
         info = {
-            'name': ch['name'],
-            'id': ch['id'],
-            'private': ch.get('is_private', False),
-            'members': ch.get('num_members', 0),
-            'topic': ch.get('topic', {}).get('value', ''),
+            "name": channel.get("name"),
+            "id": channel.get("id"),
+            "private": channel.get("is_private", False),
+            "members": channel.get("num_members", 0),
+            "topic": (channel.get("topic") or {}).get("value", ""),
         }
-
-        # Check unread (only for joined channels)
-        if ch.get('is_member'):
+        if channel.get("is_member"):
             try:
-                unread_resp = slack_get('conversations.info', f'channel={ch[\"id\"]}')
-                if unread_resp.get('ok'):
-                    count = unread_resp.get('channel', {}).get('unread_count_display', 0)
-                    info['unread'] = count
-                    unread_total += count
-            except:
-                info['unread'] = 0
-
+                channel_info = client.get("conversations.info", {"channel": channel["id"]})
+                count = (channel_info.get("channel") or {}).get("unread_count_display", 0)
+                info["unread"] = count
+                unread_total += int(count or 0)
+            except SlackError:
+                info["unread"] = 0
         channels.append(info)
+    print(
+        json.dumps(
+            {
+                "team": auth_payload.get("team", "unknown"),
+                "user": auth_payload.get("user", "unknown"),
+                "identity": token.identity,
+                "token_source": token.source,
+                "channels": {"count": len(channels), "items": sorted(channels, key=lambda c: c.get("unread", 0), reverse=True)},
+                "total_unread": unread_total,
+                "token_valid": True,
+            },
+            indent=2,
+        )
+    )
 
-# Get user info
-user_resp = slack_get('auth.test')
-user = user_resp.get('user', 'unknown') if user_resp.get('ok') else 'unknown'
-team = user_resp.get('team', 'unknown') if user_resp.get('ok') else 'unknown'
 
-snapshot = {
-    'team': team,
-    'user': user,
-    'channels': {'count': len(channels), 'items': sorted(channels, key=lambda c: c.get('unread', 0), reverse=True)},
-    'total_unread': unread_total,
-    'token_valid': channels_resp.get('ok', False),
-}
-print(json.dumps(snapshot, indent=2))
-"
-}
+def add_identity_flags(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--as-user", action="store_true", help="Use SLACK_USER_TOKEN and send as the authenticated user")
+    group.add_argument("--as-bot", action="store_true", help="Use SLACK_BOT_TOKEN or SLACK_TOKEN and send as the app/bot")
+    parser.add_argument("--json", action="store_true", help="Output JSON")
 
-# Main
-case "${1:-help}" in
-    send|message|msg)
-        shift
-        cmd_send "$@"
-        ;;
-    webhook|hook)
-        shift
-        cmd_webhook "$@"
-        ;;
-    upload|file)
-        shift
-        cmd_upload "$@"
-        ;;
-    snapshot|snap)
-        shift
-        cmd_snapshot
-        ;;
-    channels|ch)
-        shift
-        cmd_channels
-        ;;
-    help|--help|-h)
-        show_help
-        ;;
-    *)
-        # If first arg looks like a channel, assume send
-        if [[ "$1" =~ ^[#@] ]]; then
-            cmd_send "$@"
-        else
-            echo "Unknown command: $1"
-            echo "Try: agent-slack help"
-            exit 1
-        fi
-        ;;
-esac
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="agent-slack", add_help=False)
+    subparsers = parser.add_subparsers(dest="command")
+
+    send_parser = subparsers.add_parser("send", help="Send message")
+    add_identity_flags(send_parser)
+    send_parser.add_argument("target")
+    send_parser.add_argument("message", nargs=argparse.REMAINDER)
+    send_parser.set_defaults(handler=lambda args: cmd_send(args, force_dm=False))
+
+    dm_parser = subparsers.add_parser("dm", help="Send direct message")
+    add_identity_flags(dm_parser)
+    dm_parser.add_argument("target")
+    dm_parser.add_argument("message", nargs=argparse.REMAINDER)
+    dm_parser.set_defaults(handler=lambda args: cmd_send(args, force_dm=True))
+
+    resolve_parser = subparsers.add_parser("resolve-user", help="Resolve Slack user")
+    add_identity_flags(resolve_parser)
+    resolve_parser.add_argument("query")
+    resolve_parser.set_defaults(handler=cmd_resolve_user)
+
+    webhook_parser = subparsers.add_parser("webhook", help="Send via webhook")
+    webhook_parser.add_argument("message", nargs=argparse.REMAINDER)
+    webhook_parser.set_defaults(handler=cmd_webhook)
+
+    upload_parser = subparsers.add_parser("upload", help="Upload file")
+    add_identity_flags(upload_parser)
+    upload_parser.add_argument("target")
+    upload_parser.add_argument("file")
+    upload_parser.set_defaults(handler=cmd_upload)
+
+    channels_parser = subparsers.add_parser("channels", help="List channels")
+    add_identity_flags(channels_parser)
+    channels_parser.set_defaults(handler=cmd_channels)
+
+    snapshot_parser = subparsers.add_parser("snapshot", help="Workspace snapshot")
+    add_identity_flags(snapshot_parser)
+    snapshot_parser.set_defaults(handler=cmd_snapshot)
+
+    return parser
+
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    if not argv or argv[0] in {"help", "--help", "-h"}:
+        show_help()
+        raise SystemExit(0)
+    aliases = {
+        "message": "send",
+        "msg": "send",
+        "im": "dm",
+        "direct": "dm",
+        "hook": "webhook",
+        "file": "upload",
+        "ch": "channels",
+        "snap": "snapshot",
+    }
+    if argv[0] in aliases:
+        argv = [aliases[argv[0]], *argv[1:]]
+    if argv[0].startswith(("#", "@")):
+        argv = ["send", *argv]
+    return argv
+
+
+def main(argv: list[str]) -> int:
+    try:
+        parser = build_parser()
+        args = parser.parse_args(normalize_argv(argv))
+        if not hasattr(args, "handler"):
+            raise SlackError(f"unknown command: {argv[0] if argv else ''}")
+        args.handler(args)
+        return 0
+    except SlackError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

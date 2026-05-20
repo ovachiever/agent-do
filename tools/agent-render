@@ -7,41 +7,134 @@ RENDER_API="https://api.render.com/v1"
 
 show_help() {
     cat << 'EOF'
-agent-render - Render.com service management
+agent-render - Render.com service management (full API coverage)
 
-Commands:
-  services / ls                List all services
-  show <svc>                   Detailed service info
-  deploy <svc> [--commit SHA]  Trigger deploy
-  deploys <svc>                List recent deploys
-  logs <svc> [opts]            View recent logs
-  restart <svc>                Restart service
-  suspend <svc>                Suspend service
-  resume <svc>                 Resume service
-  scale <svc> <n>              Scale instances
-  env <svc>                    List env vars
-  env-set <svc> <key> <val>    Set env var
-  env-del <svc> <key>          Delete env var
-  db list                      List PostgreSQL instances
-  db show <db>                 DB details + connection info
-  domains <svc>                List custom domains
-  metrics <svc> [--type T]     Service metrics (cpu|memory|bandwidth)
-  projects                     List projects
-  snapshot                     Full account state as JSON
+WORKSPACE
+  owners                        List workspaces/owners (for --owner)
+  whoami                        Show authenticated user
+  audit [--limit N]             Audit log entries
 
-Services can be referenced by name or ID (srv-xxx).
+SERVICES (web, worker, static, private, cron)
+  services / ls                 List all services
+  show <svc>                    Detailed service info
+  create <type> <name> [opts]   Create a new service (`create --help` for opts)
+  update <svc> [opts]           Update service settings
+  delete <svc> --yes            Delete a service (destructive)
+  cache-purge <svc>             Purge build cache
+  events <svc>                  Recent service events
+  instances <svc>               Running instance list
+  restart / suspend / resume    Lifecycle
+  scale <svc> <n>               Set instance count
+  autoscaling {show|enable|disable} <svc> [--min --max --cpu --memory]
+
+DEPLOYS
+  deploy <svc> [--commit SHA]   Trigger deploy
+  deploys <svc>                 List recent deploys
+  deploy show <svc> <deploy>    Deploy details
+  deploy cancel <svc> <deploy>  Cancel in-progress deploy
+  rollback <svc> <deploy>       Roll back to a prior deploy
+
+ONE-OFF JOBS
+  jobs <svc>                    List one-off jobs
+  job run <svc> --command "..."  Run a one-off command
+  job show <svc> <job-id>       Job details
+  job cancel <svc> <job-id>     Cancel a running job
+
+CRON
+  cron run <cron>               Trigger cron job now
+  cron cancel <cron>            Cancel running cron
+
+ENV VARS / SECRET FILES
+  env <svc>                     List env vars (values masked)
+  env-set <svc> <KEY> <VAL>     Upsert env var
+  env-del <svc> <KEY>           Delete env var
+  secret {list|get|set|del} <svc> [name] [file|-]   Per-service secret files
+
+ENV GROUPS (shared vars/secrets across services)
+  env-group {list|show|create|delete|rename}
+  env-group {link|unlink} <eg> <svc>
+  env-group {set|get|del-var} <eg> <KEY> [VAL]
+  env-group secret {set|get|del} <eg> <name> [file|-]
+
+POSTGRES
+  db list                       List instances
+  db show <db>                  Details + connection info
+  db create <name> [--plan --version --region --database --user --ha --disk-size]
+  db update <db> [--plan --disk-size --name]
+  db delete <db> --yes
+  db {suspend|resume|restart|failover} <db>
+  db connect-info <db>          Internal + external DSN
+  db backup <db>                Trigger export
+  db backups <db>               List exports
+  db recover <db> [--target-time ISO]   Point-in-time recovery (or window check)
+  db creds {list|add|del} <db> [user]
+
+KEY VALUE (Redis-compatible)
+  kv {list|show|create|update|delete|connect-info|suspend|resume}
+
+CUSTOM DOMAINS
+  domains <svc>                 List
+  domain {add|show|del|verify} <svc> <name>
+
+HEADERS & ROUTES (web/static service config)
+  header {list|add|del} <svc> [--path --name --value | --id]
+  route {list|add|del} <svc> [--source --destination --type]
+
+BLUEPRINTS (render.yaml)
+  blueprint {list|show|validate|update|delete|syncs}
+
+DISKS
+  disk {list|show|create|update|delete|snapshots|restore}
+
+DEDICATED IPs
+  dedicated-ip {list|show|create|delete}
+
+REGISTRY CREDENTIALS (private Docker registries)
+  registry {list|show|add|delete}
+
+PROJECTS & ENVIRONMENTS
+  projects                      List (shorthand)
+  project {list|show|create|update|delete}
+  environment {list|show|create|delete|link|unlink}
+
+WEBHOOKS
+  webhook {list|show|create|update|delete|events}
+
+NOTIFICATIONS
+  notify {show|update|overrides|override} [opts]
+
+MAINTENANCE
+  maintenance {list|show|reschedule|trigger}
+
+OBSERVABILITY
+  logs <svc> [opts]             Recent logs (`logs --help` for filters)
+  metrics <svc> [--type T]      Service metrics (cpu|memory|bandwidth)
+  snapshot                      Full account state as JSON
+
+Services can be referenced by name or ID (srv-xxx, crn-xxx).
+Postgres by name or ID (dpg-xxx). Key Value by name or ID (red-xxx).
+Owners by name or ID (tea-xxx, usr-xxx).
 
 Environment:
-  RENDER_API_KEY               API key (Bearer token)
+  RENDER_API_KEY                API key (Bearer token)
 
 Examples:
-  agent-render services
-  agent-render deploy my-api --commit abc123
-  agent-render logs my-api --since 1h --type app
-  agent-render env my-api
-  agent-render env-set my-api DATABASE_URL "postgres://..."
-  agent-render db list
-  agent-render snapshot
+  agent-render owners
+  agent-render create web my-api --repo https://github.com/me/api \
+    --build "npm ci && npm run build" --start "npm start" \
+    --env DATABASE_URL='postgres://...'
+  agent-render create cron daily-task --repo https://github.com/me/jobs \
+    --schedule "0 12 * * *" --start "node daily.js"
+  agent-render db create main-db --plan basic_1gb --version 16 --region oregon
+  agent-render kv create cache --plan free --region oregon
+  agent-render env-group create shared-env --env LOG_LEVEL=info --env NODE_ENV=production
+  agent-render env-group link shared-env my-api
+  agent-render domain add my-api example.com
+  agent-render disk create --name uploads --size 10 --mount /data --service my-api
+  agent-render webhook create --name slack-deploys --url https://hooks.slack.com/... \
+    --event deploy_ended --event deploy_started
+  agent-render blueprint validate render.yaml
+  agent-render audit --limit 50
 EOF
 }
 
@@ -987,80 +1080,2160 @@ print(json.dumps(snapshot, indent=2))
 "
 }
 
+# =====================================================================
+# Workspace primitives (owners, users)
+# =====================================================================
+
+resolve_owner() {
+    local name_or_id="$1"
+    if [[ "$name_or_id" == tea-* || "$name_or_id" == usr-* ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+    local result
+    result=$(render_request GET "/owners?limit=100")
+    local owner_id
+    owner_id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for item in items:
+    o = item.get('owner', item)
+    if o.get('name', '') == name or o.get('email', '') == name:
+        print(o.get('id', '')); break
+" 2>/dev/null)
+    if [[ -z "$owner_id" ]]; then
+        echo "Error: Owner '$name_or_id' not found (try \`agent-render owners\`)" >&2
+        return 1
+    fi
+    echo "$owner_id"
+}
+
+default_owner_id() {
+    # Default to the first listed owner if user didn't specify.
+    local result
+    result=$(render_request GET "/owners?limit=1")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if items:
+    print(items[0].get('owner', items[0]).get('id', ''))
+" 2>/dev/null
+}
+
+cmd_owners() {
+    local result
+    result=$(render_request GET "/owners?limit=50")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items:
+    print('No owners (workspaces) found'); sys.exit(0)
+for item in items:
+    o = item.get('owner', item)
+    print(f\"{o.get('id', '')}  {o.get('name', '')}  [{o.get('type', '')}]  {o.get('email', '')}\")
+"
+}
+
+cmd_whoami() {
+    local result
+    result=$(render_request_checked GET "/users") || return 1
+    echo "$result" | python3 -c "
+import sys, json
+u = json.load(sys.stdin)
+if isinstance(u, list) and u:
+    u = u[0].get('user', u[0])
+print(f\"ID:    {u.get('id', '')}\")
+print(f\"Name:  {u.get('name', '')}\")
+print(f\"Email: {u.get('email', '')}\")
+"
+}
+
+# =====================================================================
+# Service create / update / delete / cache-purge / events / instances
+# =====================================================================
+
+show_create_help() {
+    cat <<'EOF'
+Usage: agent-render create <type> <name> [options]
+
+Types: web | worker | static | private | cron
+
+Common options:
+  --owner <id-or-name>       Required if not derivable (see `agent-render owners`)
+  --repo <git-url>           Git repo URL (e.g. https://github.com/me/proj)
+  --branch <name>            Default: main
+  --root-dir <path>          Sub-directory containing the project
+  --runtime <r>              node|python|ruby|go|rust|elixir|docker|image (default: node for web/worker/cron, none for static)
+  --build "<cmd>"            Build command
+  --start "<cmd>"            Start command (web/worker/private)
+  --schedule "<cron>"        Cron schedule (cron type only, e.g. "0 12 * * *")
+  --plan <p>                 starter|standard|pro|pro_plus|pro_max|pro_ultra (default: starter)
+  --region <r>               oregon|frankfurt|singapore|ohio|virginia (default: oregon)
+  --env KEY=VAL              Env var (repeatable)
+  --env-from-group <eg-id>   Link env group at creation
+  --health-check <path>      Web service health check path
+  --instances <n>            Number of instances (web/worker/private; default 1)
+  --disk-name <n> --disk-size <gb> --disk-mount <path>   Attach persistent disk
+  --no-auto-deploy           Disable auto-deploy on push
+  --publish-path <path>      Static site only (default: ./)
+  --image <ref>              Docker image (when --runtime image)
+  --dry-run                  Print the JSON body that would be POSTed; do not call API
+  --json                     Emit full API response
+
+Examples:
+  agent-render create web my-api --repo https://github.com/me/api \
+    --build "npm install && npm run build" --start "npm start" \
+    --env DATABASE_URL='postgres://...' --env NODE_ENV=production
+  agent-render create cron daily-task --repo https://github.com/me/jobs \
+    --schedule "0 12 * * *" --build "npm install" --start "node daily.js"
+  agent-render create static landing --repo https://github.com/me/site \
+    --build "npm run build" --publish-path ./dist
+EOF
+}
+
+cmd_create() {
+    if [[ $# -eq 0 ]] || is_help_arg "${1:-}"; then
+        show_create_help
+        return 0
+    fi
+
+    local type_raw="$1"; shift
+    local name="${1:-}"
+    if [[ -z "$name" || "$name" == --* ]]; then
+        echo "Error: service name required" >&2
+        show_create_help
+        return 1
+    fi
+    [[ "$name" != --* ]] && shift
+
+    # Normalize type
+    local service_type
+    case "$type_raw" in
+        web|web_service) service_type="web_service" ;;
+        worker|background_worker) service_type="background_worker" ;;
+        static|static_site) service_type="static_site" ;;
+        private|private_service) service_type="private_service" ;;
+        cron|cron_job) service_type="cron_job" ;;
+        *) echo "Error: unknown type '$type_raw' (use web|worker|static|private|cron)" >&2; return 1 ;;
+    esac
+
+    local owner=""
+    local repo="" branch="main" root_dir=""
+    local runtime=""
+    local build="" start="" schedule=""
+    local plan="" region="oregon"
+    local image_ref=""
+    local health=""
+    local instances=""
+    local disk_name="" disk_size="" disk_mount=""
+    local publish_path=""
+    local auto_deploy="yes"
+    local json_output=0
+    local dry_run=0
+    local -a env_pairs=()
+    local -a env_groups=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --owner) owner="$2"; shift 2 ;;
+            --repo) repo="$2"; shift 2 ;;
+            --branch) branch="$2"; shift 2 ;;
+            --root-dir) root_dir="$2"; shift 2 ;;
+            --runtime) runtime="$2"; shift 2 ;;
+            --build) build="$2"; shift 2 ;;
+            --start) start="$2"; shift 2 ;;
+            --schedule) schedule="$2"; shift 2 ;;
+            --plan) plan="$2"; shift 2 ;;
+            --region) region="$2"; shift 2 ;;
+            --env) env_pairs+=("$2"); shift 2 ;;
+            --env-from-group) env_groups+=("$2"); shift 2 ;;
+            --health-check) health="$2"; shift 2 ;;
+            --instances) instances="$2"; shift 2 ;;
+            --disk-name) disk_name="$2"; shift 2 ;;
+            --disk-size) disk_size="$2"; shift 2 ;;
+            --disk-mount) disk_mount="$2"; shift 2 ;;
+            --publish-path) publish_path="$2"; shift 2 ;;
+            --image) image_ref="$2"; shift 2 ;;
+            --no-auto-deploy) auto_deploy="no"; shift ;;
+            --dry-run) dry_run=1; shift ;;
+            --json) json_output=1; shift ;;
+            *) echo "Error: unknown option '$1'" >&2; return 1 ;;
+        esac
+    done
+
+    # Resolve owner
+    if [[ -z "$owner" ]]; then
+        owner=$(default_owner_id)
+        [[ -z "$owner" ]] && { echo "Error: --owner required (no owner derivable)" >&2; return 1; }
+    else
+        owner=$(resolve_owner "$owner") || return 1
+    fi
+
+    # Default runtimes
+    if [[ -z "$runtime" ]]; then
+        case "$service_type" in
+            static_site) runtime="" ;;
+            *) runtime="node" ;;
+        esac
+    fi
+
+    # Default plan
+    if [[ -z "$plan" ]]; then
+        case "$service_type" in
+            static_site) plan="" ;;
+            *) plan="starter" ;;
+        esac
+    fi
+
+    # Build the JSON body in python (cleanest path through nested oneOf shapes)
+    # Build env vars JSON
+    local body
+    local env_json="[]"
+    if [[ ${#env_pairs[@]} -gt 0 ]]; then
+        env_json=$(python3 -c "
+import sys, json
+pairs = sys.argv[1:]
+out = []
+for p in pairs:
+    if '=' not in p:
+        continue
+    k, v = p.split('=', 1)
+    out.append({'key': k, 'value': v})
+print(json.dumps(out))
+" "${env_pairs[@]}")
+    fi
+
+    # Build serviceDetails per type
+    local sd_json
+    sd_json=$(python3 -c "
+import sys, json
+st = sys.argv[1]
+runtime = sys.argv[2]
+plan = sys.argv[3]
+region = sys.argv[4]
+build = sys.argv[5]
+start = sys.argv[6]
+schedule = sys.argv[7]
+health = sys.argv[8]
+instances = sys.argv[9]
+publish_path = sys.argv[10]
+disk_name = sys.argv[11]
+disk_size = sys.argv[12]
+disk_mount = sys.argv[13]
+image_ref = sys.argv[14]
+
+sd = {}
+if region: sd['region'] = region
+if plan: sd['plan'] = plan
+if runtime: sd['runtime'] = runtime
+if instances: sd['numInstances'] = int(instances)
+if health and st == 'web_service': sd['healthCheckPath'] = health
+if publish_path and st == 'static_site': sd['publishPath'] = publish_path
+
+# envSpecificDetails
+esd = {}
+if image_ref and runtime == 'image':
+    # docker-image-based; minimal: registry/image ref handled by separate field
+    pass
+elif runtime == 'docker':
+    if build: esd['dockerCommand'] = build  # not exact mapping
+else:
+    if build: esd['buildCommand'] = build
+    if start and st != 'static_site': esd['startCommand'] = start
+if esd and st != 'static_site':
+    sd['envSpecificDetails'] = esd
+elif st == 'static_site' and build:
+    sd['buildCommand'] = build
+
+if st == 'cron_job':
+    sd['schedule'] = schedule or ''
+
+if disk_name and disk_size and disk_mount and st != 'static_site' and st != 'cron_job':
+    sd['disk'] = {'name': disk_name, 'sizeGB': int(disk_size), 'mountPath': disk_mount}
+
+print(json.dumps(sd))
+" "$service_type" "$runtime" "$plan" "$region" "$build" "$start" "$schedule" "$health" "$instances" "$publish_path" "$disk_name" "$disk_size" "$disk_mount" "$image_ref")
+
+    # Compose full body
+    body=$(python3 -c "
+import sys, json
+st = sys.argv[1]
+name = sys.argv[2]
+owner = sys.argv[3]
+auto = sys.argv[4]
+repo = sys.argv[5]
+branch = sys.argv[6]
+root_dir = sys.argv[7]
+image_ref = sys.argv[8]
+env_vars = json.loads(sys.argv[9])
+sd = json.loads(sys.argv[10])
+env_group_ids = sys.argv[11].split(',') if sys.argv[11] else []
+
+body = {'type': st, 'name': name, 'ownerId': owner, 'autoDeploy': auto}
+if repo: body['repo'] = repo
+if repo and branch: body['branch'] = branch
+if root_dir: body['rootDir'] = root_dir
+if image_ref:
+    body['image'] = {'ownerId': owner, 'imagePath': image_ref}
+if env_vars: body['envVars'] = env_vars
+if sd: body['serviceDetails'] = sd
+print(json.dumps(body))
+" "$service_type" "$name" "$owner" "$auto_deploy" "$repo" "$branch" "$root_dir" "$image_ref" "$env_json" "$sd_json" "$(IFS=,; echo "${env_groups[*]:-}")")
+
+    if [[ "$dry_run" == "1" ]]; then
+        echo "$body" | python3 -m json.tool
+        return 0
+    fi
+
+    local result
+    result=$(render_request_checked POST "/services" "$body") || return 1
+
+    if [[ "$json_output" == "1" ]]; then
+        echo "$result"
+        return 0
+    fi
+
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+svc = data.get('service', data)
+print(f\"Created: {svc.get('name', '')} ({svc.get('id', '')})\")
+print(f\"Type:    {svc.get('type', '')}\")
+print(f\"URL:     {svc.get('serviceDetails', {}).get('url', '(building)')}\")
+deploy = data.get('deployId', '')
+if deploy:
+    print(f\"Deploy:  {deploy}\")
+"
+
+    # Link env groups if requested (separate API calls)
+    if [[ ${#env_groups[@]} -gt 0 ]]; then
+        local svc_id
+        svc_id=$(echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('service', d).get('id', ''))
+" 2>/dev/null)
+        for eg in "${env_groups[@]}"; do
+            render_request POST "/env-groups/$eg/services/$svc_id" > /dev/null && \
+                echo "Linked env group: $eg"
+        done
+    fi
+}
+
+cmd_update() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" || ! "$name_or_id" =~ ^(srv-|crn-) ]] && [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render update <service> [--name X] [--branch Y] [--root-dir Z] [--auto-deploy yes|no]"
+        return 1
+    fi
+    shift
+
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+
+    local new_name="" branch="" root_dir="" auto_deploy=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) new_name="$2"; shift 2 ;;
+            --branch) branch="$2"; shift 2 ;;
+            --root-dir) root_dir="$2"; shift 2 ;;
+            --auto-deploy) auto_deploy="$2"; shift 2 ;;
+            *) echo "Error: unknown option '$1'" >&2; return 1 ;;
+        esac
+    done
+
+    local body
+    body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['name'] = sys.argv[1]
+if sys.argv[2]: out['branch'] = sys.argv[2]
+if sys.argv[3]: out['rootDir'] = sys.argv[3]
+if sys.argv[4]: out['autoDeploy'] = sys.argv[4]
+print(json.dumps(out))
+" "$new_name" "$branch" "$root_dir" "$auto_deploy")
+
+    if [[ "$body" == "{}" ]]; then
+        echo "Error: nothing to update" >&2
+        return 1
+    fi
+
+    render_request_checked PATCH "/services/$sid" "$body" > /dev/null && \
+        echo "Updated: $name_or_id ($sid)"
+}
+
+cmd_delete() {
+    local name_or_id="${1:-}"
+    local confirm=0
+    shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y) confirm=1; shift ;;
+            *) shift ;;
+        esac
+    done
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render delete <service> --yes"
+        return 1
+    fi
+    if [[ "$confirm" != "1" ]]; then
+        echo "Refusing to delete '$name_or_id' without --yes" >&2
+        return 1
+    fi
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    render_request_checked DELETE "/services/$sid" > /dev/null && \
+        echo "Deleted: $name_or_id ($sid)"
+}
+
+cmd_cache_purge() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render cache-purge <service>"
+        return 1
+    fi
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    render_request_checked POST "/services/$sid/cache/purge" > /dev/null && \
+        echo "Cache purged: $name_or_id ($sid)"
+}
+
+cmd_events() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render events <service>"
+        return 1
+    fi
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    local result
+    result=$(render_request GET "/services/$sid/events?limit=20")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No events'); sys.exit(0)
+for item in items:
+    e = item.get('event', item)
+    print(f\"{e.get('timestamp', '')}  {e.get('type', '')}  {e.get('details', {}).get('reason', '')}\")
+"
+}
+
+cmd_instances() {
+    local name_or_id="${1:-}"
+    if [[ -z "$name_or_id" ]]; then
+        echo "Usage: agent-render instances <service>"
+        return 1
+    fi
+    local sid
+    sid=$(resolve_service "$name_or_id") || return 1
+    local result
+    result=$(render_request GET "/services/$sid/instances")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No running instances'); sys.exit(0)
+for item in items:
+    inst = item.get('instance', item)
+    print(f\"{inst.get('id', '')}  {inst.get('status', '')}  started:{inst.get('startedAt', '')}\")
+"
+}
+
+cmd_autoscaling() {
+    local subcmd="${1:-help}"
+    shift || true
+    case "$subcmd" in
+        show)
+            local sid; sid=$(resolve_service "${1:-}") || return 1
+            render_request GET "/services/$sid" | python3 -c "
+import sys, json
+svc = json.load(sys.stdin)
+a = svc.get('serviceDetails', {}).get('autoscaling') or {}
+if not a: print('Autoscaling: disabled'); sys.exit(0)
+print(f\"Enabled: {a.get('enabled', False)}\")
+print(f\"Min/Max: {a.get('min', '?')}/{a.get('max', '?')}\")
+print(f\"Criteria: {json.dumps(a.get('criteria', {}), indent=2)}\")
+"
+            ;;
+        enable|set)
+            local svc="" min="" max="" cpu="" mem=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --min) min="$2"; shift 2 ;;
+                    --max) max="$2"; shift 2 ;;
+                    --cpu) cpu="$2"; shift 2 ;;
+                    --memory) mem="$2"; shift 2 ;;
+                    *) svc="$1"; shift ;;
+                esac
+            done
+            [[ -z "$svc" ]] && { echo "Usage: agent-render autoscaling enable <svc> --min N --max N --cpu PCT --memory PCT" >&2; return 1; }
+            local sid; sid=$(resolve_service "$svc") || return 1
+            local body
+            body=$(python3 -c "
+import sys, json
+out = {'enabled': True}
+if sys.argv[1]: out['min'] = int(sys.argv[1])
+if sys.argv[2]: out['max'] = int(sys.argv[2])
+crit = {}
+if sys.argv[3]: crit['cpu'] = {'enabled': True, 'percentage': int(sys.argv[3])}
+if sys.argv[4]: crit['memory'] = {'enabled': True, 'percentage': int(sys.argv[4])}
+if crit: out['criteria'] = crit
+print(json.dumps(out))
+" "$min" "$max" "$cpu" "$mem")
+            render_request_checked PUT "/services/$sid/autoscaling" "$body" > /dev/null && \
+                echo "Autoscaling enabled: $svc"
+            ;;
+        disable)
+            local sid; sid=$(resolve_service "${1:-}") || return 1
+            render_request_checked DELETE "/services/$sid/autoscaling" > /dev/null && \
+                echo "Autoscaling disabled"
+            ;;
+        *)
+            echo "Usage: agent-render autoscaling {show|enable|disable} <svc> [opts]"
+            return 1
+            ;;
+    esac
+}
+
+# =====================================================================
+# Deploys: show + cancel + rollback
+# =====================================================================
+
+cmd_deploy_show() {
+    local svc="${1:-}" did="${2:-}"
+    if [[ -z "$svc" || -z "$did" ]]; then
+        echo "Usage: agent-render deploy show <service> <deploy-id>"
+        return 1
+    fi
+    local sid; sid=$(resolve_service "$svc") || return 1
+    local result
+    result=$(render_request_checked GET "/services/$sid/deploys/$did") || return 1
+    echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f\"ID:       {d.get('id', '')}\")
+print(f\"Status:   {d.get('status', '')}\")
+print(f\"Commit:   {(d.get('commit') or {}).get('id', '')}\")
+print(f\"Message:  {(d.get('commit') or {}).get('message', '')[:120]}\")
+print(f\"Trigger:  {d.get('trigger', '')}\")
+print(f\"Created:  {d.get('createdAt', '')}\")
+print(f\"Finished: {d.get('finishedAt', '')}\")
+"
+}
+
+cmd_deploy_cancel() {
+    local svc="${1:-}" did="${2:-}"
+    if [[ -z "$svc" || -z "$did" ]]; then
+        echo "Usage: agent-render deploy cancel <service> <deploy-id>"
+        return 1
+    fi
+    local sid; sid=$(resolve_service "$svc") || return 1
+    render_request_checked POST "/services/$sid/deploys/$did/cancel" > /dev/null && \
+        echo "Cancelled deploy $did on $svc"
+}
+
+cmd_rollback() {
+    local svc="${1:-}" did="${2:-}"
+    if [[ -z "$svc" || -z "$did" ]]; then
+        echo "Usage: agent-render rollback <service> <deploy-id>"
+        return 1
+    fi
+    local sid; sid=$(resolve_service "$svc") || return 1
+    local body
+    body=$(python3 -c "import json,sys; print(json.dumps({'deployId': sys.argv[1]}))" "$did")
+    render_request_checked POST "/services/$sid/rollback" "$body" > /dev/null && \
+        echo "Rollback triggered to $did on $svc"
+}
+
+# =====================================================================
+# One-off jobs
+# =====================================================================
+
+cmd_jobs() {
+    local sid; sid=$(resolve_service "${1:-}") || return 1
+    local result
+    result=$(render_request GET "/services/$sid/jobs?limit=20")
+    echo "$result" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No jobs'); sys.exit(0)
+for item in items:
+    j = item.get('job', item)
+    print(f\"{j.get('id', '')}  {j.get('status', '')}  started:{j.get('startedAt', '')}  cmd:{j.get('startCommand', '')[:60]}\")
+"
+}
+
+cmd_job_run() {
+    local svc="" command="" plan=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --command) command="$2"; shift 2 ;;
+            --plan) plan="$2"; shift 2 ;;
+            *) svc="$1"; shift ;;
+        esac
+    done
+    if [[ -z "$svc" || -z "$command" ]]; then
+        echo "Usage: agent-render job run <svc> --command \"<cmd>\" [--plan <plan-id>]"
+        return 1
+    fi
+    local sid; sid=$(resolve_service "$svc") || return 1
+    local body
+    body=$(python3 -c "
+import sys, json
+out = {'startCommand': sys.argv[1]}
+if sys.argv[2]: out['planId'] = sys.argv[2]
+print(json.dumps(out))
+" "$command" "$plan")
+    local result
+    result=$(render_request_checked POST "/services/$sid/jobs" "$body") || return 1
+    echo "$result" | python3 -c "
+import sys, json
+j = json.load(sys.stdin)
+print(f\"Job:    {j.get('id', '')}\")
+print(f\"Status: {j.get('status', '')}\")
+"
+}
+
+cmd_job_show() {
+    local sid; sid=$(resolve_service "${1:-}") || return 1
+    local jid="${2:-}"
+    [[ -z "$jid" ]] && { echo "Usage: agent-render job show <svc> <job-id>"; return 1; }
+    render_request GET "/services/$sid/jobs/$jid" | python3 -m json.tool
+}
+
+cmd_job_cancel() {
+    local sid; sid=$(resolve_service "${1:-}") || return 1
+    local jid="${2:-}"
+    [[ -z "$jid" ]] && { echo "Usage: agent-render job cancel <svc> <job-id>"; return 1; }
+    render_request_checked POST "/services/$sid/jobs/$jid/cancel" > /dev/null && \
+        echo "Cancelled job $jid"
+}
+
+# =====================================================================
+# Cron jobs (special: separate /cron-jobs endpoint for manual runs)
+# =====================================================================
+
+cmd_cron_run() {
+    local cron_id="${1:-}"
+    if [[ -z "$cron_id" ]]; then
+        echo "Usage: agent-render cron run <cron-id-or-name>"
+        return 1
+    fi
+    # Cron IDs are srv-* or crn-*; resolve_service handles both
+    cron_id=$(resolve_service "$cron_id") || return 1
+    render_request_checked POST "/cron-jobs/$cron_id/runs" > /dev/null && \
+        echo "Cron run triggered: $cron_id"
+}
+
+cmd_cron_cancel() {
+    local cron_id="${1:-}"
+    if [[ -z "$cron_id" ]]; then
+        echo "Usage: agent-render cron cancel <cron-id-or-name>"
+        return 1
+    fi
+    cron_id=$(resolve_service "$cron_id") || return 1
+    render_request_checked DELETE "/cron-jobs/$cron_id/runs" > /dev/null && \
+        echo "Cron runs cancelled: $cron_id"
+}
+
+# =====================================================================
+# Secret files (per service)
+# =====================================================================
+
+cmd_secret() {
+    local subcmd="${1:-list}"
+    shift || true
+    local svc="${1:-}"
+    [[ -z "$svc" ]] && { echo "Usage: agent-render secret {list|get|set|del} <svc> ..."; return 1; }
+    shift
+    local sid; sid=$(resolve_service "$svc") || return 1
+
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/services/$sid/secret-files?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No secret files'); sys.exit(0)
+for item in items:
+    sf = item.get('secretFile', item)
+    print(f\"{sf.get('name', '')}  ({len(sf.get('contents', '')) if sf.get('contents') else '?'} bytes)\")
+"
+            ;;
+        get)
+            local name="${1:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render secret get <svc> <name>"; return 1; }
+            render_request GET "/services/$sid/secret-files/$name" | python3 -c "
+import sys, json
+sf = json.load(sys.stdin)
+print(sf.get('contents', ''))
+"
+            ;;
+        set)
+            local name="${1:-}"; local file="${2:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render secret set <svc> <name> <file|->"; return 1; }
+            local contents
+            if [[ "$file" == "-" || -z "$file" ]]; then
+                contents=$(cat)
+            else
+                contents=$(cat "$file")
+            fi
+            local body
+            body=$(python3 -c "import json,sys; print(json.dumps({'contents': sys.stdin.read()}))" <<< "$contents")
+            render_request_checked PUT "/services/$sid/secret-files/$name" "$body" > /dev/null && \
+                echo "Set secret file: $name"
+            ;;
+        del|delete|rm)
+            local name="${1:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render secret del <svc> <name>"; return 1; }
+            render_request_checked DELETE "/services/$sid/secret-files/$name" > /dev/null && \
+                echo "Deleted secret file: $name"
+            ;;
+        *)
+            echo "Usage: agent-render secret {list|get|set|del} <svc> ..."
+            return 1
+            ;;
+    esac
+}
+
+# =====================================================================
+# Postgres: full lifecycle (create/update/delete/suspend/resume/restart/
+#           failover/recovery/backups/credentials/connection-info)
+# =====================================================================
+
+cmd_db_create() {
+    local name="" plan="basic_256mb" version="16" region="oregon"
+    local db_name="" db_user="" owner="" ha="" disk="" disk_auto=""
+    local environment=""
+    local json_output=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --plan) plan="$2"; shift 2 ;;
+            --version) version="$2"; shift 2 ;;
+            --region) region="$2"; shift 2 ;;
+            --database) db_name="$2"; shift 2 ;;
+            --user) db_user="$2"; shift 2 ;;
+            --owner) owner="$2"; shift 2 ;;
+            --high-availability|--ha) ha="true"; shift ;;
+            --disk-size) disk="$2"; shift 2 ;;
+            --disk-autoscale) disk_auto="true"; shift ;;
+            --environment) environment="$2"; shift 2 ;;
+            --json) json_output=1; shift ;;
+            *) [[ -z "$name" ]] && name="$1" || { echo "Error: unexpected '$1'" >&2; return 1; }; shift ;;
+        esac
+    done
+
+    [[ -z "$name" ]] && { echo "Usage: agent-render db create <name> [--plan <p>] [--version <v>] [--region <r>] ..."; return 1; }
+    if [[ -z "$owner" ]]; then
+        owner=$(default_owner_id) || true
+        [[ -z "$owner" ]] && { echo "Error: --owner required" >&2; return 1; }
+    else
+        owner=$(resolve_owner "$owner") || return 1
+    fi
+
+    local body
+    body=$(python3 -c "
+import sys, json
+out = {
+    'name': sys.argv[1],
+    'plan': sys.argv[2],
+    'version': sys.argv[3],
+    'region': sys.argv[4],
+    'ownerId': sys.argv[5],
+}
+if sys.argv[6]: out['databaseName'] = sys.argv[6]
+if sys.argv[7]: out['databaseUser'] = sys.argv[7]
+if sys.argv[8]: out['enableHighAvailability'] = True
+if sys.argv[9]: out['diskSizeGB'] = int(sys.argv[9])
+if sys.argv[10]: out['enableDiskAutoscaling'] = True
+if sys.argv[11]: out['environmentId'] = sys.argv[11]
+print(json.dumps(out))
+" "$name" "$plan" "$version" "$region" "$owner" "$db_name" "$db_user" "$ha" "$disk" "$disk_auto" "$environment")
+
+    local result
+    result=$(render_request_checked POST "/postgres" "$body") || return 1
+    if [[ "$json_output" == "1" ]]; then
+        echo "$result"
+    else
+        echo "$result" | python3 -c "
+import sys, json
+db = json.load(sys.stdin)
+print(f\"Created: {db.get('name', '')} ({db.get('id', '')})\")
+print(f\"Plan:    {db.get('plan', '')}  Version: {db.get('version', '')}\")
+print(f\"Status:  {db.get('status', '')}\")
+"
+    fi
+}
+
+cmd_db_update() {
+    local id="${1:-}"; shift || true
+    [[ -z "$id" ]] && { echo "Usage: agent-render db update <db> [--plan <p>] [--disk-size <gb>] [--name <new>]"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    local plan="" disk="" new_name=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --plan) plan="$2"; shift 2 ;;
+            --disk-size) disk="$2"; shift 2 ;;
+            --name) new_name="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    local body
+    body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['plan'] = sys.argv[1]
+if sys.argv[2]: out['diskSizeGB'] = int(sys.argv[2])
+if sys.argv[3]: out['name'] = sys.argv[3]
+print(json.dumps(out))
+" "$plan" "$disk" "$new_name")
+    [[ "$body" == "{}" ]] && { echo "Error: nothing to update" >&2; return 1; }
+    render_request_checked PATCH "/postgres/$dbid" "$body" > /dev/null && echo "Updated $id"
+}
+
+cmd_db_delete() {
+    local id="${1:-}"; local confirm=0
+    shift || true
+    while [[ $# -gt 0 ]]; do [[ "$1" == --yes || "$1" == -y ]] && confirm=1; shift; done
+    [[ -z "$id" ]] && { echo "Usage: agent-render db delete <db> --yes"; return 1; }
+    [[ "$confirm" != "1" ]] && { echo "Refusing to delete '$id' without --yes" >&2; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    render_request_checked DELETE "/postgres/$dbid" > /dev/null && echo "Deleted $id ($dbid)"
+}
+
+cmd_db_lifecycle() {
+    local action="$1"; local id="${2:-}"
+    [[ -z "$id" ]] && { echo "Usage: agent-render db $action <db>"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    render_request_checked POST "/postgres/$dbid/$action" > /dev/null && echo "Postgres $action: $id ($dbid)"
+}
+
+cmd_db_connect_info() {
+    local id="${1:-}"
+    [[ -z "$id" ]] && { echo "Usage: agent-render db connect-info <db>"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    render_request GET "/postgres/$dbid/connection-info" | python3 -c "
+import sys, json
+c = json.load(sys.stdin)
+print(f\"Internal: {c.get('internalConnectionString', '')}\")
+print(f\"External: {c.get('externalConnectionString', '')}\")
+print(f\"PSQL:     {c.get('psqlCommand', '')}\")
+"
+}
+
+cmd_db_backups() {
+    local id="${1:-}"
+    [[ -z "$id" ]] && { echo "Usage: agent-render db backups <db>"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    render_request GET "/postgres/$dbid/export" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No exports'); sys.exit(0)
+for item in items:
+    e = item.get('export', item)
+    print(f\"{e.get('id', '')}  {e.get('status', '')}  {e.get('createdAt', '')}\")
+"
+}
+
+cmd_db_backup() {
+    local id="${1:-}"
+    [[ -z "$id" ]] && { echo "Usage: agent-render db backup <db>"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    render_request_checked POST "/postgres/$dbid/export" > /dev/null && \
+        echo "Backup export triggered for $id"
+}
+
+cmd_db_recover() {
+    local id="${1:-}"; shift || true
+    [[ -z "$id" ]] && { echo "Usage: agent-render db recover <db> [--target-time ISO]"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+    local target=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in --target-time) target="$2"; shift 2 ;; *) shift ;; esac
+    done
+    if [[ -z "$target" ]]; then
+        # Check available recovery window
+        render_request GET "/postgres/$dbid/recovery" | python3 -m json.tool
+    else
+        local body
+        body=$(python3 -c "import json,sys; print(json.dumps({'targetTime': sys.argv[1]}))" "$target")
+        render_request_checked POST "/postgres/$dbid/recovery" "$body" > /dev/null && \
+            echo "Recovery initiated to $target"
+    fi
+}
+
+cmd_db_creds() {
+    local subcmd="${1:-list}"; shift || true
+    local id="${1:-}"; shift || true
+    [[ -z "$id" ]] && { echo "Usage: agent-render db creds {list|add|del} <db> [user]"; return 1; }
+    local dbid; dbid=$(resolve_postgres "$id") || return 1
+
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/postgres/$dbid/credentials" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No credentials'); sys.exit(0)
+for item in items:
+    c = item.get('credential', item)
+    print(f\"{c.get('username', '')}  ({c.get('id', '')})\")
+"
+            ;;
+        add|create)
+            local user="${1:-}"
+            [[ -z "$user" ]] && { echo "Usage: agent-render db creds add <db> <username>"; return 1; }
+            local body
+            body=$(python3 -c "import json,sys; print(json.dumps({'username': sys.argv[1]}))" "$user")
+            render_request_checked POST "/postgres/$dbid/credentials" "$body" | python3 -m json.tool
+            ;;
+        del|delete|rm)
+            local user="${1:-}"
+            [[ -z "$user" ]] && { echo "Usage: agent-render db creds del <db> <username>"; return 1; }
+            render_request_checked DELETE "/postgres/$dbid/credentials/$user" > /dev/null && \
+                echo "Deleted credential: $user"
+            ;;
+        *) echo "Unknown subcommand: $subcmd"; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Key Value (Redis-compatible)
+# =====================================================================
+
+resolve_kv() {
+    local name_or_id="$1"
+    if [[ "$name_or_id" == red-* || "$name_or_id" == kv-* ]]; then
+        echo "$name_or_id"; return 0
+    fi
+    local result; result=$(render_request GET "/key-value?limit=100")
+    local id
+    id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for item in items:
+    kv = item.get('keyValue', item)
+    if kv.get('name', '') == name: print(kv.get('id', '')); break
+" 2>/dev/null)
+    if [[ -z "$id" ]]; then
+        echo "Error: Key Value '$name_or_id' not found" >&2; return 1
+    fi
+    echo "$id"
+}
+
+cmd_kv() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/key-value?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No Key Value instances'); sys.exit(0)
+for item in items:
+    kv = item.get('keyValue', item)
+    print(f\"{kv.get('id', '')}  {kv.get('name', '')}  [{kv.get('plan', '')}]  {kv.get('status', '')}  {kv.get('region', '')}\")
+"
+            ;;
+        show|get)
+            local id="${1:-}"; [[ -z "$id" ]] && { echo "Usage: agent-render kv show <kv>"; return 1; }
+            local kvid; kvid=$(resolve_kv "$id") || return 1
+            render_request GET "/key-value/$kvid" | python3 -m json.tool
+            ;;
+        create)
+            local name="" plan="free" region="oregon" owner="" persist=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --plan) plan="$2"; shift 2 ;;
+                    --region) region="$2"; shift 2 ;;
+                    --owner) owner="$2"; shift 2 ;;
+                    --persist) persist="$2"; shift 2 ;;
+                    *) [[ -z "$name" ]] && name="$1" || true; shift ;;
+                esac
+            done
+            [[ -z "$name" ]] && { echo "Usage: agent-render kv create <name> [--plan p] [--region r]"; return 1; }
+            if [[ -z "$owner" ]]; then
+                owner=$(default_owner_id) || true
+                [[ -z "$owner" ]] && { echo "Error: --owner required" >&2; return 1; }
+            else
+                owner=$(resolve_owner "$owner") || return 1
+            fi
+            local body
+            body=$(python3 -c "
+import sys, json
+out = {'name': sys.argv[1], 'plan': sys.argv[2], 'region': sys.argv[3], 'ownerId': sys.argv[4]}
+if sys.argv[5]: out['persistenceMode'] = sys.argv[5]
+print(json.dumps(out))
+" "$name" "$plan" "$region" "$owner" "$persist")
+            render_request_checked POST "/key-value" "$body" | python3 -c "
+import sys, json
+kv = json.load(sys.stdin)
+print(f\"Created: {kv.get('name', '')} ({kv.get('id', '')})\")
+print(f\"Plan: {kv.get('plan', '')}\")
+"
+            ;;
+        update)
+            local id="${1:-}"; shift
+            local kvid; kvid=$(resolve_kv "$id") || return 1
+            local plan="" name=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --plan) plan="$2"; shift 2 ;; --name) name="$2"; shift 2 ;; *) shift ;; esac
+            done
+            local body
+            body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['plan'] = sys.argv[1]
+if sys.argv[2]: out['name'] = sys.argv[2]
+print(json.dumps(out))
+" "$plan" "$name")
+            render_request_checked PATCH "/key-value/$kvid" "$body" > /dev/null && echo "Updated $id"
+            ;;
+        delete|del|rm)
+            local id="${1:-}"; local confirm=0; shift || true
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            local kvid; kvid=$(resolve_kv "$id") || return 1
+            render_request_checked DELETE "/key-value/$kvid" > /dev/null && echo "Deleted $id"
+            ;;
+        connect-info|conn)
+            local kvid; kvid=$(resolve_kv "${1:-}") || return 1
+            render_request GET "/key-value/$kvid/connection-info" | python3 -m json.tool
+            ;;
+        suspend|resume)
+            local kvid; kvid=$(resolve_kv "${1:-}") || return 1
+            render_request_checked POST "/key-value/$kvid/$subcmd" > /dev/null && echo "Key Value $subcmd: ${1}"
+            ;;
+        *) echo "Usage: agent-render kv {list|show|create|update|delete|connect-info|suspend|resume}"; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Env Groups
+# =====================================================================
+
+resolve_env_group() {
+    local name_or_id="$1"
+    if [[ "$name_or_id" == evg-* ]]; then echo "$name_or_id"; return 0; fi
+    local result; result=$(render_request GET "/env-groups?limit=100")
+    local id
+    id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for item in items:
+    g = item.get('envGroup', item)
+    if g.get('name', '') == name: print(g.get('id', '')); break
+" 2>/dev/null)
+    [[ -z "$id" ]] && { echo "Error: env group '$name_or_id' not found" >&2; return 1; }
+    echo "$id"
+}
+
+cmd_env_group() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/env-groups?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No env groups'); sys.exit(0)
+for item in items:
+    g = item.get('envGroup', item)
+    print(f\"{g.get('id', '')}  {g.get('name', '')}  vars:{len(g.get('envVars', []))}\")
+"
+            ;;
+        show|get)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            render_request GET "/env-groups/$id" | python3 -m json.tool
+            ;;
+        create)
+            local name="" owner=""
+            local -a vars=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --owner) owner="$2"; shift 2 ;;
+                    --env) vars+=("$2"); shift 2 ;;
+                    *) [[ -z "$name" ]] && name="$1" || true; shift ;;
+                esac
+            done
+            [[ -z "$name" ]] && { echo "Usage: agent-render env-group create <name> [--env K=V]..."; return 1; }
+            if [[ -z "$owner" ]]; then
+                owner=$(default_owner_id) || true
+                [[ -z "$owner" ]] && { echo "Error: --owner required" >&2; return 1; }
+            else
+                owner=$(resolve_owner "$owner") || return 1
+            fi
+            local body
+            body=$(python3 -c "
+import sys, json
+name = sys.argv[1]; owner = sys.argv[2]
+pairs = sys.argv[3:]
+env_vars = []
+for p in pairs:
+    if '=' in p:
+        k, v = p.split('=', 1)
+        env_vars.append({'key': k, 'value': v})
+print(json.dumps({'name': name, 'ownerId': owner, 'envVars': env_vars}))
+" "$name" "$owner" "${vars[@]}")
+            render_request_checked POST "/env-groups" "$body" | python3 -c "
+import sys, json
+g = json.load(sys.stdin)
+print(f\"Created: {g.get('name', '')} ({g.get('id', '')})\")
+"
+            ;;
+        delete|del|rm)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local confirm=0; shift
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/env-groups/$id" > /dev/null && echo "Deleted env group"
+            ;;
+        rename)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local new="${2:-}"
+            [[ -z "$new" ]] && { echo "Usage: agent-render env-group rename <eg> <new-name>"; return 1; }
+            local body; body=$(python3 -c "import json,sys; print(json.dumps({'name': sys.argv[1]}))" "$new")
+            render_request_checked PATCH "/env-groups/$id" "$body" > /dev/null && echo "Renamed"
+            ;;
+        link)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local svc; svc=$(resolve_service "${2:-}") || return 1
+            render_request_checked POST "/env-groups/$id/services/$svc" > /dev/null && \
+                echo "Linked env group to service"
+            ;;
+        unlink)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local svc; svc=$(resolve_service "${2:-}") || return 1
+            render_request_checked DELETE "/env-groups/$id/services/$svc" > /dev/null && \
+                echo "Unlinked"
+            ;;
+        set)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local key="${2:-}" val="${3:-}"
+            [[ -z "$key" ]] && { echo "Usage: agent-render env-group set <eg> <KEY> <VAL>"; return 1; }
+            local body; body=$(python3 -c "import json,sys; print(json.dumps({'value': sys.argv[1]}))" "$val")
+            render_request_checked PUT "/env-groups/$id/env-vars/$key" "$body" > /dev/null && echo "Set $key"
+            ;;
+        get)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local key="${2:-}"
+            [[ -z "$key" ]] && { echo "Usage: agent-render env-group get <eg> <KEY>"; return 1; }
+            render_request GET "/env-groups/$id/env-vars/$key" | python3 -c "
+import sys, json
+v = json.load(sys.stdin)
+print(v.get('value', ''))
+"
+            ;;
+        del-var|unset)
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local key="${2:-}"
+            [[ -z "$key" ]] && { echo "Usage: agent-render env-group del-var <eg> <KEY>"; return 1; }
+            render_request_checked DELETE "/env-groups/$id/env-vars/$key" > /dev/null && echo "Deleted $key"
+            ;;
+        secret)
+            local action="${1:-list}"; shift || true
+            local id; id=$(resolve_env_group "${1:-}") || return 1
+            local name="${2:-}"
+            case "$action" in
+                set)
+                    local file="${3:-}"
+                    [[ -z "$name" ]] && { echo "Usage: agent-render env-group secret set <eg> <name> [<file|->]"; return 1; }
+                    local contents
+                    if [[ -z "$file" || "$file" == "-" ]]; then contents=$(cat); else contents=$(cat "$file"); fi
+                    local body; body=$(python3 -c "import json,sys; print(json.dumps({'contents': sys.stdin.read()}))" <<< "$contents")
+                    render_request_checked PUT "/env-groups/$id/secret-files/$name" "$body" > /dev/null && echo "Set secret file $name"
+                    ;;
+                get)
+                    [[ -z "$name" ]] && { echo "Usage: agent-render env-group secret get <eg> <name>"; return 1; }
+                    render_request GET "/env-groups/$id/secret-files/$name" | python3 -c "import sys, json; print(json.load(sys.stdin).get('contents', ''))"
+                    ;;
+                del|rm)
+                    [[ -z "$name" ]] && { echo "Usage: agent-render env-group secret del <eg> <name>"; return 1; }
+                    render_request_checked DELETE "/env-groups/$id/secret-files/$name" > /dev/null && echo "Deleted"
+                    ;;
+                *) echo "Usage: agent-render env-group secret {set|get|del} <eg> <name> [file]"; return 1 ;;
+            esac
+            ;;
+        *) echo "Usage: agent-render env-group {list|show|create|delete|rename|link|unlink|set|get|del-var|secret} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Blueprints (validate / list / show / patch / delete / sync-history)
+# =====================================================================
+
+resolve_blueprint() {
+    local name_or_id="$1"
+    if [[ "$name_or_id" == bp-* || "$name_or_id" == exs-* ]]; then echo "$name_or_id"; return 0; fi
+    local result; result=$(render_request GET "/blueprints?limit=100")
+    local id
+    id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for item in items:
+    b = item.get('blueprint', item)
+    if b.get('name', '') == name: print(b.get('id', '')); break
+" 2>/dev/null)
+    [[ -z "$id" ]] && { echo "Error: blueprint '$name_or_id' not found" >&2; return 1; }
+    echo "$id"
+}
+
+cmd_blueprint() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/blueprints?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No blueprints'); sys.exit(0)
+for item in items:
+    b = item.get('blueprint', item)
+    print(f\"{b.get('id', '')}  {b.get('name', '')}  {b.get('repo', '')}@{b.get('branch', '')}  auto:{b.get('autoSync', '')}\")
+"
+            ;;
+        show|get)
+            local id; id=$(resolve_blueprint "${1:-}") || return 1
+            render_request GET "/blueprints/$id" | python3 -m json.tool
+            ;;
+        validate)
+            local file="${1:-render.yaml}"
+            if [[ ! -f "$file" ]]; then
+                echo "Error: $file not found" >&2
+                return 1
+            fi
+            local body
+            body=$(python3 -c "
+import sys, json, yaml
+y = yaml.safe_load(open(sys.argv[1]))
+print(json.dumps({'spec': y}))
+" "$file" 2>/dev/null) || {
+                # Fallback if PyYAML not available — send raw text under 'specYaml'
+                local raw
+                raw=$(cat "$file")
+                body=$(python3 -c "import sys, json; print(json.dumps({'specYaml': sys.stdin.read()}))" <<< "$raw")
+            }
+            render_request_checked POST "/blueprints/validate" "$body" | python3 -m json.tool
+            ;;
+        update|patch)
+            local id; id=$(resolve_blueprint "${1:-}") || return 1
+            shift
+            local auto="" name=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --auto-sync) auto="$2"; shift 2 ;;
+                    --name) name="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            local body
+            body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['autoSync'] = sys.argv[1] in ('yes', 'true', '1')
+if sys.argv[2]: out['name'] = sys.argv[2]
+print(json.dumps(out))
+" "$auto" "$name")
+            render_request_checked PATCH "/blueprints/$id" "$body" > /dev/null && echo "Updated blueprint"
+            ;;
+        delete|del|rm)
+            local id; id=$(resolve_blueprint "${1:-}") || return 1
+            local confirm=0; shift
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/blueprints/$id" > /dev/null && echo "Deleted blueprint"
+            ;;
+        syncs|history)
+            local id; id=$(resolve_blueprint "${1:-}") || return 1
+            render_request GET "/blueprints/$id/syncs?limit=20" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No sync history'); sys.exit(0)
+for item in items:
+    s = item.get('sync', item)
+    print(f\"{s.get('createdAt', '')}  {s.get('status', '')}  resources:{len(s.get('resources', []))}\")
+"
+            ;;
+        *)
+            cat <<'EOF'
+Usage: agent-render blueprint <subcommand>
+
+  list                          List blueprints
+  show <bp>                     Blueprint details
+  validate [render.yaml]        Validate a render.yaml against the API
+  update <bp> [--auto-sync yes|no] [--name X]
+  delete <bp> --yes
+  syncs <bp>                    Sync history (which resources got created)
+
+Note: blueprints are created automatically when a repo with render.yaml is
+linked via the dashboard. The API does not expose a create endpoint; it
+provides validate + management of existing blueprints.
+EOF
+            return 1
+            ;;
+    esac
+}
+
+# =====================================================================
+# Custom domains: add / show / delete / verify (list is `cmd_domains`)
+# =====================================================================
+
+cmd_domain() {
+    local subcmd="${1:-list}"; shift || true
+    local svc="${1:-}"; shift || true
+    [[ -z "$svc" ]] && { echo "Usage: agent-render domain {list|add|show|del|verify} <svc> ..."; return 1; }
+    local sid; sid=$(resolve_service "$svc") || return 1
+
+    case "$subcmd" in
+        list|ls) cmd_domains "$svc" ;;
+        add)
+            local name="${1:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render domain add <svc> <domain>"; return 1; }
+            local body; body=$(python3 -c "import json,sys; print(json.dumps({'name': sys.argv[1]}))" "$name")
+            render_request_checked POST "/services/$sid/custom-domains" "$body" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f\"Added: {d.get('name', '')} ({d.get('id', '')})\")
+print(f\"Status: {d.get('verificationStatus', '?')}\")
+dns = d.get('dnsRecords') or []
+if dns:
+    print('DNS records to add at your registrar:')
+    for r in dns:
+        print(f\"  {r.get('type', '')}  {r.get('name', '')}  {r.get('value', '')}\")
+"
+            ;;
+        show|get)
+            local name="${1:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render domain show <svc> <domain>"; return 1; }
+            render_request GET "/services/$sid/custom-domains/$name" | python3 -m json.tool
+            ;;
+        del|delete|rm)
+            local name="${1:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render domain del <svc> <domain>"; return 1; }
+            render_request_checked DELETE "/services/$sid/custom-domains/$name" > /dev/null && \
+                echo "Deleted domain: $name"
+            ;;
+        verify)
+            local name="${1:-}"
+            [[ -z "$name" ]] && { echo "Usage: agent-render domain verify <svc> <domain>"; return 1; }
+            render_request_checked POST "/services/$sid/custom-domains/$name/verify" > /dev/null && \
+                echo "Verification triggered for $name"
+            ;;
+        *) echo "Usage: agent-render domain {list|add|show|del|verify} <svc> ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Service HTTP headers (web/static service custom response headers)
+# =====================================================================
+
+cmd_header() {
+    local subcmd="${1:-list}"; shift || true
+    local svc="${1:-}"; shift || true
+    [[ -z "$svc" ]] && { echo "Usage: agent-render header {list|add|del} <svc> ..."; return 1; }
+    local sid; sid=$(resolve_service "$svc") || return 1
+
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/services/$sid/headers" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No headers'); sys.exit(0)
+for item in items:
+    h = item.get('headerRule', item)
+    print(f\"{h.get('id', '')}  {h.get('path', '')}  {h.get('name', '')}: {h.get('value', '')}\")
+"
+            ;;
+        add)
+            local path="" name="" value=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --path) path="$2"; shift 2 ;;
+                    --name) name="$2"; shift 2 ;;
+                    --value) value="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            [[ -z "$path" || -z "$name" || -z "$value" ]] && { echo "Usage: agent-render header add <svc> --path /* --name X --value Y"; return 1; }
+            local body
+            body=$(python3 -c "
+import sys, json
+print(json.dumps({'path': sys.argv[1], 'name': sys.argv[2], 'value': sys.argv[3]}))
+" "$path" "$name" "$value")
+            render_request_checked POST "/services/$sid/headers" "$body" | python3 -m json.tool
+            ;;
+        del|delete|rm)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { echo "Usage: agent-render header del <svc> <header-id>"; return 1; }
+            render_request_checked DELETE "/services/$sid/headers/$id" > /dev/null && echo "Deleted header rule"
+            ;;
+        *) echo "Usage: agent-render header {list|add|del} <svc> ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Static-site routes
+# =====================================================================
+
+cmd_route() {
+    local subcmd="${1:-list}"; shift || true
+    local svc="${1:-}"; shift || true
+    [[ -z "$svc" ]] && { echo "Usage: agent-render route {list|add|del} <svc> ..."; return 1; }
+    local sid; sid=$(resolve_service "$svc") || return 1
+
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/services/$sid/routes" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No routes'); sys.exit(0)
+for item in items:
+    r = item.get('route', item)
+    print(f\"{r.get('id', '')}  {r.get('type', '')}  {r.get('source', '')} -> {r.get('destination', '')}\")
+"
+            ;;
+        add)
+            local type="rewrite" source="" dest=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --type) type="$2"; shift 2 ;;
+                    --source) source="$2"; shift 2 ;;
+                    --destination|--dest) dest="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            [[ -z "$source" || -z "$dest" ]] && { echo "Usage: agent-render route add <svc> --source /old --destination /new [--type rewrite|redirect]"; return 1; }
+            local body
+            body=$(python3 -c "
+import sys, json
+print(json.dumps({'type': sys.argv[1], 'source': sys.argv[2], 'destination': sys.argv[3]}))
+" "$type" "$source" "$dest")
+            render_request_checked POST "/services/$sid/routes" "$body" | python3 -m json.tool
+            ;;
+        del|delete|rm)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { echo "Usage: agent-render route del <svc> <route-id>"; return 1; }
+            render_request_checked DELETE "/services/$sid/routes/$id" > /dev/null && echo "Deleted route"
+            ;;
+        *) echo "Usage: agent-render route {list|add|del} <svc> ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Persistent disks + snapshots
+# =====================================================================
+
+resolve_disk() {
+    local name_or_id="$1"
+    if [[ "$name_or_id" == dsk-* ]]; then echo "$name_or_id"; return 0; fi
+    local result; result=$(render_request GET "/disks?limit=100")
+    local id
+    id=$(echo "$result" | python3 -c "
+import sys, json
+name = '$name_or_id'
+items = json.load(sys.stdin)
+for item in items:
+    d = item.get('disk', item)
+    if d.get('name', '') == name: print(d.get('id', '')); break
+" 2>/dev/null)
+    [[ -z "$id" ]] && { echo "Error: disk '$name_or_id' not found" >&2; return 1; }
+    echo "$id"
+}
+
+cmd_disk() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/disks?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No disks'); sys.exit(0)
+for item in items:
+    d = item.get('disk', item)
+    print(f\"{d.get('id', '')}  {d.get('name', '')}  {d.get('sizeGB', '?')}GB  mount:{d.get('mountPath', '')}  svc:{d.get('serviceId', '')}\")
+"
+            ;;
+        show|get)
+            local id; id=$(resolve_disk "${1:-}") || return 1
+            render_request GET "/disks/$id" | python3 -m json.tool
+            ;;
+        create)
+            local name="" size="" mount="" svc=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --name) name="$2"; shift 2 ;;
+                    --size) size="$2"; shift 2 ;;
+                    --mount) mount="$2"; shift 2 ;;
+                    --service|--svc) svc="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            [[ -z "$name" || -z "$size" || -z "$mount" || -z "$svc" ]] && {
+                echo "Usage: agent-render disk create --name X --size 10 --mount /data --service <svc>"
+                return 1
+            }
+            local sid; sid=$(resolve_service "$svc") || return 1
+            local body
+            body=$(python3 -c "
+import sys, json
+print(json.dumps({'name': sys.argv[1], 'sizeGB': int(sys.argv[2]), 'mountPath': sys.argv[3], 'serviceId': sys.argv[4]}))
+" "$name" "$size" "$mount" "$sid")
+            render_request_checked POST "/disks" "$body" | python3 -m json.tool
+            ;;
+        update)
+            local id; id=$(resolve_disk "${1:-}") || return 1
+            shift
+            local size="" name=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --size) size="$2"; shift 2 ;; --name) name="$2"; shift 2 ;; *) shift ;; esac
+            done
+            local body
+            body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['sizeGB'] = int(sys.argv[1])
+if sys.argv[2]: out['name'] = sys.argv[2]
+print(json.dumps(out))
+" "$size" "$name")
+            render_request_checked PATCH "/disks/$id" "$body" > /dev/null && echo "Updated disk"
+            ;;
+        delete|del|rm)
+            local id; id=$(resolve_disk "${1:-}") || return 1
+            local confirm=0; shift
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/disks/$id" > /dev/null && echo "Deleted disk"
+            ;;
+        snapshots)
+            local id; id=$(resolve_disk "${1:-}") || return 1
+            render_request GET "/disks/$id/snapshots" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No snapshots'); sys.exit(0)
+for item in items:
+    s = item.get('snapshot', item)
+    print(f\"{s.get('id', '')}  {s.get('createdAt', '')}  {s.get('sizeGB', '?')}GB\")
+"
+            ;;
+        restore)
+            local id; id=$(resolve_disk "${1:-}") || return 1
+            local snap="${2:-}"
+            [[ -z "$snap" ]] && { echo "Usage: agent-render disk restore <disk> <snapshot-id>"; return 1; }
+            local body; body=$(python3 -c "import json,sys; print(json.dumps({'snapshotId': sys.argv[1]}))" "$snap")
+            render_request_checked POST "/disks/$id/snapshots/restore" "$body" > /dev/null && \
+                echo "Restore initiated from $snap"
+            ;;
+        *) echo "Usage: agent-render disk {list|show|create|update|delete|snapshots|restore} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Dedicated IPs
+# =====================================================================
+
+cmd_dedicated_ip() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            local owner=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --owner) owner="$2"; shift 2 ;; *) shift ;; esac
+            done
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            render_request GET "/dedicated-ips?ownerId=$owner&limit=50" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Render: {data['message']}\"); sys.exit(0)
+if not data: print('No dedicated IPs'); sys.exit(0)
+for item in data:
+    ip = item.get('dedicatedIp', item) if isinstance(item, dict) else {}
+    print(f\"{ip.get('id', '')}  {ip.get('ipAddress', '')}  region:{ip.get('region', '')}\")
+"
+            ;;
+        show|get)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { echo "Usage: agent-render dedicated-ip show <id>"; return 1; }
+            render_request GET "/dedicated-ips/$id" | python3 -m json.tool
+            ;;
+        create)
+            local owner="" region="oregon"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --owner) owner="$2"; shift 2 ;; --region) region="$2"; shift 2 ;; *) shift ;; esac
+            done
+            [[ -z "$owner" ]] && { owner=$(default_owner_id); }
+            owner=$(resolve_owner "$owner") || return 1
+            local body; body=$(python3 -c "import json,sys; print(json.dumps({'ownerId': sys.argv[1], 'region': sys.argv[2]}))" "$owner" "$region")
+            render_request_checked POST "/dedicated-ips" "$body" | python3 -m json.tool
+            ;;
+        delete|del|rm)
+            local id="${1:-}"; local confirm=0; shift || true
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ -z "$id" ]] && { echo "Usage: agent-render dedicated-ip delete <id> --yes"; return 1; }
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/dedicated-ips/$id" > /dev/null && echo "Deleted"
+            ;;
+        *) echo "Usage: agent-render dedicated-ip {list|show|create|delete} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Registry credentials (Docker private registries)
+# =====================================================================
+
+cmd_registry() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/registrycredentials?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No registry credentials'); sys.exit(0)
+for item in items:
+    r = item.get('registryCredential', item)
+    print(f\"{r.get('id', '')}  {r.get('name', '')}  {r.get('registry', '')}  user:{r.get('username', '')}\")
+"
+            ;;
+        show|get)
+            local id="${1:-}"; [[ -z "$id" ]] && { echo "Usage: agent-render registry show <id>"; return 1; }
+            render_request GET "/registrycredentials/$id" | python3 -m json.tool
+            ;;
+        add|create)
+            local name="" registry="DOCKER" username="" token="" owner=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --name) name="$2"; shift 2 ;;
+                    --registry) registry="$2"; shift 2 ;;
+                    --username) username="$2"; shift 2 ;;
+                    --token|--password) token="$2"; shift 2 ;;
+                    --owner) owner="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            [[ -z "$name" || -z "$username" || -z "$token" ]] && {
+                echo "Usage: agent-render registry add --name X --registry DOCKER|GHCR|GAR|... --username U --token T"
+                return 1
+            }
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            local body
+            body=$(python3 -c "
+import sys, json
+print(json.dumps({'name': sys.argv[1], 'registry': sys.argv[2], 'username': sys.argv[3], 'authToken': sys.argv[4], 'ownerId': sys.argv[5]}))
+" "$name" "$registry" "$username" "$token" "$owner")
+            render_request_checked POST "/registrycredentials" "$body" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(f\"Created: {r.get('name', '')} ({r.get('id', '')})\")
+"
+            ;;
+        delete|del|rm)
+            local id="${1:-}"; local confirm=0; shift || true
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ -z "$id" ]] && { echo "Usage: agent-render registry delete <id> --yes"; return 1; }
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/registrycredentials/$id" > /dev/null && echo "Deleted"
+            ;;
+        *) echo "Usage: agent-render registry {list|show|add|delete} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Projects (extended) + Environments
+# =====================================================================
+
+cmd_project() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls) cmd_projects ;;
+        show|get)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { echo "Usage: agent-render project show <project-id>"; return 1; }
+            render_request GET "/projects/$id" | python3 -m json.tool
+            ;;
+        create)
+            local name="" owner=""
+            local -a envs=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --owner) owner="$2"; shift 2 ;;
+                    --env) envs+=("$2"); shift 2 ;;
+                    *) [[ -z "$name" ]] && name="$1" || true; shift ;;
+                esac
+            done
+            [[ -z "$name" ]] && { echo "Usage: agent-render project create <name> [--env <name>]..."; return 1; }
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            # Default to one env named "production" if none given
+            [[ ${#envs[@]} -eq 0 ]] && envs=("production")
+            local body
+            body=$(python3 -c "
+import sys, json
+name = sys.argv[1]; owner = sys.argv[2]
+envs = [{'name': n} for n in sys.argv[3:]]
+print(json.dumps({'name': name, 'ownerId': owner, 'environments': envs}))
+" "$name" "$owner" "${envs[@]}")
+            render_request_checked POST "/projects" "$body" | python3 -c "
+import sys, json
+p = json.load(sys.stdin)
+print(f\"Created: {p.get('name', '')} ({p.get('id', '')})\")
+"
+            ;;
+        update|patch)
+            local id="${1:-}"; shift
+            local new_name=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --name) new_name="$2"; shift 2 ;; *) shift ;; esac
+            done
+            local body; body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['name'] = sys.argv[1]
+print(json.dumps(out))
+" "$new_name")
+            render_request_checked PATCH "/projects/$id" "$body" > /dev/null && echo "Updated project"
+            ;;
+        delete|del|rm)
+            local id="${1:-}"; local confirm=0; shift || true
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/projects/$id" > /dev/null && echo "Deleted project"
+            ;;
+        *) echo "Usage: agent-render project {list|show|create|update|delete} ..."; return 1 ;;
+    esac
+}
+
+cmd_environment() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            local project=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --project|-p) project="$2"; shift 2 ;; *) shift ;; esac
+            done
+            if [[ -z "$project" ]]; then
+                # Render requires projectId; iterate over projects.
+                local projects_json
+                projects_json=$(render_request GET "/projects?limit=100")
+                local pids
+                pids=$(echo "$projects_json" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+for it in items:
+    p = it.get('project', it)
+    print(p.get('id', ''))
+" 2>/dev/null)
+                if [[ -z "$pids" ]]; then
+                    echo "No projects found (environments require a project)"
+                    return 0
+                fi
+                local pid
+                for pid in $pids; do
+                    render_request GET "/environments?projectId=$pid" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    sys.exit(0)
+if not data: sys.exit(0)
+for item in data:
+    e = item.get('environment', item) if isinstance(item, dict) else {}
+    print(f\"{e.get('id', '')}  {e.get('name', '')}  project:{e.get('projectId', '')}\")
+"
+                done
+            else
+                render_request GET "/environments?projectId=$project" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Render: {data['message']}\"); sys.exit(0)
+if not data: print('No environments'); sys.exit(0)
+for item in data:
+    e = item.get('environment', item) if isinstance(item, dict) else {}
+    print(f\"{e.get('id', '')}  {e.get('name', '')}  project:{e.get('projectId', '')}\")
+"
+            fi
+            ;;
+        show|get)
+            local id="${1:-}"; [[ -z "$id" ]] && { echo "Usage: agent-render environment show <env>"; return 1; }
+            render_request GET "/environments/$id" | python3 -m json.tool
+            ;;
+        create)
+            local name="" project=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --project|-p) project="$2"; shift 2 ;;
+                    --name) name="$2"; shift 2 ;;
+                    *) [[ -z "$name" ]] && name="$1" || true; shift ;;
+                esac
+            done
+            [[ -z "$name" || -z "$project" ]] && { echo "Usage: agent-render environment create <name> --project <project-id>"; return 1; }
+            local body; body=$(python3 -c "
+import json,sys; print(json.dumps({'name': sys.argv[1], 'projectId': sys.argv[2]}))
+" "$name" "$project")
+            render_request_checked POST "/environments" "$body" | python3 -m json.tool
+            ;;
+        delete|del|rm)
+            local id="${1:-}"; local confirm=0; shift || true
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/environments/$id" > /dev/null && echo "Deleted"
+            ;;
+        link)
+            local env="${1:-}"; shift
+            [[ -z "$env" ]] && { echo "Usage: agent-render environment link <env> --resource <id>..."; return 1; }
+            local -a resources=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --resource) resources+=("$2"); shift 2 ;; *) shift ;; esac
+            done
+            local body; body=$(python3 -c "
+import json, sys
+print(json.dumps({'resourceIds': sys.argv[1:]}))
+" "${resources[@]}")
+            render_request_checked POST "/environments/$env/resources" "$body" > /dev/null && echo "Linked resources"
+            ;;
+        unlink)
+            local env="${1:-}"; shift
+            local -a resources=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --resource) resources+=("$2"); shift 2 ;; *) shift ;; esac
+            done
+            local body; body=$(python3 -c "
+import json, sys
+print(json.dumps({'resourceIds': sys.argv[1:]}))
+" "${resources[@]}")
+            render_request_checked DELETE "/environments/$env/resources" "$body" > /dev/null && echo "Unlinked resources"
+            ;;
+        *) echo "Usage: agent-render environment {list|show|create|delete|link|unlink} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Webhooks
+# =====================================================================
+
+cmd_webhook() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/webhooks?limit=50" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No webhooks'); sys.exit(0)
+for item in items:
+    w = item.get('webhook', item)
+    print(f\"{w.get('id', '')}  {w.get('name', '')}  enabled:{w.get('enabled', False)}  {w.get('url', '')}\")
+"
+            ;;
+        show|get)
+            local id="${1:-}"; [[ -z "$id" ]] && { echo "Usage: agent-render webhook show <id>"; return 1; }
+            render_request GET "/webhooks/$id" | python3 -m json.tool
+            ;;
+        create)
+            local name="" url="" owner="" enabled="true"
+            local -a events=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --name) name="$2"; shift 2 ;;
+                    --url) url="$2"; shift 2 ;;
+                    --owner) owner="$2"; shift 2 ;;
+                    --event) events+=("$2"); shift 2 ;;
+                    --disabled) enabled="false"; shift ;;
+                    *) shift ;;
+                esac
+            done
+            [[ -z "$name" || -z "$url" ]] && { echo "Usage: agent-render webhook create --name X --url Y [--event T]..."; return 1; }
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            [[ ${#events[@]} -eq 0 ]] && events=("deploy_ended" "deploy_started")
+            local body
+            body=$(python3 -c "
+import sys, json
+print(json.dumps({
+    'name': sys.argv[1],
+    'url': sys.argv[2],
+    'ownerId': sys.argv[3],
+    'enabled': sys.argv[4] == 'true',
+    'eventFilter': {'eventTypes': sys.argv[5:]},
+}))
+" "$name" "$url" "$owner" "$enabled" "${events[@]}")
+            render_request_checked POST "/webhooks" "$body" | python3 -m json.tool
+            ;;
+        update)
+            local id="${1:-}"; shift
+            local enabled=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in --enable) enabled="true"; shift ;; --disable) enabled="false"; shift ;; *) shift ;; esac
+            done
+            local body; body=$(python3 -c "
+import sys, json
+out = {}
+if sys.argv[1]: out['enabled'] = sys.argv[1] == 'true'
+print(json.dumps(out))
+" "$enabled")
+            render_request_checked PATCH "/webhooks/$id" "$body" > /dev/null && echo "Updated webhook"
+            ;;
+        delete|del|rm)
+            local id="${1:-}"; local confirm=0; shift || true
+            while [[ $# -gt 0 ]]; do [[ "$1" == --yes ]] && confirm=1; shift; done
+            [[ "$confirm" != "1" ]] && { echo "Refusing without --yes" >&2; return 1; }
+            render_request_checked DELETE "/webhooks/$id" > /dev/null && echo "Deleted webhook"
+            ;;
+        events)
+            local id="${1:-}"; [[ -z "$id" ]] && { echo "Usage: agent-render webhook events <id>"; return 1; }
+            render_request GET "/webhooks/$id/events?limit=20" | python3 -m json.tool
+            ;;
+        *) echo "Usage: agent-render webhook {list|show|create|update|delete|events} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Notification settings
+# =====================================================================
+
+cmd_notify() {
+    local subcmd="${1:-show}"; shift || true
+    case "$subcmd" in
+        show)
+            local owner="${1:-}"
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            render_request GET "/notification-settings/owners/$owner" | python3 -m json.tool
+            ;;
+        update)
+            local owner="" body_file=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --owner) owner="$2"; shift 2 ;;
+                    --from-file) body_file="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            local body
+            if [[ -n "$body_file" ]]; then
+                body=$(cat "$body_file")
+            else
+                body=$(cat)
+            fi
+            render_request_checked PATCH "/notification-settings/owners/$owner" "$body" > /dev/null && \
+                echo "Updated notification settings"
+            ;;
+        overrides)
+            local owner="${1:-}"
+            [[ -z "$owner" ]] && owner=$(default_owner_id)
+            owner=$(resolve_owner "$owner") || return 1
+            render_request GET "/notification-settings/overrides?ownerId=$owner" | python3 -m json.tool
+            ;;
+        override)
+            local svc="${1:-}"
+            [[ -z "$svc" ]] && { echo "Usage: agent-render notify override <svc>"; return 1; }
+            local sid; sid=$(resolve_service "$svc") || return 1
+            render_request GET "/notification-settings/overrides/services/$sid" | python3 -m json.tool
+            ;;
+        *) echo "Usage: agent-render notify {show|update|overrides|override} ..."; return 1 ;;
+    esac
+}
+
+# =====================================================================
+# Audit logs
+# =====================================================================
+
+cmd_audit() {
+    local owner=""
+    local limit="20"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --owner) owner="$2"; shift 2 ;;
+            --limit) limit="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ -z "$owner" ]] && owner=$(default_owner_id)
+    owner=$(resolve_owner "$owner") || return 1
+    render_request GET "/owners/$owner/audit-logs?limit=$limit" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict) and 'message' in data:
+    print(f\"Render: {data['message']}\"); sys.exit(0)
+if not data: print('No audit log entries'); sys.exit(0)
+for item in data:
+    e = item.get('auditLog', item) if isinstance(item, dict) else {}
+    actor = e.get('actor', {}) or {}
+    resource = e.get('resource', {}) or {}
+    print(f\"{e.get('timestamp', '')}  {e.get('action', '')}  by:{actor.get('email', '?')}  on:{resource.get('id', '?')}\")
+"
+}
+
+# =====================================================================
+# Maintenance windows
+# =====================================================================
+
+cmd_maintenance() {
+    local subcmd="${1:-list}"; shift || true
+    case "$subcmd" in
+        list|ls)
+            render_request GET "/maintenance?limit=20" | python3 -c "
+import sys, json
+items = json.load(sys.stdin)
+if not items: print('No maintenance runs'); sys.exit(0)
+for item in items:
+    m = item.get('maintenance', item)
+    print(f\"{m.get('id', '')}  {m.get('status', '')}  scheduled:{m.get('scheduledFor', '')}\")
+"
+            ;;
+        show|get)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { echo "Usage: agent-render maintenance show <id>"; return 1; }
+            render_request GET "/maintenance/$id" | python3 -m json.tool
+            ;;
+        reschedule)
+            local id="${1:-}" when="${2:-}"
+            [[ -z "$id" || -z "$when" ]] && { echo "Usage: agent-render maintenance reschedule <id> <ISO-datetime>"; return 1; }
+            local body; body=$(python3 -c "import json,sys; print(json.dumps({'scheduledFor': sys.argv[1]}))" "$when")
+            render_request_checked PATCH "/maintenance/$id" "$body" > /dev/null && echo "Rescheduled"
+            ;;
+        trigger)
+            local id="${1:-}"
+            [[ -z "$id" ]] && { echo "Usage: agent-render maintenance trigger <id>"; return 1; }
+            render_request_checked POST "/maintenance/$id/trigger" > /dev/null && echo "Maintenance triggered"
+            ;;
+        *) echo "Usage: agent-render maintenance {list|show|reschedule|trigger} ..."; return 1 ;;
+    esac
+}
+
 # --- Main ---
 
 case "${1:-help}" in
-    services|ls|list)
-        cmd_services
-        ;;
-    show|get)
-        shift
-        cmd_show "$@"
-        ;;
+    # --- workspace primitives ---
+    owners) cmd_owners ;;
+    whoami|me) cmd_whoami ;;
+    audit|audit-logs) shift; cmd_audit "$@" ;;
+
+    # --- services ---
+    services|ls|list) cmd_services ;;
+    show|get) shift; cmd_show "$@" ;;
+    create) shift; cmd_create "$@" ;;
+    update|patch) shift; cmd_update "$@" ;;
+    delete|destroy|rm) shift; cmd_delete "$@" ;;
+    cache-purge|purge-cache) shift; cmd_cache_purge "$@" ;;
+    events) shift; cmd_events "$@" ;;
+    instances) shift; cmd_instances "$@" ;;
+    restart) shift; cmd_restart "$@" ;;
+    suspend) shift; cmd_suspend "$@" ;;
+    resume) shift; cmd_resume "$@" ;;
+    scale) shift; cmd_scale "$@" ;;
+    autoscaling|autoscale) shift; cmd_autoscaling "$@" ;;
+
+    # --- deploys ---
     deploy)
         shift
-        cmd_deploy "$@"
+        # Support `deploy show <svc> <id>` and `deploy cancel <svc> <id>`
+        case "${1:-}" in
+            show) shift; cmd_deploy_show "$@" ;;
+            cancel) shift; cmd_deploy_cancel "$@" ;;
+            *) cmd_deploy "$@" ;;
+        esac
         ;;
-    deploys)
+    deploys) shift; cmd_deploys "$@" ;;
+    rollback) shift; cmd_rollback "$@" ;;
+
+    # --- one-off jobs ---
+    jobs) shift; cmd_jobs "$@" ;;
+    job)
         shift
-        cmd_deploys "$@"
+        case "${1:-}" in
+            run) shift; cmd_job_run "$@" ;;
+            show|get) shift; cmd_job_show "$@" ;;
+            cancel) shift; cmd_job_cancel "$@" ;;
+            *) echo "Usage: agent-render job {run|show|cancel} <svc> ..." ;;
+        esac
         ;;
-    logs)
+
+    # --- cron ---
+    cron)
         shift
-        cmd_logs "$@"
+        case "${1:-}" in
+            run|trigger) shift; cmd_cron_run "$@" ;;
+            cancel) shift; cmd_cron_cancel "$@" ;;
+            *) echo "Usage: agent-render cron {run|cancel} <cron>" ;;
+        esac
         ;;
-    restart)
-        shift
-        cmd_restart "$@"
-        ;;
-    suspend)
-        shift
-        cmd_suspend "$@"
-        ;;
-    resume)
-        shift
-        cmd_resume "$@"
-        ;;
-    scale)
-        shift
-        cmd_scale "$@"
-        ;;
-    env)
-        shift
-        cmd_env "$@"
-        ;;
-    env-set)
-        shift
-        cmd_env_set "$@"
-        ;;
-    env-del|env-delete|env-rm)
-        shift
-        cmd_env_del "$@"
-        ;;
+
+    # --- env vars / secret files ---
+    env) shift; cmd_env "$@" ;;
+    env-set) shift; cmd_env_set "$@" ;;
+    env-del|env-delete|env-rm) shift; cmd_env_del "$@" ;;
+    secret|secrets|secret-file) shift; cmd_secret "$@" ;;
+
+    # --- env groups ---
+    env-group|envgroup|eg) shift; cmd_env_group "$@" ;;
+
+    # --- postgres (extended) ---
     db|postgres)
         shift || true
-        cmd_db "$@"
+        case "${1:-list}" in
+            list|ls|show|get) cmd_db "$@" ;;
+            create) shift; cmd_db_create "$@" ;;
+            update|patch) shift; cmd_db_update "$@" ;;
+            delete|del|rm) shift; cmd_db_delete "$@" ;;
+            suspend|resume|restart|failover) action="$1"; shift; cmd_db_lifecycle "$action" "$@" ;;
+            connect-info|conn|connection-info) shift; cmd_db_connect_info "$@" ;;
+            backup) shift; cmd_db_backup "$@" ;;
+            backups) shift; cmd_db_backups "$@" ;;
+            recover|recovery) shift; cmd_db_recover "$@" ;;
+            creds|credentials) shift; cmd_db_creds "$@" ;;
+            *) cmd_db "$@" ;;
+        esac
         ;;
-    domains)
-        shift
-        cmd_domains "$@"
-        ;;
-    metrics)
-        shift
-        cmd_metrics "$@"
-        ;;
-    projects)
-        cmd_projects
-        ;;
-    snapshot|snap)
-        cmd_snapshot
-        ;;
-    help|--help|-h)
-        show_help
-        ;;
+
+    # --- key value ---
+    kv|key-value|keyvalue|redis) shift; cmd_kv "$@" ;;
+
+    # --- domains ---
+    domains) shift; cmd_domains "$@" ;;
+    domain) shift; cmd_domain "$@" ;;
+
+    # --- headers / routes ---
+    header|headers) shift; cmd_header "$@" ;;
+    route|routes) shift; cmd_route "$@" ;;
+
+    # --- blueprints ---
+    blueprint|blueprints|bp) shift; cmd_blueprint "$@" ;;
+
+    # --- disks ---
+    disk|disks) shift; cmd_disk "$@" ;;
+
+    # --- dedicated IPs ---
+    dedicated-ip|dedicated-ips|ip) shift; cmd_dedicated_ip "$@" ;;
+
+    # --- registry creds ---
+    registry|registry-cred|registries) shift; cmd_registry "$@" ;;
+
+    # --- projects / environments ---
+    projects) cmd_projects ;;
+    project) shift; cmd_project "$@" ;;
+    environment|environments|env-project) shift; cmd_environment "$@" ;;
+
+    # --- webhooks ---
+    webhook|webhooks) shift; cmd_webhook "$@" ;;
+
+    # --- notifications ---
+    notify|notification|notifications) shift; cmd_notify "$@" ;;
+
+    # --- maintenance ---
+    maintenance|maint) shift; cmd_maintenance "$@" ;;
+
+    # --- observability ---
+    logs) shift; cmd_logs "$@" ;;
+    metrics) shift; cmd_metrics "$@" ;;
+    snapshot|snap) cmd_snapshot ;;
+
+    help|--help|-h) show_help ;;
     *)
-        echo "Unknown command: $1"
-        echo "Try: agent-render --help"
+        echo "Unknown command: $1" >&2
+        echo "Try: agent-render --help" >&2
         exit 1
         ;;
 esac

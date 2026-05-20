@@ -61,7 +61,7 @@ def main() -> int:
 
     prompt_result = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text='{"prompt":"deploy this on vercel and check logs"}',
     )
     require(prompt_result.returncode == 0, f"prompt-router failed: {prompt_result.stderr}")
@@ -69,17 +69,16 @@ def main() -> int:
 
     dpt_result = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text='{"prompt":"check the design quality of this page"}',
     )
     require(dpt_result.returncode == 0, f"dpt prompt-router failed: {dpt_result.stderr}")
-    dpt_payload = json.loads(dpt_result.stdout)
-    dpt_context = dpt_payload["hookSpecificOutput"]["additionalContext"]
-    require("agent-do dpt score" in dpt_context, f"expected DPT routing context, got: {dpt_context}")
+    require(dpt_result.stdout.strip() == "",
+            f"expected no non-AI design keyword route, got: {dpt_result.stdout}")
 
     mail_result = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text='{"prompt":"check my mail inbox for the latest verification code"}',
     )
     require(mail_result.returncode == 0, f"mail prompt-router failed: {mail_result.stderr}")
@@ -87,7 +86,7 @@ def main() -> int:
 
     gh_prompt = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text='{"prompt":"what PRs need me on GitHub"}',
     )
     require(gh_prompt.returncode == 0, f"gh prompt-router failed: {gh_prompt.stderr}")
@@ -95,7 +94,7 @@ def main() -> int:
 
     gh_awaiting_prompt = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text='{"prompt":"which PRs are awaiting my review on GitHub"}',
     )
     require(gh_awaiting_prompt.returncode == 0, f"gh awaiting prompt-router failed: {gh_awaiting_prompt.stderr}")
@@ -103,7 +102,7 @@ def main() -> int:
 
     spec_prompt_result = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text='{"prompt":"write a change proposal and spec package for this feature"}',
     )
     require(spec_prompt_result.returncode == 0, f"spec prompt-router failed: {spec_prompt_result.stderr}")
@@ -119,7 +118,7 @@ def main() -> int:
     for completion_prompt in completion_prompts:
         completion_result = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text=json.dumps({"prompt": completion_prompt}),
         )
         require(completion_result.returncode == 0, f"completion prompt-router failed: {completion_result.stderr}")
@@ -130,7 +129,7 @@ def main() -> int:
 
     playwright_nudge = run(
         "python3",
-        "hooks/agent-do-pretooluse-check.py",
+        "hooks/claude/agent-do-pretooluse-check.py",
         input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
     )
     require(playwright_nudge.returncode == 0, f"pretool hook failed: {playwright_nudge.stderr}")
@@ -141,7 +140,7 @@ def main() -> int:
 
     ios_nudge = run(
         "python3",
-        "hooks/agent-do-pretooluse-check.py",
+        "hooks/claude/agent-do-pretooluse-check.py",
         input_text='{"tool_name":"Bash","tool_input":{"command":"xcrun simctl io booted screenshot /tmp/out.png"}}',
     )
     require(ios_nudge.returncode == 0, f"ios pretool hook failed: {ios_nudge.stderr}")
@@ -151,7 +150,7 @@ def main() -> int:
 
     docs_fetch_nudge = run(
         "python3",
-        "hooks/agent-do-pretooluse-check.py",
+        "hooks/claude/agent-do-pretooluse-check.py",
         input_text='{"tool_name":"Bash","tool_input":{"command":"curl https://raw.githubusercontent.com/example/project/main/docs/api.md"}}',
     )
     require(docs_fetch_nudge.returncode == 0, f"docs fetch pretool hook failed: {docs_fetch_nudge.stderr}")
@@ -159,27 +158,24 @@ def main() -> int:
     docs_fetch_context = docs_fetch_payload["hookSpecificOutput"]["additionalContext"]
     require("agent-do context fetch https://raw.githubusercontent.com/example/project/main/docs/api.md" in docs_fetch_context, f"expected context fetch nudge, got: {docs_fetch_context}")
 
-    codex_prewrap = run(
-        "python3",
-        "hooks/agent-do-pretooluse-codex.py",
-        input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
-    )
-    require(codex_prewrap.returncode == 0, f"codex pretool wrapper failed: {codex_prewrap.stderr}")
-    require(
-        codex_prewrap.stdout.strip() == "",
-        f"codex pretool wrapper must suppress unsupported additionalContext, got: {codex_prewrap.stdout}",
-    )
-
+    # Codex now supports `hookSpecificOutput.additionalContext` on PreToolUse
+    # (May 2026 hooks release). The Codex-specific wrapper file was deleted;
+    # Codex's `~/.codex/hooks/agent-do-pretooluse-check.py` runpy-passes
+    # through to this repo's hook directly. AGENT_DO_HOOK_RUNTIME=codex no
+    # longer suppresses output: the hook emits the same nudge in both
+    # runtimes, and Codex consumes it.
     codex_direct = run(
         "python3",
-        "hooks/agent-do-pretooluse-check.py",
+        "hooks/claude/agent-do-pretooluse-check.py",
         input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
         env={"AGENT_DO_HOOK_RUNTIME": "codex"},
     )
     require(codex_direct.returncode == 0, f"codex direct pretool failed: {codex_direct.stderr}")
+    codex_payload = json.loads(codex_direct.stdout)
+    codex_context = codex_payload["hookSpecificOutput"]["additionalContext"]
     require(
-        codex_direct.stdout.strip() == "",
-        f"codex direct pretool must suppress unsupported additionalContext, got: {codex_direct.stdout}",
+        "agent-do browse" in codex_context,
+        f"codex runtime should emit the same browse nudge as claude, got: {codex_context}",
     )
 
     offline = run("python3", "bin/pattern-matcher", "--json", "deploy this on vercel")
@@ -221,18 +217,47 @@ def main() -> int:
         f"expected query-specific retrieve command, got: {docs_top}",
     )
 
+    # Intent-bound nudges (docs retrieval, design toolkit, coord advisory) are
+    # gated by the AI classifier. With AI off (test default), the hook must be
+    # SILENT on these even for prompts that look like clear keyword matches.
+    # This was a deliberate structural change: the old keyword paths produced
+    # false positives on forwarded narratives mentioning "docs"/"api" as a
+    # topic. The agent-first audit principle is: emit only when the classifier
+    # confirms intent, otherwise stay silent.
     docs_prompt = run(
         "python3",
-        "hooks/agent-do-prompt-router.py",
+        "hooks/claude/agent-do-prompt-router.py",
         input_text=json.dumps({"prompt": "use latest TanStack Query docs"}),
     )
     require(docs_prompt.returncode == 0, f"docs prompt-router failed: {docs_prompt.stderr}")
-    docs_prompt_payload = json.loads(docs_prompt.stdout)
-    docs_context = docs_prompt_payload["hookSpecificOutput"]["additionalContext"]
-    require("agent-do Context Retrieval" in docs_context, f"expected context retrieval nudge, got: {docs_context}")
+    # With AI off, the hook should produce no output (silent fallthrough).
     require(
-        "agent-do context retrieve 'use latest TanStack Query docs' --fresh --prefer-latest --max-tokens 8000" in docs_context,
-        f"expected query-specific retrieve nudge, got: {docs_context}",
+        docs_prompt.stdout.strip() == "",
+        f"expected silent fallthrough with AI off, got: {docs_prompt.stdout!r}",
+    )
+
+    # Forwarded handoff prompts that mention "docs"/"api" as a topic must also
+    # produce no false-positive nudges. This was the live misfire that
+    # motivated the structural fix.
+    forwarded_handoff = (
+        "## For Codex review: the full package\n\n"
+        "Three things, one architecture. The agent-do contracts proposal at "
+        "`.handoff/AGENT-DO-CONTRACTS-PLAN.md` operationalizes the README's "
+        "five-beat mental model. The full session handoff has the api build, "
+        "context redesign, and audit. Team-sharing folds in via scope metadata.\n\n"
+        "### Coord and docs\n\n"
+        "agent-do context retrieve respects scope. Tools declare contracts. "
+        "Review this handoff, then react in writing with blockers.\n"
+    )
+    forwarded = run(
+        "python3",
+        "hooks/claude/agent-do-prompt-router.py",
+        input_text=json.dumps({"prompt": forwarded_handoff}),
+    )
+    require(forwarded.returncode == 0, f"forwarded handoff hook failed: {forwarded.stderr}")
+    require(
+        forwarded.stdout.strip() == "",
+        f"forwarded handoff must produce no nudges with AI off, got: {forwarded.stdout!r}",
     )
 
     find = run("./agent-do", "find", "playwright", "--json")
@@ -258,7 +283,7 @@ def main() -> int:
         )
 
         hook_input = json.dumps({"cwd": str(project)})
-        session_hook = run("bash", "hooks/agent-do-session-start.sh", input_text=hook_input)
+        session_hook = run("bash", "hooks/claude/agent-do-session-start.sh", input_text=hook_input)
         require(session_hook.returncode == 0, f"session hook failed: {session_hook.stderr}")
         session_payload = json.loads(session_hook.stdout)
         additional = session_payload["hookSpecificOutput"]["additionalContext"]
@@ -277,7 +302,7 @@ def main() -> int:
 
         bootstrap_hook = run(
             "bash",
-            "hooks/agent-do-session-start.sh",
+            "hooks/claude/agent-do-session-start.sh",
             input_text=json.dumps({"cwd": str(project)}),
             env=env,
         )
@@ -300,7 +325,7 @@ def main() -> int:
         first_env["CODEX_THREAD_ID"] = "alpha-123"
         first_hook = run(
             "bash",
-            "hooks/agent-do-session-start.sh",
+            "hooks/claude/agent-do-session-start.sh",
             input_text=json.dumps({"cwd": str(project)}),
             env=first_env,
         )
@@ -314,7 +339,7 @@ def main() -> int:
         second_env["CODEX_THREAD_ID"] = "beta-456"
         second_hook = run(
             "bash",
-            "hooks/agent-do-session-start.sh",
+            "hooks/claude/agent-do-session-start.sh",
             input_text=json.dumps({"cwd": str(project)}),
             env=second_env,
         )
@@ -326,7 +351,7 @@ def main() -> int:
 
         quiet_prompt = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text=json.dumps({"prompt": "could you tell me whether agent-do suggest uses an AI model?", "cwd": str(project)}),
             env=second_env,
         )
@@ -335,7 +360,7 @@ def main() -> int:
 
         work_prompt = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text=json.dumps({"prompt": "fix the render config in this repo", "cwd": str(project)}),
             env=second_env,
         )
@@ -348,7 +373,7 @@ def main() -> int:
 
         docs_prompt = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text=json.dumps({"prompt": "update docs, clean repo, update readme, do the thang and THEN push", "cwd": str(project)}),
             env=second_env,
         )
@@ -386,7 +411,7 @@ def main() -> int:
 
         overlap_hook = run(
             "bash",
-            "hooks/agent-do-session-start.sh",
+            "hooks/claude/agent-do-session-start.sh",
             input_text=json.dumps({"cwd": str(project)}),
             env=second_env,
         )
@@ -398,7 +423,7 @@ def main() -> int:
 
         coord_prompt = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text=json.dumps({"prompt": "please review the other agent's work so we do not conflict", "cwd": str(project)}),
             env=second_env,
         )
@@ -418,19 +443,19 @@ def main() -> int:
 
         _ = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text='{"prompt":"deploy this on vercel"}',
             env=env,
         )
         _ = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text='{"prompt":"continue"}',
             env=env,
         )
         _ = run(
             "python3",
-            "hooks/agent-do-pretooluse-check.py",
+            "hooks/claude/agent-do-pretooluse-check.py",
             input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
             env=env,
         )

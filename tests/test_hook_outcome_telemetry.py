@@ -58,7 +58,7 @@ def main() -> int:
 
         pretool = run(
             "python3",
-            "hooks/agent-do-pretooluse-check.py",
+            "hooks/claude/agent-do-pretooluse-check.py",
             input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
             env=env,
         )
@@ -77,7 +77,7 @@ def main() -> int:
 
         second_pretool = run(
             "python3",
-            "hooks/agent-do-pretooluse-check.py",
+            "hooks/claude/agent-do-pretooluse-check.py",
             input_text='{"tool_name":"Bash","tool_input":{"command":"npx playwright test"}}',
             env=env,
         )
@@ -92,7 +92,7 @@ def main() -> int:
 
         prompt = run(
             "python3",
-            "hooks/agent-do-prompt-router.py",
+            "hooks/claude/agent-do-prompt-router.py",
             input_text='{"prompt":"maybe look around"}',
             env=env,
         )
