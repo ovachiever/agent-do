@@ -1,0 +1,1612 @@
+#!/usr/bin/env bash
+# agent-psql - PostgreSQL CLI wrapper for AI agents
+# Wraps the native psql/pg_dump/pg_restore binaries.
+# Complementary to agent-db (which uses Python drivers for multi-database support).
+#
+# Designed for Render Postgres and Supabase — paste a connection string, get structured access.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PSQL_CONFIG_DIR="${AGENT_DO_HOME:-$HOME/.agent-do}/psql"
+SESSION_FILE="${PSQL_CONFIG_DIR}/session.json"
+PROFILES_FILE="${PSQL_CONFIG_DIR}/profiles.json"
+
+# Source shared helpers
+source "${SCRIPT_DIR}/../lib/json-output.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/../lib/snapshot.sh" 2>/dev/null || true
+
+show_help() {
+    cat << 'EOF'
+agent-psql - PostgreSQL CLI wrapper for AI agents
+
+Wraps the native psql binary for PostgreSQL-specific operations.
+Paste a Render or Supabase connection string and go.
+
+CONNECTION
+  connect <conn_string>      Connect via connection string
+  connect --profile <name>   Connect via saved profile
+  disconnect                 End session
+  status                     Show connection status
+
+PROFILES
+  profiles                   List saved profiles
+  profile add <name> <str>   Save a connection profile (password stored in keychain)
+  profile remove <name>      Remove a profile
+
+SCHEMA EXPLORATION
+  snapshot                   Full schema overview (tables, views, sizes, extensions)
+  snapshot --compact         Table names only
+  tables [pattern]           List tables (optional LIKE pattern)
+  views                      List views
+  describe <table>           Columns, types, constraints, indexes, FKs
+  schemas                    List schemas
+  extensions                 List installed extensions
+  sizes                      Table and index sizes
+  relations [table]          FK relationship map
+
+DATA
+  query "<sql>"              Execute SQL, return JSON
+  query "<sql>" --limit N    Add/override LIMIT (default: 200 for SELECT)
+  sample <table> [n]         Sample n rows (default: 5)
+  count <table>              Row count
+  exec <file.sql>            Execute a SQL file
+
+ADMINISTRATION
+  connections                Active database connections
+  locks                      Current lock contention
+  stats [table]              Table statistics (seq/idx scans, live/dead tuples)
+  indexes <table>            Index details and usage stats
+  version                    PostgreSQL server version
+
+BACKUP
+  dump <outfile> [opts]      pg_dump wrapper
+    --table <t>              Dump specific table
+    --schema-only            Schema only, no data
+    --format <fmt>           Output format: plain (default), custom, directory
+  restore <file> [opts]      pg_restore wrapper
+    --clean                  Drop objects before restoring
+    --schema-only            Schema only
+
+ENVIRONMENT
+  PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD   Standard libpq vars
+  Connection strings: postgresql://user:pass@host:port/dbname?sslmode=require
+
+EXIT CODES
+  0  Success
+  1  Connection failed
+  2  psql binary not found
+  3  Object not found
+  4  Query error
+  5  Permission denied
+  6  File not found
+  7  Backup/restore error
+  8  Unknown error
+
+EXAMPLES
+  # Connect with a Render connection string
+  agent-psql connect "postgresql://user:pass@host.render.com:5432/mydb?sslmode=require"
+
+  # Save it for later
+  agent-psql profile add mydb "postgresql://user:pass@host.render.com:5432/mydb"
+
+  # Explore
+  agent-psql snapshot
+  agent-psql describe users
+  agent-psql sample orders 10
+
+  # Query
+  agent-psql query "SELECT * FROM users WHERE active = true"
+
+  # Admin
+  agent-psql connections
+  agent-psql sizes
+
+  # Backup
+  agent-psql dump backup.sql --schema-only
+EOF
+}
+
+# --- Helpers ---
+
+ensure_psql() {
+    if ! command -v psql &>/dev/null; then
+        echo '{"ok": false, "error": "psql binary not found. Install PostgreSQL client: brew install postgresql"}'
+        exit 2
+    fi
+}
+
+ensure_config_dir() {
+    mkdir -p "$PSQL_CONFIG_DIR"
+}
+
+# Validate a table reference to prevent SQL injection.
+# Allows: schema.table or just table. Each component must be a valid SQL identifier
+# (letters, digits, underscores; must start with letter or underscore).
+# At most one dot (schema.table); rejects everything else.
+validate_table_name() {
+    local name="$1"
+    if [[ -z "$name" ]]; then
+        echo '{"ok": false, "error": "Table name required"}'
+        return 1
+    fi
+    # Allow schema.table (one dot max); validate each component
+    local part
+    local dot_count="${name//[^.]/}"
+    if [[ ${#dot_count} -gt 1 ]]; then
+        echo "{\"ok\": false, \"error\": \"Invalid table reference (too many dots): $name\"}"
+        return 1
+    fi
+    IFS='.' read -ra parts <<< "$name"
+    for part in "${parts[@]}"; do
+        if [[ ! "$part" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            echo "{\"ok\": false, \"error\": \"Invalid identifier: $part\"}"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Parse a table reference into schema and table components.
+# Sets _TBL_SCHEMA and _TBL_NAME. Call after validate_table_name.
+# "users" -> schema=public, table=users
+# "myschema.users" -> schema=myschema, table=users
+parse_table_ref() {
+    local ref="$1"
+    if [[ "$ref" == *.* ]]; then
+        _TBL_SCHEMA="${ref%%.*}"
+        _TBL_NAME="${ref#*.}"
+    else
+        _TBL_SCHEMA="public"
+        _TBL_NAME="$ref"
+    fi
+}
+
+# Mask password in a connection string for safe display
+mask_connection_string() {
+    python3 -c "
+import sys
+from urllib.parse import urlparse, urlunparse
+try:
+    u = urlparse(sys.argv[1])
+    if u.password:
+        masked = u._replace(netloc=f'{u.username}:****@{u.hostname}' + (f':{u.port}' if u.port else ''))
+        print(urlunparse(masked))
+    else:
+        print(sys.argv[1])
+except:
+    print('****')
+" "$1"
+}
+
+# Parse a connection string into PG* env vars.
+# Sets: _PG_HOST, _PG_PORT, _PG_DATABASE, _PG_USER, _PG_PASSWORD, _PG_SSLMODE
+parse_connection_string() {
+    eval "$(python3 -c "
+import sys, shlex
+from urllib.parse import urlparse, parse_qs
+try:
+    u = urlparse(sys.argv[1])
+    host = u.hostname or 'localhost'
+    port = str(u.port or 5432)
+    db = (u.path or '').lstrip('/')
+    user = u.username or ''
+    pw = u.password or ''
+    qs = parse_qs(u.query)
+    ssl = qs.get('sslmode', ['prefer'])[0]
+    print(f'_PG_HOST={shlex.quote(host)}')
+    print(f'_PG_PORT={shlex.quote(port)}')
+    print(f'_PG_DATABASE={shlex.quote(db)}')
+    print(f'_PG_USER={shlex.quote(user)}')
+    print(f'_PG_PASSWORD={shlex.quote(pw)}')
+    print(f'_PG_SSLMODE={shlex.quote(ssl)}')
+except Exception as e:
+    print(f'echo \"Error parsing connection string: {e}\" >&2; return 1', file=sys.stderr)
+    sys.exit(1)
+" "$1")"
+}
+
+# Load active session. Returns 0 if session exists, 1 otherwise.
+# Sets _PG_* vars from the session file.
+load_session() {
+    if [[ ! -f "$SESSION_FILE" ]]; then
+        return 1
+    fi
+    eval "$(python3 -c "
+import json, sys, shlex
+try:
+    with open(sys.argv[1]) as f:
+        s = json.load(f)
+    print(f'_PG_HOST={shlex.quote(s.get(\"host\", \"\"))}')
+    print(f'_PG_PORT={shlex.quote(s.get(\"port\", \"5432\"))}')
+    print(f'_PG_DATABASE={shlex.quote(s.get(\"database\", \"\"))}')
+    print(f'_PG_USER={shlex.quote(s.get(\"user\", \"\"))}')
+    print(f'_PG_SSLMODE={shlex.quote(s.get(\"sslmode\", \"prefer\"))}')
+except:
+    sys.exit(1)
+" "$SESSION_FILE" 2>/dev/null)" || return 1
+    # Password comes from keychain or env
+    _PG_PASSWORD="${PGPASSWORD:-}"
+    if [[ -z "$_PG_PASSWORD" ]]; then
+        _PG_PASSWORD=$(_get_session_password 2>/dev/null || true)
+    fi
+    return 0
+}
+
+# Save session state (never stores password in the file)
+save_session() {
+    ensure_config_dir
+    python3 -c "
+import json, sys
+from datetime import datetime
+session = {
+    'host': sys.argv[1],
+    'port': sys.argv[2],
+    'database': sys.argv[3],
+    'user': sys.argv[4],
+    'sslmode': sys.argv[5],
+    'connected_at': datetime.utcnow().isoformat() + 'Z'
+}
+with open(sys.argv[6], 'w') as f:
+    json.dump(session, f, indent=2)
+" "$_PG_HOST" "$_PG_PORT" "$_PG_DATABASE" "$_PG_USER" "$_PG_SSLMODE" "$SESSION_FILE"
+}
+
+# Store password in macOS keychain
+_store_password() {
+    local profile_name="$1"
+    local password="$2"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        security delete-generic-password -a "$profile_name" -s "agent-psql" 2>/dev/null || true
+        security add-generic-password -a "$profile_name" -s "agent-psql" -w "$password" 2>/dev/null
+    fi
+}
+
+# Get password from keychain
+_get_password() {
+    local profile_name="$1"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        security find-generic-password -a "$profile_name" -s "agent-psql" -w 2>/dev/null || true
+    fi
+}
+
+# Build a composite session key to avoid collisions across hosts/users/databases
+_session_key() {
+    echo "session-${_PG_HOST:-localhost}-${_PG_PORT:-5432}-${_PG_USER:-$(whoami)}-${_PG_DATABASE:-default}"
+}
+
+# Get session password
+_get_session_password() {
+    _get_password "$(_session_key)"
+}
+
+# Store session password
+_store_session_password() {
+    _store_password "$(_session_key)" "$1"
+}
+
+# Ensure we have an active connection. Exits with error if not.
+require_connection() {
+    ensure_psql
+    if ! load_session; then
+        echo '{"ok": false, "error": "Not connected. Use: agent-psql connect <connection_string>"}'
+        exit 1
+    fi
+}
+
+# Execute psql with tuples-only unaligned output (no CSV, tab-separated)
+run_psql_raw() {
+    local sql="$1"
+    PGPASSWORD="$_PG_PASSWORD" psql \
+        -X -t -A -F $'\t' \
+        -v ON_ERROR_STOP=1 \
+        -h "$_PG_HOST" \
+        -p "$_PG_PORT" \
+        -U "$_PG_USER" \
+        -d "$_PG_DATABASE" \
+        -c "$sql" 2>&1
+}
+
+# Execute psql with full output (headers + footers, for human or query results)
+run_psql_full() {
+    local sql="$1"
+    PGPASSWORD="$_PG_PASSWORD" psql \
+        -X -A --csv \
+        -v ON_ERROR_STOP=1 \
+        -h "$_PG_HOST" \
+        -p "$_PG_PORT" \
+        -U "$_PG_USER" \
+        -d "$_PG_DATABASE" \
+        -c "$sql" 2>&1
+}
+
+# --- Connection Commands ---
+
+cmd_connect() {
+    ensure_psql
+    local conn_string=""
+    local profile_name=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile|-p) profile_name="$2"; shift 2 ;;
+            --help|-h) show_help; return 0 ;;
+            *) conn_string="$1"; shift ;;
+        esac
+    done
+
+    # From profile
+    if [[ -n "$profile_name" ]]; then
+        local profiles
+        profiles=$(_load_profiles)
+        local conn
+        conn=$(echo "$profiles" | python3 -c "
+import json, sys
+profiles = json.load(sys.stdin)
+name = sys.argv[1]
+if name not in profiles:
+    print('', end='')
+    sys.exit(1)
+print(profiles[name].get('connection_string', ''))
+" "$profile_name" 2>/dev/null) || true
+
+        if [[ -z "$conn" ]]; then
+            echo "{\"ok\": false, \"error\": \"Profile '$profile_name' not found\"}"
+            exit 1
+        fi
+        conn_string="$conn"
+        # Get password from keychain
+        local stored_pw
+        stored_pw=$(_get_password "$profile_name" 2>/dev/null || true)
+        if [[ -n "$stored_pw" ]]; then
+            # Inject password into connection string if it has a placeholder
+            conn_string=$(python3 -c "
+import sys
+from urllib.parse import urlparse, urlunparse
+u = urlparse(sys.argv[1])
+pw = sys.argv[2]
+if not u.password or u.password == '****':
+    netloc = f'{u.username}:{pw}@{u.hostname}' + (f':{u.port}' if u.port else '')
+    print(urlunparse(u._replace(netloc=netloc)))
+else:
+    print(sys.argv[1])
+" "$conn_string" "$stored_pw")
+        fi
+    fi
+
+    if [[ -z "$conn_string" ]]; then
+        # Try PG* env vars
+        if [[ -n "${PGHOST:-}" ]] && [[ -n "${PGDATABASE:-}" ]]; then
+            _PG_HOST="${PGHOST}"
+            _PG_PORT="${PGPORT:-5432}"
+            _PG_DATABASE="${PGDATABASE}"
+            _PG_USER="${PGUSER:-$(whoami)}"
+            _PG_PASSWORD="${PGPASSWORD:-}"
+            _PG_SSLMODE="${PGSSLMODE:-prefer}"
+        else
+            echo '{"ok": false, "error": "No connection string, profile, or PGHOST/PGDATABASE env vars provided"}'
+            exit 1
+        fi
+    else
+        parse_connection_string "$conn_string"
+    fi
+
+    # Test the connection
+    local version
+    version=$(run_psql_raw "SELECT version()" 2>&1) || {
+        python3 -c "
+import json, sys
+print(json.dumps({'ok': False, 'error': 'Connection failed: ' + sys.argv[1]}))
+" "$(echo "$version" | head -1)"
+        exit 1
+    }
+
+    # Store session
+    save_session
+
+    # Store password in keychain for session reconnect
+    if [[ -n "$_PG_PASSWORD" ]]; then
+        _store_session_password "$_PG_PASSWORD"
+    fi
+
+    local masked
+    masked=$(mask_connection_string "postgresql://${_PG_USER}:${_PG_PASSWORD}@${_PG_HOST}:${_PG_PORT}/${_PG_DATABASE}")
+
+    # Snapshot the connection event
+    if type snapshot_begin &>/dev/null; then
+        snapshot_begin "psql-connect"
+        snapshot_field "host" "$_PG_HOST"
+        snapshot_field "port" "$_PG_PORT"
+        snapshot_field "database" "$_PG_DATABASE"
+        snapshot_field "user" "$_PG_USER"
+        snapshot_field "sslmode" "$_PG_SSLMODE"
+        snapshot_field "masked_uri" "$masked"
+        snapshot_end
+    fi
+
+    python3 -c "
+import json, sys
+print(json.dumps({
+    'ok': True,
+    'message': 'Connected',
+    'host': sys.argv[1],
+    'port': sys.argv[2],
+    'database': sys.argv[3],
+    'user': sys.argv[4],
+    'sslmode': sys.argv[5],
+    'server_version': sys.argv[6].strip(),
+    'masked_uri': sys.argv[7]
+}, indent=2))
+" "$_PG_HOST" "$_PG_PORT" "$_PG_DATABASE" "$_PG_USER" "$_PG_SSLMODE" "$version" "$masked"
+}
+
+cmd_disconnect() {
+    if [[ -f "$SESSION_FILE" ]]; then
+        rm -f "$SESSION_FILE"
+    fi
+    echo '{"ok": true, "message": "Disconnected"}'
+}
+
+cmd_status() {
+    if load_session; then
+        python3 -c "
+import json, sys
+print(json.dumps({
+    'ok': True,
+    'connected': True,
+    'host': sys.argv[1],
+    'port': sys.argv[2],
+    'database': sys.argv[3],
+    'user': sys.argv[4],
+    'sslmode': sys.argv[5]
+}, indent=2))
+" "$_PG_HOST" "$_PG_PORT" "$_PG_DATABASE" "$_PG_USER" "$_PG_SSLMODE"
+    else
+        echo '{"ok": true, "connected": false, "message": "Not connected. Use: agent-psql connect <connection_string>"}'
+    fi
+}
+
+# --- Profile Commands ---
+
+_load_profiles() {
+    if [[ -f "$PROFILES_FILE" ]]; then
+        cat "$PROFILES_FILE"
+    else
+        echo '{}'
+    fi
+}
+
+cmd_profiles() {
+    ensure_config_dir
+    local profiles
+    profiles=$(_load_profiles)
+
+    echo "$profiles" | python3 -c "
+import json, sys
+from urllib.parse import urlparse
+profiles = json.load(sys.stdin)
+if not profiles:
+    print(json.dumps({'ok': True, 'profiles': [], 'count': 0}, indent=2))
+    sys.exit(0)
+items = []
+for name, data in profiles.items():
+    cs = data.get('connection_string', '')
+    try:
+        u = urlparse(cs)
+        items.append({
+            'name': name,
+            'host': u.hostname or '',
+            'port': u.port or 5432,
+            'database': (u.path or '').lstrip('/'),
+            'user': u.username or ''
+        })
+    except:
+        items.append({'name': name, 'host': '?', 'database': '?'})
+print(json.dumps({'ok': True, 'profiles': items, 'count': len(items)}, indent=2))
+"
+}
+
+cmd_profile_add() {
+    local name="${1:-}"
+    local conn_string="${2:-}"
+
+    if [[ -z "$name" ]] || [[ -z "$conn_string" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql profile add <name> <connection_string>"}'
+        return 1
+    fi
+
+    ensure_config_dir
+
+    # Extract and store password separately
+    local password
+    password=$(python3 -c "
+from urllib.parse import urlparse
+import sys
+u = urlparse(sys.argv[1])
+print(u.password or '')
+" "$conn_string")
+
+    # Store password-stripped connection string
+    local stripped
+    stripped=$(python3 -c "
+from urllib.parse import urlparse, urlunparse
+import sys
+u = urlparse(sys.argv[1])
+if u.password:
+    netloc = f'{u.username}:****@{u.hostname}' + (f':{u.port}' if u.port else '')
+    print(urlunparse(u._replace(netloc=netloc)))
+else:
+    print(sys.argv[1])
+" "$conn_string")
+
+    # Update profiles file
+    local profiles
+    profiles=$(_load_profiles)
+    echo "$profiles" | python3 -c "
+import json, sys
+profiles = json.load(sys.stdin)
+profiles[sys.argv[1]] = {'connection_string': sys.argv[2]}
+with open(sys.argv[3], 'w') as f:
+    json.dump(profiles, f, indent=2)
+" "$name" "$stripped" "$PROFILES_FILE"
+
+    # Store password in keychain
+    if [[ -n "$password" ]]; then
+        _store_password "$name" "$password"
+        echo "{\"ok\": true, \"message\": \"Profile '$name' saved. Password stored in keychain.\"}"
+    else
+        echo "{\"ok\": true, \"message\": \"Profile '$name' saved. No password found in connection string.\"}"
+    fi
+}
+
+cmd_profile_remove() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql profile remove <name>"}'
+        return 1
+    fi
+
+    local profiles
+    profiles=$(_load_profiles)
+    echo "$profiles" | python3 -c "
+import json, sys
+profiles = json.load(sys.stdin)
+name = sys.argv[1]
+if name not in profiles:
+    print(json.dumps({'ok': False, 'error': f\"Profile '{name}' not found\"}))
+    sys.exit(1)
+del profiles[name]
+with open(sys.argv[2], 'w') as f:
+    json.dump(profiles, f, indent=2)
+print(json.dumps({'ok': True, 'message': f\"Profile '{name}' removed\"}))
+" "$name" "$PROFILES_FILE"
+
+    # Remove from keychain
+    if [[ "$(uname)" == "Darwin" ]]; then
+        security delete-generic-password -a "$name" -s "agent-psql" 2>/dev/null || true
+    fi
+}
+
+# --- Schema Exploration Commands ---
+
+cmd_snapshot() {
+    require_connection
+    local compact=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --compact) compact=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ "$compact" == "true" ]]; then
+        local result
+        result=$(run_psql_raw "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename") || {
+            python3 -c "import json,sys; print(json.dumps({'ok':False,'error':'Query failed: '+sys.argv[1]}))" "$(echo "$result" | head -1)"
+            exit 4
+        }
+        python3 -c "
+import json, sys
+lines = [l.strip() for l in sys.stdin.read().strip().split('\n') if l.strip()]
+print(json.dumps({
+    'ok': True,
+    'database': sys.argv[1],
+    'table_count': len(lines),
+    'tables': lines
+}, indent=2))
+" "$_PG_DATABASE" <<< "$result"
+        return
+    fi
+
+    # Full snapshot: tables with row counts and sizes, views, extensions
+    local result
+    result=$(run_psql_full "
+SELECT json_build_object(
+    'tables', COALESCE((
+        SELECT json_agg(json_build_object(
+            'name', t.tablename,
+            'schema', t.schemaname,
+            'rows', COALESCE(s.n_live_tup, 0),
+            'size', pg_size_pretty(pg_total_relation_size(quote_ident(t.tablename))),
+            'size_bytes', pg_total_relation_size(quote_ident(t.tablename))
+        ) ORDER BY t.tablename)
+        FROM pg_tables t
+        LEFT JOIN pg_stat_user_tables s ON s.relname = t.tablename
+        WHERE t.schemaname = 'public'
+    ), '[]'::json),
+    'views', COALESCE((
+        SELECT json_agg(json_build_object(
+            'name', viewname,
+            'schema', schemaname
+        ) ORDER BY viewname)
+        FROM pg_views
+        WHERE schemaname = 'public'
+    ), '[]'::json),
+    'extensions', COALESCE((
+        SELECT json_agg(json_build_object(
+            'name', extname,
+            'version', extversion
+        ) ORDER BY extname)
+        FROM pg_extension
+        WHERE extname != 'plpgsql'
+    ), '[]'::json),
+    'database', current_database(),
+    'server_version', version(),
+    'db_size', pg_size_pretty(pg_database_size(current_database())),
+    'db_size_bytes', pg_database_size(current_database())
+)
+") || {
+        python3 -c "import json,sys; print(json.dumps({'ok':False,'error':'Snapshot failed: '+sys.argv[1]}))" "$(echo "$result" | head -1)"
+        exit 4
+    }
+
+    # The CSV header is the first line; the JSON is the second
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+# Skip CSV header line if present
+lines = raw.split('\n')
+for line in lines:
+    line = line.strip()
+    if line.startswith('{'):
+        data = json.loads(line)
+        data['ok'] = True
+        table_count = len(data.get('tables', []))
+        view_count = len(data.get('views', []))
+        data['table_count'] = table_count
+        data['view_count'] = view_count
+        print(json.dumps(data, indent=2))
+        sys.exit(0)
+print(json.dumps({'ok': False, 'error': 'Unexpected output format'}))
+" <<< "$result"
+}
+
+cmd_tables() {
+    require_connection
+    local pattern="${1:-}"
+
+    local sql="
+        SELECT json_agg(json_build_object(
+            'name', t.tablename,
+            'rows', COALESCE(s.n_live_tup, 0),
+            'size', pg_size_pretty(pg_total_relation_size(quote_ident(t.tablename)))
+        ) ORDER BY t.tablename)
+        FROM pg_tables t
+        LEFT JOIN pg_stat_user_tables s ON s.relname = t.tablename
+        WHERE t.schemaname = 'public'
+    "
+    if [[ -n "$pattern" ]]; then
+        # Validate LIKE pattern: allow table name chars plus % and _ wildcards
+        if [[ ! "$pattern" =~ ^[a-zA-Z0-9_%.-]+$ ]]; then
+            echo "{\"ok\": false, \"error\": \"Invalid table pattern: $pattern\"}"
+            return 1
+        fi
+        sql+=" AND t.tablename LIKE '${pattern}'"
+    fi
+
+    local result
+    result=$(run_psql_raw "$sql") || {
+        echo "{\"ok\": false, \"error\": \"Query failed\"}"
+        exit 4
+    }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw or raw == '':
+    print(json.dumps({'ok': True, 'tables': [], 'count': 0}, indent=2))
+    sys.exit(0)
+try:
+    tables = json.loads(raw) or []
+    print(json.dumps({'ok': True, 'tables': tables, 'count': len(tables)}, indent=2))
+except:
+    print(json.dumps({'ok': True, 'tables': [], 'count': 0}, indent=2))
+" <<< "$result"
+}
+
+cmd_views() {
+    require_connection
+
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'name', viewname,
+            'schema', schemaname,
+            'definition', LEFT(definition, 200)
+        ) ORDER BY viewname), '[]')
+        FROM pg_views WHERE schemaname = 'public'
+    ") || {
+        echo "{\"ok\": false, \"error\": \"Query failed\"}"
+        exit 4
+    }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+views = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'views': views, 'count': len(views)}, indent=2))
+" <<< "$result"
+}
+
+cmd_describe() {
+    require_connection
+    local table="${1:-}"
+    if [[ -z "$table" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql describe <table>"}'
+        return 1
+    fi
+    validate_table_name "$table" || return 1
+    parse_table_ref "$table"
+
+    local result
+    result=$(run_psql_raw "
+        SELECT json_build_object(
+            'table', '$table',
+            'schema', '$_TBL_SCHEMA',
+            'columns', (
+                SELECT json_agg(json_build_object(
+                    'name', c.column_name,
+                    'type', c.data_type ||
+                        CASE WHEN c.character_maximum_length IS NOT NULL
+                             THEN '(' || c.character_maximum_length || ')'
+                             ELSE '' END,
+                    'nullable', c.is_nullable = 'YES',
+                    'default', c.column_default
+                ) ORDER BY c.ordinal_position)
+                FROM information_schema.columns c
+                WHERE c.table_name = '$_TBL_NAME' AND c.table_schema = '$_TBL_SCHEMA'
+            ),
+            'primary_key', COALESCE((
+                SELECT json_agg(a.attname ORDER BY a.attnum)
+                FROM pg_index i
+                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                WHERE i.indrelid = '\"$_TBL_SCHEMA\".\"$_TBL_NAME\"'::regclass AND i.indisprimary
+            ), '[]'::json),
+            'foreign_keys', COALESCE((
+                SELECT json_agg(json_build_object(
+                    'column', kcu.column_name,
+                    'references', ccu.table_schema || '.' || ccu.table_name || '.' || ccu.column_name,
+                    'constraint', tc.constraint_name
+                ))
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                JOIN information_schema.constraint_column_usage ccu
+                    ON ccu.constraint_name = tc.constraint_name
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                  AND tc.table_name = '$_TBL_NAME' AND tc.table_schema = '$_TBL_SCHEMA'
+            ), '[]'::json),
+            'indexes', COALESCE((
+                SELECT json_agg(json_build_object(
+                    'name', indexname,
+                    'definition', indexdef,
+                    'size', pg_size_pretty(pg_relation_size(quote_ident(indexname)))
+                ))
+                FROM pg_indexes
+                WHERE tablename = '$_TBL_NAME' AND schemaname = '$_TBL_SCHEMA'
+            ), '[]'::json),
+            'row_count', (SELECT n_live_tup FROM pg_stat_user_tables
+                          WHERE relname = '$_TBL_NAME' AND schemaname = '$_TBL_SCHEMA'),
+            'size', pg_size_pretty(pg_total_relation_size(
+                quote_ident('$_TBL_SCHEMA') || '.' || quote_ident('$_TBL_NAME'))),
+            'size_bytes', pg_total_relation_size(
+                quote_ident('$_TBL_SCHEMA') || '.' || quote_ident('$_TBL_NAME'))
+        )
+    ") || {
+        echo "{\"ok\": false, \"error\": \"Table '$table' not found or query failed\", \"exit_code\": 3}"
+        exit 3
+    }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    print(json.dumps({'ok': False, 'error': 'No output', 'exit_code': 3}))
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+    data['ok'] = True
+    print(json.dumps(data, indent=2))
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': f'Parse error: {e}'}))
+" <<< "$result"
+}
+
+cmd_schemas() {
+    require_connection
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'name', schema_name,
+            'owner', schema_owner
+        ) ORDER BY schema_name), '[]')
+        FROM information_schema.schemata
+        WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+schemas = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'schemas': schemas, 'count': len(schemas)}, indent=2))
+" <<< "$result"
+}
+
+cmd_extensions() {
+    require_connection
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'name', e.extname,
+            'version', e.extversion,
+            'schema', n.nspname,
+            'description', c.description
+        ) ORDER BY e.extname), '[]')
+        FROM pg_extension e
+        JOIN pg_namespace n ON n.oid = e.extnamespace
+        LEFT JOIN pg_description c ON c.objoid = e.oid AND c.classoid = 'pg_extension'::regclass
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+exts = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'extensions': exts, 'count': len(exts)}, indent=2))
+" <<< "$result"
+}
+
+cmd_sizes() {
+    require_connection
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'table', relname,
+            'total_size', pg_size_pretty(pg_total_relation_size(relid)),
+            'total_bytes', pg_total_relation_size(relid),
+            'table_size', pg_size_pretty(pg_relation_size(relid)),
+            'index_size', pg_size_pretty(pg_indexes_size(relid)),
+            'rows', n_live_tup
+        ) ORDER BY pg_total_relation_size(relid) DESC), '[]')
+        FROM pg_stat_user_tables
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+tables = json.loads(raw) if raw else []
+total = sum(t.get('total_bytes', 0) for t in tables)
+print(json.dumps({
+    'ok': True,
+    'tables': tables,
+    'count': len(tables),
+    'total_size': f'{total / 1024 / 1024:.1f} MB' if total > 1024*1024 else f'{total / 1024:.1f} kB'
+}, indent=2))
+" <<< "$result"
+}
+
+cmd_relations() {
+    require_connection
+    local table="${1:-}"
+
+    local where_clause=""
+    if [[ -n "$table" ]]; then
+        validate_table_name "$table" || return 1
+        parse_table_ref "$table"
+        where_clause="AND ((tc.table_name = '$_TBL_NAME' AND tc.table_schema = '$_TBL_SCHEMA') OR (ccu.table_name = '$_TBL_NAME' AND ccu.table_schema = '$_TBL_SCHEMA'))"
+    fi
+
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'constraint', tc.constraint_name,
+            'from_table', tc.table_name,
+            'from_column', kcu.column_name,
+            'to_table', ccu.table_name,
+            'to_column', ccu.column_name
+        )), '[]')
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+        JOIN information_schema.constraint_column_usage ccu
+            ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY' $where_clause
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+rels = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'relations': rels, 'count': len(rels)}, indent=2))
+" <<< "$result"
+}
+
+# --- Data Commands ---
+
+cmd_query() {
+    require_connection
+    local sql=""
+    local limit=""
+    local explain=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --limit|-l) limit="$2"; shift 2 ;;
+            --explain) explain=true; shift ;;
+            *) sql="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$sql" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql query \"<sql>\" [--limit N]"}'
+        return 1
+    fi
+
+    # Snapshot the query
+    if type snapshot_begin &>/dev/null; then
+        snapshot_begin "psql-query"
+        snapshot_field "database" "$_PG_DATABASE"
+        snapshot_field "sql" "$sql"
+        snapshot_end
+    fi
+
+    # Add EXPLAIN ANALYZE if requested
+    if [[ "$explain" == "true" ]]; then
+        sql="EXPLAIN ANALYZE $sql"
+    fi
+
+    # Add default LIMIT for SELECT statements without one
+    if [[ -z "$limit" ]]; then
+        # Only add default limit for SELECT, not for EXPLAIN or DML
+        if echo "$sql" | grep -qi '^[[:space:]]*SELECT' && ! echo "$sql" | grep -qi 'LIMIT' && [[ "$explain" == "false" ]]; then
+            limit="200"
+        fi
+    fi
+
+    # Validate limit is numeric
+    if [[ -n "$limit" ]] && [[ ! "$limit" =~ ^[0-9]+$ ]]; then
+        echo '{"ok": false, "error": "Limit must be a positive integer"}'
+        return 1
+    fi
+    if [[ -n "$limit" ]] && ! echo "$sql" | grep -qi 'LIMIT'; then
+        sql="$sql LIMIT $limit"
+    fi
+
+    local start_ms
+    start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+
+    local result
+    result=$(run_psql_full "$sql" 2>&1)
+    local exit_code=$?
+
+    local end_ms
+    end_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+    local elapsed=$((end_ms - start_ms))
+
+    if [[ $exit_code -ne 0 ]]; then
+        python3 -c "
+import json, sys
+print(json.dumps({
+    'ok': False,
+    'error': sys.argv[1].strip(),
+    'exit_code': 4
+}, indent=2))
+" "$result"
+        return 1
+    fi
+
+    # Parse CSV output into JSON
+    python3 -c "
+import csv, json, sys, io
+from datetime import datetime, date
+raw = sys.stdin.read().strip()
+elapsed = int(sys.argv[1])
+if not raw:
+    print(json.dumps({'ok': True, 'columns': [], 'rows': [], 'row_count': 0, 'execution_time_ms': elapsed}, indent=2))
+    sys.exit(0)
+reader = csv.reader(io.StringIO(raw))
+rows_out = []
+columns = []
+for i, row in enumerate(reader):
+    if i == 0:
+        columns = row
+    else:
+        rows_out.append(row)
+print(json.dumps({
+    'ok': True,
+    'columns': columns,
+    'rows': rows_out,
+    'row_count': len(rows_out),
+    'execution_time_ms': elapsed
+}, indent=2))
+" "$elapsed" <<< "$result"
+}
+
+cmd_sample() {
+    require_connection
+    local table="${1:-}"
+    local n="${2:-5}"
+    local random=false
+
+    if [[ -z "$table" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql sample <table> [n]"}'
+        return 1
+    fi
+    validate_table_name "$table" || return 1
+    parse_table_ref "$table"
+
+    # Validate n is numeric and within bounds
+    if [[ ! "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]] || [[ "$n" -gt 1000 ]]; then
+        echo '{"ok": false, "error": "Sample count must be a number between 1 and 1000"}'
+        return 1
+    fi
+
+    # Shift off table and n, check for --random
+    shift
+    shift 2>/dev/null || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --random) random=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local order_clause=""
+    if [[ "$random" == "true" ]]; then
+        order_clause="ORDER BY RANDOM()"
+    fi
+
+    local qualified="\"$_TBL_SCHEMA\".\"$_TBL_NAME\""
+
+    # Get total count
+    local total
+    total=$(run_psql_raw "SELECT COUNT(*) FROM $qualified" 2>/dev/null) || total="?"
+
+    local result
+    result=$(run_psql_full "SELECT * FROM $qualified $order_clause LIMIT $n") || {
+        echo "{\"ok\": false, \"error\": \"Table '$table' not found\", \"exit_code\": 3}"
+        exit 3
+    }
+
+    python3 -c "
+import csv, json, sys, io
+raw = sys.stdin.read().strip()
+table = sys.argv[1]
+total = sys.argv[2]
+if not raw:
+    print(json.dumps({'ok': True, 'table': table, 'columns': [], 'rows': [], 'sampled': 0, 'total_rows': total}, indent=2))
+    sys.exit(0)
+reader = csv.reader(io.StringIO(raw))
+columns = []
+rows = []
+for i, row in enumerate(reader):
+    if i == 0:
+        columns = row
+    else:
+        rows.append(row)
+try:
+    total = int(total.strip())
+except:
+    total = '?'
+print(json.dumps({
+    'ok': True,
+    'table': table,
+    'columns': columns,
+    'rows': rows,
+    'sampled': len(rows),
+    'total_rows': total
+}, indent=2))
+" "$table" "$total" <<< "$result"
+}
+
+cmd_count() {
+    require_connection
+    local table="${1:-}"
+    if [[ -z "$table" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql count <table>"}'
+        return 1
+    fi
+    validate_table_name "$table" || return 1
+    parse_table_ref "$table"
+
+    local qualified="\"$_TBL_SCHEMA\".\"$_TBL_NAME\""
+    local result
+    result=$(run_psql_raw "SELECT COUNT(*) FROM $qualified") || {
+        echo "{\"ok\": false, \"error\": \"Table '$table' not found\", \"exit_code\": 3}"
+        exit 3
+    }
+
+    python3 -c "
+import json, sys
+count = int(sys.stdin.read().strip())
+print(json.dumps({'ok': True, 'table': sys.argv[1], 'count': count}, indent=2))
+" "$table" <<< "$result"
+}
+
+cmd_exec() {
+    require_connection
+    local file="${1:-}"
+    if [[ -z "$file" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql exec <file.sql>"}'
+        return 1
+    fi
+    if [[ ! -f "$file" ]]; then
+        echo "{\"ok\": false, \"error\": \"File not found: $file\", \"exit_code\": 6}"
+        exit 6
+    fi
+
+    # Snapshot the file execution
+    if type snapshot_begin &>/dev/null; then
+        snapshot_begin "psql-exec"
+        snapshot_field "database" "$_PG_DATABASE"
+        snapshot_field "file" "$file"
+        snapshot_end
+    fi
+
+    local start_ms
+    start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+
+    local result
+    result=$(PGPASSWORD="$_PG_PASSWORD" psql \
+        -X -v ON_ERROR_STOP=1 \
+        -h "$_PG_HOST" -p "$_PG_PORT" -U "$_PG_USER" -d "$_PG_DATABASE" \
+        -f "$file" 2>&1)
+    local exit_code=$?
+
+    local end_ms
+    end_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+    local elapsed=$((end_ms - start_ms))
+
+    python3 -c "
+import json, sys
+ok = int(sys.argv[1]) == 0
+output = sys.stdin.read().strip()
+data = {
+    'ok': ok,
+    'file': sys.argv[2],
+    'execution_time_ms': int(sys.argv[3]),
+    'output': output[:2000] if output else ''
+}
+if not ok:
+    data['error'] = output[:500]
+    data['exit_code'] = 4
+print(json.dumps(data, indent=2))
+" "$exit_code" "$file" "$elapsed" <<< "$result"
+}
+
+# --- Administration Commands ---
+
+cmd_connections() {
+    require_connection
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'pid', pid,
+            'user', usename,
+            'database', datname,
+            'client', client_addr,
+            'state', state,
+            'query', LEFT(query, 200),
+            'duration', EXTRACT(EPOCH FROM (now() - query_start))::int,
+            'wait_event', wait_event_type
+        ) ORDER BY query_start), '[]')
+        FROM pg_stat_activity
+        WHERE datname = current_database() AND pid != pg_backend_pid()
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+conns = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'connections': conns, 'count': len(conns)}, indent=2))
+" <<< "$result"
+}
+
+cmd_locks() {
+    require_connection
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'pid', l.pid,
+            'relation', COALESCE(c.relname, l.relation::text),
+            'mode', l.mode,
+            'granted', l.granted,
+            'query', LEFT(a.query, 200),
+            'wait_event', a.wait_event_type,
+            'duration', EXTRACT(EPOCH FROM (now() - a.query_start))::int
+        )), '[]')
+        FROM pg_locks l
+        JOIN pg_stat_activity a ON a.pid = l.pid
+        LEFT JOIN pg_class c ON c.oid = l.relation
+        WHERE l.pid != pg_backend_pid()
+          AND l.relation IS NOT NULL
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+locks = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'locks': locks, 'count': len(locks)}, indent=2))
+" <<< "$result"
+}
+
+cmd_stats() {
+    require_connection
+    local table="${1:-}"
+
+    if [[ -n "$table" ]]; then
+        validate_table_name "$table" || return 1
+        parse_table_ref "$table"
+        local result
+        result=$(run_psql_raw "
+            SELECT json_build_object(
+                'table', relname,
+                'schema', schemaname,
+                'seq_scan', seq_scan,
+                'seq_tup_read', seq_tup_read,
+                'idx_scan', COALESCE(idx_scan, 0),
+                'idx_tup_fetch', COALESCE(idx_tup_fetch, 0),
+                'n_tup_ins', n_tup_ins,
+                'n_tup_upd', n_tup_upd,
+                'n_tup_del', n_tup_del,
+                'n_live_tup', n_live_tup,
+                'n_dead_tup', n_dead_tup,
+                'last_vacuum', last_vacuum,
+                'last_autovacuum', last_autovacuum,
+                'last_analyze', last_analyze,
+                'last_autoanalyze', last_autoanalyze
+            )
+            FROM pg_stat_user_tables
+            WHERE relname = '$_TBL_NAME' AND schemaname = '$_TBL_SCHEMA'
+        ") || { echo '{"ok": false, "error": "Table not found", "exit_code": 3}'; exit 3; }
+
+        python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    print(json.dumps({'ok': False, 'error': 'Table not found', 'exit_code': 3}))
+else:
+    data = json.loads(raw)
+    data['ok'] = True
+    print(json.dumps(data, indent=2, default=str))
+" <<< "$result"
+    else
+        # All tables stats summary
+        local result
+        result=$(run_psql_raw "
+            SELECT COALESCE(json_agg(json_build_object(
+                'table', relname,
+                'rows', n_live_tup,
+                'dead', n_dead_tup,
+                'seq_scan', seq_scan,
+                'idx_scan', COALESCE(idx_scan, 0),
+                'inserts', n_tup_ins,
+                'updates', n_tup_upd,
+                'deletes', n_tup_del
+            ) ORDER BY n_live_tup DESC), '[]')
+            FROM pg_stat_user_tables
+        ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+        python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+stats = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'tables': stats, 'count': len(stats)}, indent=2))
+" <<< "$result"
+    fi
+}
+
+cmd_indexes() {
+    require_connection
+    local table="${1:-}"
+    if [[ -z "$table" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql indexes <table>"}'
+        return 1
+    fi
+    validate_table_name "$table" || return 1
+    parse_table_ref "$table"
+
+    local result
+    result=$(run_psql_raw "
+        SELECT COALESCE(json_agg(json_build_object(
+            'name', i.indexrelname,
+            'size', pg_size_pretty(pg_relation_size(i.indexrelid)),
+            'size_bytes', pg_relation_size(i.indexrelid),
+            'scans', i.idx_scan,
+            'tuples_read', i.idx_tup_read,
+            'tuples_fetched', i.idx_tup_fetch,
+            'definition', pg_get_indexdef(i.indexrelid)
+        ) ORDER BY i.idx_scan DESC), '[]')
+        FROM pg_stat_user_indexes i
+        WHERE i.relname = '$_TBL_NAME' AND i.schemaname = '$_TBL_SCHEMA'
+    ") || { echo '{"ok": false, "error": "Query failed"}'; exit 4; }
+
+    python3 -c "
+import json, sys
+raw = sys.stdin.read().strip()
+idxs = json.loads(raw) if raw else []
+print(json.dumps({'ok': True, 'table': sys.argv[1], 'indexes': idxs, 'count': len(idxs)}, indent=2))
+" "$table" <<< "$result"
+}
+
+cmd_version() {
+    require_connection
+    local result
+    result=$(run_psql_raw "SELECT version()") || {
+        echo '{"ok": false, "error": "Query failed"}'
+        exit 4
+    }
+    python3 -c "
+import json, sys
+print(json.dumps({'ok': True, 'version': sys.stdin.read().strip()}, indent=2))
+" <<< "$result"
+}
+
+# --- Backup Commands ---
+
+cmd_dump() {
+    require_connection
+    local outfile=""
+    local table=""
+    local schema_only=false
+    local format="plain"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --table|-t) table="$2"; shift 2 ;;
+            --schema-only) schema_only=true; shift ;;
+            --format|-F) format="$2"; shift 2 ;;
+            *) outfile="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$outfile" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql dump <outfile> [--table T] [--schema-only] [--format plain|custom|directory]"}'
+        return 1
+    fi
+
+    if ! command -v pg_dump &>/dev/null; then
+        echo '{"ok": false, "error": "pg_dump binary not found", "exit_code": 2}'
+        exit 2
+    fi
+
+    local -a dump_args=(-h "$_PG_HOST" -p "$_PG_PORT" -U "$_PG_USER" -d "$_PG_DATABASE")
+
+    case "$format" in
+        plain|p)   dump_args+=(-F p) ;;
+        custom|c)  dump_args+=(-F c) ;;
+        directory|d) dump_args+=(-F d) ;;
+        *) echo "{\"ok\": false, \"error\": \"Unknown format: $format\"}"; return 1 ;;
+    esac
+
+    if [[ -n "$table" ]]; then
+        validate_table_name "$table" || return 1
+        dump_args+=(-t "$table")
+    fi
+    if [[ "$schema_only" == "true" ]]; then
+        dump_args+=(--schema-only)
+    fi
+
+    dump_args+=(-f "$outfile")
+
+    local result
+    result=$(PGPASSWORD="$_PG_PASSWORD" pg_dump "${dump_args[@]}" 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
+        local size="?"
+        if [[ -f "$outfile" ]]; then
+            size=$(du -sh "$outfile" 2>/dev/null | cut -f1)
+        elif [[ -d "$outfile" ]]; then
+            size=$(du -sh "$outfile" 2>/dev/null | cut -f1)
+        fi
+        python3 -c "
+import json, sys
+print(json.dumps({
+    'ok': True,
+    'message': 'Dump completed',
+    'file': sys.argv[1],
+    'format': sys.argv[2],
+    'size': sys.argv[3],
+    'table': sys.argv[4] or None,
+    'schema_only': sys.argv[5] == 'true'
+}, indent=2))
+" "$outfile" "$format" "$size" "$table" "$schema_only"
+    else
+        python3 -c "
+import json, sys
+print(json.dumps({
+    'ok': False,
+    'error': sys.stdin.read().strip()[:500],
+    'exit_code': 7
+}, indent=2))
+" <<< "$result"
+        exit 7
+    fi
+}
+
+cmd_restore() {
+    require_connection
+    local infile=""
+    local clean=false
+    local schema_only=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --clean) clean=true; shift ;;
+            --schema-only) schema_only=true; shift ;;
+            *) infile="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$infile" ]]; then
+        echo '{"ok": false, "error": "Usage: agent-psql restore <file> [--clean] [--schema-only]"}'
+        return 1
+    fi
+    if [[ ! -e "$infile" ]]; then
+        echo "{\"ok\": false, \"error\": \"File not found: $infile\", \"exit_code\": 6}"
+        exit 6
+    fi
+
+    # Detect format: .sql → psql, otherwise → pg_restore
+    if [[ "$infile" == *.sql ]]; then
+        # Warn if restore-specific flags are set — they don't apply to plain SQL
+        if [[ "$clean" == "true" ]] || [[ "$schema_only" == "true" ]]; then
+            echo '{"ok": false, "error": "Flags --clean and --schema-only are not supported for .sql files (use pg_restore custom/directory format instead)"}'
+            return 1
+        fi
+        cmd_exec "$infile"
+        return $?
+    fi
+
+    if ! command -v pg_restore &>/dev/null; then
+        echo '{"ok": false, "error": "pg_restore binary not found", "exit_code": 2}'
+        exit 2
+    fi
+
+    local -a restore_args=(-h "$_PG_HOST" -p "$_PG_PORT" -U "$_PG_USER" -d "$_PG_DATABASE")
+    if [[ "$clean" == "true" ]]; then restore_args+=(--clean); fi
+    if [[ "$schema_only" == "true" ]]; then restore_args+=(--schema-only); fi
+    restore_args+=("$infile")
+
+    local result
+    result=$(PGPASSWORD="$_PG_PASSWORD" pg_restore "${restore_args[@]}" 2>&1)
+    local exit_code=$?
+
+    python3 -c "
+import json, sys
+ok = int(sys.argv[1]) == 0
+output = sys.stdin.read().strip()
+data = {'ok': ok, 'file': sys.argv[2]}
+if ok:
+    data['message'] = 'Restore completed'
+else:
+    data['error'] = output[:500]
+    data['exit_code'] = 7
+print(json.dumps(data, indent=2))
+" "$exit_code" "$infile" <<< "$result"
+}
+
+# --- Main Dispatcher ---
+
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    connect)
+        shift
+        cmd_connect "$@"
+        ;;
+    disconnect)
+        cmd_disconnect
+        ;;
+    status)
+        cmd_status
+        ;;
+    profiles)
+        cmd_profiles
+        ;;
+    profile)
+        shift
+        action="${1:-}"
+        shift || true
+        case "$action" in
+            add)    cmd_profile_add "$@" ;;
+            remove) cmd_profile_remove "$@" ;;
+            *)      echo '{"ok": false, "error": "Usage: agent-psql profile [add|remove] <name> ..."}' ;;
+        esac
+        ;;
+    snapshot)
+        shift
+        cmd_snapshot "$@"
+        ;;
+    tables)
+        shift
+        cmd_tables "$@"
+        ;;
+    views)
+        cmd_views
+        ;;
+    describe|desc)
+        shift
+        cmd_describe "$@"
+        ;;
+    schemas)
+        cmd_schemas
+        ;;
+    extensions)
+        cmd_extensions
+        ;;
+    sizes)
+        cmd_sizes
+        ;;
+    relations|rels)
+        shift
+        cmd_relations "$@"
+        ;;
+    query|q)
+        shift
+        cmd_query "$@"
+        ;;
+    sample)
+        shift
+        cmd_sample "$@"
+        ;;
+    count)
+        shift
+        cmd_count "$@"
+        ;;
+    exec)
+        shift
+        cmd_exec "$@"
+        ;;
+    connections|conns)
+        cmd_connections
+        ;;
+    locks)
+        cmd_locks
+        ;;
+    stats)
+        shift
+        cmd_stats "$@"
+        ;;
+    indexes|idx)
+        shift
+        cmd_indexes "$@"
+        ;;
+    version)
+        cmd_version
+        ;;
+    dump)
+        shift
+        cmd_dump "$@"
+        ;;
+    restore)
+        shift
+        cmd_restore "$@"
+        ;;
+    *)
+        echo "{\"ok\": false, \"error\": \"Unknown command: $1. Run 'agent-psql help' for usage.\"}"
+        exit 1
+        ;;
+esac

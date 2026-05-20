@@ -23,7 +23,7 @@ def run_hook(prompt: str, *, cwd: Path | None = None, env: dict[str, str]) -> su
     if cwd is not None:
         payload["cwd"] = str(cwd)
     return subprocess.run(
-        ["python3", "hooks/agent-do-prompt-router.py"],
+        ["python3", "hooks/claude/agent-do-prompt-router.py"],
         cwd=ROOT,
         env=env,
         input=json.dumps(payload),

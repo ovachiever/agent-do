@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# agent-transcribe — Source-to-transcript ingestion pipeline.
+#
+# Handles YouTube URLs, authenticated downloads (via agent-do browse sessions),
+# batch jobs, Whisper API + local Whisper + caption fallbacks, cost estimation,
+# structured JSON output, and on-disk transcript archives.
+#
+# This is a thin dispatcher: all logic lives in transcribe.py.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-transcribe - Source-to-transcript pipeline for agents
+
+CONNECT & VERIFY
+  doctor [--json]                       Dependency + credential + browse-session readiness
+  snapshot [--json]                     Current cache, sessions, output dir, recent jobs
+
+PREFLIGHT
+  cost <url-or-id> [--json]             Estimate API cost for a single source
+  cost --batch-file <path> [--json]     Estimate API cost for a batch
+
+INTERACT
+  transcribe <url-or-id-or-path>        Transcribe a single source
+  --batch                               Read URLs from stdin
+  --batch-file <path>                   Read URLs from file (one per line)
+
+AUTH
+  --browse-session <name>               Use cookies from an agent-do browse session
+  --cookies <path>                      Use a Netscape cookies.txt file
+  --youtube-player-client <client>      yt-dlp YouTube client shortcut (try ios/android for members-only blocks)
+  --extractor-args <spec>               Raw yt-dlp extractor args, repeatable (example: youtube:player_client=ios)
+  --browser-capture                     Play the authenticated page and capture tab audio instead of yt-dlp
+  --capture-seconds <n>                 Limit browser capture duration (default: video duration + 5s)
+                                        Requires browser Screen & System Audio Recording permission on macOS
+
+METHOD SELECTION
+  --method <m>                          Force: whisper-api | local-whisper | captions | vtt | auto
+  --prefer-free                         Try free methods (captions, VTT) first
+  --prefer <m>                          Reorder priority (captions|whisper|vtt)
+
+OUTPUT
+  --output-dir <path>                   Where batch writes per-source files (default: cwd)
+  --output <path>                       Single-source output text path (stdout if absent)
+  --json                                Force structured JSON to stdout
+  --keep-audio                          Preserve downloaded audio (default: cleanup)
+  --no-cache                            Force fresh transcription
+
+EXAMPLES
+  # Public single video
+  agent-do transcribe https://youtube.com/watch?v=dQw4w9WgXcQ
+
+  # Members-only video using saved browse session
+  agent-do transcribe https://youtube.com/watch?v=XXX --browse-session youtube_arc
+
+  # Retry authenticated YouTube blocks through the iOS player client
+  agent-do transcribe https://youtube.com/watch?v=XXX \
+    --browse-session youtube_arc --youtube-player-client ios
+
+  # Member-tier content that only the browser can play
+  agent-do transcribe https://youtube.com/watch?v=XXX \
+    --browse-session youtube_arc --browser-capture --json
+
+  # Cost estimate before committing to a batch
+  agent-do transcribe cost --batch-file urls.txt --youtube-player-client ios --json
+
+  # Batch transcribe with auth + structured output
+  agent-do transcribe --batch-file urls.txt \
+    --browse-session youtube_arc --browser-capture \
+    --output-dir ./transcripts --json
+
+OUTPUT SCHEMA (per source)
+  <output-dir>/<video-id>.txt           Plain text transcript
+  <output-dir>/<video-id>.json          Structured metadata + segments
+
+CACHE
+  ~/.agent-do/transcribe/<source-hash>.json    Cached results (skip with --no-cache)
+
+EOF
+}
+
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        exec python3 "$SCRIPT_DIR/transcribe.py" "$@"
+        ;;
+esac

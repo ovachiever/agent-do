@@ -66,10 +66,53 @@ EOF
     esac
 
     if [[ "$response" == "Bootstrap" ]]; then
+        # Capture output to a log; emit a macOS notification with status; on
+        # failure also fire a follow-up dialog with the option to view the log.
+        # The session-start hook fires once per session, so it's fine to grab
+        # the user's attention briefly when something actually needs them.
+        local log_dir log_file run_exit project_label
+        log_dir="${HOME}/.agent-do/logs"
+        mkdir -p "$log_dir" 2>/dev/null || true
+        log_file="$log_dir/bootstrap-$(date +%Y%m%d-%H%M%S)-$$.log"
+        project_label="$(basename "$project_root")"
+
         (
             cd "$project_root"
-            "$AGENT_DO_DIR/agent-do" bootstrap --yes >/dev/null 2>&1 || true
+            echo "agent-do bootstrap --yes" > "$log_file"
+            echo "project: $project_root" >> "$log_file"
+            echo "started: $(date '+%Y-%m-%d %H:%M:%S')" >> "$log_file"
+            echo "---" >> "$log_file"
+            "$AGENT_DO_DIR/agent-do" bootstrap --yes >> "$log_file" 2>&1
         )
+        run_exit=$?
+
+        if command -v osascript >/dev/null 2>&1; then
+            if [[ "$run_exit" -eq 0 ]]; then
+                osascript -e "display notification \"Bootstrap completed for $project_label. Log: $log_file\" with title \"agent-do Bootstrap\" sound name \"Glass\"" 2>/dev/null || true
+            else
+                osascript -e "display notification \"Bootstrap FAILED for $project_label (exit $run_exit). Log: $log_file\" with title \"agent-do Bootstrap\" sound name \"Basso\"" 2>/dev/null || true
+                # On failure also offer to open the log right now.
+                local choice
+                choice=$(osascript <<DLG 2>/dev/null || true
+display dialog "agent-do bootstrap failed (exit $run_exit) for $project_label.
+
+Log: $log_file" with title "agent-do Bootstrap failed" buttons {"Dismiss", "Open log"} default button "Open log"
+button returned of result
+DLG
+)
+                if [[ "$choice" == "Open log" ]] && command -v open >/dev/null 2>&1; then
+                    open "$log_file" 2>/dev/null || true
+                fi
+            fi
+        else
+            # Non-macOS / no osascript: echo status to stderr so it lands in
+            # whatever the host shell shows.
+            if [[ "$run_exit" -eq 0 ]]; then
+                echo "[agent-do bootstrap] completed for $project_label. Log: $log_file" >&2
+            else
+                echo "[agent-do bootstrap] FAILED for $project_label (exit $run_exit). Log: $log_file" >&2
+            fi
+        fi
     fi
 
     return 0

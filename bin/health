@@ -174,12 +174,16 @@ check_tool() {
                 fi
                 ;;
             obsidian)
-                # The obsidian CLI either lives on PATH (via Obsidian's
-                # "Register CLI" symlink), inside Obsidian.app's bundle,
-                # or has been wired up by `agent-do obsidian doctor --fix`.
-                # bin/health does not auto-link — that's an explicit action
-                # the user opts into via doctor.
-                if [[ -n "${OBSIDIAN_BIN:-}" && -x "${OBSIDIAN_BIN}" ]]; then
+                # Local index mode is the primary agent surface. The
+                # obsidian-cli path is still useful for live/app operations,
+                # but a readable vault path is enough for read/search/save,
+                # indexing, semantic retrieval, and JSON automation.
+                local obsidian_vault="${AGENT_OBSIDIAN_VAULT_PATH:-${AGENT_OBSIDIAN_VAULT:-}}"
+                if [[ -n "$obsidian_vault" && -d "$obsidian_vault" && -d "$obsidian_vault/.obsidian" ]]; then
+                    status="OK"; note="local vault index mode"
+                elif [[ -n "$obsidian_vault" ]]; then
+                    status="WARN"; note="AGENT_OBSIDIAN_VAULT_PATH is not a readable Obsidian vault"
+                elif [[ -n "${OBSIDIAN_BIN:-}" && -x "${OBSIDIAN_BIN}" ]]; then
                     status="OK"; note="OBSIDIAN_BIN=$OBSIDIAN_BIN"
                 elif command -v obsidian &>/dev/null; then
                     status="OK"

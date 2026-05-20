@@ -295,7 +295,7 @@ AGENT_DO_PATTERNS = {
 }
 ```
 
-Claude can consume the shared PreToolUse hook directly because it accepts `additionalContext`. Codex should use `hooks/agent-do-pretooluse-codex.py`, which runs the same check for telemetry but suppresses stdout because Codex rejects PreToolUse `additionalContext`.
+Both Claude Code and Codex consume the same PreToolUse hook. Codex supports `hookSpecificOutput.additionalContext` on PreToolUse as of the May 2026 hooks release; the prior `agent-do-pretooluse-codex.py` suppress-stdout wrapper is obsolete. Codex users install a thin runpy pass-through at `~/.codex/hooks/agent-do-pretooluse-check.py` (shipped under `hooks/codex/`) which forwards stdin/stdout to the same repo hook.
 
 ## Exit Codes
 

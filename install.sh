@@ -1,20 +1,24 @@
 #!/bin/bash
-# install.sh — Idempotent installer for agent-do + Claude Code hooks
+# install.sh — Idempotent installer for agent-do + Claude Code (+ optional Codex) hooks
 #
 # What it does:
 #   1. Symlinks agent-do into ~/.local/bin (adds to PATH)
 #   2. Writes breadcrumb at ~/.agent-do/install-path
-#   3. Copies 3 Claude Code hooks to ~/.claude/hooks/
-#   4. Installs Python dependencies
-#   5. Optional: npm install for browse/unbrowse
-#   6. Optional: cargo build for manna
-#   7. Runs agent-do --health
-#   8. Prints settings.json snippet (doesn't auto-modify)
-#   9. Prints CLAUDE.md snippet for projects
+#   3. Copies Claude Code hooks to ~/.claude/hooks/
+#   4. Optional: Codex hooks to ~/.codex/hooks/ (--codex or auto-detected)
+#   5. Installs Python dependencies
+#   6. Optional: npm install for browse/unbrowse
+#   7. Optional: cargo build for manna
+#   8. Runs agent-do --health
+#   9. Prints Claude settings.json snippet (doesn't auto-modify)
+#  10. Prints Codex hooks.json snippet if Codex install ran
+#  11. Prints CLAUDE.md snippet for projects
 #
 # Usage:
-#   ./install.sh              # Install
-#   ./install.sh --uninstall  # Remove symlink + hooks
+#   ./install.sh              # Install (auto-installs Codex hooks if ~/.codex/ exists)
+#   ./install.sh --codex      # Force Codex install even without ~/.codex/
+#   ./install.sh --no-codex   # Skip Codex install even when ~/.codex/ exists
+#   ./install.sh --uninstall  # Remove symlink + hooks (both Claude and Codex)
 
 set -euo pipefail
 
@@ -23,7 +27,18 @@ SYMLINK_DIR="$HOME/.local/bin"
 SYMLINK_PATH="$SYMLINK_DIR/agent-do"
 AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
 CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
+CODEX_HOOKS_DIR="$HOME/.codex/hooks"
 HOOKS_DIR="$REPO_DIR/hooks"
+CODEX_HOOKS_SRC="$HOOKS_DIR/codex"
+
+# Decide whether to install Codex hooks. Default: auto (yes if ~/.codex/ exists).
+INSTALL_CODEX="auto"
+for arg in "$@"; do
+    case "$arg" in
+        --codex)    INSTALL_CODEX="yes" ;;
+        --no-codex) INSTALL_CODEX="no"  ;;
+    esac
+done
 
 # Colors (skip if not a terminal)
 if [ -t 1 ]; then
@@ -61,7 +76,7 @@ uninstall() {
         info "Removed breadcrumb $AGENT_DO_HOME/install-path"
     fi
 
-    # Remove hooks
+    # Remove Claude hooks that agent-do installs (only those, not personal hooks)
     local hooks=(
         "agent-do-session-start.sh"
         "agent-do-prompt-router.py"
@@ -74,9 +89,24 @@ uninstall() {
         fi
     done
 
+    # Remove Codex hooks that agent-do installs (only those, not personal hooks)
+    local codex_hooks=(
+        "agent-do-session-start.py"
+        "agent-do-prompt-router.py"
+        "agent-do-pretooluse-check.py"
+        "stop-quality-gate.sh"
+        "stop-quality-gate.py"
+    )
+    for hook in "${codex_hooks[@]}"; do
+        if [ -f "$CODEX_HOOKS_DIR/$hook" ]; then
+            rm "$CODEX_HOOKS_DIR/$hook"
+            info "Removed Codex hook $CODEX_HOOKS_DIR/$hook"
+        fi
+    done
+
     echo ""
     warn "Remember to remove the agent-do hooks from ~/.claude/settings.json"
-    warn "Search for 'agent-do' in the hooks section and remove those entries."
+    warn "and ~/.codex/hooks.json. Search for 'agent-do' in the hooks sections."
     echo ""
     info "Uninstall complete. Repo at $REPO_DIR is untouched."
     exit 0
@@ -122,30 +152,173 @@ mkdir -p "$AGENT_DO_HOME"
 echo "$REPO_DIR" > "$AGENT_DO_HOME/install-path"
 info "Wrote $AGENT_DO_HOME/install-path"
 
-# 3. Copy hooks to ~/.claude/hooks/
-step "Installing Claude Code hooks"
+# 3. Install hooks (wrapper-based, so `git pull` updates flow through)
+#
+# Installed hooks are thin wrappers that delegate to the canonical files
+# under `<repo>/hooks/`. This means:
+#   - `git pull` on the repo immediately changes hook behavior on the next
+#     event. No re-install needed unless the wrapper itself changes (rare).
+#   - Hooks that import from `<repo>/lib/` work correctly because the wrapper
+#     resolves the repo root and sets sys.path before delegating.
+#   - The wrappers themselves are version-tagged so re-running install.sh
+#     refreshes them when the wrapper format changes.
+#
+# The canonical hook files stay in `hooks/` (Claude defaults) and
+# `hooks/codex/` (Codex-specific variants). install.sh writes the
+# corresponding wrapper at the installed path.
+
+WRAPPER_VERSION="2"
+# v2: hooks restructured into hooks/claude/ + hooks/codex/ symmetric dirs.
+#     Auto-commit removed from the bundle (it's git automation, not agent-do).
+
+install_py_wrapper() {
+    local repo_hook_rel="$1"  # e.g. "hooks/agent-do-prompt-router.py"
+    local installed="$2"      # e.g. "$CLAUDE_HOOKS_DIR/agent-do-prompt-router.py"
+    local hook_name
+    hook_name=$(basename "$installed")
+    cat > "$installed" <<WRAPPER
+#!/usr/bin/env python3
+# agent-do hook wrapper v$WRAPPER_VERSION (managed by install.sh; do not edit).
+# Delegates to the canonical hook under the agent-do repo so that future
+# \`git pull\` updates flow through without re-running install.sh.
+import os
+import runpy
+import sys
+from pathlib import Path
+
+
+def _resolve_repo():
+    env_root = os.environ.get("AGENT_DO_REPO")
+    if env_root:
+        candidate = Path(env_root).expanduser()
+        if candidate.is_dir():
+            return candidate
+    breadcrumb = Path.home() / ".agent-do" / "install-path"
+    if breadcrumb.is_file():
+        try:
+            candidate = Path(breadcrumb.read_text().strip()).expanduser()
+            if candidate.is_dir():
+                return candidate
+        except OSError:
+            pass
+    return None
+
+
+def main():
+    repo = _resolve_repo()
+    if repo is None:
+        sys.stderr.write(
+            "[$hook_name wrapper] could not resolve agent-do repo; "
+            "set AGENT_DO_REPO or run install.sh\\n"
+        )
+        return
+    hook = repo / "$repo_hook_rel"
+    if not hook.is_file():
+        sys.stderr.write(f"[$hook_name wrapper] canonical hook missing: {hook}\\n")
+        return
+    sys.path.insert(0, str(repo / "lib"))
+    runpy.run_path(str(hook), run_name="__main__")
+
+
+if __name__ == "__main__":
+    main()
+WRAPPER
+    chmod +x "$installed"
+}
+
+install_sh_wrapper() {
+    local repo_hook_rel="$1"
+    local installed="$2"
+    local hook_name
+    hook_name=$(basename "$installed")
+    cat > "$installed" <<WRAPPER
+#!/usr/bin/env bash
+# agent-do hook wrapper v$WRAPPER_VERSION (managed by install.sh; do not edit).
+# Delegates to the canonical hook under the agent-do repo so that future
+# \`git pull\` updates flow through without re-running install.sh.
+set -uo pipefail
+repo="\${AGENT_DO_REPO:-\$(cat "\$HOME/.agent-do/install-path" 2>/dev/null)}"
+if [ -z "\$repo" ] || [ ! -d "\$repo" ]; then
+    echo "[$hook_name wrapper] could not resolve agent-do repo; set AGENT_DO_REPO or run install.sh" >&2
+    exit 0
+fi
+canonical="\$repo/$repo_hook_rel"
+if [ ! -x "\$canonical" ]; then
+    echo "[$hook_name wrapper] canonical hook missing or not executable: \$canonical" >&2
+    exit 0
+fi
+exec "\$canonical" "\$@"
+WRAPPER
+    chmod +x "$installed"
+}
+
+step "Installing Claude Code hooks (wrapper-based)"
 mkdir -p "$CLAUDE_HOOKS_DIR"
 
-HOOK_FILES=(
-    "agent-do-session-start.sh"
-    "agent-do-prompt-router.py"
-    "agent-do-pretooluse-check.py"
+# Map: installed-name | source-relative-to-repo | wrapper-kind
+#
+# Scope: only hooks that nudge agents toward agent-do tools, manage agent-do
+# state, or implement agent-do conventions ship here. Personal productivity
+# hooks (screenshot shorthand, prompt annotation, git auto-commit, generic
+# OS notifications) belong in your dotfiles, not in the agent-do repo.
+CLAUDE_HOOK_SPECS=(
+    "agent-do-session-start.sh|hooks/claude/agent-do-session-start.sh|sh"
+    "agent-do-prompt-router.py|hooks/claude/agent-do-prompt-router.py|py"
+    "agent-do-pretooluse-check.py|hooks/claude/agent-do-pretooluse-check.py|py"
 )
-for hook in "${HOOK_FILES[@]}"; do
-    src="$HOOKS_DIR/$hook"
-    dst="$CLAUDE_HOOKS_DIR/$hook"
+for spec in "${CLAUDE_HOOK_SPECS[@]}"; do
+    IFS='|' read -r name rel kind <<< "$spec"
+    src="$REPO_DIR/$rel"
+    dst="$CLAUDE_HOOKS_DIR/$name"
     if [ ! -f "$src" ]; then
         err "Hook source not found: $src"
         continue
     fi
-    if [ -f "$dst" ] && diff -q "$src" "$dst" &>/dev/null; then
-        info "Hook already up to date: $hook"
-    else
-        cp "$src" "$dst"
-        chmod +x "$dst"
-        info "Installed hook: $dst"
-    fi
+    case "$kind" in
+        py) install_py_wrapper "$rel" "$dst" ;;
+        sh) install_sh_wrapper "$rel" "$dst" ;;
+    esac
+    info "Installed Claude wrapper: $name → $rel"
 done
+
+# 3b. Optional: Codex hooks (also wrapper-based, same upgrade model)
+should_install_codex="no"
+case "$INSTALL_CODEX" in
+    yes)  should_install_codex="yes" ;;
+    auto) [ -d "$HOME/.codex" ] && should_install_codex="yes" ;;
+esac
+
+if [ "$should_install_codex" = "yes" ]; then
+    step "Installing Codex hooks (wrapper-based)"
+    mkdir -p "$CODEX_HOOKS_DIR"
+
+    CODEX_HOOK_SPECS=(
+        "agent-do-session-start.py|hooks/codex/agent-do-session-start.py|py"
+        "agent-do-prompt-router.py|hooks/codex/agent-do-prompt-router.py|py"
+        "agent-do-pretooluse-check.py|hooks/codex/agent-do-pretooluse-check.py|py"
+        "stop-quality-gate.sh|hooks/codex/stop-quality-gate.sh|sh"
+        "stop-quality-gate.py|hooks/codex/stop-quality-gate.py|py"
+    )
+    for spec in "${CODEX_HOOK_SPECS[@]}"; do
+        IFS='|' read -r name rel kind <<< "$spec"
+        src="$REPO_DIR/$rel"
+        dst="$CODEX_HOOKS_DIR/$name"
+        if [ ! -f "$src" ]; then
+            err "Codex hook source not found: $src"
+            continue
+        fi
+        case "$kind" in
+            py) install_py_wrapper "$rel" "$dst" ;;
+            sh) install_sh_wrapper "$rel" "$dst" ;;
+        esac
+        info "Installed Codex wrapper: $name → $rel"
+    done
+
+    info "Codex registration template: $CODEX_HOOKS_SRC/hooks.json.example"
+    info "Merge into ~/.codex/hooks.json (see snippet at the end of this run)"
+else
+    info "Skipped Codex install (use --codex to force, or install ~/.codex/ first)"
+fi
 
 # 4. Python dependencies
 step "Installing Python dependencies"
@@ -239,11 +412,31 @@ cat << 'SETTINGS_JSON'
           }
         ]
       }
-    ]
+    ],
   }
 }
 SETTINGS_JSON
 echo ""
+echo "Note: agent-do does not register a Stop hook. If you want auto-commit,"
+echo "DPT scoring at turn end, or other Stop-time behavior, register your"
+echo "own scripts in settings.json under Stop. agent-do scopes itself to"
+echo "agent-first tooling nudges and project bootstrap."
+echo ""
+
+# 8b. Print Codex hooks.json snippet if Codex install ran
+if [ "$should_install_codex" = "yes" ]; then
+    step "Codex hooks.json configuration"
+    echo ""
+    echo "Codex now supports hookSpecificOutput.additionalContext on PreToolUse"
+    echo "(May 2026 release). The wrappers in ~/.codex/hooks/ runpy-pass-through to"
+    echo "this repo's hooks, so updates flow through automatically."
+    echo ""
+    echo "Merge the following into ~/.codex/hooks.json (full template is at"
+    echo "$CODEX_HOOKS_SRC/hooks.json.example):"
+    echo ""
+    cat "$CODEX_HOOKS_SRC/hooks.json.example"
+    echo ""
+fi
 
 # 9. Print CLAUDE.md snippet
 step "Project CLAUDE.md snippet"

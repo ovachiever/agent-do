@@ -145,10 +145,25 @@ def main() -> int:
     email_creds = get_tool_credentials(email_info or {})
     require("AGENT_EMAIL_IMAP_PASS" in email_creds["optional"], f"unexpected email credentials: {email_creds}")
 
+    obsidian_info = get_tool_info(registry, "obsidian")
+    obsidian_creds = get_tool_credentials(obsidian_info or {})
+    require("VOYAGE_API_KEY" in obsidian_creds["optional"], f"unexpected obsidian credentials: {obsidian_creds}")
+    require(
+        obsidian_creds.get("features", {}).get("VOYAGE_API_KEY", {}).get("recommended") is True,
+        f"obsidian credentials should describe recommended Voyage semantic setup: {obsidian_creds}",
+    )
+
     required = run("./agent-do", "creds", "required", "render", "--json")
     require(required.returncode == 0, f"render required failed: {required.stderr}")
     required_payload = json.loads(required.stdout)
     require(required_payload["required"] == ["RENDER_API_KEY"], f"unexpected render required output: {required_payload}")
+
+    obsidian_required = run("./agent-do", "creds", "required", "obsidian")
+    require(obsidian_required.returncode == 0, f"obsidian required failed: {obsidian_required.stderr}")
+    require("VOYAGE_API_KEY: default voyage-4-large semantic embeddings" in obsidian_required.stdout,
+            f"obsidian required output should explain Voyage use: {obsidian_required.stdout}")
+    require("read, save, keyword search" in obsidian_required.stdout,
+            f"obsidian required output should explain no-key baseline: {obsidian_required.stdout}")
 
     env = os.environ.copy()
     env["RENDER_API_KEY"] = "render-test-token"

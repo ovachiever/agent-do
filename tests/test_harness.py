@@ -51,14 +51,16 @@ def main() -> int:
     text_result = run_agent_do("harness", "inspect")
     require(text_result.returncode == 0, f"harness inspect failed: {text_result.stderr}")
     require("agent-do harness" in text_result.stdout, f"unexpected text output: {text_result.stdout}")
-    require("Tools: 91" in text_result.stdout, f"expected current tool count in text output: {text_result.stdout}")
+    require("Tools: 92" in text_result.stdout, f"expected current tool count in text output: {text_result.stdout}")
 
     json_result = run_agent_do("harness", "inspect", "--json")
     require(json_result.returncode == 0, f"harness inspect --json failed: {json_result.stderr}")
     payload = json.loads(json_result.stdout)
     require(payload["ok"] is True, f"expected ok payload: {payload}")
-    require(payload["summary"]["tools"] == 91, f"expected 91 tools: {payload['summary']}")
-    require(payload["summary"]["by_type"]["tool"] == 91, f"expected tool component count: {payload['summary']}")
+    require(payload["summary"]["tools"] == 92, f"expected 92 tools: {payload['summary']}")
+    require(payload["summary"]["by_type"]["tool"] == 92, f"expected tool component count: {payload['summary']}")
+    require(payload["summary"]["tools_with_contracts"] >= 2, f"expected contract coverage in summary: {payload['summary']}")
+    require(payload["summary"]["contract_errors"] == 0, f"contract shape errors should be zero: {payload['summary']}")
 
     global_json_result = run_agent_do("harness", "--json", "inspect")
     require(global_json_result.returncode == 0, f"harness global --json failed: {global_json_result.stderr}")
@@ -68,11 +70,13 @@ def main() -> int:
     for component_id in [
         "registry:agent-do",
         "hook:user-prompt-submit",
-        "hook:pretooluse-codex",
+        "hook:pretooluse-claude",
         "tool:harness",
         "tool:context",
         "tool:zpc",
         "tool:vector",
+        "tool:obsidian",
+        "tool:transcribe",
     ]:
         require(component_id in components, f"missing harness component {component_id}")
 
@@ -81,6 +85,14 @@ def main() -> int:
     for command in ["inspect", "nudges", "evidence", "manifest"]:
         require(command in harness_tool["commands"], f"missing {command} command: {harness_tool}")
     require(harness_tool["concurrency"] == "read", f"harness should be read-only: {harness_tool}")
+
+    transcribe_tool = components["tool:transcribe"]
+    require(transcribe_tool["contract_validation"]["declared"] is True,
+            f"transcribe should declare contracts: {transcribe_tool}")
+    require(transcribe_tool["contract_validation"]["ok"] is True,
+            f"transcribe contracts should validate: {transcribe_tool['contract_validation']}")
+    require("snapshot" in transcribe_tool["contracts"] and "cost" in transcribe_tool["contracts"]["snapshot"],
+            f"transcribe cost should be a snapshot contract: {transcribe_tool['contracts']}")
 
     prompt_hook = components["hook:user-prompt-submit"]
     require("tests/test_prompt_hook_ai.py" in prompt_hook["tests"], f"missing hook tests: {prompt_hook}")

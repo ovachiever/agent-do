@@ -1010,22 +1010,30 @@ tools:
     description: Control Slack
     capabilities:
     - send messages
+    - send direct messages as a user token
     - read channels
     - manage reactions
     - upload files
     commands:
-      send: Send message
+      send: Send message to channel or conversation
+      dm: Send direct message to a person, email, user ID, or DM ID
+      resolve-user: Resolve Slack user by name, email, or user ID
       read: Read channel
       react: Add reaction
       upload: Upload file
     examples:
     - intent: 'post ''deploy complete'' to #engineering'
       command: agent-slack send '#engineering' 'deploy complete'
+    - intent: DM a teammate as me
+      command: agent-slack dm --as-user teammate@example.com 'hello'
     - intent: 'read #general'
       command: agent-slack read '#general'
     credentials:
-      required:
-      - SLACK_TOKEN
+      one_of:
+      - - SLACK_USER_TOKEN
+        - SLACK_TOKEN
+        - SLACK_BOT_TOKEN
+        - SLACK_WEBHOOK_URL
       optional:
       - SLACK_WEBHOOK_URL
     concurrency: mixed
@@ -1205,14 +1213,16 @@ tools:
       - LINEAR_API_KEY
     concurrency: mixed
   obsidian:
-    description: Obsidian vault integration via the official Obsidian CLI — notes, daily notes, search, tasks, tags, properties, backlinks, and (under +live) eval / dev tools / plugin reload
+    description: Obsidian vault integration with a local SQLite vault index plus official Obsidian CLI fallback
     capabilities:
-    - read, create, append, and search notes in the active vault
-    - manage daily notes (read, append)
-    - read and write YAML frontmatter properties (get, set)
-    - list checkbox tasks, tags, and backlinks
-    - target a specific vault with --vault, or use the most-recently-focused vault
-    - emit structured JSON snapshots and doctor output
+    - index, read, keyword search, semantic search, hybrid retrieval, query, relate, summarize, and audit local Obsidian vaults
+    - build chunked semantic embeddings with Voyage voyage-4-large by default, OpenAI text-embedding-3-large fallback metadata, and Voyage rerank-2.5 reranking when available
+    - build cited agent context and GPT-5.5 vault chat answers from local chunks
+    - save individual notes and linked note groups with per-vault conventions
+    - manage daily, weekly, period, template, graph, tag, backlink, and task workflows
+    - read and write YAML frontmatter properties, including batch updates
+    - target a specific vault path with --vault or AGENT_OBSIDIAN_VAULT_PATH, or fall back to obsidian-cli for named live vaults
+    - emit structured JSON output for every local-index command
     - one-time CLI link from the Obsidian.app bundle into ~/.local/bin
     - +live-gated eval / dev / plugin surface for plugin and theme development
     # concurrency: mixed — read-only: doctor, snapshot, read, search, tasks,
@@ -1221,15 +1231,32 @@ tools:
     commands:
       doctor: 'Check obsidian-cli wiring: doctor [--fix] [--json]'
       snapshot: 'Integration state as JSON: snapshot [--vault V]'
+      refresh: 'Refresh local SQLite index: refresh [--full] [--json]'
+      embed: 'Semantic embedding index: embed status|refresh [--full] [--json]'
       read: 'Read a note: read <name> | --path <path> [--copy] [--vault V]'
       create: 'Create a note: create <name> [--content T] [--template T] [--overwrite] [--open] [--vault V]'
       append: 'Append text to a note: append <name> [<text>...] [--content T] [--path] [--vault V]'
-      search: 'Search notes: search <query> [--limit N] [--total] [--vault V]'
-      daily: 'Daily notes: daily read | daily append [<text>...] [--content T]'
-      prop: 'Frontmatter properties: prop get|set [--file F]'
-      tasks: 'List checkbox tasks: tasks [todo|done] [--daily]'
-      tags: 'List tags: tags [--counts] [--sort name|count]'
+      search: 'Search notes: search <query> [--mode keyword|semantic|hybrid] [--limit N] [--total] [--vault V]'
+      context: 'Build cited retrieval context: context build <query> [--mode keyword|semantic|hybrid]'
+      chat: 'Answer from vault context with citations: chat <question> [--mode hybrid]'
+      connections: 'Find related notes by semantic/hybrid retrieval: connections <name>'
+      query: 'Safe DQL subset over local index: query "FROM #tag WHERE status=active SORT due ASC"'
+      relate: 'Rank backlink candidates: relate <name-or-content> [--limit N]'
+      summarize: 'Summarize matching notes with cited sources: summarize <topic>'
+      save: 'Save content with conventions frontmatter: save --content T [--related auto] [--scope local|team|public]'
+      save-group: 'Save linked note group: save-group <hub> --child name:body [--scope S]'
+      daily: 'Daily notes: daily read | daily append | daily list'
+      weekly: 'Weekly notes: weekly read | weekly append | weekly list'
+      period: 'Period notes: period read --from YYYY-MM-DD --to YYYY-MM-DD'
+      prop: 'Frontmatter properties: prop get|set|list|batch'
+      tasks: 'Unified tasks: tasks list|add|complete|update|next'
+      tags: 'List or manage tags: tags [--counts] [--sort name|count]'
       backlinks: 'Backlinks for a note: backlinks <name>'
+      graph: 'Vault graph: graph orphans|broken-links|clusters|cluster|tag-usage'
+      templates: 'Vault templates: templates list|show|apply|register'
+      audit: 'Vault hygiene ledger: audit [--scope folder] [--json]'
+      move: 'Move note with journaled link rewrite: move <from> <to> [--update-links]'
+      delete: 'Move note to .trash: delete <name> --confirm'
       eval: '+live: run JavaScript in Obsidian: eval <code>'
       dev: '+live: developer surface: dev {errors|screenshot|dom|console|css|mobile}'
       plugin: '+live: plugin management: plugin reload <id>'
@@ -1244,12 +1271,55 @@ tools:
       command: agent-do obsidian create "Inbox/Idea" --content "Pricing experiment"
     - intent: search the active vault
       command: agent-do obsidian search "review" --limit 5
+    - intent: build the semantic vault index
+      command: agent-do obsidian embed refresh --json
+    - intent: build cited agent context from the vault
+      command: agent-do obsidian context build "what did I decide about voice" --json
+    - intent: ask the vault a question with citations
+      command: agent-do obsidian chat "what is on my plate today?" --json
+    - intent: save a note with related links
+      command: agent-do obsidian save --content "Pricing experiment" --related auto --json
+    - intent: ask the vault a question
+      command: agent-do obsidian summarize "Trinity Site" --json
+    - intent: choose next tasks
+      command: agent-do obsidian tasks next --horizon today --json
     - intent: mark a project as done
       command: agent-do obsidian prop set status done --file "Projects/agent-obsidian"
     - intent: list backlinks for a note
       command: agent-do obsidian backlinks "agent-do roadmap"
     - intent: run obsidian dev tools (requires +live)
       command: agent-do +live(scope=desktop,app=Obsidian,ttl=15m) obsidian dev errors
+    credentials:
+      optional:
+      - VOYAGE_API_KEY
+      - OPENAI_API_KEY
+      - COHERE_API_KEY
+      features:
+        VOYAGE_API_KEY:
+          unlocks: default voyage-4-large semantic embeddings and Voyage rerank-2.5 reranking
+          required_for:
+          - embed refresh
+          - semantic search with default model
+          - hybrid search reranking
+          recommended: true
+          setup: agent-do creds store VOYAGE_API_KEY --stdin
+        OPENAI_API_KEY:
+          unlocks: GPT-5.5 vault chat and text-embedding-3-large fallback embeddings
+          required_for:
+          - chat
+          - OpenAI embedding fallback
+          recommended: true
+          setup: agent-do creds store OPENAI_API_KEY --stdin
+        COHERE_API_KEY:
+          unlocks: future multimodal vault embeddings with Cohere embed-v4.0
+          required_for:
+          - multimodal asset indexing
+          recommended: false
+          setup: agent-do creds store COHERE_API_KEY --stdin
+      notes:
+      - Obsidian read, save, keyword search, tasks, graph, audit, and local indexing work without API keys.
+      - Add VOYAGE_API_KEY for the recommended semantic vault index.
+      - Add OPENAI_API_KEY for vault chat and the OpenAI embedding fallback.
     routing:
       discover_keywords:
       - obsidian
@@ -1265,11 +1335,45 @@ tools:
       - \bbacklinks?\b
       - \bvault\b
       - \bfrontmatter\b
+      intents:
+      - label: vault_save_intent
+        examples:
+        - save this to my vault
+        - put that in obsidian
+        - lock this in
+        recommended_entrypoint: agent-do obsidian save --content "..."
+      - label: vault_find_intent
+        examples:
+        - find every note about X
+        - where did I write about Y
+        recommended_entrypoint: agent-do obsidian search "..." --mode hybrid --json
+      - label: vault_ask_intent
+        examples:
+        - summarize my thinking on X
+        - what do my notes say about Y
+        recommended_entrypoint: agent-do obsidian context build "..." --json
+      - label: vault_organize_intent
+        examples:
+        - what should I work on next
+        - what's gone stale
+        recommended_entrypoint: agent-do obsidian tasks next --json
+      - label: vault_refactor_intent
+        examples:
+        - rename X to Y across my vault
+        - merge tags A and B
+        recommended_entrypoint: agent-do obsidian move "X" "Y" --update-links --json
       recommended_entrypoints:
       - agent-do obsidian doctor
       - agent-do obsidian snapshot
+      - agent-do obsidian refresh --full --json
+      - agent-do obsidian embed status --json
+      - agent-do obsidian embed refresh --json
       - agent-do obsidian daily read
-      - agent-do obsidian search <query>
+      - agent-do obsidian search <query> --mode keyword
+      - agent-do obsidian search <query> --mode hybrid --json
+      - agent-do obsidian context build <query> --json
+      - agent-do obsidian chat <question> --json
+      - agent-do obsidian save --content "..." --related auto --json
       default_command: snapshot
       raw_cli_equivalents:
       - pattern: \bobsidian\s+(read|create|append|search|daily|tasks|tags|backlinks)\b
@@ -1286,7 +1390,64 @@ tools:
       readiness:
         check: agent-do obsidian doctor
         fix: agent-do obsidian doctor --fix
-        note: Requires the Obsidian desktop app; doctor --fix links the bundled CLI into ~/.local/bin
+        note: Local index mode requires a vault path; CLI fallback requires the Obsidian desktop app
+    contracts:
+      connect:
+      - doctor
+      snapshot:
+      - snapshot
+      - read
+      - search
+      - embed status
+      - context build
+      - connections
+      - query
+      - relate
+      - summarize
+      - tasks list
+      - tasks next
+      - tags
+      - backlinks
+      - graph orphans
+      - graph broken-links
+      - graph clusters
+      - graph cluster
+      - graph tag-usage
+      - daily read
+      - daily list
+      - weekly read
+      - weekly list
+      - period read
+      - prop get
+      - prop list
+      - templates list
+      - templates show
+      interact:
+      - refresh
+      - embed refresh
+      - chat
+      - create
+      - append
+      - move
+      - delete
+      - prop set
+      - prop batch
+      - tasks add
+      - tasks complete
+      - tasks update
+      - tags rename
+      - tags merge
+      - daily append
+      - weekly append
+      - templates apply
+      - templates register
+      - audit fix
+      verify:
+      - doctor
+      - audit
+      save:
+      - save
+      - save-group
     concurrency: mixed
   figma:
     description: Control Figma
@@ -1827,10 +1988,96 @@ tools:
     commands:
       convert: Convert format
       trim: Trim audio
-      transcribe: Transcribe audio
+      transcribe: Transcribe audio (local file, local Whisper only — for URL/API/batch use agent-transcribe)
     examples:
     - intent: transcribe recording.mp3
       command: agent-audio transcribe recording.mp3
+    concurrency: mixed
+  transcribe:
+    description: Source-to-transcript ingestion pipeline (YouTube URLs, authenticated downloads, Whisper API + local Whisper + caption fallbacks, batch, cost preflight, structured JSON)
+    capabilities:
+    - transcribe YouTube videos by URL or ID (public and members-only)
+    - transcribe local audio/video files
+    - use authenticated agent-do browse sessions for members-only content
+    - pass yt-dlp extractor args and YouTube player-client overrides when cookies alone are insufficient
+    - capture authenticated browser tab audio for member-tier/paywalled media that yt-dlp cannot extract
+    - call OpenAI Whisper API with automatic ffmpeg chunking for large audio
+    - fall back to local Whisper, YouTube auto-captions, or yt-dlp VTT subtitles
+    - batch transcribe from stdin or a file of URLs
+    - estimate API cost before committing (preflight, never blocks)
+    - cache results per source/method to skip repeat work
+    commands:
+      doctor: Report dependency, credential, and browse-session readiness
+      snapshot: Report cache state, available browse sessions, default method order
+      cost: Estimate Whisper API cost for one source or a batch (informational preflight)
+      transcribe: Transcribe a source to text+JSON (default verb when first arg is a URL/ID/path)
+    examples:
+    - intent: transcribe a public YouTube video
+      command: agent-do transcribe https://youtube.com/watch?v=dQw4w9WgXcQ
+    - intent: transcribe a members-only YouTube video using saved auth
+      command: agent-do transcribe https://youtube.com/watch?v=XXX --browse-session youtube_arc
+    - intent: retry a members-only YouTube video through a mobile player client
+      command: agent-do transcribe https://youtube.com/watch?v=XXX --browse-session youtube_arc --youtube-player-client ios
+    - intent: transcribe browser-only member-tier YouTube content
+      command: agent-do transcribe https://youtube.com/watch?v=XXX --browse-session youtube_arc --browser-capture --json
+    - intent: estimate cost for a batch before transcribing
+      command: agent-do transcribe cost --batch-file urls.txt --youtube-player-client ios --json
+    - intent: batch transcribe with structured output
+      command: agent-do transcribe --batch-file urls.txt --browse-session youtube_arc --browser-capture --output-dir ./transcripts --json
+    - intent: free fallback only (no Whisper API)
+      command: agent-do transcribe <url> --prefer-free
+    - intent: check tool readiness as JSON
+      command: agent-do transcribe doctor --json
+    routing:
+      discover_keywords:
+      - transcribe
+      - transcription
+      - youtube transcript
+      - video transcript
+      - audio transcript
+      - speech to text
+      - whisper
+      - caption
+      - subtitle
+      - yt-dlp
+      - youtube player client
+      - extractor args
+      - browser capture
+      - tab audio
+      prompt_patterns:
+      - \btranscrib\w*\b
+      - \btranscript\b
+      - \byoutube.*(transcript|caption|subtitle|transcribe)\b
+      - \b(speech|audio|video).*to.*text\b
+      - \bwhisper\s+api\b
+      - \bcaption\w*\b
+      - \bplayer_client\b
+      - \bextractor args?\b
+      - \bbrowser capture\b
+      - \btab audio\b
+      recommended_entrypoints:
+      - agent-do transcribe doctor --json
+      - agent-do transcribe cost <url> --youtube-player-client ios --json
+      - agent-do transcribe <url> --browse-session youtube_arc --browser-capture --json
+      - agent-do transcribe <url> --browse-session youtube_arc --youtube-player-client ios --json
+      - agent-do transcribe --batch-file urls.txt --browse-session youtube_arc --browser-capture --output-dir transcripts --json
+      default_command: doctor
+    credentials:
+      optional:
+      - OPENAI_API_KEY
+    contracts:
+      connect:
+      - doctor
+      snapshot:
+      - snapshot
+      - cost
+      interact:
+      - transcribe
+      verify:
+      - doctor
+      - cost
+      save:
+      - transcribe
     concurrency: mixed
   hardware:
     description: Unified hardware device control across serial, bluetooth, USB, printers, and MIDI
@@ -2743,35 +2990,98 @@ tools:
       - OKTA_API_TOKEN
     concurrency: mixed
   render:
-    description: Control Render.com services, deploys, databases, and env vars
+    description: Full-surface Render.com control — services (create/update/delete/lifecycle), deploys (trigger/show/cancel/rollback), one-off jobs, cron runs, env vars + secret files, env groups, postgres lifecycle + creds + recovery, key value, blueprints, custom domains + headers + routes, persistent disks + snapshots, dedicated IPs, registry credentials, projects + environments, webhooks, notifications, maintenance, audit logs, owners, observability (logs + metrics)
     capabilities:
-    - list and manage services
-    - trigger and view deploys
-    - view logs and metrics
-    - manage environment variables
-    - manage PostgreSQL databases
-    - view custom domains and projects
+    - create and manage services (web, worker, static, private, cron)
+    - trigger, view, cancel, and roll back deploys
+    - run and cancel one-off jobs
+    - trigger and cancel cron job runs
+    - manage env vars and secret files at service and env-group scope
+    - link env groups to services
+    - full PostgreSQL lifecycle (create, update, delete, suspend, resume, restart, failover, recovery, exports, credentials, connection info)
+    - full Key Value (Redis-compatible) lifecycle
+    - validate render.yaml blueprints, manage existing blueprints, view sync history
+    - custom domains add/show/verify/delete; HTTP headers and static-site routes
+    - persistent disks with snapshots and restore
+    - dedicated IPs, registry credentials for private Docker registries
+    - projects and environments with resource linking
+    - webhooks for deploy and lifecycle events
+    - notification settings and per-service overrides
+    - audit log retrieval and maintenance windows
+    - structured logs and metrics with filters
+    - cross-account snapshot
     commands:
-      services: List all services
-      show: Detailed service info
-      deploy: Trigger deploy
-      deploys: List recent deploys
-      logs: View service logs
+      owners: List workspaces (for --owner resolution)
+      whoami: Show authenticated user
+      audit: Audit log entries
+      services: List services
+      show: Service details
+      create: 'Create service: create <web|worker|static|private|cron> <name> [opts]'
+      update: Update service settings
+      delete: Delete a service (--yes required)
+      cache-purge: Purge build cache
+      events: Recent service events
+      instances: Running instance list
       restart: Restart service
       suspend: Suspend service
       resume: Resume service
-      scale: Scale instances
+      scale: Scale instance count
+      autoscaling: 'Autoscaling: show|enable|disable'
+      deploy: 'Trigger deploy, or deploy {show|cancel} for sub-ops'
+      deploys: List recent deploys
+      rollback: Roll back to a prior deploy
+      jobs: List one-off jobs
+      job: 'One-off job ops: run|show|cancel'
+      cron: 'Cron job ops: run|cancel'
       env: List env vars
-      env-set: Set env var
+      env-set: Upsert env var
       env-del: Delete env var
-      db: PostgreSQL management (list, show)
+      secret: 'Per-service secret files: list|get|set|del'
+      env-group: 'Env groups: list|show|create|delete|rename|link|unlink|set|get|del-var|secret'
+      db: 'Postgres: list|show|create|update|delete|suspend|resume|restart|failover|connect-info|backup|backups|recover|creds'
+      kv: 'Key Value: list|show|create|update|delete|connect-info|suspend|resume'
       domains: List custom domains
-      metrics: View service metrics
-      projects: List projects
+      domain: 'Custom domain ops: add|show|del|verify'
+      header: 'HTTP header rules: list|add|del'
+      route: 'Static-site routes: list|add|del'
+      blueprint: 'Blueprints: list|show|validate|update|delete|syncs'
+      disk: 'Persistent disks: list|show|create|update|delete|snapshots|restore'
+      dedicated-ip: 'Dedicated IPs: list|show|create|delete'
+      registry: 'Docker registry creds: list|show|add|delete'
+      projects: List projects (shorthand)
+      project: 'Project ops: list|show|create|update|delete'
+      environment: 'Environment ops: list|show|create|delete|link|unlink'
+      webhook: 'Webhooks: list|show|create|update|delete|events'
+      notify: 'Notifications: show|update|overrides|override'
+      maintenance: 'Maintenance windows: list|show|reschedule|trigger'
+      metrics: Service metrics
+      logs: Structured logs with filters
       snapshot: Full account state as JSON
     examples:
     - intent: list my render services
       command: agent-render services
+    - intent: create a new web service on render from a github repo
+      command: agent-render create web my-api --repo https://github.com/me/api --build "npm ci && npm run build" --start "npm start"
+    - intent: create a render cron job
+      command: agent-render create cron daily-task --repo https://github.com/me/jobs --schedule "0 12 * * *" --start "node daily.js"
+    - intent: dry-run a render service create to see the request body
+      command: agent-render create web my-api --repo https://github.com/me/api --build "npm ci" --start "npm start" --dry-run
+    - intent: create a render postgres database
+      command: agent-render db create main-db --plan basic_1gb --version 16 --region oregon
+    - intent: list render env groups
+      command: agent-render env-group list
+    - intent: link a render env group to a service
+      command: agent-render env-group link shared-env my-api
+    - intent: validate a render.yaml blueprint
+      command: agent-render blueprint validate render.yaml
+    - intent: roll back a render deploy
+      command: agent-render rollback my-api dep-xxxxx
+    - intent: trigger a render cron job manually
+      command: agent-render cron run daily-task
+    - intent: add a custom domain on render
+      command: agent-render domain add my-api example.com
+    - intent: create a webhook for render deploys
+      command: agent-render webhook create --name slack --url https://hooks.slack.com/... --event deploy_ended
     - intent: deploy my-api on render
       command: agent-render deploy my-api
     - intent: show render service details
@@ -2865,7 +3175,7 @@ tools:
     - intent: run vector sync
       command: agent-vector sync --dry-run
     - intent: bind a vector project
-      command: agent-vector bind versova-research --dir /Users/erik/Documents/AI/Custom_Coding/versova-research
+      command: agent-vector bind versova-research --dir ~/Custom-Coding/versova-research
     credentials:
       required:
       - VECTOR_SUPABASE_URL

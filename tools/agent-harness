@@ -239,26 +239,20 @@ def hook_components() -> list[dict[str, Any]]:
         (
             "hook:session-start",
             "SessionStart",
-            ["hooks/agent-do-session-start.sh"],
+            ["hooks/claude/agent-do-session-start.sh", "hooks/codex/agent-do-session-start.py"],
             "Injects project-aware tool guidance and bootstrap context.",
         ),
         (
             "hook:user-prompt-submit",
             "UserPromptSubmit",
-            ["hooks/agent-do-prompt-router.py"],
+            ["hooks/claude/agent-do-prompt-router.py", "hooks/codex/agent-do-prompt-router.py"],
             "Routes prompts to high-confidence tool suggestions and coord focus context.",
         ),
         (
             "hook:pretooluse-claude",
             "PreToolUse Claude",
-            ["hooks/agent-do-pretooluse-check.py"],
+            ["hooks/claude/agent-do-pretooluse-check.py", "hooks/codex/agent-do-pretooluse-check.py"],
             "Emits Claude-compatible raw-command nudges.",
-        ),
-        (
-            "hook:pretooluse-codex",
-            "PreToolUse Codex",
-            ["hooks/agent-do-pretooluse-codex.py"],
-            "Runs the shared PreToolUse check while suppressing Codex-unsupported output.",
         ),
     ]
     components = []
@@ -313,12 +307,13 @@ def library_components() -> list[dict[str, Any]]:
 def tool_components(registry: dict[str, Any]) -> list[dict[str, Any]]:
     components = []
     sys.path.insert(0, str(REPO_ROOT / "lib"))
-    from registry import get_tool_secret_envs  # noqa: WPS433
+    from registry import get_tool_contracts, get_tool_secret_envs, validate_tool_contracts  # noqa: WPS433
 
     for name, info in sorted(registry.items()):
         files = tool_files(name)
         commands = sorted((info.get("commands") or {}).keys())
         credentials = sorted(get_tool_secret_envs(info))
+        contract_validation = validate_tool_contracts(name, info)
         component = {
             "id": f"tool:{name}",
             "type": "tool",
@@ -330,6 +325,8 @@ def tool_components(registry: dict[str, Any]) -> list[dict[str, Any]]:
             "capabilities": info.get("capabilities") or [],
             "concurrency": info.get("concurrency", "mixed"),
             "credentials": credentials,
+            "contracts": get_tool_contracts(info),
+            "contract_validation": contract_validation,
             "routing": bool(info.get("routing")),
             "tests": test_paths_for_tool(name),
             "state": state_refs_for_tool(name),
@@ -350,6 +347,10 @@ def inspect_harness() -> dict[str, Any]:
     by_type = Counter(component["type"] for component in components)
     tools_with_tests = sum(1 for component in components if component["type"] == "tool" and component.get("tests"))
     tools_with_routing = sum(1 for component in components if component["type"] == "tool" and component.get("routing"))
+    tool_contract_components = [component for component in components if component["type"] == "tool"]
+    tools_with_contracts = sum(1 for component in tool_contract_components if component.get("contract_validation", {}).get("declared"))
+    contract_errors = sum(len(component.get("contract_validation", {}).get("errors") or []) for component in tool_contract_components)
+    contract_warnings = sum(len(component.get("contract_validation", {}).get("warnings") or []) for component in tool_contract_components)
 
     return {
         "ok": True,
@@ -364,6 +365,9 @@ def inspect_harness() -> dict[str, Any]:
             "tools": len(registry),
             "tools_with_tests": tools_with_tests,
             "tools_with_routing": tools_with_routing,
+            "tools_with_contracts": tools_with_contracts,
+            "contract_errors": contract_errors,
+            "contract_warnings": contract_warnings,
         },
         "components": components,
     }
@@ -377,6 +381,9 @@ def render_inspect_text(payload: dict[str, Any]) -> None:
     print(f"  Tools: {summary['tools']}")
     print(f"  Tools with tests: {summary['tools_with_tests']}")
     print(f"  Tools with routing: {summary['tools_with_routing']}")
+    print(f"  Tools with contracts: {summary.get('tools_with_contracts', 0)}")
+    print(f"  Contract warnings: {summary.get('contract_warnings', 0)}")
+    print(f"  Contract errors: {summary.get('contract_errors', 0)}")
     print("  Component types:")
     for kind, count in summary["by_type"].items():
         print(f"    - {kind}: {count}")

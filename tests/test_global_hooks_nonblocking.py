@@ -15,9 +15,10 @@ from pathlib import Path
 
 
 HOME = Path.home()
+ROOT = Path(__file__).resolve().parents[1]
 CODEX_STOP = HOME / ".codex" / "hooks" / "stop-quality-gate.py"
-CODEX_ANNOTATE = HOME / ".codex" / "hooks" / "annotate.py"
-CLAUDE_ANNOTATE = HOME / ".claude" / "hooks" / "annotate.py"
+CODEX_PROMPT_ROUTER = HOME / ".codex" / "hooks" / "agent-do-prompt-router.py"
+CLAUDE_PROMPT_ROUTER = HOME / ".claude" / "hooks" / "agent-do-prompt-router.py"
 
 
 def require(condition: bool, message: str) -> None:
@@ -29,6 +30,7 @@ def run_hook(path: Path, payload: dict, cwd: Path | None = None, home: Path | No
     env = os.environ.copy()
     if home is not None:
         env["HOME"] = str(home)
+    env["AGENT_DO_REPO"] = str(ROOT)
     proc = subprocess.run(
         ["python3", str(path)],
         cwd=str(cwd) if cwd else None,
@@ -65,20 +67,23 @@ def test_codex_stop_is_advisory() -> None:
         require("systemMessage" in payload, f"codex stop hook should emit advisory context: {payload}")
 
 
-def test_annotation_hooks_are_advisory() -> None:
+def test_prompt_router_hooks_are_advisory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
-        for label, hook in (("codex annotate", CODEX_ANNOTATE), ("claude annotate", CLAUDE_ANNOTATE)):
+        for label, hook in (
+            ("codex prompt router", CODEX_PROMPT_ROUTER),
+            ("claude prompt router", CLAUDE_PROMPT_ROUTER),
+        ):
             if not hook.exists():
                 continue
-            payload = run_hook(hook, {"prompt": "#tag:review", "session_id": "test-session"}, home=home)
+            payload = run_hook(hook, {"prompt": "continue", "session_id": "test-session"}, home=home)
             assert_not_blocking(payload, label)
             require("hookSpecificOutput" in payload, f"{label} should emit context: {payload}")
 
 
 def main() -> int:
     test_codex_stop_is_advisory()
-    test_annotation_hooks_are_advisory()
+    test_prompt_router_hooks_are_advisory()
     print("global hook nonblocking tests passed")
     return 0
 

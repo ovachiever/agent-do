@@ -275,7 +275,31 @@ if one_of:
     print('  one_of:')
     for group in one_of:
         print('    - ' + ' | '.join(group))
-if not any([required, optional, one_of]):
+features = creds.get('features', {})
+if features:
+    print('  features:')
+    for key, meta in features.items():
+        if not isinstance(meta, dict):
+            continue
+        label = meta.get('unlocks') or meta.get('description') or ''
+        required_for = meta.get('required_for') or []
+        if isinstance(required_for, list) and required_for:
+            label = (label + ' ' if label else '') + '(required for: ' + ', '.join(required_for) + ')'
+        recommended = meta.get('recommended')
+        suffix = ' [recommended]' if recommended is True else ''
+        if label:
+            print(f'    - {key}: {label}{suffix}')
+        else:
+            print(f'    - {key}{suffix}')
+        setup = meta.get('setup')
+        if setup:
+            print(f'      setup: {setup}')
+notes = creds.get('notes', [])
+if notes:
+    print('  notes:')
+    for note in notes:
+        print(f'    - {note}')
+if not any([required, optional, one_of, features, notes]):
     print('  no credential metadata declared')
 "
 }
