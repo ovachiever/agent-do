@@ -1,4 +1,3 @@
-"""PR audit and review risk analysis."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +8,6 @@ from ..refs import PrRef, parse_pr_ref
 from ..render import print_json, print_table
 from ..transport import command_available, run_optional
 from .pr import pr_checks, pr_detail, pr_diff_text, pr_threads
-
 
 ENV_VAR_RE = re.compile(r"\b([A-Z][A-Z0-9_]*[A-Z0-9])\b")
 INTERESTING_ENV_PREFIXES = (
@@ -38,7 +36,6 @@ OPTIONAL_PROVIDER_ENV_NAMES = {
     "VERCEL_ENV",
 }
 
-
 def add_finding(
     findings: list[dict[str, Any]],
     *,
@@ -50,17 +47,14 @@ def add_finding(
 ) -> None:
     findings.append({"severity": severity, "category": category, "title": title, "evidence": evidence, "fix": fix})
 
-
 def changed_file(detail: dict[str, Any], suffix: str) -> dict[str, Any] | None:
     for file in detail.get("files") or []:
         if str(file.get("path") or "").endswith(suffix):
             return file
     return None
 
-
 def changed_paths(detail: dict[str, Any]) -> list[str]:
     return [str(file.get("path") or "") for file in detail.get("files") or [] if file.get("path")]
-
 
 def extract_interesting_env_vars(text: str) -> list[str]:
     envs: set[str] = set()
@@ -73,7 +67,6 @@ def extract_interesting_env_vars(text: str) -> list[str]:
         envs.add("SENTRY_AUTH_TOKEN")
     return sorted(envs)
 
-
 def parse_env_keys(output_text: str) -> set[str]:
     keys: set[str] = set()
     for line in output_text.splitlines():
@@ -82,12 +75,10 @@ def parse_env_keys(output_text: str) -> set[str]:
             keys.add(match.group(1))
     return keys
 
-
 def repo_slug(repo: str | None) -> str | None:
     if not repo or "/" not in repo:
         return None
     return repo.split("/", 1)[1].lower()
-
 
 def deployment_target_kind(paths: list[str]) -> str:
     web = any(p.startswith("presentation/") or p == "Dockerfile.web" or p.endswith("Dockerfile.web") for p in paths)
@@ -98,7 +89,6 @@ def deployment_target_kind(paths: list[str]) -> str:
         return "worker"
     return "mixed"
 
-
 def service_matches_target(service_name: str, target_kind: str) -> bool:
     lower = service_name.lower()
     if target_kind == "web":
@@ -107,9 +97,7 @@ def service_matches_target(service_name: str, target_kind: str) -> bool:
         return "worker" in lower
     return True
 
-
 def probe_deployment_env(detail: dict[str, Any], env_vars: list[str], *, target_kind: str = "mixed") -> dict[str, Any]:
-    """Best-effort local provider probe. Values are never returned, only key presence."""
     slug = repo_slug(detail.get("repo"))
     result: dict[str, Any] = {
         "enabled": True,
@@ -168,7 +156,6 @@ def probe_deployment_env(detail: dict[str, Any], env_vars: list[str], *, target_
     else:
         result["notes"].append("agent-do not found; provider env probe skipped")
     return result
-
 
 def audit_pr(ref: PrRef, *, probe_deploys: bool = False) -> dict[str, Any]:
     detail = pr_detail(ref)
@@ -275,7 +262,6 @@ def audit_pr(ref: PrRef, *, probe_deploys: bool = False) -> dict[str, Any]:
         "verdict": "request_changes" if any(item.get("severity") in {"high", "medium"} for item in findings) else "no_blockers_found",
     }
 
-
 def format_audit_reply(audit: dict[str, Any]) -> str:
     pr = audit.get("pr") or {}
     findings = audit.get("findings") or []
@@ -314,7 +300,6 @@ def format_audit_reply(audit: dict[str, Any]) -> str:
         "", "This is not a substitute for reading the code diff, but there are no automated blockers from the audited signals.",
     ])
     return "\n".join(lines)
-
 
 def cmd_audit(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)

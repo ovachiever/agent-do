@@ -1,4 +1,3 @@
-"""Reference parsing: PrRef, RepoRef, IssueRef."""
 from __future__ import annotations
 
 import re
@@ -7,13 +6,11 @@ from dataclasses import dataclass
 
 from .transport import GhError
 
-
 @dataclass(frozen=True)
 class PrRef:
     repo: str | None
     number: str
     original: str
-
 
 @dataclass(frozen=True)
 class RepoRef:
@@ -23,7 +20,6 @@ class RepoRef:
     @property
     def slug(self) -> str:
         return f"{self.owner}/{self.repo}"
-
 
 @dataclass(frozen=True)
 class IssueRef:
@@ -39,13 +35,10 @@ class IssueRef:
     def repo_ref(self) -> RepoRef:
         return RepoRef(self.owner, self.repo)
 
-
 _REPO_RE = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?)/([A-Za-z0-9._-]+)$")
 _NUM_RE = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?)/([A-Za-z0-9._-]+)#(\d+)$")
 
-
 def repo_from_git() -> str | None:
-    """Infer the owner/repo slug from the git remote origin URL, or return None."""
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -63,9 +56,7 @@ def repo_from_git() -> str | None:
         return None
     return match.group(1)
 
-
 def parse_pr_ref(raw: str | None) -> PrRef:
-    """Parse a PR reference from a URL, owner/repo#num, bare number, or empty string."""
     value = (raw or "").strip()
     if not value:
         repo = repo_from_git()
@@ -89,9 +80,7 @@ def parse_pr_ref(raw: str | None) -> PrRef:
 
     raise GhError(f"Invalid PR reference: {value}")
 
-
 def pr_gh_args(ref: PrRef) -> list[str]:
-    """Build the gh CLI positional args for a PR reference."""
     args: list[str] = []
     if ref.number:
         args.append(ref.number)
@@ -99,17 +88,13 @@ def pr_gh_args(ref: PrRef) -> list[str]:
         args.extend(["--repo", ref.repo])
     return args
 
-
 def parse_repo(s: str) -> RepoRef:
-    """Parse an owner/repo string into a RepoRef, raising ValueError on bad input."""
     m = _REPO_RE.match(s.strip())
     if not m:
         raise ValueError(f"Not a valid owner/repo: {s!r}")
     return RepoRef(m.group(1), m.group(2))
 
-
 def parse_issue(s: str) -> IssueRef:
-    """Parse an owner/repo#num string into an IssueRef, raising ValueError on bad input."""
     m = _NUM_RE.match(s.strip())
     if not m:
         raise ValueError(f"Not a valid owner/repo#num: {s!r}")

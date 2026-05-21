@@ -1,4 +1,3 @@
-"""Issue management commands."""
 from __future__ import annotations
 
 import argparse
@@ -11,10 +10,8 @@ from ..render import output, print_json, print_table
 from ..snapshot import envelope
 from ..transport import GhError, gh_json, run_gh
 
-
 _ISSUE_LIST_FIELDS = "number,title,state,author,labels,assignees,milestone,createdAt,updatedAt,url"
 _ISSUE_VIEW_FIELDS = "number,title,state,author,body,labels,assignees,milestone,createdAt,updatedAt,closedAt,url"
-
 
 def _read_body(args: argparse.Namespace) -> str | None:
     if getattr(args, "body_file", None):
@@ -22,13 +19,11 @@ def _read_body(args: argparse.Namespace) -> str | None:
         return sys.stdin.read() if p == "-" else Path(p).read_text()
     return getattr(args, "body", None)
 
-
 # ── core data functions ────────────────────────────────────────────────────────
 
 def list_issues(repo: str, *, state: str = "open", labels: list[str] | None = None,
                 assignee: str | None = None, author: str | None = None,
                 milestone: str | None = None, limit: int = 50) -> dict[str, Any]:
-    """List issues in a repo, returning a structured envelope."""
     r = parse_repo(repo)
     args = ["issue", "list", "--repo", r.slug, "--state", state,
             "--limit", str(limit), "--json", _ISSUE_LIST_FIELDS]
@@ -42,21 +37,17 @@ def list_issues(repo: str, *, state: str = "open", labels: list[str] | None = No
         args += ["--milestone", milestone]
     return envelope("issue list", ref=r.slug, data={"issues": gh_json(args) or []})
 
-
 def view_issue(ref: str, *, comments: bool = False) -> dict[str, Any]:
-    """Fetch full details for a single issue by owner/repo#num reference."""
     i = parse_issue(ref)
     fields = _ISSUE_VIEW_FIELDS + (",comments" if comments else "")
     return envelope("issue view", ref=i.slug, data=gh_json(
         ["issue", "view", str(i.number), "--repo", i.repo_ref.slug, "--json", fields]
     ) or {})
 
-
 def create_issue(repo: str, *, title: str, body: str | None = None,
                  body_file: str | None = None, labels: list[str] | None = None,
                  assignees: list[str] | None = None, milestone: str | None = None,
                  project: str | None = None) -> dict[str, Any]:
-    """Create a new issue in a repo; returns an envelope with the new issue URL."""
     r = parse_repo(repo)
     args = ["issue", "create", "--repo", r.slug, "--title", title]
     if body is not None:
@@ -78,9 +69,7 @@ def create_issue(repo: str, *, title: str, body: str | None = None,
     url = out.splitlines()[-1] if out else None
     return envelope("issue create", ref=r.slug, data={"url": url})
 
-
 def comment_issue(ref: str, *, body: str | None = None, body_file: str | None = None) -> dict[str, Any]:
-    """Post a comment on an issue."""
     i = parse_issue(ref)
     if body is None and body_file is None:
         raise GhError("--body or --body-file is required for issue comment")
@@ -93,9 +82,7 @@ def comment_issue(ref: str, *, body: str | None = None, body_file: str | None = 
     run_gh(args)
     return envelope("issue comment", ref=i.slug, data={"commented": True})
 
-
 def close_issue(ref: str, *, reason: str | None = None, comment: str | None = None) -> dict[str, Any]:
-    """Close an issue, optionally with a reason and closing comment."""
     i = parse_issue(ref)
     args = ["issue", "close", str(i.number), "--repo", i.repo_ref.slug]
     if reason:
@@ -105,9 +92,7 @@ def close_issue(ref: str, *, reason: str | None = None, comment: str | None = No
     run_gh(args)
     return envelope("issue close", ref=i.slug, data={"closed": True, "reason": reason})
 
-
 def reopen_issue(ref: str, *, comment: str | None = None) -> dict[str, Any]:
-    """Reopen a closed issue."""
     i = parse_issue(ref)
     args = ["issue", "reopen", str(i.number), "--repo", i.repo_ref.slug]
     if comment:
@@ -115,9 +100,7 @@ def reopen_issue(ref: str, *, comment: str | None = None) -> dict[str, Any]:
     run_gh(args)
     return envelope("issue reopen", ref=i.slug, data={"reopened": True})
 
-
 def label_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
-    """Add or remove labels on an issue."""
     i = parse_issue(ref)
     args = ["issue", "edit", str(i.number), "--repo", i.repo_ref.slug]
     for lbl in add or []:
@@ -129,9 +112,7 @@ def label_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | N
     run_gh(args)
     return envelope("issue label", ref=i.slug, data={"add": add or [], "remove": remove or []})
 
-
 def assign_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
-    """Add or remove assignees on an issue."""
     i = parse_issue(ref)
     args = ["issue", "edit", str(i.number), "--repo", i.repo_ref.slug]
     for a in add or []:
@@ -143,10 +124,8 @@ def assign_issue(ref: str, *, add: list[str] | None = None, remove: list[str] | 
     run_gh(args)
     return envelope("issue assign", ref=i.slug, data={"add": add or [], "remove": remove or []})
 
-
 def snapshot_issues(repo: str, *, state: str = "open", limit: int = 100) -> dict[str, Any]:
     return list_issues(repo, state=state, limit=limit)
-
 
 # ── command handlers ───────────────────────────────────────────────────────────
 
@@ -165,7 +144,6 @@ def cmd_issue_list(args: argparse.Namespace) -> None:
     else:
         print_table(result["data"]["issues"], ["number", "state", "title", "author", "updatedAt"])
 
-
 def cmd_issue_view(args: argparse.Namespace) -> None:
     result = view_issue(args.issue_ref, comments=args.comments)
     if args.json:
@@ -178,7 +156,6 @@ def cmd_issue_view(args: argparse.Namespace) -> None:
         if d.get("body"):
             print()
             print(d["body"])
-
 
 def cmd_issue_create(args: argparse.Namespace) -> None:
     if args.dry_run:
@@ -199,7 +176,6 @@ def cmd_issue_create(args: argparse.Namespace) -> None:
     else:
         print(f"Created: {result['data'].get('url')}")
 
-
 def cmd_issue_comment(args: argparse.Namespace) -> None:
     if args.dry_run:
         print(f"[dry-run] would comment on {args.issue_ref}")
@@ -211,7 +187,6 @@ def cmd_issue_comment(args: argparse.Namespace) -> None:
     else:
         print(f"Commented on {args.issue_ref}")
 
-
 def cmd_issue_close(args: argparse.Namespace) -> None:
     if args.dry_run:
         print(f"[dry-run] would close {args.issue_ref}")
@@ -221,7 +196,6 @@ def cmd_issue_close(args: argparse.Namespace) -> None:
         print_json(result)
     else:
         print(f"Closed {args.issue_ref}")
-
 
 def cmd_issue_reopen(args: argparse.Namespace) -> None:
     if args.dry_run:
@@ -233,7 +207,6 @@ def cmd_issue_reopen(args: argparse.Namespace) -> None:
     else:
         print(f"Reopened {args.issue_ref}")
 
-
 def cmd_issue_label(args: argparse.Namespace) -> None:
     if args.dry_run:
         print(f"[dry-run] would update labels on {args.issue_ref}")
@@ -243,7 +216,6 @@ def cmd_issue_label(args: argparse.Namespace) -> None:
         print_json(result)
     else:
         print(f"Updated labels on {args.issue_ref}")
-
 
 def cmd_issue_assign(args: argparse.Namespace) -> None:
     if args.dry_run:
@@ -255,14 +227,12 @@ def cmd_issue_assign(args: argparse.Namespace) -> None:
     else:
         print(f"Updated assignees on {args.issue_ref}")
 
-
 def cmd_issue_snapshot(args: argparse.Namespace) -> None:
     result = snapshot_issues(args.repo, state=args.state, limit=args.limit)
     if args.json:
         print_json(result)
     else:
         print_table(result["data"]["issues"], ["number", "state", "title", "updatedAt"])
-
 
 def cmd_issue_triage(args: argparse.Namespace) -> None:
     from ..triage.issue_triage import triage

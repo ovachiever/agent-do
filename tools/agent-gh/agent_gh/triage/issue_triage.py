@@ -1,4 +1,3 @@
-"""Deterministic issue triage: classify, suggest labels, find related, draft first response."""
 from __future__ import annotations
 
 import re
@@ -9,7 +8,6 @@ from ..refs import parse_issue
 from ..snapshot import envelope
 from ..transport import run_gh
 
-
 _BUG = (r"\berror\b", r"\bexception\b", r"\bstack\s?trace\b", r"\bcrash(es|ed)?\b",
         r"\bbroke(n)?\b", r"\bdoes\s?n[o']?t\s+work\b", r"\bfail(s|ed|ure)?\b",
         r"\bregression\b", r"\bbug\b")
@@ -19,7 +17,6 @@ _FEATURE = (r"\bfeature\s+request\b", r"\bwould\s+be\s+(great|nice|cool)\b",
 _QUESTION = (r"\?\s*$", r"\bhow\s+(do|can)\s+i\b", r"\bwhat('s|\s+is)\b",
              r"\bis\s+it\s+possible\b", r"\bwhy\s+(does|is)\b")
 _DOCS = (r"\bdocs?\b", r"\bdocumentation\b", r"\btypo\b", r"\breadme\b")
-
 
 @dataclass
 class TriageResult:
@@ -32,9 +29,7 @@ class TriageResult:
     needs_repro: bool
     needs_version: bool
 
-
 def triage(ref: str) -> dict[str, Any]:
-    """Classify an issue, suggest labels, and draft a first response without LLM."""
     from ..groups.issue import view_issue
 
     iref = parse_issue(ref)
@@ -91,7 +86,6 @@ def triage(ref: str) -> dict[str, Any]:
     )
     return envelope("issue triage", ref=iref.slug, data=asdict(result))
 
-
 def _draft(classification: str, needs_repro: bool, needs_version: bool,
            author: str | None) -> str:
     greeting = f"Thanks for the report{', @' + author if author else ''}."
@@ -111,7 +105,6 @@ def _draft(classification: str, needs_repro: bool, needs_version: bool,
     if classification == "docs":
         return f"{greeting} Good catch — could you point to the exact file / section?"
     return f"{greeting} I'll route this to triage."
-
 
 def _search_related(repo_slug: str, title: str) -> list[dict[str, Any]]:
     keywords = " ".join(w for w in title.split() if len(w) > 3)[:60]

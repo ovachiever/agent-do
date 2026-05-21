@@ -1,4 +1,3 @@
-"""PR inspection and action commands."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +11,6 @@ from ..refs import PrRef, parse_pr_ref, pr_gh_args
 from ..render import output, print_json, print_table
 from ..snapshot import now_iso, parse_github_time
 from ..transport import GhError, gh_json, run_gh
-
 
 PR_VIEW_FIELDS = ",".join(
     [
@@ -47,7 +45,6 @@ PR_VIEW_FIELDS = ",".join(
 
 PR_SEARCH_FIELDS = "number,title,state,url,repository,author,isDraft,updatedAt,commentsCount,labels"
 
-
 def normalize_pr(item: dict[str, Any]) -> dict[str, Any]:
     repo = item.get("repository") or {}
     author = item.get("author") or {}
@@ -66,13 +63,11 @@ def normalize_pr(item: dict[str, Any]) -> dict[str, Any]:
         "labels": [label.get("name") for label in labels if isinstance(label, dict)],
     }
 
-
 def review_request_label(request: dict[str, Any]) -> str | None:
     reviewer = request.get("requestedReviewer")
     if not isinstance(reviewer, dict):
         reviewer = request
     return reviewer.get("login") or reviewer.get("slug") or reviewer.get("name")
-
 
 def search_prs(args: argparse.Namespace) -> list[dict[str, Any]]:
     gh_args = ["search", "prs", "--json", PR_SEARCH_FIELDS, "--limit", str(args.limit)]
@@ -106,11 +101,9 @@ def search_prs(args: argparse.Namespace) -> list[dict[str, Any]]:
     payload = gh_json(gh_args) or []
     return [normalize_pr(item) for item in payload]
 
-
 def pr_detail(ref: PrRef) -> dict[str, Any]:
     payload = gh_json(["pr", "view", *pr_gh_args(ref), "--json", PR_VIEW_FIELDS])
     return normalize_pr_detail(ref, payload or {})
-
 
 def normalize_pr_detail(ref: PrRef, payload: dict[str, Any]) -> dict[str, Any]:
     review_requests = payload.get("reviewRequests") or []
@@ -165,7 +158,6 @@ def normalize_pr_detail(ref: PrRef, payload: dict[str, Any]) -> dict[str, Any]:
         "url": payload.get("url"),
     }
 
-
 def summarize_checks(checks: list[Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {"total": 0, "passed": 0, "failed": 0, "pending": 0, "items": []}
     for check in checks:
@@ -184,15 +176,12 @@ def summarize_checks(checks: list[Any]) -> dict[str, Any]:
         summary["items"].append({"name": name, "state": state, "conclusion": conclusion, "bucket": bucket})
     return summary
 
-
 def pr_checks(ref: PrRef) -> list[dict[str, Any]]:
     payload = gh_json(["pr", "checks", *pr_gh_args(ref), "--json", "name,state,bucket,link,description,workflow,startedAt,completedAt"])
     return payload or []
 
-
 def pr_diff_text(ref: PrRef) -> str:
     return run_gh(["pr", "diff", *pr_gh_args(ref)])
-
 
 def pr_threads(ref: PrRef, *, all_threads: bool = False) -> list[dict[str, Any]]:
     if not ref.repo or not ref.number:
@@ -271,7 +260,6 @@ query($owner:String!, $repo:String!, $number:Int!) {
         )
     return threads
 
-
 def build_inbox(limit: int) -> list[dict[str, Any]]:
     items: dict[str, dict[str, Any]] = {}
 
@@ -308,13 +296,11 @@ def build_inbox(limit: int) -> list[dict[str, Any]]:
 
     return list(items.values())[:limit]
 
-
 def is_bot_login(login: str | None) -> bool:
     if not login:
         return False
     lower = login.lower()
     return lower.endswith("[bot]") or lower in {"dependabot", "dependabot-preview"}
-
 
 def search_candidates_for_awaiting(args: argparse.Namespace) -> list[dict[str, Any]]:
     items: dict[str, dict[str, Any]] = {}
@@ -349,7 +335,6 @@ def search_candidates_for_awaiting(args: argparse.Namespace) -> list[dict[str, A
 
     return list(items.values())
 
-
 def awaiting_reasons(detail: dict[str, Any], viewer: str, *, include_reviewed: bool) -> list[str]:
     reasons: list[str] = []
     review_requests = set(detail.get("review_requests") or [])
@@ -381,7 +366,6 @@ def awaiting_reasons(detail: dict[str, Any], viewer: str, *, include_reviewed: b
         reasons.append(f"reviewed_by_me:{review_state or 'unknown'}")
 
     return reasons
-
 
 def build_awaiting(args: argparse.Namespace) -> dict[str, Any]:
     viewer = current_user().get("login") or ""
@@ -418,7 +402,6 @@ def build_awaiting(args: argparse.Namespace) -> dict[str, Any]:
         scope_note = "Unscoped awaiting uses strict review requests only. Add --owner, --repo, --author, or a query for broader not-yet-reviewed PR discovery."
     return {"viewer": viewer, "count": len(details), "items": details[: args.limit], "scope_note": scope_note}
 
-
 def read_body(args: argparse.Namespace, *, required: bool = False) -> str | None:
     if args.body_file:
         if args.body_file == "-":
@@ -430,12 +413,10 @@ def read_body(args: argparse.Namespace, *, required: bool = False) -> str | None
         raise GhError("--body or --body-file is required")
     return None
 
-
 # ── command handlers ───────────────────────────────────────────────────────────
 
 def cmd_whoami(args: argparse.Namespace) -> None:
     output({"user": current_user(refresh=args.refresh)}, json_mode=args.json)
-
 
 def cmd_repos(args: argparse.Namespace) -> None:
     if args.repos_command == "sync" or args.refresh:
@@ -458,7 +439,6 @@ def cmd_repos(args: argparse.Namespace) -> None:
     else:
         print_table(payload["repos"], ["full_name", "visibility", "default_branch", "updated_at"])
 
-
 def cmd_prs(args: argparse.Namespace) -> None:
     prs = search_prs(args)
     payload = {"count": len(prs), "prs": prs}
@@ -467,7 +447,6 @@ def cmd_prs(args: argparse.Namespace) -> None:
     else:
         print_table(prs, ["ref", "state", "draft", "author", "updated_at", "title"])
 
-
 def cmd_inbox(args: argparse.Namespace) -> None:
     entries = build_inbox(args.limit)
     payload = {"count": len(entries), "items": entries}
@@ -475,7 +454,6 @@ def cmd_inbox(args: argparse.Namespace) -> None:
         print_json(payload)
     else:
         print_table(entries, ["ref", "reasons", "state", "author", "updated_at", "title"])
-
 
 def cmd_awaiting(args: argparse.Namespace) -> None:
     from ..groups import audit as audit_group
@@ -518,7 +496,6 @@ def cmd_awaiting(args: argparse.Namespace) -> None:
         if payload.get("scope_note"):
             print(f"\nNote: {payload['scope_note']}")
 
-
 def cmd_pr(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
     detail = pr_detail(ref)
@@ -527,11 +504,9 @@ def cmd_pr(args: argparse.Namespace) -> None:
     else:
         output(detail, json_mode=False)
 
-
 def cmd_diff(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
     print(run_gh(["pr", "diff", *pr_gh_args(ref)]), end="")
-
 
 def cmd_threads(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -554,7 +529,6 @@ def cmd_threads(args: argparse.Namespace) -> None:
             )
         print_table(rows, ["path", "line", "resolved", "author", "body"])
 
-
 def cmd_checks(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
     checks = pr_checks(ref)
@@ -563,7 +537,6 @@ def cmd_checks(args: argparse.Namespace) -> None:
         print_json(payload)
     else:
         print_table(checks, ["name", "state", "bucket", "link"])
-
 
 def cmd_review_summary(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -583,7 +556,6 @@ def cmd_review_summary(args: argparse.Namespace) -> None:
         print(f"Checks: {len(checks)}  Unresolved threads: {len(threads)}")
         print(f"Files changed: {detail.get('changed_files')}  +{detail.get('additions')} -{detail.get('deletions')}")
 
-
 def cmd_review_action(args: argparse.Namespace, action: str) -> None:
     ref = parse_pr_ref(args.pr)
     body = read_body(args, required=action == "--request-changes")
@@ -592,7 +564,6 @@ def cmd_review_action(args: argparse.Namespace, action: str) -> None:
         gh_args.extend(["--body", body])
     run_gh(gh_args)
     print(f"Submitted review for {ref.repo}#{ref.number}")
-
 
 def cmd_merge(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -615,7 +586,6 @@ def cmd_merge(args: argparse.Namespace) -> None:
     run_gh(gh_args)
     print(f"Merged {ref.repo}#{ref.number}")
 
-
 def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
     ref = parse_pr_ref(args.pr)
     gh_args = ["pr", "ready", *pr_gh_args(ref)]
@@ -624,9 +594,7 @@ def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
     run_gh(gh_args)
     print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
 
-
 def read_comment(args: argparse.Namespace) -> str | None:
-    """Read a comment string from --comment or --comment-file (- for stdin)."""
     if args.comment_file:
         if args.comment_file == "-":
             return sys.stdin.read()
@@ -634,7 +602,6 @@ def read_comment(args: argparse.Namespace) -> str | None:
     if args.comment:
         return args.comment
     return None
-
 
 def cmd_close(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -650,7 +617,6 @@ def cmd_close(args: argparse.Namespace) -> None:
     run_gh(gh_args)
     print(f"Closed {ref.repo}#{ref.number}")
 
-
 def cmd_reopen(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
     gh_args = ["pr", "reopen", *pr_gh_args(ref)]
@@ -662,7 +628,6 @@ def cmd_reopen(args: argparse.Namespace) -> None:
         return
     run_gh(gh_args)
     print(f"Reopened {ref.repo}#{ref.number}")
-
 
 def cmd_checkout(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -681,12 +646,9 @@ def cmd_checkout(args: argparse.Namespace) -> None:
     run_gh(gh_args)
     print(f"Checked out {ref.repo}#{ref.number}")
 
-
 def append_repeated_flag(gh_args: list[str], flag: str, values: list[str] | None) -> None:
-    """Append a repeated CLI flag for each value in the list."""
     for value in values or []:
         gh_args.extend([flag, value])
-
 
 def cmd_edit(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -716,7 +678,6 @@ def cmd_edit(args: argparse.Namespace) -> None:
         return
     run_gh(gh_args)
     print(f"Edited {ref.repo}#{ref.number}")
-
 
 def cmd_update_branch(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)

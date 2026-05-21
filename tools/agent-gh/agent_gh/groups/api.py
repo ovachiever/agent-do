@@ -1,4 +1,3 @@
-"""Raw GitHub REST and GraphQL API escape hatch."""
 from __future__ import annotations
 
 import argparse
@@ -11,11 +10,9 @@ from ..render import print_json
 from ..snapshot import envelope, now_iso
 from ..transport import GhError, gh_json, run_gh
 
-
 def call_api(method: str, path: str, *, fields: list[str] | None = None,
              raw_fields: list[str] | None = None, headers: list[str] | None = None,
              paginate: bool = False, jq: str | None = None) -> dict[str, Any]:
-    """Make a raw GitHub REST API call and return the response in an envelope."""
     args = ["api", "--method", method, path]
     for f in fields or []:
         args += ["--field", f]
@@ -30,10 +27,8 @@ def call_api(method: str, path: str, *, fields: list[str] | None = None,
     data = gh_json(args)
     return envelope(f"api {method} {path}", data=data)
 
-
 def call_graphql(query: str, *, fields: list[str] | None = None,
                  paginate: bool = False, jq: str | None = None) -> dict[str, Any]:
-    """Make a raw GitHub GraphQL call; query may be a string or @filepath."""
     # Allow @file syntax for reading query from disk
     if query.startswith("@"):
         path = Path(query[1:])
@@ -51,7 +46,6 @@ def call_graphql(query: str, *, fields: list[str] | None = None,
         args += ["--jq", jq]
     data = gh_json(args)
     return envelope("graphql", data=data)
-
 
 # ── command handlers ───────────────────────────────────────────────────────────
 
@@ -73,7 +67,6 @@ def cmd_api(args: argparse.Namespace) -> None:
             print(json.dumps(data, indent=2))
         else:
             print(data)
-
 
 def cmd_graphql(args: argparse.Namespace) -> None:
     result = call_graphql(

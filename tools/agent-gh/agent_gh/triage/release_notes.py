@@ -1,4 +1,3 @@
-"""Generate release notes between two tags by grouping merged PRs by label."""
 from __future__ import annotations
 
 from typing import Any
@@ -7,7 +6,6 @@ from ..refs import parse_repo
 from ..snapshot import envelope
 from ..transport import gh_json
 
-
 _SECTION_LABELS: list[tuple[str, list[str]]] = [
     ("Features", ["enhancement", "feature", "feat"]),
     ("Bug Fixes", ["bug", "fix", "bugfix"]),
@@ -15,14 +13,7 @@ _SECTION_LABELS: list[tuple[str, list[str]]] = [
     ("Maintenance", ["chore", "maintenance", "refactor", "deps", "dependencies"]),
 ]
 
-
 def _tag_date(repo_slug: str, tag: str) -> str | None:
-    """Return the ISO 8601 date string for a git tag via the GitHub API, or None on failure.
-
-    Handles both lightweight tags (points to a commit) and annotated tags (points to a tag
-    object which then points to a commit).  Returns None rather than raising so callers
-    can fall back to including all PRs.
-    """
     try:
         ref_obj = gh_json(["api", f"/repos/{repo_slug}/git/ref/tags/{tag}"]) or {}
         obj = ref_obj.get("object") or {}
@@ -39,9 +30,7 @@ def _tag_date(repo_slug: str, tag: str) -> str | None:
     except Exception:
         return None
 
-
 def notes_between(repo: str, since_tag: str, *, target: str | None = None) -> dict[str, Any]:
-    """Generate release notes since since_tag; tries GitHub's API then falls back to PR labels."""
     r = parse_repo(repo)
 
     # Use gh api to generate notes (GitHub's own notes generation endpoint)

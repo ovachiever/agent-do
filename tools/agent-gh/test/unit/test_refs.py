@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Unit tests for agent_gh.refs: parse_repo, parse_issue, parse_pr_ref."""
 
 from __future__ import annotations
 
@@ -18,11 +17,9 @@ from agent_gh.refs import (
 )
 from agent_gh.transport import GhError
 
-
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
-
 
 # ── parse_repo ─────────────────────────────────────────────────────────────────
 
@@ -33,12 +30,10 @@ def test_parse_repo_valid() -> None:
     require(r.repo == "agent-do", f"bad repo: {r}")
     require(r.slug == "ovachiever/agent-do", f"bad slug: {r}")
 
-
 def test_parse_repo_dots_and_underscores() -> None:
     r = parse_repo("org/my_tool.v2")
     require(r.owner == "org", f"bad owner: {r}")
     require(r.repo == "my_tool.v2", f"bad repo: {r}")
-
 
 def test_parse_repo_invalid_no_slash() -> None:
     raised = False
@@ -48,7 +43,6 @@ def test_parse_repo_invalid_no_slash() -> None:
         raised = True
     require(raised, "expected ValueError for bare word")
 
-
 def test_parse_repo_invalid_too_many_slashes() -> None:
     raised = False
     try:
@@ -57,7 +51,6 @@ def test_parse_repo_invalid_too_many_slashes() -> None:
         raised = True
     require(raised, "expected ValueError for triple-slash")
 
-
 def test_parse_repo_invalid_empty() -> None:
     raised = False
     try:
@@ -65,7 +58,6 @@ def test_parse_repo_invalid_empty() -> None:
     except ValueError:
         raised = True
     require(raised, "expected ValueError for empty string")
-
 
 # ── parse_issue ────────────────────────────────────────────────────────────────
 
@@ -77,18 +69,15 @@ def test_parse_issue_valid() -> None:
     require(i.number == 42, f"bad number: {i}")
     require(i.slug == "ovachiever/agent-do#42", f"bad slug: {i}")
 
-
 def test_parse_issue_repo_ref() -> None:
     i = parse_issue("ovachiever/agent-do#42")
     rr = i.repo_ref
     require(isinstance(rr, RepoRef), "expected RepoRef from repo_ref")
     require(rr.slug == "ovachiever/agent-do", f"bad slug: {rr}")
 
-
 def test_parse_issue_large_number() -> None:
     i = parse_issue("org/repo#1000000")
     require(i.number == 1_000_000, f"bad number: {i}")
-
 
 def test_parse_issue_invalid_no_hash() -> None:
     raised = False
@@ -98,7 +87,6 @@ def test_parse_issue_invalid_no_hash() -> None:
         raised = True
     require(raised, "expected ValueError without #num")
 
-
 def test_parse_issue_invalid_non_numeric() -> None:
     raised = False
     try:
@@ -106,7 +94,6 @@ def test_parse_issue_invalid_non_numeric() -> None:
     except ValueError:
         raised = True
     require(raised, "expected ValueError for non-numeric issue number")
-
 
 def test_parse_issue_invalid_empty() -> None:
     raised = False
@@ -116,7 +103,6 @@ def test_parse_issue_invalid_empty() -> None:
         raised = True
     require(raised, "expected ValueError for empty string")
 
-
 # ── parse_pr_ref ───────────────────────────────────────────────────────────────
 
 def test_parse_pr_ref_owner_hash() -> None:
@@ -125,12 +111,10 @@ def test_parse_pr_ref_owner_hash() -> None:
     require(ref.repo == "ovachiever/agent-do", f"bad repo: {ref}")
     require(ref.number == "3", f"bad number: {ref}")
 
-
 def test_parse_pr_ref_github_url() -> None:
     ref = parse_pr_ref("https://github.com/ovachiever/agent-do/pull/99")
     require(ref.repo == "ovachiever/agent-do", f"bad repo: {ref}")
     require(ref.number == "99", f"bad number: {ref}")
-
 
 def test_parse_pr_ref_bare_number_no_git() -> None:
     from unittest.mock import patch
@@ -142,7 +126,6 @@ def test_parse_pr_ref_bare_number_no_git() -> None:
             raised = True
     require(raised, "expected GhError for bare number outside git repo")
 
-
 def test_parse_pr_ref_invalid() -> None:
     raised = False
     try:
@@ -150,7 +133,6 @@ def test_parse_pr_ref_invalid() -> None:
     except GhError:
         raised = True
     require(raised, "expected GhError for garbage input")
-
 
 def test_parse_pr_ref_empty_outside_git() -> None:
     raised = False
@@ -162,7 +144,6 @@ def test_parse_pr_ref_empty_outside_git() -> None:
     # in the test env we're inside a git repo so this may succeed — only require
     # that it doesn't crash unexpectedly.
     _ = raised  # result is environment-dependent
-
 
 # ── main ───────────────────────────────────────────────────────────────────────
 
@@ -199,7 +180,6 @@ def main() -> int:
         return 1
     print(f"refs unit tests passed ({len(tests)} tests)")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

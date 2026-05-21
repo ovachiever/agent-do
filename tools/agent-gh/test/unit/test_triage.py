@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Unit tests for agent_gh.triage.issue_triage: classification logic."""
 
 from __future__ import annotations
 
@@ -11,11 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from agent_gh.triage import issue_triage as triage_mod
 
-
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
-
 
 def _make_issue(title: str, body: str, author: str = "reporter") -> dict:
     return {
@@ -26,9 +23,7 @@ def _make_issue(title: str, body: str, author: str = "reporter") -> dict:
         "labels": [],
     }
 
-
 def _triage(title: str, body: str, author: str = "reporter") -> dict:
-    """Call triage() with mocked view_issue and empty related search."""
     issue = _make_issue(title, body, author)
     # view_issue is locally imported inside triage() so patch it at its source module.
     # run_gh is imported at module level in issue_triage so patch it there, not in transport.
@@ -38,7 +33,6 @@ def _triage(title: str, body: str, author: str = "reporter") -> dict:
     ):
         return triage_mod.triage("ovachiever/agent-do#1")
 
-
 # ── classification ─────────────────────────────────────────────────────────────
 
 def test_classifies_bug() -> None:
@@ -47,13 +41,11 @@ def test_classifies_bug() -> None:
     require(d["classification"] == "bug", f"expected bug, got: {d['classification']}")
     require("bug" in d["suggested_labels"], f"expected bug label: {d}")
 
-
 def test_classifies_feature() -> None:
     result = _triage("Feature request: add dark mode", "It would be great if you could add dark mode. Enhancement proposal.")
     d = result["data"]
     require(d["classification"] == "feature", f"expected feature, got: {d['classification']}")
     require("enhancement" in d["suggested_labels"], f"expected enhancement label: {d}")
-
 
 def test_classifies_question() -> None:
     result = _triage("How do I configure the timeout?", "How can I set a custom timeout? Is it possible?")
@@ -61,37 +53,31 @@ def test_classifies_question() -> None:
     require(d["classification"] == "question", f"expected question, got: {d['classification']}")
     require("question" in d["suggested_labels"], f"expected question label: {d}")
 
-
 def test_classifies_docs() -> None:
     result = _triage("Typo in README", "There is a typo in the docs.")
     d = result["data"]
     require(d["classification"] == "docs", f"expected docs, got: {d['classification']}")
     require("documentation" in d["suggested_labels"], f"expected documentation label: {d}")
 
-
 def test_needs_repro_when_no_steps() -> None:
     result = _triage("App crashes", "It just fails. Bug definitely.")
     d = result["data"]
     require(d["needs_repro"] is True, f"expected needs_repro=true: {d}")
-
 
 def test_no_needs_repro_when_steps_present() -> None:
     result = _triage("App crashes", "Bug. Steps to reproduce:\n1. Run the app\n2. Click X")
     d = result["data"]
     require(d["needs_repro"] is False, f"expected needs_repro=false: {d}")
 
-
 def test_needs_version_when_absent() -> None:
     result = _triage("App crashes", "It just fails with an error. Bug confirmed.")
     d = result["data"]
     require(d["needs_version"] is True, f"expected needs_version=true: {d}")
 
-
 def test_no_needs_version_when_present() -> None:
     result = _triage("App crashes", "Bug on version v1.2.3")
     d = result["data"]
     require(d["needs_version"] is False, f"expected needs_version=false: {d}")
-
 
 # ── first_response_draft ───────────────────────────────────────────────────────
 
@@ -102,20 +88,17 @@ def test_draft_bug_with_asks() -> None:
     require("@alice" in draft, f"expected author mention: {draft}")
     require("steps to reproduce" in draft or "version" in draft, f"expected ask in draft: {draft}")
 
-
 def test_draft_feature() -> None:
     result = _triage("Add dark mode", "Enhancement: would be great to have dark mode.")
     d = result["data"]
     draft = d["first_response_draft"]
     require("use case" in draft, f"expected use-case ask in feature draft: {draft}")
 
-
 def test_draft_question() -> None:
     result = _triage("How to configure?", "How can I set the timeout?")
     d = result["data"]
     draft = d["first_response_draft"]
     require("version" in draft.lower(), f"expected version ask in question draft: {draft}")
-
 
 # ── envelope ──────────────────────────────────────────────────────────────────
 
@@ -128,13 +111,11 @@ def test_envelope_shape() -> None:
     require(result["command"] == "issue triage", f"bad command: {result}")
     require(result["ref"] == "ovachiever/agent-do#1", f"bad ref: {result}")
 
-
 # ── _draft helper (direct) ────────────────────────────────────────────────────
 
 def test_draft_unknown_classification() -> None:
     draft = triage_mod._draft("unknown", False, False, "bob")
     require("triage" in draft.lower(), f"expected triage mention: {draft}")
-
 
 # ── main ───────────────────────────────────────────────────────────────────────
 
@@ -168,7 +149,6 @@ def main() -> int:
         return 1
     print(f"triage unit tests passed ({len(tests)} tests)")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,4 +1,3 @@
-"""Cache helpers for ~/.agent-do/gh/."""
 from __future__ import annotations
 
 import json
@@ -9,36 +8,27 @@ from typing import Any
 from .snapshot import now_iso
 from .transport import GhError, gh_json
 
-
 AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
 STATE_DIR = AGENT_DO_HOME / "gh"
 REPOS_CACHE = STATE_DIR / "repos.json"
 USER_CACHE = STATE_DIR / "user.json"
 
-
 def _state_dir() -> Path:
-    """Return the resolved state directory, re-reading env in case it changed."""
     home = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
     return home / "gh"
 
-
 def ensure_state_dir() -> Path:
-    """Create and return the gh state directory under AGENT_DO_HOME."""
     d = _state_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-
 def _repos_cache() -> Path:
     return _state_dir() / "repos.json"
-
 
 def _user_cache() -> Path:
     return _state_dir() / "user.json"
 
-
 def normalize_repo(item: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a raw GitHub repo payload into a consistent flat dict."""
     owner = item.get("owner") or {}
     owner_login = owner.get("login") if isinstance(owner, dict) else None
     full_name = item.get("full_name") or item.get("nameWithOwner")
@@ -57,9 +47,7 @@ def normalize_repo(item: dict[str, Any]) -> dict[str, Any]:
         "updated_at": item.get("updated_at") or item.get("updatedAt"),
     }
 
-
 def fetch_repos(limit: int | None = None) -> list[dict[str, Any]]:
-    """Fetch all accessible repos from the GitHub API and return normalized dicts."""
     args = [
         "api",
         "--paginate",
@@ -79,17 +67,13 @@ def fetch_repos(limit: int | None = None) -> list[dict[str, Any]]:
         repos = repos[:limit]
     return repos
 
-
 def write_repos_cache(repos: list[dict[str, Any]]) -> None:
-    """Write the repo list to the on-disk JSON cache."""
     ensure_state_dir()
     _repos_cache().write_text(
         json.dumps({"synced_at": now_iso(), "count": len(repos), "repos": repos}, indent=2) + "\n"
     )
 
-
 def read_repos_cache() -> dict[str, Any] | None:
-    """Read the on-disk repo cache, returning None if missing or corrupt."""
     path = _repos_cache()
     if not path.exists():
         return None
@@ -98,9 +82,7 @@ def read_repos_cache() -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
 
-
 def current_user(*, refresh: bool = False) -> dict[str, Any]:
-    """Return the authenticated GitHub user, using disk cache unless refresh=True."""
     ensure_state_dir()
     cache = _user_cache()
     if not refresh and cache.exists():

@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""Compatibility tests for v1.2 PR action commands preserved through the package refactor.
-
-Proves that close, reopen, checkout, edit, and update-branch still work after
-agent-gh was restructured from a flat script into a Python package.  This is
-the exact surface ovachiever verified was missing on the PR head.
-"""
 
 from __future__ import annotations
 
@@ -15,19 +9,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_DO = ROOT / "agent-do"
-
 
 def make_exec(path: Path, contents: str) -> None:
     path.write_text(contents)
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-
 def run(cmd: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, env=env, text=True, capture_output=True, check=False)
-
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -203,7 +193,6 @@ sys.exit(0)
             return 1
         print("All compat tests passed.")
         return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

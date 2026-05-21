@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Integration tests for agent-gh Phase 1: issue, release, api, graphql commands."""
 
 from __future__ import annotations
 
@@ -10,31 +9,25 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_DO = ROOT / "agent-do"
 FIXTURES = ROOT / "tools" / "agent-gh" / "fixtures"
-
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
 
-
 def make_exec(path: Path, contents: str) -> None:
     path.write_text(contents)
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-
 def run(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True, check=False)
-
 
 ISSUE_LIST = (FIXTURES / "issue_list.json").read_text()
 ISSUE_VIEW = (FIXTURES / "issue_view.json").read_text()
 RELEASE_LIST = (FIXTURES / "release_list.json").read_text()
 RELEASE_VIEW = (FIXTURES / "release_view.json").read_text()
-
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -356,7 +349,6 @@ else:
 
     print("gh phase1 tests passed")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

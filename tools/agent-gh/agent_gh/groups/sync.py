@@ -1,10 +1,3 @@
-"""PR sync: keep your open PRs up to date with their base branch.
-
-Clean PRs (no conflicts) are updated via the GitHub API (no local checkout).
-Conflicted PRs are resolved locally using `claude --print` with full context,
-then committed and pushed — using your existing Pro/Max subscription, no API
-key required.
-"""
 from __future__ import annotations
 
 import json
@@ -18,7 +11,6 @@ from typing import Any
 
 from ..transport import GhError, gh_json, run_gh
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def _run(cmd: list[str], *, cwd: str | None = None, input_text: str | None = None,
@@ -28,20 +20,17 @@ def _run(cmd: list[str], *, cwd: str | None = None, input_text: str | None = Non
         text=True, capture_output=True, check=False, timeout=timeout,
     )
 
-
 def _claude_bin() -> str | None:
     configured = os.environ.get("AGENT_CLAUDE_BIN")
     if configured:
         return configured
     return shutil.which("claude")
 
-
 def _git_bin() -> str:
     found = shutil.which("git")
     if not found:
         raise GhError("git not found in PATH")
     return found
-
 
 def _current_github_user() -> str:
     try:
@@ -50,9 +39,7 @@ def _current_github_user() -> str:
     except GhError:
         return ""
 
-
 def _open_prs_for_author(author: str, limit: int) -> list[dict[str, Any]]:
-    """Return open PRs authored by the given GitHub login across all repos."""
     fields = "number,title,headRefName,baseRefName,url,headRepositoryOwner,headRepository,mergeStateStatus"
     try:
         results = gh_json([
@@ -78,7 +65,6 @@ def _open_prs_for_author(author: str, limit: int) -> list[dict[str, Any]]:
         except GhError:
             return []
 
-
 def _pr_repo_slug(pr: dict[str, Any]) -> str | None:
     owner = (pr.get("headRepositoryOwner") or {}).get("login", "")
     repo = (pr.get("headRepository") or {}).get("name", "")
@@ -91,9 +77,7 @@ def _pr_repo_slug(pr: dict[str, Any]) -> str | None:
         return f"{parts[-4]}/{parts[-3]}"
     return None
 
-
 def _try_api_update(repo_slug: str, pr_number: int, rebase: bool) -> bool:
-    """Try GitHub API branch update. Returns True on success, False on conflict."""
     args = ["pr", "update-branch", str(pr_number), "--repo", repo_slug]
     if rebase:
         args.append("--rebase")
@@ -110,14 +94,11 @@ def _try_api_update(repo_slug: str, pr_number: int, rebase: bool) -> bool:
         # Re-raise unexpected errors
         raise
 
-
 def _conflicted_files(repo_dir: str) -> list[str]:
     result = _run([_git_bin(), "diff", "--name-only", "--diff-filter=U"], cwd=repo_dir)
     return [f for f in result.stdout.splitlines() if f.strip()]
 
-
 def _read_conflict_block(path: str) -> str:
-    """Return the raw conflict markers section of a file (truncated for context)."""
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
@@ -128,7 +109,6 @@ def _read_conflict_block(path: str) -> str:
     except OSError:
         return "(could not read file)"
 
-
 def _resolve_with_claude(
     repo_dir: str,
     conflicted: list[str],
@@ -137,7 +117,6 @@ def _resolve_with_claude(
     claude_bin: str,
     verbose: bool,
 ) -> bool:
-    """Invoke claude --print to resolve conflicts in-place. Returns True on success."""
     pr_title = pr.get("title", "")
     head_branch = pr.get("headRefName", "")
     base_branch = pr.get("baseRefName", "main")
@@ -205,7 +184,6 @@ Work through each file completely. The files are in: {repo_dir}
 
     return True
 
-
 def _push_branch(repo_dir: str, head_branch: str) -> bool:
     result = _run([_git_bin(), "push", "origin", head_branch], cwd=repo_dir)
     if result.returncode != 0:
@@ -213,9 +191,7 @@ def _push_branch(repo_dir: str, head_branch: str) -> bool:
         return False
     return True
 
-
 def _clone_or_update(repo_slug: str, head_branch: str, workdir: str) -> str | None:
-    """Clone repo into workdir and checkout head_branch. Returns path or None on failure."""
     clone_url = f"https://github.com/{repo_slug}.git"
     dest = os.path.join(workdir, repo_slug.replace("/", "_"))
     git = _git_bin()
@@ -227,9 +203,7 @@ def _clone_or_update(repo_slug: str, head_branch: str, workdir: str) -> str | No
         return None
     return dest
 
-
 def _merge_base_into_branch(repo_dir: str, base_branch: str) -> tuple[bool, bool]:
-    """Fetch origin and merge base_branch into HEAD. Returns (success, had_conflicts)."""
     git = _git_bin()
     _run([git, "fetch", "origin"], cwd=repo_dir, timeout=60)
     result = _run([git, "merge", f"origin/{base_branch}", "--no-edit"], cwd=repo_dir)
@@ -238,7 +212,6 @@ def _merge_base_into_branch(repo_dir: str, base_branch: str) -> tuple[bool, bool
     if "CONFLICT" in result.stdout or "CONFLICT" in result.stderr:
         return False, True
     return False, False
-
 
 # ── main command ───────────────────────────────────────────────────────────────
 
