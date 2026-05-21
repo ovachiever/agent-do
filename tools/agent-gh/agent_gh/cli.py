@@ -179,6 +179,18 @@ def build_parser() -> argparse.ArgumentParser:
     update_branch.add_argument("--dry-run", action="store_true")
     update_branch.set_defaults(func=pr_group.cmd_update_branch)
 
+    # ── sync: keep your PRs up to date with main ──────────────────────────────
+    from .groups import sync as sync_group  # noqa: PLC0415
+
+    sync = sub.add_parser("sync", help="Update all your open PRs with their base branch; auto-resolve conflicts via claude")
+    sync.add_argument("--author", help="GitHub login (default: authenticated user)")
+    sync.add_argument("--rebase", action="store_true", help="Use rebase instead of merge")
+    sync.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+    sync.add_argument("--limit", type=int, default=50, help="Max PRs to process (default: 50)")
+    sync.add_argument("--verbose", action="store_true", help="Show claude invocation details")
+    sync.add_argument("--json", action="store_true", help="Output results as JSON")
+    sync.set_defaults(func=sync_group.cmd_sync)
+
     # ── Phase 1: issue ─────────────────────────────────────────────────────────
     _build_issue_parser(sub)
 
@@ -435,12 +447,20 @@ Release commands (new):
   release latest <owner/repo>    Show latest release
   release create / edit / publish / delete / upload / download / notes
 
+Sync (new):
+  sync [--author <login>]        Update all your open PRs with their base branch;
+                                 auto-resolve conflicts via claude (Pro/Max — no API key needed)
+  sync --dry-run                 Show what would be done without making changes
+  sync --rebase                  Use rebase instead of merge
+
 API escape hatch (new):
   api GET /rate_limit            Raw REST API call
   graphql '<query>'              Raw GraphQL call
 
 Examples:
   agent-do gh inbox
+  agent-do gh sync
+  agent-do gh sync --dry-run
   agent-do gh issue list ovachiever/agent-do --state open
   agent-do gh issue triage ovachiever/agent-do#42
   agent-do gh release latest ovachiever/agent-do --json

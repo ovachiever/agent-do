@@ -6,6 +6,7 @@ GitHub repository, pull request, issue, and release work-state plugin for agent-
 
 - Python 3.10+
 - [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`)
+- [`claude` CLI](https://claude.ai/code) authenticated (`claude auth login`) — required only for `sync` conflict resolution; uses your Pro/Max subscription, no API key needed
 
 ## PR reference format
 
@@ -96,6 +97,30 @@ agent-do gh update-branch <ref> [--rebase] [--dry-run]
 ```
 
 All five lifecycle commands support `--dry-run`: prints the `gh` command that would be run and exits with code `2` without touching GitHub.
+
+---
+
+### PR sync
+
+```bash
+agent-do gh sync [--author <login>] [--rebase] [--dry-run] [--limit N] [--json]
+```
+
+Finds all your open PRs across GitHub, and for each one:
+
+1. **No conflicts** — updates the branch via the GitHub API (no local checkout, instant)
+2. **Conflicts detected** — clones the branch locally, merges the base, invokes `claude --print` with the conflict context, lets Claude resolve the files, commits, and pushes
+
+Uses your existing Claude Pro/Max subscription via the `claude` CLI — no `ANTHROPIC_API_KEY` needed.
+
+```bash
+agent-do gh sync                        # update all your open PRs
+agent-do gh sync --dry-run              # preview without making changes
+agent-do gh sync --rebase               # use rebase instead of merge
+agent-do gh sync --author ClaudeRogers  # explicit author (default: authenticated user)
+```
+
+If `claude` is not installed or not authenticated, conflicted PRs are flagged for manual resolution instead of failing.
 
 ---
 

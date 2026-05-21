@@ -1783,6 +1783,7 @@ tools:
       "release notes": Generate release notes between tags (--since, --target)
       api: Raw GitHub REST API call (GET/POST/PATCH/PUT/DELETE, --field, --paginate, --jq)
       graphql: Raw GitHub GraphQL call (query string or @file, --field, --paginate, --jq)
+      sync: Update all your open PRs with their base branch; auto-resolve conflicts via claude CLI (Pro/Max, no API key needed). --author to target a specific user, --rebase for rebase strategy, --dry-run to preview, --json for structured output
     examples:
     - intent: show GitHub pull requests that need me
       command: agent-do gh inbox
@@ -1802,6 +1803,10 @@ tools:
       command: 'agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-needed'
     - intent: update PR branch from base
       command: 'agent-do gh update-branch ovachiever/agent-do#5'
+    - intent: keep all my open PRs up to date with main, auto-resolve conflicts
+      command: agent-do gh sync
+    - intent: preview what sync would do without making changes
+      command: agent-do gh sync --dry-run
     - intent: list open GitHub issues in a repo
       command: agent-do gh issue list ovachiever/agent-do --state open
     - intent: view an issue with comments
