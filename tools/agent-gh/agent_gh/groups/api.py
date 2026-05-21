@@ -65,7 +65,7 @@ def cmd_api(args: argparse.Namespace) -> None:
         data = result.get("data")
         if isinstance(data, (dict, list)):
             print(json.dumps(data, indent=2))
-        else:
+        elif data is not None:
             print(data)
 
 def cmd_graphql(args: argparse.Namespace) -> None:
@@ -81,5 +81,5 @@ def cmd_graphql(args: argparse.Namespace) -> None:
         data = result.get("data")
         if isinstance(data, (dict, list)):
             print(json.dumps(data, indent=2))
-        else:
+        elif data is not None:
             print(data)

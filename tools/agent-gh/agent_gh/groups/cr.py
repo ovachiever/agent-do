@@ -224,7 +224,7 @@ def _address_pr(ref: PrRef, threads: list[dict[str, Any]], args: Any, *, emit_js
     verbose = getattr(args, "verbose", False)
     json_mode = getattr(args, "json", False)
 
-    if args.dry_run:
+    if getattr(args, "dry_run", False):
         if json_mode and emit_json:
             print_json({
                 "pr": f"{repo_slug}#{ref.number}",
@@ -347,8 +347,7 @@ def _cr_single(args: Any) -> None:
 def _cr_sweep(args: Any) -> None:
     author = getattr(args, "author", None) or _current_github_user()
     if not author:
-        print("Error: could not determine GitHub user. Use --author.", file=sys.stderr)
-        sys.exit(1)
+        raise GhError("could not determine GitHub user. Use --author.")
 
     limit = getattr(args, "limit", 50)
     prs = _open_prs_for_author(author, limit)

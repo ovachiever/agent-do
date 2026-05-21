@@ -90,7 +90,7 @@ def current_user(*, refresh: bool = False) -> dict[str, Any]:
             return json.loads(cache.read_text())
         except json.JSONDecodeError:
             pass
-    payload = gh_json(["api", "user"])
+    payload = gh_json(["api", "user"]) or {}
     user = {
         "login": payload.get("login", ""),
         "id": payload.get("id"),

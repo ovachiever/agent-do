@@ -186,6 +186,8 @@ def pr_diff_text(ref: PrRef) -> str:
 def pr_threads(ref: PrRef, *, all_threads: bool = False) -> list[dict[str, Any]]:
     if not ref.repo or not ref.number:
         raise GhError("threads requires an explicit PR reference")
+    if "/" not in ref.repo:
+        raise GhError(f"Invalid repo reference (expected owner/repo): {ref.repo!r}")
     owner, repo = ref.repo.split("/", 1)
     query = """
 query($owner:String!, $repo:String!, $number:Int!) {
@@ -562,8 +564,13 @@ def cmd_review_action(args: argparse.Namespace, action: str) -> None:
     gh_args = ["pr", "review", *pr_gh_args(ref), action]
     if body:
         gh_args.extend(["--body", body])
+    if getattr(args, "dry_run", False):
+        if not getattr(args, "json", False):
+            print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
-    print(f"Submitted review for {ref.repo}#{ref.number}")
+    if not getattr(args, "json", False):
+        print(f"Submitted review for {ref.repo}#{ref.number}")
 
 def cmd_merge(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
@@ -583,16 +590,26 @@ def cmd_merge(args: argparse.Namespace) -> None:
         gh_args.extend(["--subject", args.subject])
     if args.body:
         gh_args.extend(["--body", args.body])
+    if getattr(args, "dry_run", False):
+        if not getattr(args, "json", False):
+            print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
-    print(f"Merged {ref.repo}#{ref.number}")
+    if not getattr(args, "json", False):
+        print(f"Merged {ref.repo}#{ref.number}")
 
 def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
     ref = parse_pr_ref(args.pr)
     gh_args = ["pr", "ready", *pr_gh_args(ref)]
     if draft:
         gh_args.append("--undo")
+    if getattr(args, "dry_run", False):
+        if not getattr(args, "json", False):
+            print(f"[dry-run] would run: gh {' '.join(gh_args)}")
+        return
     run_gh(gh_args)
-    print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
+    if not getattr(args, "json", False):
+        print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
 
 def read_comment(args: argparse.Namespace) -> str | None:
     if args.comment_file:

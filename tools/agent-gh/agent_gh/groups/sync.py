@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..transport import GhError, gh_json, run_gh
+from ..transport import GhError, gh_bin, gh_json, run_gh
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -157,7 +157,7 @@ Work through each file completely. The files are in: {repo_dir}
 """
 
     if verbose:
-        print(f"    Invoking claude to resolve {len(conflicted)} conflict(s)...")
+        print(f"    Invoking claude to resolve {len(conflicted)} conflict(s)...", file=sys.stderr)
 
     try:
         result = subprocess.run(
@@ -192,12 +192,11 @@ def _push_branch(repo_dir: str, head_branch: str) -> bool:
     return True
 
 def _clone_or_update(repo_slug: str, head_branch: str, workdir: str) -> str | None:
-    clone_url = f"https://github.com/{repo_slug}.git"
     dest = os.path.join(workdir, repo_slug.replace("/", "_"))
-    git = _git_bin()
-
-    result = _run([git, "clone", "--depth", "50", "--branch", head_branch, clone_url, dest],
-                  timeout=120)
+    result = _run(
+        [gh_bin(), "repo", "clone", repo_slug, dest, "--", "--branch", head_branch, "--depth", "50"],
+        timeout=120,
+    )
     if result.returncode != 0:
         print(f"    clone failed: {result.stderr.strip()[:200]}", file=sys.stderr)
         return None
@@ -218,8 +217,7 @@ def _merge_base_into_branch(repo_dir: str, base_branch: str) -> tuple[bool, bool
 def cmd_sync(args: Any) -> None:
     author = args.author or _current_github_user()
     if not author:
-        print("Error: could not determine GitHub user. Use --author.", file=sys.stderr)
-        sys.exit(1)
+        raise GhError("could not determine GitHub user. Use --author.")
 
     rebase = args.rebase
     dry_run = args.dry_run
@@ -227,16 +225,22 @@ def cmd_sync(args: Any) -> None:
     limit = args.limit
     json_mode = args.json
 
+    def _log(msg: str) -> None:
+        if not json_mode:
+            print(msg)
+
     claude_bin = _claude_bin()
     if not claude_bin:
         print("Warning: claude CLI not found — conflicted PRs will be flagged but not auto-resolved.",
               file=sys.stderr)
 
-    print(f"Syncing open PRs for @{author}...")
+    _log(f"Syncing open PRs for @{author}...")
 
     prs = _open_prs_for_author(author, limit)
     if not prs:
-        print("No open PRs found.")
+        _log("No open PRs found.")
+        if json_mode:
+            print(json.dumps({"results": []}))
         return
 
     results = []
@@ -250,16 +254,20 @@ def cmd_sync(args: Any) -> None:
         repo_slug = _pr_repo_slug(pr)
 
         label = f"#{number} {title[:60]}"
-        print(f"\n  {label}")
-        print(f"    {head_branch} → {base_branch}  ({repo_slug})")
+        _log(f"\n  {label}")
+        _log(f"    {head_branch} → {base_branch}  ({repo_slug})")
 
         if not repo_slug:
             print("    skipped: could not determine repo", file=sys.stderr)
             results.append({"pr": number, "title": title, "status": "skipped", "reason": "no repo"})
             continue
 
+        if not number:
+            results.append({"pr": number, "title": title, "status": "skipped", "reason": "no number"})
+            continue
+
         if dry_run:
-            print("    [dry-run] would attempt update-branch via API")
+            _log("    [dry-run] would attempt update-branch via API")
             results.append({"pr": number, "title": title, "status": "dry-run"})
             continue
 
@@ -272,15 +280,15 @@ def cmd_sync(args: Any) -> None:
             continue
 
         if clean:
-            print("    ✓ updated via API (no conflicts)")
+            _log("    ✓ updated via API (no conflicts)")
             results.append({"pr": number, "title": title, "status": "updated"})
             continue
 
         # ── conflicts — resolve locally with claude ────────────────────────────
-        print("    conflicts detected — resolving locally...")
+        _log("    conflicts detected — resolving locally...")
 
         if not claude_bin:
-            print("    ✗ claude not available — manual resolution required")
+            _log("    ✗ claude not available — manual resolution required")
             results.append({"pr": number, "title": title, "status": "conflict", "url": url})
             continue
 
@@ -295,7 +303,7 @@ def cmd_sync(args: Any) -> None:
             if success:
                 # Clean after clone+merge — just push
                 if _push_branch(repo_dir, head_branch):
-                    print("    ✓ merged and pushed (no conflicts after local merge)")
+                    _log("    ✓ merged and pushed (no conflicts after local merge)")
                     results.append({"pr": number, "title": title, "status": "updated"})
                 else:
                     results.append({"pr": number, "title": title, "status": "error",
@@ -312,18 +320,18 @@ def cmd_sync(args: Any) -> None:
             if not conflicted:
                 conflicted = ["(unknown — check git status)"]
 
-            print(f"    conflicted files: {', '.join(conflicted)}")
+            _log(f"    conflicted files: {', '.join(conflicted)}")
 
             resolved = _resolve_with_claude(repo_dir, conflicted, pr, repo_slug,
                                             claude_bin, verbose)
             if not resolved:
-                print(f"    ✗ auto-resolution failed — resolve manually: {url}")
+                _log(f"    ✗ auto-resolution failed — resolve manually: {url}")
                 results.append({"pr": number, "title": title, "status": "conflict",
                                  "url": url, "files": conflicted})
                 continue
 
             if _push_branch(repo_dir, head_branch):
-                print("    ✓ conflicts resolved by claude and pushed")
+                _log("    ✓ conflicts resolved by claude and pushed")
                 results.append({"pr": number, "title": title, "status": "resolved",
                                  "files": conflicted})
             else:
@@ -337,18 +345,17 @@ def cmd_sync(args: Any) -> None:
     errors   = sum(1 for r in results if r["status"] == "error")
     skipped  = sum(1 for r in results if r["status"] in ("skipped", "dry-run"))
 
-    print(f"\nDone: {updated} updated, {resolved} resolved, "
-          f"{conflicts} need manual attention, {errors} errors, {skipped} skipped")
-
-    if conflicts:
-        print("\nRequires manual resolution:")
-        for r in results:
-            if r["status"] == "conflict":
-                print(f"  {r['title'][:70]}  {r.get('url', '')}")
+    if not json_mode:
+        print(f"\nDone: {updated} updated, {resolved} resolved, "
+              f"{conflicts} need manual attention, {errors} errors, {skipped} skipped")
+        if conflicts:
+            print("\nRequires manual resolution:")
+            for r in results:
+                if r["status"] == "conflict":
+                    print(f"  {r['title'][:70]}  {r.get('url', '')}")
 
     if json_mode:
-        import json as _json
-        print(_json.dumps({"results": results}, indent=2))
+        print(json.dumps({"results": results}, indent=2))
 
     if conflicts or errors:
         sys.exit(1)

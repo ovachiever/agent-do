@@ -110,12 +110,13 @@ def _search_related(repo_slug: str, title: str) -> list[dict[str, Any]]:
     keywords = " ".join(w for w in title.split() if len(w) > 3)[:60]
     if not keywords:
         return []
-    res = run_gh(
-        ["search", "issues", keywords, "--repo", repo_slug,
-         "--limit", "5", "--json", "number,title,state,url"],
-    )
+    from ..transport import GhError
     import json
     try:
+        res = run_gh(
+            ["search", "issues", "--", keywords, "--repo", repo_slug,
+             "--limit", "5", "--json", "number,title,state,url"],
+        )
         return json.loads(res) or []
-    except json.JSONDecodeError:
+    except (GhError, json.JSONDecodeError):
         return []
