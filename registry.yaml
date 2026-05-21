@@ -1784,6 +1784,7 @@ tools:
       api: Raw GitHub REST API call (GET/POST/PATCH/PUT/DELETE, --field, --paginate, --jq)
       graphql: Raw GitHub GraphQL call (query string or @file, --field, --paginate, --jq)
       sync: Update all your open PRs with their base branch; auto-resolve conflicts via claude CLI (Pro/Max, no API key needed). --author to target a specific user, --rebase for rebase strategy, --dry-run to preview, --json for structured output
+      cr: Scan open PRs for unresolved review threads (CodeRabbit, teammates). Without --address, lists thread counts per PR. With --address, clones each PR branch, invokes claude to address each thread, pushes, and posts a reply comment with the commit SHA. --dry-run previews without changes. --author / --limit to narrow scope.
     examples:
     - intent: show GitHub pull requests that need me
       command: agent-do gh inbox
@@ -1803,6 +1804,16 @@ tools:
       command: 'agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-needed'
     - intent: update PR branch from base
       command: 'agent-do gh update-branch ovachiever/agent-do#5'
+    - intent: check all my open PRs for unresolved review comments
+      command: agent-do gh cr
+    - intent: see unresolved review threads on a specific PR
+      command: 'agent-do gh cr owner/repo#42'
+    - intent: address review comments on a PR with claude and push
+      command: 'agent-do gh cr owner/repo#42 --address'
+    - intent: sweep all open PRs and address every review thread
+      command: agent-do gh cr --address
+    - intent: preview what cr would do without making changes
+      command: agent-do gh cr --address --dry-run
     - intent: keep all my open PRs up to date with main, auto-resolve conflicts
       command: agent-do gh sync
     - intent: preview what sync would do without making changes
@@ -1856,6 +1867,11 @@ tools:
       - github inbox
       - github issue
       - issue triage
+      - address review comments
+      - coderabbit comments
+      - respond to review
+      - fix pr feedback
+      - cr command
       - github release
       - release notes
       - github api

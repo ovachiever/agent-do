@@ -177,6 +177,19 @@ def build_parser() -> argparse.ArgumentParser:
     update_branch.add_argument("--dry-run", action="store_true")
     update_branch.set_defaults(func=pr_group.cmd_update_branch)
 
+    # ── cr: address unresolved review comments via claude ─────────────────────
+    from .groups import cr as cr_group  # noqa: PLC0415
+
+    cr = sub.add_parser("cr", help="Scan PRs for unresolved review threads; address via claude")
+    cr.add_argument("pr", nargs="?", help="PR reference (owner/repo#num, URL, or bare number)")
+    cr.add_argument("--address", action="store_true", help="Address threads via claude, push, and reply")
+    cr.add_argument("--author", help="GitHub login to sweep (default: authenticated user)")
+    cr.add_argument("--limit", type=int, default=50, help="Max PRs to sweep (default: 50)")
+    cr.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+    cr.add_argument("--verbose", action="store_true", help="Show claude invocation details")
+    cr.add_argument("--json", action="store_true", help="Output results as JSON")
+    cr.set_defaults(func=cr_group.cmd_cr)
+
     # ── sync: keep your PRs up to date with main ──────────────────────────────
     from .groups import sync as sync_group  # noqa: PLC0415
 
@@ -440,6 +453,13 @@ Release commands (new):
   release latest <owner/repo>    Show latest release
   release create / edit / publish / delete / upload / download / notes
 
+Code review responder (new):
+  cr                             Sweep all your open PRs for unresolved review threads
+  cr <pr>                        Show unresolved threads on a specific PR
+  cr <pr> --address              Address threads via claude, push, and post a reply comment
+  cr --address                   Sweep and address all your open PRs
+  cr --dry-run                   Show what would be done without making changes
+
 Sync (new):
   sync [--author <login>]        Update all your open PRs with their base branch;
                                  auto-resolve conflicts via claude (Pro/Max — no API key needed)
@@ -452,6 +472,10 @@ API escape hatch (new):
 
 Examples:
   agent-do gh inbox
+  agent-do gh cr
+  agent-do gh cr ovachiever/agent-do#3
+  agent-do gh cr ovachiever/agent-do#3 --address
+  agent-do gh cr --address --dry-run
   agent-do gh sync
   agent-do gh sync --dry-run
   agent-do gh issue list ovachiever/agent-do --state open

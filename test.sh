@@ -93,6 +93,7 @@ check_output "vector --help" "today" "$AGENT_DO" vector --help
 check_cmd "gh tests" python3 "$SCRIPT_DIR/tests/test_gh.py"
 check_cmd "gh pr compat tests" python3 "$SCRIPT_DIR/tests/test_gh_pr_compat.py"
 check_cmd "gh phase1 tests" python3 "$SCRIPT_DIR/tests/test_gh_phase1.py"
+check_cmd "gh cr tests" python3 "$SCRIPT_DIR/tests/test_gh_cr.py"
 check_cmd "gh refs unit tests" python3 "$SCRIPT_DIR/tools/agent-gh/test/unit/test_refs.py"
 check_cmd "gh triage unit tests" python3 "$SCRIPT_DIR/tools/agent-gh/test/unit/test_triage.py"
 check_cmd "hardware tests" python3 "$SCRIPT_DIR/tests/test_hardware.py"
