@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Integration tests for agent-mongo: connection profiles, discovery, querying, safe writes."""
 
 from __future__ import annotations
 
@@ -24,11 +23,9 @@ _FAKE_PYMONGO = '''
 """Fake pymongo for agent-mongo integration tests."""
 from datetime import datetime
 
-
 # Fake BSON types whose __name__ matches what _serialize_doc() inspects.
 class ObjectId(str):
     pass
-
 
 class Decimal128:
     def __init__(self, val):
@@ -37,10 +34,8 @@ class Decimal128:
     def __str__(self):
         return str(self._val)
 
-
 class Int64(int):
     pass
-
 
 FIXTURE_DOCS = [
     {
@@ -68,7 +63,6 @@ FIXTURE_INDEXES = [
     {"name": "externalId_1", "key": {"externalId": 1}, "unique": True},
 ]
 
-
 class _Cursor(list):
     def sort(self, key_or_list, *args, **kwargs):
         return self
@@ -79,10 +73,8 @@ class _Cursor(list):
     def limit(self, n):
         return _Cursor(self[:n]) if n else self
 
-
 class _InsertResult:
     inserted_id = "507f1f77bcf86cd799439011"
-
 
 class _UpdateResult:
     def __init__(self, matched=1, modified=1):
@@ -90,11 +82,9 @@ class _UpdateResult:
         self.modified_count = modified
         self.upserted_id = None
 
-
 class _DeleteResult:
     def __init__(self, deleted=1):
         self.deleted_count = deleted
-
 
 class _Collection:
     def __init__(self, name):
@@ -130,7 +120,6 @@ class _Collection:
     def list_indexes(self):
         return iter(list(FIXTURE_INDEXES))
 
-
 class _Database:
     def __init__(self, name):
         self.name = name
@@ -150,7 +139,6 @@ class _Database:
             }
         }
 
-
 class MongoClient:
     def __init__(self, uri, **kwargs):
         self.uri = uri
@@ -166,20 +154,16 @@ class MongoClient:
         pass
 '''
 
-
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
-
 
 def make_exec(path: Path, contents: str) -> None:
     path.write_text(contents)
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-
 def run(cmd: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, env=env, text=True, capture_output=True, check=False)
-
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -921,7 +905,6 @@ def main() -> int:
             return 1
         print("All tests passed.")
         return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""agent-mongo backend: connection profiles, discovery, querying, safe writes."""
 
 from __future__ import annotations
 
@@ -10,40 +9,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def _now() -> str:
-    """Return current UTC time as ISO 8601 string."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-
 def _home() -> Path:
-    """Return the agent-do state directory, re-reading env each call."""
     return Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
-
 
 _PROFILE_NAME_RE = __import__("re").compile(r'^[a-zA-Z0-9_\-]+$')
 
-
 def _validate_profile_name(name: str) -> None:
-    """Reject profile names that are not safe for use as filenames."""
     if not _PROFILE_NAME_RE.match(name):
         _err(f"Invalid profile name {name!r}. Use only letters, numbers, hyphens, and underscores.")
 
-
 def _profiles_path() -> Path:
-    """Return path to the connection profiles JSON file (metadata only — no URIs)."""
     return _home() / "mongo" / "connections.json"
 
-
 def _creds_dir() -> Path:
-    """Return directory that holds per-profile URI files (mode 0o700)."""
     return _home() / "mongo" / ".creds"
 
-
 def _creds_store_profile(profile_name: str, uri: str) -> None:
-    """Write a connection URI atomically to a 0o600 file, separate from profile metadata."""
     import tempfile  # noqa: PLC0415
     d = _creds_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -67,9 +53,7 @@ def _creds_store_profile(profile_name: str, uri: str) -> None:
             pass
         raise
 
-
 def _creds_get_profile(profile_name: str) -> str:
-    """Return the URI for a profile: env var first, then the per-profile creds file."""
     env_key = "MONGO_CONNECTION_" + profile_name.upper().replace("-", "_")
     env_val = os.environ.get(env_key, "")
     if env_val:
@@ -79,17 +63,13 @@ def _creds_get_profile(profile_name: str) -> str:
         return creds_file.read_text(encoding="utf-8").strip()
     return ""
 
-
 def _creds_delete_profile(profile_name: str) -> None:
-    """Remove the URI creds file for a profile (no-op if absent)."""
     try:
         (_creds_dir() / profile_name).unlink()
     except FileNotFoundError:
         pass
 
-
 def _load_profiles() -> dict[str, Any]:
-    """Load connection profile metadata (no URIs) from disk."""
     p = _profiles_path()
     if not p.exists():
         return {"profiles": {}, "default": None}
@@ -98,9 +78,7 @@ def _load_profiles() -> dict[str, Any]:
     except json.JSONDecodeError:
         return {"profiles": {}, "default": None}
 
-
 def _save_profiles(data: dict[str, Any]) -> None:
-    """Write profile metadata atomically with owner-only permissions."""
     import tempfile  # noqa: PLC0415
     p = _profiles_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -122,33 +100,20 @@ def _save_profiles(data: dict[str, Any]) -> None:
             pass
         raise
 
-
 def _envelope(command: str, *, ref: str | None = None, data: Any) -> dict[str, Any]:
-    """Wrap data in the standard agent-do structured output envelope."""
     result: dict[str, Any] = {"tool": "mongo", "command": command, "timestamp": _now(), "data": data}
     if ref is not None:
         result["ref"] = ref
     return result
 
-
 def _print_json(payload: Any) -> None:
-    """Print payload as indented JSON to stdout, serializing unknown types via str()."""
     print(json.dumps(payload, indent=2, default=str))
 
-
 def _err(msg: str, code: int = 1) -> None:
-    """Print an error message to stderr and exit with the given code."""
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(code)
 
-
 def _parse_filter(raw: str | None) -> dict[str, Any]:
-    """Parse a filter from JSON string or key=value shorthand.
-
-    Supported value coercions for key=value shorthand:
-      null/none → None, true/false → bool, integers, floats, else string.
-    Whitespace-only input is treated the same as no filter (returns {}).
-    """
     if not raw:
         return {}
     raw = raw.strip()
@@ -180,9 +145,7 @@ def _parse_filter(raw: str | None) -> dict[str, Any]:
     _err(f"Cannot parse filter: {raw!r}. Use JSON or key=value.")
     return {}  # unreachable
 
-
 def _parse_int(value: str, flag: str, *, min_val: int = 0) -> int:
-    """Parse a CLI integer argument with a clear error on bad input or out-of-range value."""
     try:
         n = int(value)
     except ValueError:
@@ -192,9 +155,7 @@ def _parse_int(value: str, flag: str, *, min_val: int = 0) -> int:
         _err(f"{flag} must be >= {min_val}, got: {n}")
     return n
 
-
 def _parse_json_arg(raw: str | None, name: str) -> Any:
-    """Parse a JSON argument, supporting @file syntax."""
     if not raw:
         return None
     if raw.startswith("@"):
@@ -207,14 +168,7 @@ def _parse_json_arg(raw: str | None, name: str) -> Any:
     except json.JSONDecodeError as exc:
         _err(f"Invalid JSON for {name}: {exc}")
 
-
 def _get_uri(connection: str | None) -> tuple[str, str]:
-    """Return (uri, provider) for the given profile name or env fallback.
-
-    Resolution order: named profile creds file → default profile creds file →
-    MONGO_CONNECTION_STRING env var.  Per-profile env vars (MONGO_CONNECTION_<NAME>)
-    are checked first inside _creds_get_profile before reading the creds file.
-    """
     env_uri = os.environ.get("MONGO_CONNECTION_STRING", "")
 
     if connection:
@@ -247,9 +201,7 @@ def _get_uri(connection: str | None) -> tuple[str, str]:
          "  # or set MONGO_CONNECTION_STRING")
     return "", ""  # unreachable
 
-
 def _connect(uri: str, provider: str) -> Any:
-    """Return a connected MongoClient, with CosmosDB-appropriate TLS settings."""
     import pymongo  # noqa: PLC0415
     kwargs: dict[str, Any] = {"serverSelectionTimeoutMS": 8000}
     if provider == "cosmosdb":
@@ -258,11 +210,9 @@ def _connect(uri: str, provider: str) -> Any:
         kwargs["retryWrites"] = False  # CosmosDB doesn't support retryWrites
     return pymongo.MongoClient(uri, **kwargs)
 
-
 # ── connection management ──────────────────────────────────────────────────────
 
 def cmd_connections(argv: list[str]) -> None:
-    """Manage saved connection profiles."""
     sub = argv[0] if argv else "list"
     rest = argv[1:]
 
@@ -407,11 +357,9 @@ def cmd_connections(argv: list[str]) -> None:
     else:
         _err(f"Unknown connections subcommand: {sub}")
 
-
 # ── discovery ──────────────────────────────────────────────────────────────────
 
 def cmd_snapshot(argv: list[str]) -> None:
-    """Snapshot all databases and collections with document counts."""
     connection = None
     json_mode = False
     i = 0
@@ -457,9 +405,7 @@ def cmd_snapshot(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 def cmd_schema(argv: list[str]) -> None:
-    """Infer schema from a sample of documents in a collection."""
     if len(argv) < 2:
         _err("Usage: schema <db> <collection> [--sample N] [--connection <name>] [--json]")
     db_name, coll_name = argv[0], argv[1]
@@ -528,9 +474,7 @@ def cmd_schema(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 def cmd_indexes(argv: list[str]) -> None:
-    """List indexes on a collection."""
     if len(argv) < 2:
         _err("Usage: indexes <db> <collection> [--connection <name>] [--json]")
     db_name, coll_name = argv[0], argv[1]
@@ -565,11 +509,9 @@ def cmd_indexes(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 # ── querying ───────────────────────────────────────────────────────────────────
 
 def cmd_query(argv: list[str]) -> None:
-    """Find documents in a collection with optional filter, projection, sort."""
     if len(argv) < 2:
         _err("Usage: query <db> <collection> [--where <filter>] [--limit N] [--json]")
     db_name, coll_name = argv[0], argv[1]
@@ -636,9 +578,7 @@ def cmd_query(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 def cmd_count(argv: list[str]) -> None:
-    """Count documents matching a filter."""
     if len(argv) < 2:
         _err("Usage: count <db> <collection> [--where <filter>] [--connection <name>]")
     db_name, coll_name = argv[0], argv[1]
@@ -674,12 +614,9 @@ def cmd_count(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 _DESTRUCTIVE_PIPELINE_STAGES = {"$out", "$merge"}
 
-
 def cmd_aggregate(argv: list[str]) -> None:
-    """Run an aggregation pipeline."""
     if len(argv) < 2:
         _err("Usage: aggregate <db> <collection> --pipeline <json-or-@file> [--confirm] [--dry-run] [--json]")
     db_name, coll_name = argv[0], argv[1]
@@ -748,9 +685,7 @@ def cmd_aggregate(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 def cmd_explain(argv: list[str]) -> None:
-    """Show query execution plan — useful for inspecting RU cost on CosmosDB."""
     if len(argv) < 2:
         _err("Usage: explain <db> <collection> [--where <filter>] [--connection <name>]")
     db_name, coll_name = argv[0], argv[1]
@@ -779,11 +714,9 @@ def cmd_explain(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 # ── safe writes ────────────────────────────────────────────────────────────────
 
 def cmd_insert(argv: list[str]) -> None:
-    """Insert a document into a collection."""
     if len(argv) < 2:
         _err("Usage: insert <db> <collection> --doc <json> [--dry-run]")
     db_name, coll_name = argv[0], argv[1]
@@ -833,9 +766,7 @@ def cmd_insert(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 def cmd_update(argv: list[str]) -> None:
-    """Update documents matching a filter."""
     if len(argv) < 2:
         _err("Usage: update <db> <collection> --where <filter> --set <updates> [--dry-run]")
     db_name, coll_name = argv[0], argv[1]
@@ -919,9 +850,7 @@ def cmd_update(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 def cmd_delete(argv: list[str]) -> None:
-    """Delete documents matching a filter. Requires --confirm or --dry-run."""
     if len(argv) < 2:
         _err("Usage: delete <db> <collection> --where <filter> --confirm [--dry-run]")
     db_name, coll_name = argv[0], argv[1]
@@ -989,11 +918,9 @@ def cmd_delete(argv: list[str]) -> None:
     finally:
         client.close()
 
-
 # ── serialization ──────────────────────────────────────────────────────────────
 
 def _serialize_doc(doc: Any) -> Any:
-    """Recursively convert BSON types to JSON-serializable forms."""
     if isinstance(doc, dict):
         return {k: _serialize_doc(v) for k, v in doc.items()}
     if isinstance(doc, list):
@@ -1006,11 +933,9 @@ def _serialize_doc(doc: Any) -> Any:
         return doc.isoformat().replace("+00:00", "Z")
     return doc
 
-
 # ── dispatch ───────────────────────────────────────────────────────────────────
 
 def main(argv: list[str]) -> int:
-    """Parse top-level command and dispatch to the appropriate handler."""
     if not argv:
         print("Usage: agent-do mongo <command> [args...]")
         return 0
@@ -1045,7 +970,6 @@ def main(argv: list[str]) -> int:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
