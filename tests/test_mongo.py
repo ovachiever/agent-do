@@ -415,15 +415,25 @@ def main() -> int:
         out = json.loads(r.stdout)
         check("aggregate @file pipeline_stages=2", out["data"]["pipeline_stages"] == 2)
 
-        # explain
+        # explain --json
+        r = run(
+            [str(AGENT_DO), "mongo", "explain", "prism_bcc", "expectations",
+             "--where", "externalId=x001", "--json"],
+            env=base_env,
+        )
+        check("explain exit 0", r.returncode == 0, r.stderr)
+        out = json.loads(r.stdout)
+        check("explain command=explain", out.get("command") == "explain")
+        check("explain has plan.executionStats", "executionStats" in out.get("data", {}).get("plan", {}))
+
+        # explain human-readable (no --json)
         r = run(
             [str(AGENT_DO), "mongo", "explain", "prism_bcc", "expectations",
              "--where", "externalId=x001"],
             env=base_env,
         )
-        check("explain exit 0", r.returncode == 0, r.stderr)
-        out = json.loads(r.stdout)
-        check("explain has executionStats", "executionStats" in out)
+        check("explain human exit 0", r.returncode == 0, r.stderr)
+        check("explain human shows executionTimeMillis", "executionTimeMillis" in r.stdout)
 
         # ── safe writes ───────────────────────────────────────────────────────
         print("\n--- safe writes ---")
@@ -897,6 +907,44 @@ def main() -> int:
               "kubectl" in r.stderr.lower() or "failed" in r.stderr.lower())
         # clean up fake kubectl so it doesn't affect other tests
         (fake_bin / "kubectl").unlink(missing_ok=True)
+
+        # ── dry-run --json output is valid JSON, not plain text ───────────────
+        print("\n--- dry-run --json output ---")
+
+        r = run([str(AGENT_DO), "mongo", "insert", "prism_bcc", "expectations",
+                 "--doc", '{"x":1}', "--dry-run", "--json"], env=base_env)
+        check("insert dry-run --json exits 2", r.returncode == 2)
+        drj = json.loads(r.stdout) if r.stdout.strip().startswith("{") else None
+        check("insert dry-run --json is valid JSON", drj is not None, r.stdout[:200])
+        check("insert dry-run --json has dry_run=true", (drj or {}).get("dry_run") is True)
+
+        r = run([str(AGENT_DO), "mongo", "update", "prism_bcc", "expectations",
+                 "--where", "x=1", "--set", "y=2", "--dry-run", "--json"], env=base_env)
+        check("update dry-run --json exits 2", r.returncode == 2)
+        drj = json.loads(r.stdout) if r.stdout.strip().startswith("{") else None
+        check("update dry-run --json is valid JSON", drj is not None, r.stdout[:200])
+        check("update dry-run --json has dry_run=true", (drj or {}).get("dry_run") is True)
+
+        r = run([str(AGENT_DO), "mongo", "delete", "prism_bcc", "expectations",
+                 "--where", "x=1", "--dry-run", "--json"], env=base_env)
+        check("delete dry-run --json exits 2", r.returncode == 2)
+        drj = json.loads(r.stdout) if r.stdout.strip().startswith("{") else None
+        check("delete dry-run --json is valid JSON", drj is not None, r.stdout[:200])
+        check("delete dry-run --json has dry_run=true", (drj or {}).get("dry_run") is True)
+
+        # aggregate --dry-run for non-destructive pipeline: must preview and exit 2
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$count":"total"}]', "--dry-run"], env=base_env)
+        check("aggregate non-destructive --dry-run exits 2", r.returncode == 2)
+        check("aggregate non-destructive --dry-run shows [dry-run]", "[dry-run]" in r.stdout)
+
+        # aggregate --dry-run --json for non-destructive pipeline
+        r = run([str(AGENT_DO), "mongo", "aggregate", "prism_bcc", "expectations",
+                 "--pipeline", '[{"$count":"total"}]', "--dry-run", "--json"], env=base_env)
+        check("aggregate non-destructive --dry-run --json exits 2", r.returncode == 2)
+        drj = json.loads(r.stdout) if r.stdout.strip().startswith("{") else None
+        check("aggregate non-destructive --dry-run --json is valid JSON", drj is not None, r.stdout[:200])
+        check("aggregate non-destructive --dry-run --json has dry_run=true", (drj or {}).get("dry_run") is True)
 
         # ── summary ───────────────────────────────────────────────────────────
         print(f"\n{'=' * 40}")

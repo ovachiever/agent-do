@@ -659,12 +659,24 @@ def cmd_aggregate(argv: list[str]) -> None:
     ]
     if destructive:
         if dry_run:
-            print(f"[dry-run] would run aggregate with destructive stage(s) {destructive} on {db_name}.{coll_name}")
-            print(json.dumps(pipeline, indent=2, default=str))
+            if json_mode:
+                _print_json({"dry_run": True, "collection": f"{db_name}.{coll_name}",
+                             "destructive_stages": destructive, "pipeline": pipeline})
+            else:
+                print(f"[dry-run] would run aggregate with destructive stage(s) {destructive} on {db_name}.{coll_name}")
+                print(json.dumps(pipeline, indent=2, default=str))
             sys.exit(2)
         if not confirm:
             _err(f"Pipeline contains destructive stage(s) {destructive} that write to other collections. "
                  "Use --confirm to proceed or --dry-run to preview.")
+    elif dry_run:
+        if json_mode:
+            _print_json({"dry_run": True, "collection": f"{db_name}.{coll_name}",
+                         "pipeline_stages": len(pipeline), "pipeline": pipeline})
+        else:
+            print(f"[dry-run] would run aggregate ({len(pipeline)} stage(s)) on {db_name}.{coll_name}")
+            print(json.dumps(pipeline, indent=2, default=str))
+        sys.exit(2)
 
     uri, provider = _get_uri(connection)
     client = _connect(uri, provider)
@@ -687,10 +699,11 @@ def cmd_aggregate(argv: list[str]) -> None:
 
 def cmd_explain(argv: list[str]) -> None:
     if len(argv) < 2:
-        _err("Usage: explain <db> <collection> [--where <filter>] [--connection <name>]")
+        _err("Usage: explain <db> <collection> [--where <filter>] [--connection <name>] [--json]")
     db_name, coll_name = argv[0], argv[1]
     where_raw = None
     connection = None
+    json_mode = False
     i = 2
     while i < len(argv):
         if argv[i] == "--where" and i + 1 < len(argv):
@@ -699,6 +712,9 @@ def cmd_explain(argv: list[str]) -> None:
         elif argv[i] == "--connection" and i + 1 < len(argv):
             connection = argv[i + 1]
             i += 2
+        elif argv[i] == "--json":
+            json_mode = True
+            i += 1
         else:
             i += 1
 
@@ -707,10 +723,20 @@ def cmd_explain(argv: list[str]) -> None:
     client = _connect(uri, provider)
     try:
         db = client[db_name]
-        plan = db.command("explain",
-                          {"find": coll_name, "filter": filt},
-                          verbosity="executionStats")
-        _print_json(_serialize_doc(plan))
+        plan = _serialize_doc(db.command("explain",
+                                         {"find": coll_name, "filter": filt},
+                                         verbosity="executionStats"))
+        ref = f"{db_name}.{coll_name}"
+        payload = _envelope("explain", ref=ref, data={"filter": filt, "plan": plan})
+        if json_mode:
+            _print_json(payload)
+        else:
+            stats = (plan.get("executionStats") or {})
+            print(f"explain: {ref}  filter={json.dumps(filt)}")
+            print(f"  executionTimeMillis: {stats.get('executionTimeMillis', '?')}")
+            print(f"  totalDocsExamined:  {stats.get('totalDocsExamined', '?')}")
+            print(f"  totalKeysExamined:  {stats.get('totalKeysExamined', '?')}")
+            print(f"  (full plan in --json output)")
     finally:
         client.close()
 
@@ -748,8 +774,12 @@ def cmd_insert(argv: list[str]) -> None:
         _err("--doc must be a JSON object")
 
     if dry_run:
-        print(f"[dry-run] would insert into {db_name}.{coll_name}:")
-        print(json.dumps(doc, indent=2, default=str))
+        if json_mode:
+            _print_json({"dry_run": True, "action": "insert",
+                         "collection": f"{db_name}.{coll_name}", "doc": doc})
+        else:
+            print(f"[dry-run] would insert into {db_name}.{coll_name}:")
+            print(json.dumps(doc, indent=2, default=str))
         sys.exit(2)
 
     uri, provider = _get_uri(connection)
@@ -824,10 +854,16 @@ def cmd_update(argv: list[str]) -> None:
     updates = {"$set": set_doc}
 
     if dry_run:
-        print(f"[dry-run] would update {db_name}.{coll_name}")
-        print(f"  filter: {json.dumps(filt)}")
-        print(f"  update: {json.dumps(updates)}")
-        print(f"  multi={multi}  upsert={upsert}")
+        if json_mode:
+            _print_json({"dry_run": True, "action": "update",
+                         "collection": f"{db_name}.{coll_name}",
+                         "filter": filt, "update": updates,
+                         "multi": multi, "upsert": upsert})
+        else:
+            print(f"[dry-run] would update {db_name}.{coll_name}")
+            print(f"  filter: {json.dumps(filt)}")
+            print(f"  update: {json.dumps(updates)}")
+            print(f"  multi={multi}  upsert={upsert}")
         sys.exit(2)
 
     uri, provider = _get_uri(connection)
@@ -892,9 +928,14 @@ def cmd_delete(argv: list[str]) -> None:
              "Use a specific --where clause.")
 
     if dry_run:
-        print(f"[dry-run] would delete from {db_name}.{coll_name}")
-        print(f"  filter: {json.dumps(filt)}")
-        print(f"  multi={multi}")
+        if json_mode:
+            _print_json({"dry_run": True, "action": "delete",
+                         "collection": f"{db_name}.{coll_name}",
+                         "filter": filt, "multi": multi})
+        else:
+            print(f"[dry-run] would delete from {db_name}.{coll_name}")
+            print(f"  filter: {json.dumps(filt)}")
+            print(f"  multi={multi}")
         sys.exit(2)
 
     if not confirm:
