@@ -143,6 +143,7 @@ def make_fake_gh(
         fake_bin / "gh",
         f"""#!/usr/bin/env python3
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -184,6 +185,13 @@ if args[:2] == ["search", "prs"]:
     print({search_json!r})
     sys.exit(0)
 
+# repo clone — create the dest directory so git rev-parse can run there
+if args[:2] == ["repo", "clone"]:
+    # args: repo clone <repo> <dest> -- --branch <branch> --depth 50
+    dest = args[3] if len(args) > 3 else args[2]
+    os.makedirs(dest, exist_ok=True)
+    sys.exit(0)
+
 sys.exit(0)
 """,
     )
@@ -193,30 +201,17 @@ def make_fake_git(
     fake_bin: Path,
     *,
     sha_counter_path: Path,
-    clone_ok: bool = True,
     push_ok: bool = True,
 ) -> None:
     make_exec(
         fake_bin / "git",
         f"""#!/usr/bin/env python3
 import sys
-import os
 from pathlib import Path
 
 args = sys.argv[1:]
 counter_path = Path({str(sha_counter_path)!r})
-clone_ok = {str(clone_ok).lower() == "true" or clone_ok!r}
-push_ok = {str(push_ok).lower() == "true" or push_ok!r}
-
-if args[0] == "clone":
-    if not clone_ok:
-        print("fatal: could not clone", file=sys.stderr)
-        sys.exit(1)
-    dest = args[-1]
-    os.makedirs(dest, exist_ok=True)
-    # Write a dummy file so rev-parse has something
-    Path(os.path.join(dest, "dummy.txt")).write_text("hello")
-    sys.exit(0)
+push_ok = {push_ok!r}
 
 if args[:2] == ["rev-parse", "HEAD"]:
     count = int(counter_path.read_text().strip()) if counter_path.exists() else 0
@@ -479,7 +474,7 @@ def test_cr_address_no_claude() -> None:
 
 
 def test_cr_address_clone_failure() -> None:
-    """cr <pr> --address exits with error when git clone fails."""
+    """cr <pr> --address exits with error when gh repo clone fails."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         fake_bin = tmp / "bin"
@@ -488,8 +483,33 @@ def test_cr_address_clone_failure() -> None:
         fake_home.mkdir()
         sha_counter = tmp / "sha_counter.txt"
 
-        make_fake_gh(fake_bin)
-        make_fake_git(fake_bin, sha_counter_path=sha_counter, clone_ok=False)
+        # Override gh to fail on repo clone
+        pr_view_j = json.dumps(PR_VIEW_7)
+        threads_j = json.dumps(GQL_THREADS_2)
+        make_exec(
+            fake_bin / "gh",
+            f"""#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+if args[:2] in [["api", "/user"], ["api", "user"]]:
+    print('{{"login": "ovachiever"}}')
+    sys.exit(0)
+if args[:2] == ["api", "graphql"]:
+    print({threads_j!r})
+    sys.exit(0)
+if args[:2] == ["pr", "view"]:
+    print({pr_view_j!r})
+    sys.exit(0)
+if args[:2] == ["pr", "diff"]:
+    print("diff --git")
+    sys.exit(0)
+if args[:2] == ["repo", "clone"]:
+    print("fatal: repository not found", file=sys.stderr)
+    sys.exit(128)
+sys.exit(0)
+""",
+        )
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
         make_fake_claude(fake_bin)
 
         env = base_env(fake_bin, fake_home)
@@ -566,15 +586,12 @@ def test_cr_address_no_changes() -> None:
         make_fake_claude(fake_bin)
 
         # Git always returns the same SHA → pre == post → "no changes"
+        # gh handles the clone; git only needs rev-parse
         make_exec(
             fake_bin / "git",
             """#!/usr/bin/env python3
-import sys, os
+import sys
 args = sys.argv[1:]
-if args[0] == "clone":
-    dest = args[-1]
-    os.makedirs(dest, exist_ok=True)
-    sys.exit(0)
 if args[:2] == ["rev-parse", "HEAD"]:
     print("samesamesamesame1234567890")
     sys.exit(0)
@@ -607,12 +624,8 @@ def test_cr_address_no_changes_json() -> None:
         make_exec(
             fake_bin / "git",
             """#!/usr/bin/env python3
-import sys, os
+import sys
 args = sys.argv[1:]
-if args[0] == "clone":
-    dest = args[-1]
-    os.makedirs(dest, exist_ok=True)
-    sys.exit(0)
 if args[:2] == ["rev-parse", "HEAD"]:
     print("samesamesamesame1234567890")
     sys.exit(0)
@@ -1066,6 +1079,254 @@ sys.exit(0)
         assert result.returncode == 0, result.stderr
 
 
+def test_cr_address_closed_pr() -> None:
+    """cr <pr> --address on a closed PR raises an error without cloning."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+        sha_counter = tmp / "sha_counter.txt"
+
+        closed_view = {**PR_VIEW_7, "state": "CLOSED"}
+        make_fake_gh(fake_bin, pr_view=closed_view)
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
+        make_fake_claude(fake_bin)
+
+        env = base_env(fake_bin, fake_home)
+        result = run(
+            [str(AGENT_DO), "gh", "cr", "owner/repo#7", "--address"],
+            env=env,
+        )
+
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "closed" in combined.lower() or "open" in combined.lower()
+
+
+def test_cr_address_merged_pr() -> None:
+    """cr <pr> --address on a merged PR raises an error."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+        sha_counter = tmp / "sha_counter.txt"
+
+        merged_view = {**PR_VIEW_7, "state": "MERGED"}
+        make_fake_gh(fake_bin, pr_view=merged_view)
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
+        make_fake_claude(fake_bin)
+
+        env = base_env(fake_bin, fake_home)
+        result = run(
+            [str(AGENT_DO), "gh", "cr", "owner/repo#7", "--address"],
+            env=env,
+        )
+
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "merged" in combined.lower() or "open" in combined.lower()
+
+
+def test_cr_address_empty_head_branch() -> None:
+    """cr <pr> --address on PR with no head branch raises a clean error."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+        sha_counter = tmp / "sha_counter.txt"
+
+        no_head_view = {**PR_VIEW_7, "headRefName": ""}
+        make_fake_gh(fake_bin, pr_view=no_head_view)
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
+        make_fake_claude(fake_bin)
+
+        env = base_env(fake_bin, fake_home)
+        result = run(
+            [str(AGENT_DO), "gh", "cr", "owner/repo#7", "--address"],
+            env=env,
+        )
+
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "head branch" in combined.lower() or "branch" in combined.lower()
+
+
+def test_cr_comment_failure_does_not_fail_overall() -> None:
+    """cr <pr> --address succeeds even if the reply comment post fails."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+        sha_counter = tmp / "sha_counter.txt"
+
+        # pr comment fails with permission error
+        pr_view_j = json.dumps(PR_VIEW_7)
+        threads_j = json.dumps(GQL_THREADS_2)
+        make_exec(
+            fake_bin / "gh",
+            f"""#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+if args[:2] in [["api", "/user"], ["api", "user"]]:
+    print('{{"login": "ovachiever"}}')
+    sys.exit(0)
+if args[:2] == ["api", "graphql"]:
+    print({threads_j!r})
+    sys.exit(0)
+if args[:2] == ["pr", "view"]:
+    print({pr_view_j!r})
+    sys.exit(0)
+if args[:2] == ["pr", "diff"]:
+    print("diff --git")
+    sys.exit(0)
+if args[:2] == ["pr", "comment"]:
+    print("Error: permission denied", file=sys.stderr)
+    sys.exit(1)
+if args[:2] == ["repo", "clone"]:
+    dest = args[3] if len(args) > 3 else args[2]
+    os.makedirs(dest, exist_ok=True)
+    sys.exit(0)
+sys.exit(0)
+""",
+        )
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
+        make_fake_claude(fake_bin)
+
+        env = base_env(fake_bin, fake_home)
+        result = run(
+            [str(AGENT_DO), "gh", "cr", "owner/repo#7", "--address"],
+            env=env,
+        )
+
+        # Should succeed overall despite comment failure
+        assert result.returncode == 0, result.stderr
+        assert "addressed" in result.stdout
+        # Warning about comment failure goes to stderr
+        assert "warning" in (result.stdout + result.stderr).lower()
+
+
+def test_cr_sweep_null_number_skipped() -> None:
+    """cr sweep skips PRs with no number without crashing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+
+        bad_pr = {
+            "number": None,
+            "title": "Bad PR",
+            "state": "open",
+            "url": "https://github.com/owner/repo/pull/0",
+            "headRepositoryOwner": {"login": "owner"},
+            "headRepository": {"name": "repo"},
+            "headRefName": "feat/bad",
+            "baseRefName": "main",
+        }
+        make_fake_gh(fake_bin, search_prs=[bad_pr])
+
+        env = base_env(fake_bin, fake_home)
+        result = run([str(AGENT_DO), "gh", "cr"], env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert "skipped" in (result.stdout + result.stderr).lower()
+
+
+def test_cr_sweep_address_includes_sha() -> None:
+    """cr --address --json sweep result includes sha for each addressed PR."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+        sha_counter = tmp / "sha_counter.txt"
+
+        make_fake_gh(fake_bin)
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
+        make_fake_claude(fake_bin)
+
+        env = base_env(fake_bin, fake_home)
+        result = run(
+            [str(AGENT_DO), "gh", "cr", "--address", "--json"],
+            env=env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        data = json.loads(result.stdout)
+        item = data["items"][0]
+        assert item["status"] == "addressed"
+        assert "sha" in item
+        assert len(item["sha"]) > 0
+
+
+def test_cr_address_uses_gh_clone() -> None:
+    """cr --address uses gh repo clone (not git clone) for private-repo auth."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_home = tmp / "home"
+        fake_home.mkdir()
+        sha_counter = tmp / "sha_counter.txt"
+        clone_log = tmp / "clone_log.txt"
+
+        pr_view_j = json.dumps(PR_VIEW_7)
+        threads_j = json.dumps(GQL_THREADS_2)
+        make_exec(
+            fake_bin / "gh",
+            f"""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+log = Path({str(clone_log)!r})
+if args[:2] in [["api", "/user"], ["api", "user"]]:
+    print('{{"login": "ovachiever"}}')
+    sys.exit(0)
+if args[:2] == ["api", "graphql"]:
+    print({threads_j!r})
+    sys.exit(0)
+if args[:2] == ["pr", "view"]:
+    print({pr_view_j!r})
+    sys.exit(0)
+if args[:2] == ["pr", "diff"]:
+    print("diff --git")
+    sys.exit(0)
+if args[:2] == ["pr", "comment"]:
+    sys.exit(0)
+if args[:2] == ["repo", "clone"]:
+    log.write_text(json.dumps(args))
+    dest = args[3] if len(args) > 3 else args[2]
+    os.makedirs(dest, exist_ok=True)
+    sys.exit(0)
+sys.exit(0)
+""",
+        )
+        make_fake_git(fake_bin, sha_counter_path=sha_counter)
+        make_fake_claude(fake_bin)
+
+        env = base_env(fake_bin, fake_home)
+        result = run(
+            [str(AGENT_DO), "gh", "cr", "owner/repo#7", "--address"],
+            env=env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert clone_log.exists(), "gh repo clone was not called"
+        clone_args = json.loads(clone_log.read_text())
+        assert clone_args[:2] == ["repo", "clone"]
+        assert "owner/repo" in clone_args
+
+
 # ── main ───────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -1097,6 +1358,14 @@ def main() -> int:
         test_cr_help,
         test_cr_comment_body_contains_sha_and_threads,
         test_cr_sweep_error_fetching_threads,
+        # QA edge cases
+        test_cr_address_closed_pr,
+        test_cr_address_merged_pr,
+        test_cr_address_empty_head_branch,
+        test_cr_comment_failure_does_not_fail_overall,
+        test_cr_sweep_null_number_skipped,
+        test_cr_sweep_address_includes_sha,
+        test_cr_address_uses_gh_clone,
     ]
 
     passed = 0

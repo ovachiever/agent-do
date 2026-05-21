@@ -9,7 +9,7 @@ from typing import Any
 
 from ..refs import PrRef, parse_pr_ref
 from ..render import print_json, print_table
-from ..transport import GhError, gh_json, run_gh
+from ..transport import GhError, gh_bin, gh_json, run_gh
 from .pr import pr_detail, pr_diff_text, pr_threads
 
 
@@ -70,10 +70,10 @@ def _pr_repo_slug(pr: dict[str, Any]) -> str | None:
 
 
 def _clone_branch(repo_slug: str, head_branch: str, workdir: str) -> str | None:
-    clone_url = f"https://github.com/{repo_slug}.git"
     dest = os.path.join(workdir, repo_slug.replace("/", "_"))
+    # Use gh repo clone so gh's auth (token/SSH/Enterprise) handles private repos
     result = _run(
-        [_git_bin(), "clone", "--depth", "50", "--branch", head_branch, clone_url, dest],
+        [gh_bin(), "repo", "clone", repo_slug, dest, "--", "--branch", head_branch, "--depth", "50"],
         timeout=120,
     )
     if result.returncode != 0:
@@ -96,7 +96,11 @@ def _push_branch(repo_dir: str, head_branch: str) -> bool:
 
 
 def _post_pr_comment(repo_slug: str, pr_number: int, body: str) -> None:
-    run_gh(["pr", "comment", str(pr_number), "--repo", repo_slug, "--body", body])
+    try:
+        run_gh(["pr", "comment", str(pr_number), "--repo", repo_slug, "--body", body])
+    except GhError as exc:
+        # Changes are already pushed — warn but don't fail the whole operation
+        print(f"    warning: failed to post reply comment: {exc}", file=sys.stderr)
 
 
 def _format_thread_summary(threads: list[dict[str, Any]]) -> str:
@@ -197,15 +201,26 @@ Address every thread. Work through them one at a time.
     return True
 
 
-def _address_pr(ref: PrRef, threads: list[dict[str, Any]], args: Any, *, emit_json: bool = True) -> None:
+def _address_pr(ref: PrRef, threads: list[dict[str, Any]], args: Any, *, emit_json: bool = True) -> str | None:
     claude_bin = _claude_bin()
     if not claude_bin:
         raise GhError("claude CLI not found. Install Claude Code or set AGENT_CLAUDE_BIN.")
 
-    detail = pr_detail(ref)
-    head_branch = detail.get("head") or ""
-    base_branch = detail.get("base") or "main"
     repo_slug = ref.repo or ""
+    if not repo_slug:
+        raise GhError(f"Cannot determine repo for PR #{ref.number}")
+
+    detail = pr_detail(ref)
+
+    pr_state = str(detail.get("state") or "").upper()
+    if pr_state and pr_state != "OPEN":
+        raise GhError(f"PR {repo_slug}#{ref.number} is {pr_state} — only OPEN PRs can be addressed")
+
+    head_branch = detail.get("head") or ""
+    if not head_branch:
+        raise GhError(f"PR {repo_slug}#{ref.number} has no head branch — cannot clone")
+
+    base_branch = detail.get("base") or "main"
     verbose = getattr(args, "verbose", False)
     json_mode = getattr(args, "json", False)
 
@@ -223,7 +238,7 @@ def _address_pr(ref: PrRef, threads: list[dict[str, Any]], args: Any, *, emit_js
         elif not json_mode:
             print(f"[dry-run] would address {len(threads)} thread(s) on {repo_slug}#{ref.number}")
             print(f"[dry-run] would clone {head_branch}, invoke claude, push, post comment")
-        return
+        return None
 
     pr_dict = {
         "title": detail.get("title", ""),
@@ -260,7 +275,7 @@ def _address_pr(ref: PrRef, threads: list[dict[str, Any]], args: Any, *, emit_js
                 print_json({"pr": f"{repo_slug}#{ref.number}", "status": "no_changes", "sha": post_sha})
             elif not json_mode:
                 print("  No changes committed by claude — threads may already be addressed")
-            return
+            return None
 
         if not json_mode:
             print(f"  Pushing branch {head_branch}...")
@@ -280,6 +295,8 @@ def _address_pr(ref: PrRef, threads: list[dict[str, Any]], args: Any, *, emit_js
             })
         elif not json_mode:
             print(f"  ✓ addressed {len(threads)} thread(s), pushed, commented ({post_sha[:8]})")
+
+        return post_sha
 
 
 # ── command handlers ───────────────────────────────────────────────────────────
@@ -354,6 +371,12 @@ def _cr_sweep(args: Any) -> None:
         url = pr.get("url", "")
         label = f"#{number} {title[:60]}"
 
+        if not number:
+            results.append({"pr": number, "title": title, "status": "skipped", "reason": "no number"})
+            if not json_mode:
+                print(f"  {title[:60]}  — skipped (no PR number)")
+            continue
+
         if not repo_slug:
             results.append({"pr": number, "title": title, "status": "skipped", "reason": "no repo"})
             if not json_mode:
@@ -391,8 +414,10 @@ def _cr_sweep(args: Any) -> None:
                     print(f"    [dry-run] would address {len(threads)} thread(s)")
             else:
                 try:
-                    _address_pr(ref, threads, args, emit_json=False)
+                    sha = _address_pr(ref, threads, args, emit_json=False)
                     result["status"] = "addressed"
+                    if sha:
+                        result["sha"] = sha
                 except GhError as exc:
                     print(f"    ✗ {exc}", file=sys.stderr)
                     result["status"] = "error"
