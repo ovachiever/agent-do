@@ -1728,13 +1728,16 @@ tools:
       command: agent-ci trigger deploy
     concurrency: write
   gh:
-    description: GitHub repository, pull request, review, and merge work-state across accessible repos
+    description: GitHub repository, pull request, issue, release, and raw API work-state across accessible repos
     capabilities:
     - discover accessible GitHub repositories
     - list actionable pull requests across repos
     - inspect pull request details, diffs, checks, and unresolved review threads
     - audit PR review risks and generate fix-oriented engineering review replies
     - approve, comment, request changes, close/reopen, edit, check out, update branches, mark ready/draft, and merge pull requests
+    - list, view, create, comment, close, reopen, label, assign, and triage GitHub issues
+    - list, view, create, edit, publish, delete, upload, download, and generate notes for GitHub releases
+    - raw REST API and GraphQL escape hatch via gh api / gh graphql
     commands:
       whoami: Show authenticated GitHub user
       repos: List or sync accessible repositories
@@ -1758,29 +1761,85 @@ tools:
       merge: Merge a PR
       ready: Mark a PR ready for review
       draft: Convert a PR to draft
+      "issue list": List issues in a repo (--state, --label, --assignee, --author, --milestone, --limit)
+      "issue view": View issue details (owner/repo#num, --comments)
+      "issue create": Create an issue (--title, --body, --label, --assignee, --dry-run)
+      "issue comment": Comment on an issue (--body, --dry-run)
+      "issue close": Close an issue (--reason, --comment, --dry-run)
+      "issue reopen": Reopen a closed issue (--comment, --dry-run)
+      "issue label": Add or remove labels (--add, --remove, --dry-run)
+      "issue assign": Add or remove assignees (--add, --remove, --dry-run)
+      "issue snapshot": Bulk structured snapshot of open issues
+      "issue triage": Deterministic classification, suggested labels, and first-response draft
+      "release list": List releases (--limit)
+      "release view": View a release (repo tag)
+      "release latest": Show the latest release
+      "release create": Create a release (--title, --notes, --draft, --prerelease, --generate-notes, --dry-run)
+      "release edit": Edit a release (--title, --notes, --draft/--no-draft, --prerelease, --dry-run)
+      "release publish": Publish a draft release (--dry-run)
+      "release delete": Delete a release (--confirm required, --cleanup-tag, --dry-run)
+      "release upload": Upload release assets (--dry-run)
+      "release download": Download release assets (--pattern, --output-dir, --dry-run)
+      "release notes": Generate release notes between tags (--since, --target)
+      api: Raw GitHub REST API call (GET/POST/PATCH/PUT/DELETE, --field, --paginate, --jq)
+      graphql: Raw GitHub GraphQL call (query string or @file, --field, --paginate, --jq)
+      sync: Update all your open PRs with their base branch; auto-resolve conflicts via claude CLI (Pro/Max, no API key needed). --author to target a specific user, --rebase for rebase strategy, --dry-run to preview, --json for structured output
+      cr: Scan open PRs for unresolved review threads (CodeRabbit, teammates). Without --address, lists thread counts per PR. With --address, clones each PR branch, invokes claude to address each thread, pushes, and posts a reply comment with the commit SHA. --dry-run previews without changes. --author / --limit to narrow scope.
     examples:
     - intent: show GitHub pull requests that need me
-      command: agent-gh inbox
+      command: agent-do gh inbox
     - intent: show PRs awaiting my review in VID repos
-      command: agent-gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova
+      command: agent-do gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova
     - intent: deeply review PRs awaiting my review and draft replies
-      command: agent-gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova --audit --replies --probe-deploys
+      command: agent-do gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova --audit --replies --probe-deploys
     - intent: list open PRs across my repos
-      command: agent-gh prs --state open
+      command: agent-do gh prs --state open
     - intent: audit a pull request and generate a request-changes reply
-      command: agent-gh audit ovachiever/agent-do#3 --reply --probe-deploys
-    - intent: review pull request 3 in agent-do
-      command: agent-gh review ovachiever/agent-do#3 --summary
-    - intent: show unresolved GitHub review comments
-      command: agent-gh threads ovachiever/agent-do#3
-    - intent: approve this GitHub PR
-      command: agent-gh approve ovachiever/agent-do#3 --body "LGTM"
+      command: 'agent-do gh audit ovachiever/agent-do#3 --reply --probe-deploys'
     - intent: close accidental pull request and delete branch
-      command: agent-gh close ovachiever/agent-do#4 --delete-branch --comment "Closing accidental PR"
+      command: 'agent-do gh close ovachiever/agent-do#4 --delete-branch --comment "Closing accidental PR"'
     - intent: check out pull request for local review
-      command: agent-gh checkout ovachiever/agent-do#5 --branch review/pr-5
+      command: 'agent-do gh checkout ovachiever/agent-do#5 --branch review/pr-5'
     - intent: add reviewer and label to pull request
-      command: agent-gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-needed
+      command: 'agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-needed'
+    - intent: update PR branch from base
+      command: 'agent-do gh update-branch ovachiever/agent-do#5'
+    - intent: check all my open PRs for unresolved review comments
+      command: agent-do gh cr
+    - intent: see unresolved review threads on a specific PR
+      command: 'agent-do gh cr owner/repo#42'
+    - intent: address review comments on a PR with claude and push
+      command: 'agent-do gh cr owner/repo#42 --address'
+    - intent: sweep all open PRs and address every review thread
+      command: agent-do gh cr --address
+    - intent: preview what cr would do without making changes
+      command: agent-do gh cr --address --dry-run
+    - intent: keep all my open PRs up to date with main, auto-resolve conflicts
+      command: agent-do gh sync
+    - intent: preview what sync would do without making changes
+      command: agent-do gh sync --dry-run
+    - intent: list open GitHub issues in a repo
+      command: agent-do gh issue list ovachiever/agent-do --state open
+    - intent: view an issue with comments
+      command: 'agent-do gh issue view ovachiever/agent-do#42 --comments --json'
+    - intent: triage a GitHub issue and suggest labels
+      command: 'agent-do gh issue triage ovachiever/agent-do#42 --json'
+    - intent: create a GitHub issue
+      command: 'agent-do gh issue create ovachiever/agent-do --title "Bug: crash on empty input" --label bug --dry-run'
+    - intent: close a GitHub issue as completed
+      command: 'agent-do gh issue close ovachiever/agent-do#42 --reason completed'
+    - intent: list GitHub releases
+      command: agent-do gh release list ovachiever/agent-do --json
+    - intent: show the latest release
+      command: agent-do gh release latest ovachiever/agent-do --json
+    - intent: create a GitHub release with auto-generated notes
+      command: agent-do gh release create ovachiever/agent-do v1.3.0 --generate-notes --dry-run
+    - intent: generate release notes between two tags
+      command: agent-do gh release notes ovachiever/agent-do --since v1.1.0 --json
+    - intent: call the GitHub REST API directly
+      command: agent-do gh api GET /rate_limit --json
+    - intent: run a GitHub GraphQL query
+      command: 'agent-do gh graphql "{ viewer { login } }" --json'
     routing:
       default_command: inbox
       recommended_entrypoints:
@@ -1788,8 +1847,12 @@ tools:
       - agent-do gh awaiting --owner <owner>
       - agent-do gh awaiting --owner <owner> --audit --replies --probe-deploys
       - agent-do gh prs --state open
-      - agent-do gh audit owner/repo#123 --reply --probe-deploys
-      - agent-do gh review owner/repo#123 --summary
+      - 'agent-do gh audit owner/repo#123 --reply --probe-deploys'
+      - 'agent-do gh review owner/repo#123 --summary'
+      - agent-do gh issue list owner/repo --state open
+      - 'agent-do gh issue triage owner/repo#123'
+      - agent-do gh release latest owner/repo
+      - agent-do gh release notes owner/repo --since <prev-tag>
       discover_keywords:
       - github pull request
       - github pr
@@ -1802,16 +1865,38 @@ tools:
       - approve pr
       - merge pr
       - github inbox
+      - github issue
+      - issue triage
+      - address review comments
+      - coderabbit comments
+      - respond to review
+      - fix pr feedback
+      - cr command
+      - github release
+      - release notes
+      - github api
+      - graphql github
       prompt_patterns:
       - '\b(?:github|gh)\b.*\b(?:pull request|pr|review|merge|approve|checks?)\b'
       - '\b(?:what|which)\s+prs?\s+(?:need|needs|want|wants)\s+me\b'
       - '\bprs?\b.*\b(?:awaiting|waiting)\b.*\b(?:my|me)\b.*\breview\b'
       - '\bunresolved\s+(?:review\s+)?comments?\b'
+      - '\b(?:github|gh)\b.*\b(?:issue|bug|triage|label)\b'
+      - '\b(?:github|gh)\b.*\b(?:release|tag|changelog|notes)\b'
+      - '\b(?:github|gh)\b.*\b(?:api|graphql|rest)\b'
       raw_cli_equivalents:
       - pattern: '^\s*gh\s+(?:search\s+prs|pr\s+(?:view|diff|checks|review|merge|ready))\b'
         replacement: agent-do gh
         example: agent-do gh inbox
         reason: agent-do gh keeps GitHub PR/review work-state in one structured surface
+      - pattern: '^\s*gh\s+issue\b'
+        replacement: agent-do gh issue
+        example: agent-do gh issue list owner/repo
+        reason: agent-do gh issue wraps gh issue commands in structured envelope output
+      - pattern: '^\s*gh\s+release\b'
+        replacement: agent-do gh release
+        example: agent-do gh release latest owner/repo
+        reason: agent-do gh release wraps gh release commands in structured envelope output
     concurrency: mixed
   jira:
     description: Jira Cloud and Server/Data Center issue management — projects, issues, sprints, JQL search, and connection profiles

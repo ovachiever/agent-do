@@ -134,7 +134,9 @@ agent-do obsidian audit --scope "Projects" --json
 
 ## GitHub Review Work
 
-`gh` is for PR and review state across accessible GitHub repos.
+`gh` covers PR review, issue management, release management, and raw API access across accessible GitHub repos.
+
+### PR Review
 
 ```bash
 agent-do gh inbox
@@ -157,6 +159,38 @@ Review actions:
 agent-do gh approve ovachiever/agent-do#2 --body "LGTM"
 agent-do gh request-changes ovachiever/agent-do#3 --body-file review.md
 agent-do gh merge ovachiever/agent-do#2 --squash --delete-branch
+```
+
+### Issues
+
+```bash
+agent-do gh issue list ovachiever/agent-do --state open --json
+agent-do gh issue view ovachiever/agent-do#42 --comments --json
+agent-do gh issue triage ovachiever/agent-do#42 --json
+agent-do gh issue create ovachiever/agent-do --title "Bug: crash on startup" --label bug --dry-run
+agent-do gh issue close ovachiever/agent-do#42 --reason completed
+agent-do gh issue label ovachiever/agent-do#42 --add confirmed --remove needs-triage
+agent-do gh issue snapshot ovachiever/agent-do --json
+```
+
+### Releases
+
+```bash
+agent-do gh release list ovachiever/agent-do --json
+agent-do gh release latest ovachiever/agent-do --json
+agent-do gh release view ovachiever/agent-do v1.2.0 --json
+agent-do gh release create ovachiever/agent-do v1.3.0 --generate-notes --dry-run
+agent-do gh release publish ovachiever/agent-do v1.3.0
+agent-do gh release delete ovachiever/agent-do v1.3.0 --confirm
+agent-do gh release notes ovachiever/agent-do --since v1.1.0 --json
+```
+
+### Raw API
+
+```bash
+agent-do gh api GET /rate_limit --json
+agent-do gh api POST /repos/ovachiever/agent-do/issues --field title=Test --dry-run
+agent-do gh graphql '{ viewer { login } }' --json
 ```
 
 ## Cloud And Platform Tools
