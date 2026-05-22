@@ -76,7 +76,8 @@ def _load_profiles() -> dict[str, Any]:
     try:
         return json.loads(p.read_text())
     except json.JSONDecodeError:
-        return {"profiles": {}, "default": None}
+        _err(f"Corrupted connections file: {p}")
+        return {"profiles": {}, "default": None}  # unreachable
 
 def _save_profiles(data: dict[str, Any]) -> None:
     import tempfile  # noqa: PLC0415
@@ -188,10 +189,12 @@ def _get_uri(connection: str | None) -> tuple[str, str]:
     if default and default in data["profiles"]:
         p = data["profiles"][default]
         uri = _creds_get_profile(default)
-        if not uri:
-            _err(f"No URI stored for profile '{default}'. "
-                 f"Re-add it: agent-do mongo connections add {default} --uri <uri>")
-        return uri, p.get("provider", "mongodb")
+        if uri:
+            return uri, p.get("provider", "mongodb")
+        if env_uri:
+            return env_uri, "mongodb"
+        _err(f"No URI stored for profile '{default}'. "
+             f"Re-add it: agent-do mongo connections add {default} --uri <uri>")
 
     if env_uri:
         return env_uri, "mongodb"
@@ -215,22 +218,48 @@ def _connect(uri: str, provider: str) -> Any:
 def cmd_connections(argv: list[str]) -> None:
     sub = argv[0] if argv else "list"
     rest = argv[1:]
+    json_mode = False
+    filtered_rest: list[str] = []
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--json":
+            json_mode = True
+            i += 1
+        else:
+            filtered_rest.append(rest[i])
+            i += 1
+    rest = filtered_rest
 
     if sub in ("list", "ls"):
         data = _load_profiles()
         profiles = data.get("profiles", {})
         default = data.get("default")
         if not profiles:
+            if json_mode:
+                _print_json(_envelope("connections", data={"default": default, "profiles": []}))
+                return
             print("No connection profiles saved.")
             print("  agent-do mongo connections add <name> --uri <uri>")
             return
+        profile_rows = []
         for name, p in profiles.items():
             marker = " *" if name == default else ""
             provider = p.get("provider", "mongodb")
             added = p.get("added_at", "")[:10]
             source = p.get("source", "")
             source_str = f"  via {source}" if source else ""
+            profile_rows.append({
+                "name": name,
+                "provider": provider,
+                "added_at": p.get("added_at"),
+                "source": source or None,
+                "default": name == default,
+            })
+            if json_mode:
+                continue
             print(f"  {name}{marker}  [{provider}]  {added}  (uri stored securely{source_str})")
+        if json_mode:
+            _print_json(_envelope("connections", data={"default": default, "profiles": profile_rows}))
 
     elif sub == "add":
         name = rest[0] if rest else None
@@ -253,17 +282,26 @@ def cmd_connections(argv: list[str]) -> None:
                 i += 1
             else:
                 i += 1
+        if provider not in ("mongodb", "cosmosdb"):
+            _err("--provider must be either mongodb or cosmosdb")
         uri = uri.strip()
         if not uri:
             _err("--uri is required")
         data = _load_profiles()
         data["profiles"][name] = {"provider": provider, "added_at": _now()}
-        if is_default or not data.get("default"):
+        if is_default:
             data["default"] = name
         _creds_store_profile(name, uri)
         _save_profiles(data)
-        print(f"Saved profile '{name}' [{provider}]"
-              + (" (default)" if data["default"] == name else ""))
+        default_note = " (default)" if data.get("default") == name else ""
+        if json_mode:
+            _print_json(_envelope("connections", data={
+                "action": "add",
+                "profile": {"name": name, "provider": provider, "default": data.get("default") == name},
+                "default": data.get("default"),
+            }))
+        else:
+            print(f"Saved profile '{name}' [{provider}]" + default_note)
 
     elif sub == "remove":
         name = rest[0] if rest else None
@@ -277,7 +315,14 @@ def cmd_connections(argv: list[str]) -> None:
         if data.get("default") == name:
             data["default"] = next(iter(data["profiles"]), None)
         _save_profiles(data)
-        print(f"Removed profile '{name}'")
+        if json_mode:
+            _print_json(_envelope("connections", data={
+                "action": "remove",
+                "profile": name,
+                "default": data.get("default"),
+            }))
+        else:
+            print(f"Removed profile '{name}'")
 
     elif sub == "set-default":
         name = rest[0] if rest else None
@@ -289,7 +334,13 @@ def cmd_connections(argv: list[str]) -> None:
             _err(f"Profile '{name}' not found")
         data["default"] = name
         _save_profiles(data)
-        print(f"Default connection set to '{name}'")
+        if json_mode:
+            _print_json(_envelope("connections", data={
+                "action": "set-default",
+                "default": name,
+            }))
+        else:
+            print(f"Default connection set to '{name}'")
 
     elif sub == "import-from-aks":
         secret = ""
@@ -352,7 +403,15 @@ def cmd_connections(argv: list[str]) -> None:
             data["default"] = profile_name
         _creds_store_profile(profile_name, uri)
         _save_profiles(data)
-        print(f"Imported '{profile_name}' from AKS secret {namespace}/{secret}")
+        if json_mode:
+            _print_json(_envelope("connections", data={
+                "action": "import-from-aks",
+                "profile": {"name": profile_name, "provider": "cosmosdb", "default": data.get("default") == profile_name},
+                "default": data.get("default"),
+                "source": f"aks:{namespace}/{secret}",
+            }))
+        else:
+            print(f"Imported '{profile_name}' from AKS secret {namespace}/{secret}")
 
     else:
         _err(f"Unknown connections subcommand: {sub}")
@@ -371,7 +430,7 @@ def cmd_snapshot(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     uri, provider = _get_uri(connection)
     client = _connect(uri, provider)
@@ -424,7 +483,7 @@ def cmd_schema(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     uri, provider = _get_uri(connection)
     client = _connect(uri, provider)
@@ -489,7 +548,7 @@ def cmd_indexes(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     uri, provider = _get_uri(connection)
     client = _connect(uri, provider)
@@ -513,7 +572,7 @@ def cmd_indexes(argv: list[str]) -> None:
 
 def cmd_query(argv: list[str]) -> None:
     if len(argv) < 2:
-        _err("Usage: query <db> <collection> [--where <filter>] [--limit N] [--json]")
+        _err("Usage: query <db> <collection> [--where <filter>] [--projection <json>] [--sort <json>] [--limit N] [--skip N] [--connection <name>] [--json]")
     db_name, coll_name = argv[0], argv[1]
     where_raw = None
     projection_raw = None
@@ -546,11 +605,15 @@ def cmd_query(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     filt = _parse_filter(where_raw)
     projection = _parse_json_arg(projection_raw, "--projection")
     sort = _parse_json_arg(sort_raw, "--sort")
+    if projection is not None and not isinstance(projection, dict):
+        _err("--projection must be a JSON object")
+    if sort is not None and not isinstance(sort, dict):
+        _err("--sort must be a JSON object")
 
     uri, provider = _get_uri(connection)
     client = _connect(uri, provider)
@@ -567,7 +630,9 @@ def cmd_query(argv: list[str]) -> None:
         ref = f"{db_name}.{coll_name}"
         payload = _envelope("query", ref=ref,
                             data={"filter": filt, "count": len(docs),
-                                  "limit": limit, "documents": docs})
+                                  "limit": limit, "skip": skip,
+                                  "projection": projection, "sort": sort,
+                                  "documents": docs})
         if json_mode:
             _print_json(payload)
         else:
@@ -597,7 +662,7 @@ def cmd_count(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     filt = _parse_filter(where_raw)
     uri, provider = _get_uri(connection)
@@ -643,7 +708,7 @@ def cmd_aggregate(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     if not pipeline_raw:
         _err("--pipeline is required")
@@ -716,7 +781,7 @@ def cmd_explain(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     filt = _parse_filter(where_raw)
     uri, provider = _get_uri(connection)
@@ -765,7 +830,7 @@ def cmd_insert(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     if not doc_raw:
         _err("--doc is required")
@@ -831,7 +896,7 @@ def cmd_update(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     if not where_raw:
         _err("--where is required for update")
@@ -917,7 +982,7 @@ def cmd_delete(argv: list[str]) -> None:
             json_mode = True
             i += 1
         else:
-            i += 1
+            _err(f"Unknown argument: {argv[i]}")
 
     if not where_raw:
         _err("--where is required for delete (never delete without a filter)")

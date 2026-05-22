@@ -231,6 +231,14 @@ def main() -> int:
         check("connections list shows secure-store note", "stored securely" in r.stdout)
         check("connections list default marker", "*" in r.stdout)
 
+        r = run([str(AGENT_DO), "mongo", "connections", "list", "--json"], env=base_env)
+        check("connections list --json exit 0", r.returncode == 0, r.stderr)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("connections list --json tool=mongo", out["tool"] == "mongo")
+            check("connections list --json command=connections", out["command"] == "connections")
+            check("connections list --json has profile rows", len(out["data"]["profiles"]) == 1)
+
         # add second profile (non-default)
         r = run(
             [str(AGENT_DO), "mongo", "connections", "add", "dev_local",
@@ -245,6 +253,12 @@ def main() -> int:
         check("connections set-default message", "dev_local" in r.stdout)
 
         # remove second profile — default should roll back to remaining profile
+        creds_local = fake_home / "mongo" / ".creds" / "dev_local"
+        creds_local.unlink(missing_ok=True)
+
+        r = run([str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations", "--limit", "1", "--json"], env=base_env)
+        check("missing default creds falls back to MONGO_CONNECTION_STRING", r.returncode == 0, r.stderr)
+
         r = run([str(AGENT_DO), "mongo", "connections", "remove", "dev_local"], env=base_env)
         check("connections remove exit 0", r.returncode == 0, r.stderr)
 
@@ -364,6 +378,30 @@ def main() -> int:
         out = json.loads(r.stdout)
         check("query JSON filter parsed", out["data"]["filter"] == {"status": "pending"})
         check("query limit stored", out["data"]["limit"] == 5)
+
+        r = run(
+            [str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+             "--where", "status=active",
+             "--projection", '{"externalId": 1}',
+             "--sort", '{"externalId": 1}',
+             "--skip", "1",
+             "--json"],
+            env=base_env,
+        )
+        check("query metadata --json exit 0", r.returncode == 0, r.stderr)
+        if r.returncode == 0:
+            out = json.loads(r.stdout)
+            check("query metadata includes projection", out["data"]["projection"] == {"externalId": 1})
+            check("query metadata includes sort", out["data"]["sort"] == {"externalId": 1})
+            check("query metadata includes skip", out["data"]["skip"] == 1)
+
+        r = run(
+            [str(AGENT_DO), "mongo", "query", "prism_bcc", "expectations",
+             "--sort", '"name"'],
+            env=base_env,
+        )
+        check("query malformed sort fails", r.returncode != 0)
+        check("query malformed sort message", "sort" in r.stderr.lower())
 
         # query with integer coercion
         r = run(
@@ -889,10 +927,23 @@ def main() -> int:
         check("update --set '{}' empty object rejected", r.returncode != 0)
         check("update --set '{}' error is clear", "field" in r.stderr.lower() or "empty" in r.stderr.lower())
 
+        r = run([str(AGENT_DO), "mongo", "insert", "prism_bcc", "expectations",
+                 "--doc", '{"x": 1}', "--dry-runx"], env=base_env)
+        check("insert mistyped flag is rejected", r.returncode != 0)
+        check("insert mistyped flag error is clear", "Unknown argument" in r.stderr)
+
         # --uri with whitespace only must be rejected — not stored as garbage creds
         r = run([str(AGENT_DO), "mongo", "connections", "add", "wstest",
                  "--uri", "   "], env=base_env)
         check("connections add whitespace-only --uri rejected", r.returncode != 0)
+
+        r = run(
+            [str(AGENT_DO), "mongo", "connections", "add", "badprovider",
+             "--uri", "mongodb://localhost:27017", "--provider", "not-a-real-provider"],
+            env=base_env,
+        )
+        check("connections add invalid provider rejected", r.returncode != 0)
+        check("connections add invalid provider message", "provider" in r.stderr.lower())
 
         # import-from-aks when kubectl not installed gives clean error (not unhandled exception).
         # Inject a fake kubectl that exits 127 (command not found) to simulate missing binary

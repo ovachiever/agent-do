@@ -5,7 +5,7 @@ MongoDB and Azure CosmosDB (MongoDB API) plugin for agent-do. Provides structure
 ## Requirements
 
 - Python 3.10+
-- `pymongo` (`pip install pymongo`)
+- `pymongo[srv]` (`pip install "pymongo[srv]"`)
 - For AKS import: `kubectl` in PATH
 
 ## Connection credentials
