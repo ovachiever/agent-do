@@ -70,3 +70,6 @@ Rules:
 | 36 | `mn-a7fd91` | blocked | `mn-5d7c5a` | `.handoff/36b37-mn-a7fd91-zpc-intuitions-estate-recurrence-graduates-into-agent-do-improve.md` |
 | 37 | `mn-5d7c5a` | open | none | `.handoff/37-mn-5d7c5a-zpc-fascia-one-shared-judgment-layer-both-organs-ride.md` |
 | 38 | `mn-fc5028` | blocked | `mn-5d7c5a` | `.handoff/38b37-mn-fc5028-zpc-gardener-the-per-repo-top-50-that-strengthens-as-it-shrinks.md` |
+| 39 | `mn-c7e91b` | in_progress | none | `.handoff/mn-c7e91b-manna-state-json-expose-the-derived-board-model-from-the-core.md` (held under live claim; expected `.handoff/39-mn-c7e91b-manna-state-json-expose-the-derived-board-model-from-the-core.md`) |
+| 40 | `mn-7ef12d` | in_progress | none | `.handoff/mn-7ef12d-manna-estate-json-registered-boards-with-per-board-counts.md` (held under live claim; expected `.handoff/40-mn-7ef12d-manna-estate-json-registered-boards-with-per-board-counts.md`) |
+| 41 | `mn-86a41b` | in_progress | none | `.handoff/mn-86a41b-coord-pulse-accept-an-explicit-verdict-write-from-a-non-hook-cal.md` (held under live claim; expected `.handoff/41-mn-86a41b-coord-pulse-accept-an-explicit-verdict-write-from-a-non-hook-cal.md`) |
