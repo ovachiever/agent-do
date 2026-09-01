@@ -327,11 +327,11 @@ cmd_info() {
     local extra=()
     [[ -n "$MINLENGTH" ]] && extra+=("--minlength=$MINLENGTH")
     if $DRY_RUN; then
-        mkvcon -r "${extra[@]}" info "$disc"; return 0
+        mkvcon -r ${extra[@]+"${extra[@]}"} info "$disc"; return 0
     fi
     local tmp rc=0 parsed
     tmp="$(mktemp)"
-    mkvcon -r "${extra[@]}" info "$disc" > "$tmp" || rc=$?
+    mkvcon -r ${extra[@]+"${extra[@]}"} info "$disc" > "$tmp" || rc=$?
     if [[ ! -s "$tmp" ]]; then
         rm -f "$tmp"
         die "No output from makemkvcon (exit $rc); is a disc loaded in $disc?"
@@ -352,12 +352,12 @@ cmd_rip() {
     local extra=()
     [[ -n "$MINLENGTH" ]] && extra+=("--minlength=$MINLENGTH")
     if $DRY_RUN; then
-        mkvcon -r --progress=-same "${extra[@]}" mkv "$disc" "$title" "$outdir"
+        mkvcon -r --progress=-same ${extra[@]+"${extra[@]}"} mkv "$disc" "$title" "$outdir"
         return 0
     fi
     mkdir -p "$outdir"
     # Robot chatter (MSG/PRGV) must not precede the JSON document on stdout.
-    if ! mkvcon -r --progress=-same "${extra[@]}" mkv "$disc" "$title" "$outdir" 1>&2; then
+    if ! mkvcon -r --progress=-same ${extra[@]+"${extra[@]}"} mkv "$disc" "$title" "$outdir" 1>&2; then
         die "makemkvcon rip failed for $disc title $title"
     fi
     local parsed count

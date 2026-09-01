@@ -8,6 +8,7 @@ missing-binary error path. Uses a mock makemkvcon so no optical drive is needed.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import subprocess
@@ -74,11 +75,16 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+_MOCK_PATHS: list[str] = []
+atexit.register(lambda: [os.unlink(p) for p in _MOCK_PATHS if os.path.exists(p)])
+
+
 def make_mock() -> str:
     fd, path = tempfile.mkstemp(prefix="mock-makemkvcon-")
     with os.fdopen(fd, "w") as f:
         f.write(MOCK)
-    os.chmod(path, 0o755)
+    os.chmod(path, 0o700)
+    _MOCK_PATHS.append(path)
     return path
 
 
