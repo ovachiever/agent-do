@@ -44,6 +44,8 @@ Commands:
                                          Set structured focus (phase: building|gating|watching|quiet|blocked|stopped)
                                          --branch declares the branch this lane needs; a branch this
                                          checkout is not on raises a mandatory-isolation interrupt
+                                         A building writer joining another active building writer in
+                                         this checkout gets a warn-only worktree-isolation nudge
   focus show [peer]                      Show current focus
   focus clear                            Clear current focus
   pulse record --from-hook               Reduce one harness hook payload (stdin JSON) into this
@@ -74,8 +76,9 @@ Options:
 Environment:
   AGENT_DO_COORD_ISOLATION_NUDGE=0       Silence the isolation nudge: contention interrupts stop
                                          naming the remedy and a declared branch that differs from
-                                         HEAD stops raising one. Interrupts themselves are unchanged;
-                                         nothing here ever blocks or changes an exit code.
+                                         HEAD or concurrent building writers stop raising one.
+                                         Path and territory contentions remain; nothing here ever
+                                         blocks or changes an exit code.
 
 Examples:
   agent-coord touch
@@ -147,12 +150,13 @@ WORKTREE_COMMAND = "agent-do git worktree add <branch>"
 
 
 def overlap_remedy(paths: list[str]) -> list[str]:
-    """Ownership first: it is the cheaper fix, and disjoint lanes share one checkout safely."""
+    """Ownership comes first because isolation does not permit two writers on one path."""
     joined = ", ".join(paths) or "the contended paths"
     return [
         f"split ownership so each contended path has one owner: {joined} "
-        "(cheapest fix, and lanes with disjoint paths share one checkout safely)",
-        f"if the work truly cannot share a tree, isolate it: {WORKTREE_COMMAND} ({WORKTREE_CAVEAT})",
+        "(required before any isolation; one path still has one writer)",
+        f"if both lanes are building, or the work otherwise cannot share a tree, "
+        f"isolate it: {WORKTREE_COMMAND} ({WORKTREE_CAVEAT})",
     ]
 
 
@@ -161,6 +165,14 @@ def branch_remedy(branch: str) -> list[str]:
     return [
         f"isolation is mandatory here: agent-do git worktree add {branch} ({WORKTREE_CAVEAT})",
         "or drop the branch declaration and work on this checkout's branch",
+    ]
+
+
+def concurrent_builder_remedy() -> list[str]:
+    """A build consumes checkout-wide state even when source ownership is clean."""
+    return [
+        f"move this build lane to an isolated worktree before compiling: {WORKTREE_COMMAND} "
+        f"(compile state and build artifacts are checkout-wide; {WORKTREE_CAVEAT})",
     ]
 
 
@@ -1071,6 +1083,47 @@ class CoordStore:
             return None
         return {"declared": declared, "head": head, "remedy": branch_remedy(declared)}
 
+    def concurrent_builder_nudge(self, focus: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """Warn a building writer when another active writer builds in this checkout."""
+        if not ISOLATION_NUDGE:
+            return None
+        record = focus if focus is not None else (self.focus_for() or {})
+        if record.get("phase") != "building":
+            return None
+        agents = self._load_agents()
+        if self._record_mode(agents.get(self.agent_id, {})) != "writer":
+            return None
+
+        builders = [
+            peer
+            for peer in self.peers(include_stale=False)
+            if not peer["current"]
+            and peer["status"] == "active"
+            and peer.get("mode") == "writer"
+            and (peer.get("focus") or {}).get("phase") == "building"
+        ]
+        if not builders:
+            return None
+        builders.sort(key=lambda peer: str(peer["agent_id"]))
+        peer_ids = [str(peer["agent_id"]) for peer in builders]
+        peer_labels = [str(peer.get("alias") or peer["agent_id"]) for peer in builders]
+        count = len(builders)
+        noun = "writer" if count == 1 else "writers"
+        verb = "shares" if count == 1 else "share"
+        summary = (
+            f"{count} other active building {noun} already {verb} this checkout "
+            f"({', '.join(peer_labels)}); compile state and build artifacts are shared "
+            "even when source paths are disjoint"
+        )
+        remedy = concurrent_builder_remedy()
+        return {
+            "count": count,
+            "peers": peer_ids,
+            "peer_labels": peer_labels,
+            "summary": with_remedy(summary, remedy),
+            "remedy": remedy,
+        }
+
     def clear_focus(self) -> dict[str, Any] | None:
         self.register_self()
         with self.locked():
@@ -1835,6 +1888,28 @@ class CoordStore:
                     }
                 )
 
+        # Source ownership can be perfectly disjoint while concurrent builds
+        # still consume another lane's dirty compile state and shared artifacts.
+        building_nudge = self.concurrent_builder_nudge(focus)
+        if building_nudge:
+            interrupts.append(
+                {
+                    "kind": "contention",
+                    "reason": "concurrent_builders",
+                    "severity": "warning",
+                    "peer": None,
+                    "peer_label": None,
+                    "peers": building_nudge["peers"],
+                    "peer_labels": building_nudge["peer_labels"],
+                    "paths": [],
+                    "keys": [],
+                    "summary": building_nudge["summary"],
+                    "remedy": building_nudge["remedy"],
+                    "new": False,
+                    "event_id": None,
+                }
+            )
+
         # Declared branch that this working tree is not on: isolation is mandatory.
         mismatch = self.branch_mismatch(focus)
         if mismatch:
@@ -2451,6 +2526,7 @@ def main(argv: list[str]) -> int:
                     "tool": "coord",
                     "focus": payload,
                     "branch_mismatch": store.branch_mismatch(payload),
+                    "isolation_nudge": store.concurrent_builder_nudge(payload),
                 },
                 args.json,
             )

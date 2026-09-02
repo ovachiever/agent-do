@@ -197,8 +197,14 @@ def main() -> int:
         require(interrupts_b_overlap.returncode == 0, f"coord interrupts overlap failed: {interrupts_b_overlap.stderr}")
         overlap_payload = json.loads(interrupts_b_overlap.stdout)
         contentions = [item for item in overlap_payload["interrupts"] if item["kind"] == "contention"]
-        require(len(contentions) == 1, f"expected one contention interrupt: {overlap_payload}")
-        require("recognition-oracle/render.yaml" in contentions[0]["paths"], f"unexpected contention payload: {contentions}")
+        path_contentions = [item for item in contentions if item.get("peer") == "codex-alpha123"]
+        build_nudges = [item for item in contentions if item.get("reason") == "concurrent_builders"]
+        require(len(path_contentions) == 1, f"expected one path contention interrupt: {overlap_payload}")
+        require(len(build_nudges) == 1, f"expected one concurrent-builder nudge: {overlap_payload}")
+        require(
+            "recognition-oracle/render.yaml" in path_contentions[0]["paths"],
+            f"unexpected contention payload: {contentions}",
+        )
 
         _ = run([str(AGENT_DO), "coord", "interrupts", "--json", "--mark-seen"], cwd=project, env=env_b)
 

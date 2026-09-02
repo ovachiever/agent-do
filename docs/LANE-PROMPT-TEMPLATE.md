@@ -39,11 +39,12 @@ agent-do coord claim <primary owned path> --reason "lane NN: <why>"
 Add `--branch <name>` to `focus set` when this lane needs a branch the parent
 checkout is not on: one working tree holds one branch, so that case is mandatory
 isolation and coord will say so. Isolate with `agent-do git worktree add <branch>`
-when your branch differs, or when your owned paths overlap another live lane's.
-Otherwise stay in the shared tree and own your paths: same-branch lanes with
-disjoint ownership do not collide, and a worktree costs a rebuild. A worktree
-binds its zpc memory back to the primary store, but the manna board does not
-follow it: run claim/done/block against the primary checkout.
+when your branch differs. Split overlapping ownership before isolating. For
+build work, a second active writer defaults to its own worktree even when source
+paths are disjoint: dirty compile state and build artifacts belong to the whole
+checkout. A lone builder can stay in the primary checkout. A worktree binds its
+zpc memory back to the primary store, but the manna board does not follow it:
+run claim/done/block against the primary checkout.
 
 ## Repo
 

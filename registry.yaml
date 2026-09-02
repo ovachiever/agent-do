@@ -3984,6 +3984,7 @@ tools:
     - declare structured focus (goal, phase, note, blocking_on, last_ship, branch) with project-relative paths
     - declare roles with exclusive-writer territories and compute overlap contention for both writers
     - name the isolation remedy in contention interrupts (split ownership first, worktree second) and flag a declared branch this checkout is not on as mandatory isolation
+    - proactively warn concurrent active building writers to use separate worktrees because compile state and build artifacts remain shared even when source paths are disjoint
     - manage advisory claims and a warn-only pre-commit guard over live claims and territories
     - point peers at files via drops, declare dependencies, publish artifacts with file pointers
     - compute contention, notice, dependency, and novelty interrupts and expose the event journal as history
@@ -4001,7 +4002,7 @@ tools:
       guard: 'Advisory commit guard: guard check [<path> ...] [--staged] | guard install'
       status: Show current focus, needs, publishes, and interrupt counts
       interrupts: 'Show current interrupts: interrupts [--mark-seen] [--limit <n>]'
-      focus: 'Manage structured focus: focus set <goal> [--path <p>] [--phase <phase>] [--note <t>] [--blocking-on <ref>] [--last-ship <t>] [--branch <name>] | show | clear'
+      focus: 'Manage structured focus and report a warn-only concurrent-builder isolation nudge: focus set <goal> [--path <p>] [--phase <phase>] [--note <t>] [--blocking-on <ref>] [--last-ship <t>] [--branch <name>] | show | clear'
       pulse: 'Shared session telemetry: pulse record --from-hook (stdin JSON, always exit 0) | pulse record --session <harness-session-id> --status <working|needs-user|finished|failed|idle|ended> --updated-at <RFC3339> [--activity <note>|--clear-activity] | pulse show [peer|harness-session-id]'
       claims: List advisory claims
       claim: 'Claim a file/path: claim <path> [--reason <text>] [--strength soft|strong]'
@@ -4047,6 +4048,9 @@ tools:
       - agent coordination
       - tmux sessions
       - agent conflict
+      - concurrent build lanes
+      - shared checkout build contention
+      - worktree isolation
       - dependency between agents
       - claim file ownership
       prompt_patterns:

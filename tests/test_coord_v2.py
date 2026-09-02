@@ -468,7 +468,7 @@ def test_structured_focus(tmp_path: Path, env_base: dict[str, str]) -> None:
 
 
 def test_isolation_nudge(tmp_path: Path, env_base: dict[str, str]) -> None:
-    """Contention names the remedy; a declared branch this tree is not on is mandatory isolation."""
+    """Concurrent builders and branch/path contention name the worktree remedy."""
     project = make_project(tmp_path, "isolation")
     head = subprocess.run(
         ["git", "symbolic-ref", "--short", "HEAD"],
@@ -485,6 +485,45 @@ def test_isolation_nudge(tmp_path: Path, env_base: dict[str, str]) -> None:
 
     coord_json(["role", "set", "builder", "--territory", "shared"], cwd=project, env=env_a)
     coord_json(["role", "set", "builder", "--territory", "shared/api"], cwd=project, env=env_b)
+
+    # A lone building writer stays quiet. The second active building writer is
+    # nudged even though its source paths are disjoint: compile state and build
+    # artifacts belong to the checkout, not to either path claim.
+    lone = coord_json(
+        ["focus", "set", "writer a", "--path", "source-a", "--phase", "building"],
+        cwd=project,
+        env=env_a,
+    )
+    require(lone["isolation_nudge"] is None, f"lone builder must stay silent: {lone}")
+    joined = coord_json(
+        ["focus", "set", "writer b", "--path", "source-b", "--phase", "building"],
+        cwd=project,
+        env=env_b,
+    )
+    nudge = joined["isolation_nudge"]
+    require(nudge and nudge["count"] == 1, f"second builder must be nudged: {joined}")
+    require(
+        nudge["peers"] == ["codex-isowritera"],
+        f"nudge must identify the active building writer: {nudge}",
+    )
+    require("compile state" in nudge["summary"], f"nudge must name checkout-wide risk: {nudge}")
+    require("source paths are disjoint" in nudge["summary"], f"nudge must cover disjoint lanes: {nudge}")
+    require("agent-do git worktree add" in nudge["summary"], f"nudge must name the remedy: {nudge}")
+    require("does not share this board" in nudge["summary"], f"nudge must keep the board caveat: {nudge}")
+
+    # The warning remains visible to both building writers through the normal
+    # interrupt surface, but it is one aggregate advisory rather than one row
+    # per peer.
+    for env, other in ((env_a, "codex-isowriterb"), (env_b, "codex-isowritera")):
+        payload = coord_json(["interrupts"], cwd=project, env=env)
+        builder_nudges = [
+            item
+            for item in payload["interrupts"]
+            if item.get("reason") == "concurrent_builders"
+        ]
+        require(len(builder_nudges) == 1, f"expected one concurrent-builder nudge: {payload}")
+        require(builder_nudges[0]["peers"] == [other], f"nudge must identify peer: {builder_nudges}")
+        require(builder_nudges[0]["severity"] == "warning", f"nudge must be advisory: {builder_nudges}")
 
     # Both sides of the contention are told what to do, ownership-splitting first.
     for env, other in ((env_a, "codex-isowriterb"), (env_b, "codex-isowritera")):
@@ -512,6 +551,43 @@ def test_isolation_nudge(tmp_path: Path, env_base: dict[str, str]) -> None:
             f"structured remedy must lead with ownership-splitting: {contention}",
         )
 
+    # The opt-out suppresses this warning at declaration and on the interrupt
+    # surface. It remains a nudge: focus set still succeeds.
+    env_a_build_off = dict(env_a)
+    env_a_build_off["AGENT_DO_COORD_ISOLATION_NUDGE"] = "0"
+    off_declaration = coord_json(
+        ["focus", "set", "writer a", "--phase", "building"],
+        cwd=project,
+        env=env_a_build_off,
+    )
+    require(
+        off_declaration["isolation_nudge"] is None,
+        f"kill switch must silence declaration nudge: {off_declaration}",
+    )
+    off_building = coord_json(["interrupts"], cwd=project, env=env_a_build_off)
+    require(
+        not [item for item in off_building["interrupts"] if item.get("reason") == "concurrent_builders"],
+        f"kill switch must silence concurrent-builder interrupt: {off_building}",
+    )
+
+    # A building read-only role never triggers the writer nudge and is not
+    # counted as another building writer.
+    env_reader = clean_env(env_base)
+    env_reader["CODEX_THREAD_ID"] = "iso-reader"
+    coord_json(["role", "set", "auditor", "--territory", "research"], cwd=project, env=env_reader)
+    reader = coord_json(
+        ["focus", "set", "reader", "--path", "research", "--phase", "building"],
+        cwd=project,
+        env=env_reader,
+    )
+    require(reader["isolation_nudge"] is None, f"read-only role must not receive builder nudge: {reader}")
+
+    # Leave only the read-only lane building before the matching-branch case.
+    quiet_a = coord_json(["focus", "set", "writer a", "--phase", "quiet"], cwd=project, env=env_a)
+    require(quiet_a["isolation_nudge"] is None, f"non-building phase must stay silent: {quiet_a}")
+    quiet_b = coord_json(["focus", "set", "writer b", "--phase", "quiet"], cwd=project, env=env_b)
+    require(quiet_b["isolation_nudge"] is None, f"non-building phase must stay silent: {quiet_b}")
+
     # A lane on this checkout's branch is silent.
     env_c = clean_env(env_base)
     env_c["CODEX_THREAD_ID"] = "iso-lane-c"
@@ -522,6 +598,7 @@ def test_isolation_nudge(tmp_path: Path, env_base: dict[str, str]) -> None:
     )
     require(same["focus"]["branch"] == head, f"branch must be recorded on focus: {same}")
     require(same["branch_mismatch"] is None, f"same branch must not flag isolation: {same}")
+    require(same["isolation_nudge"] is None, f"read-only building peer must not count: {same}")
     quiet = coord_json(["interrupts"], cwd=project, env=env_c)
     require(
         not [item for item in quiet["interrupts"] if item["kind"] == "contention"],
