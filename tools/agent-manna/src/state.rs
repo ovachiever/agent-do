@@ -162,6 +162,61 @@ fn json_command(
     })
 }
 
+fn executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn resolve_executable(program: &Path) -> Option<PathBuf> {
+    if program.components().count() > 1 {
+        return fs::canonicalize(program)
+            .ok()
+            .filter(|path| executable_file(path));
+    }
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|directory| directory.join(program))
+        .find(|path| executable_file(path))
+        .and_then(|path| fs::canonicalize(path).ok())
+}
+
+/// Prefer the router's own agent-coord executable when this is a source-tree
+/// installation. The fallback preserves packaged/custom agent-do adapters.
+pub fn direct_coord_program(agent_do: &Path) -> Option<PathBuf> {
+    let router = resolve_executable(agent_do)?;
+    let candidate = router.parent()?.join("tools").join("agent-coord");
+    executable_file(&candidate).then_some(candidate)
+}
+
+fn coord_json_command(
+    root: &Path,
+    agent_do: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Value, String> {
+    if let Some(agent_coord) = direct_coord_program(agent_do) {
+        return json_command(root, &agent_coord, args, timeout);
+    }
+    let mut routed_args = Vec::with_capacity(args.len() + 1);
+    routed_args.push("coord");
+    routed_args.extend_from_slice(args);
+    json_command(root, agent_do, &routed_args, timeout)
+}
+
 fn git(root: &Path, args: &[&str], timeout: Duration) -> Result<Captured, String> {
     run(root, Path::new("git"), args, timeout)
 }
@@ -257,10 +312,10 @@ fn collect_peers(root: &Path, agent_do: Option<&Path>) -> Vec<Value> {
     let Some(agent_do) = agent_do else {
         return Vec::new();
     };
-    let Ok(payload) = json_command(
+    let Ok(payload) = coord_json_command(
         root,
         agent_do,
-        &["coord", "peers", "--json"],
+        &["peers", "--json"],
         Duration::from_secs(10),
     ) else {
         return Vec::new();
@@ -302,7 +357,7 @@ fn collect_peers(root: &Path, agent_do: Option<&Path>) -> Vec<Value> {
 }
 
 fn coord_rows(root: &Path, agent_do: &Path, args: &[&str], key: &str) -> Vec<Value> {
-    json_command(root, agent_do, args, Duration::from_secs(10))
+    coord_json_command(root, agent_do, args, Duration::from_secs(10))
         .ok()
         .and_then(|payload| payload.get(key).and_then(Value::as_array).cloned())
         .unwrap_or_default()
@@ -334,15 +389,13 @@ fn collect_coord(root: &Path, agent_do: Option<&Path>, peers: &[Value]) -> Value
         return empty_coord();
     };
     let (claim_rows, drop_rows, need_rows) = thread::scope(|scope| {
-        let claims =
-            scope.spawn(|| coord_rows(root, agent_do, &["coord", "claims", "--json"], "claims"));
-        let drops =
-            scope.spawn(|| coord_rows(root, agent_do, &["coord", "drops", "--json"], "drops"));
+        let claims = scope.spawn(|| coord_rows(root, agent_do, &["claims", "--json"], "claims"));
+        let drops = scope.spawn(|| coord_rows(root, agent_do, &["drops", "--json"], "drops"));
         let needs = scope.spawn(|| {
             coord_rows(
                 root,
                 agent_do,
-                &["coord", "need", "list", "--all", "--json"],
+                &["need", "list", "--all", "--json"],
                 "needs",
             )
         });
@@ -670,17 +723,29 @@ fn drift_parts(board_dir: &Path) -> (Value, Value) {
     )
 }
 
+/// A running manna-core can reconcile itself directly. Falling back to the
+/// agent-do router keeps library embeddings working, while the normal CLI path
+/// avoids launching the full router only to return to the same binary.
+fn live_reconcile_command(
+    agent_do: &Path,
+    current_exe: Option<PathBuf>,
+) -> (PathBuf, &'static [&'static str]) {
+    if let Some(executable) = current_exe.filter(|path| {
+        agent_do == Path::new("agent-do")
+            && path.file_stem().and_then(|name| name.to_str()) == Some("manna-core")
+    }) {
+        return (executable, &["reconcile", "--json"]);
+    }
+    (agent_do.to_path_buf(), &["manna", "reconcile", "--json"])
+}
+
 fn drift_state(root: &Path, board_dir: &Path, options: &StateOptions) -> Value {
     let (file_drift, _) = drift_parts(board_dir);
     let Some(agent_do) = options.agent_do.as_deref().filter(|_| options.live_drift) else {
         return file_drift;
     };
-    let Ok(payload) = json_command(
-        root,
-        agent_do,
-        &["manna", "reconcile", "--json"],
-        Duration::from_secs(60),
-    ) else {
+    let (program, args) = live_reconcile_command(agent_do, std::env::current_exe().ok());
+    let Ok(payload) = json_command(root, &program, args, Duration::from_secs(60)) else {
         return file_drift;
     };
     let Some(findings) = payload.get("findings").and_then(Value::as_array).cloned() else {
@@ -1245,6 +1310,55 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use tempfile::TempDir;
+
+    #[test]
+    fn live_reconcile_uses_the_running_core_without_router_round_trip() {
+        let agent_do = Path::new("agent-do");
+        let (program, args) = live_reconcile_command(
+            agent_do,
+            Some(PathBuf::from(
+                "/repo/tools/agent-manna/target/release/manna-core",
+            )),
+        );
+        assert_eq!(
+            program,
+            PathBuf::from("/repo/tools/agent-manna/target/release/manna-core")
+        );
+        assert_eq!(args, ["reconcile", "--json"]);
+
+        let custom_agent_do = Path::new("/opt/custom-agent-do");
+        let (program, args) = live_reconcile_command(
+            custom_agent_do,
+            Some(PathBuf::from(
+                "/repo/tools/agent-manna/target/release/manna-core",
+            )),
+        );
+        assert_eq!(program, custom_agent_do);
+        assert_eq!(args, ["manna", "reconcile", "--json"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn source_tree_state_invokes_agent_coord_without_router_round_trip() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let router = temp.path().join("agent-do");
+        let coord = temp.path().join("tools/agent-coord");
+        fs::create_dir(coord.parent().unwrap()).unwrap();
+        fs::write(&router, "#!/bin/sh\n").unwrap();
+        fs::write(&coord, "#!/bin/sh\n").unwrap();
+        for path in [&router, &coord] {
+            let mut permissions = fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).unwrap();
+        }
+
+        assert_eq!(
+            direct_coord_program(&router),
+            Some(coord.canonicalize().unwrap())
+        );
+    }
 
     fn issue(id: &str, title: &str, status: IssueStatus, issue_type: IssueType) -> Issue {
         let mut issue = Issue::new(id.to_string(), title.to_string()).unwrap();

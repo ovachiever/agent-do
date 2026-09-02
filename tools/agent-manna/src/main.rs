@@ -23,7 +23,9 @@ use manna_core::reconcile::{
     claim_command_ids, extract_manna_ids, lint_board, manna_trailer_ids, parse_session_pid,
     prompt_pointer, Finding, FindingKind, LintFinding,
 };
-use manna_core::state::{derive_board_state, StateOptions, DEFAULT_DECISION_MARKERS};
+use manna_core::state::{
+    derive_board_state, direct_coord_program, StateOptions, DEFAULT_DECISION_MARKERS,
+};
 use manna_core::store::MannaStore;
 use manna_core::workflow::{
     attach_handoff, canonical_handoff_path, create_paired_issue, delete_paired_issue,
@@ -2324,16 +2326,20 @@ fn pid_alive(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-/// Run `agent-do coord peers --json` bounded to ~2s; map agent_id -> status.
+/// Read coord peers bounded to ~2s; map agent_id -> status.
 fn coord_peer_statuses() -> Result<HashMap<String, String>, String> {
     use std::io::Read;
 
-    let mut child = std::process::Command::new("agent-do")
-        .args(["coord", "peers", "--json"])
+    let (program, args) = match direct_coord_program(Path::new("agent-do")) {
+        Some(agent_coord) => (agent_coord, vec!["peers", "--json"]),
+        None => (PathBuf::from("agent-do"), vec!["coord", "peers", "--json"]),
+    };
+    let mut child = std::process::Command::new(program)
+        .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("agent-do unavailable: {}", e))?;
+        .map_err(|e| format!("coord unavailable: {}", e))?;
 
     // Drain stdout on a thread so a large peers list cannot deadlock the pipe.
     let mut stdout = child.stdout.take().ok_or("no stdout handle")?;
@@ -2477,9 +2483,47 @@ fn doc_reference_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Whether a file belongs to the durable-document surfaces searched for Manna
+/// references. Build products, source files, images, and other artifacts are
+/// deliberately outside this check even when they happen to contain `mn-`.
+fn is_doc_reference_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "md" | "txt" | "yaml" | "yml" | "json" | "jsonl" | "source"
+            )
+        })
+}
+
+/// Build and cache roots can contain document-looking metadata among hundreds
+/// of thousands of artifacts. None are durable Manna documentation or valid
+/// shadow-workflow roots, so reconciliation prunes them before walking their
+/// descendants.
+fn is_reconcile_generated_dir(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    matches!(
+        name,
+        "worktrees"
+            | "toolchains"
+            | "node_modules"
+            | "target"
+            | ".build"
+            | "Build"
+            | "build"
+            | "__pycache__"
+    ) || name.starts_with("DerivedData")
+        || name.ends_with(".xcresult")
+        || name.ends_with(".noindex")
+}
+
 /// Recursively collect (file, line, id) references under a directory.
 ///
-/// Skips symlinks and files over 1MB; tolerates non-UTF8 content. A missing
+/// Scans durable document extensions only, prunes known build/cache roots,
+/// skips symlinks and files over 1MB, and tolerates non-UTF8 content. A missing
 /// directory is a successful empty scan, not a skipped check.
 fn scan_dir_for_ids(dir: &Path, refs: &mut Vec<(PathBuf, usize, String)>) {
     let entries = match std::fs::read_dir(dir) {
@@ -2496,7 +2540,13 @@ fn scan_dir_for_ids(dir: &Path, refs: &mut Vec<(PathBuf, usize, String)>) {
             continue;
         }
         if file_type.is_dir() {
+            if is_reconcile_generated_dir(&path) {
+                continue;
+            }
             scan_dir_for_ids(&path, refs);
+            continue;
+        }
+        if !is_doc_reference_file(&path) {
             continue;
         }
         if entry.metadata().map_or(true, |m| m.len() > 1_000_000) {
@@ -2759,10 +2809,9 @@ fn collect_shadow_handoffs(root: &Path, files: &mut Vec<PathBuf>, unsafe_links: 
                 }
                 continue;
             }
-            if matches!(
-                name.as_ref(),
-                ".git" | ".manna" | ".handoff" | "node_modules" | "target"
-            ) {
+            if matches!(name.as_ref(), ".git" | ".manna" | ".handoff")
+                || is_reconcile_generated_dir(&path)
+            {
                 continue;
             }
             if file_type.is_dir() {
@@ -3362,6 +3411,78 @@ mod tests {
         let store = MannaStore::new(temp_dir.path());
         store.init().unwrap();
         (temp_dir, store)
+    }
+
+    #[test]
+    fn doc_reference_file_allowlist_is_document_only() {
+        for document in [
+            "handoff.md",
+            "notes.TXT",
+            "config.yaml",
+            "config.YML",
+            "state.json",
+            "lessons.JSONL",
+            "legacy.source",
+        ] {
+            assert!(
+                is_doc_reference_file(Path::new(document)),
+                "expected document extension: {document}"
+            );
+        }
+        for artifact in [
+            "object.o",
+            "source.rs",
+            "archive.zip",
+            "screenshot.png",
+            "README",
+        ] {
+            assert!(
+                !is_doc_reference_file(Path::new(artifact)),
+                "unexpected document extension: {artifact}"
+            );
+        }
+    }
+
+    #[test]
+    fn doc_reference_scan_prunes_large_build_artifact_subtree() {
+        let temp = TempDir::new().unwrap();
+        let dev = temp.path().join(".dev");
+        let report = dev.join("reports").join("receipt.md");
+        std::fs::create_dir_all(report.parent().unwrap()).unwrap();
+        std::fs::write(&report, "receipt for mn-a1b2c3\n").unwrap();
+
+        // A source/build artifact outside a named build root is still ignored
+        // by extension, even though the old scanner would read the embedded ID.
+        std::fs::write(dev.join("artifact.o"), "mn-b2c3d4\n").unwrap();
+
+        // Model the expensive .dev shape: a large DerivedData subtree with
+        // many small artifacts plus document-looking build metadata. Pruning
+        // the root must make every descendant irrelevant to doc_reference.
+        let products = dev.join("DerivedData-Holy").join("Build").join("Products");
+        std::fs::create_dir_all(&products).unwrap();
+        for index in 0..256 {
+            std::fs::write(
+                products.join(format!("artifact-{index}.o")),
+                "binary payload mentions mn-c3d4e5\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            products.join("metadata.json"),
+            "{\"issue\":\"mn-d4e5f6\"}\n",
+        )
+        .unwrap();
+        let toolchains = dev.join("toolchains").join("swift");
+        std::fs::create_dir_all(&toolchains).unwrap();
+        std::fs::write(
+            toolchains.join("manifest.json"),
+            "{\"issue\":\"mn-e5f6a7\"}\n",
+        )
+        .unwrap();
+
+        let mut refs = Vec::new();
+        scan_dir_for_ids(&dev, &mut refs);
+        assert_eq!(refs, vec![(report, 1, "mn-a1b2c3".to_string())]);
     }
 
     #[test]
@@ -4127,6 +4248,29 @@ mod tests {
                     .as_deref()
                     .is_some_and(|path| path.ends_with("innocent-notes.md"))
         }));
+    }
+
+    #[test]
+    fn workflow_sprawl_prunes_generated_artifact_directories() {
+        let project = TempDir::new().unwrap();
+        std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
+        let generated_roots = [
+            project.path().join(".dev/DerivedData-Holy/Build"),
+            project.path().join(".dev/toolchains/swift"),
+            project.path().join(".dev/worktrees/install-lane"),
+        ];
+        for root in generated_roots {
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(
+                root.join("looks-like-a-handoff.md"),
+                "agent-do manna claim mn-abc123\n",
+            )
+            .unwrap();
+        }
+
+        let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
+        let findings = check_workflow_sprawl(project.path(), &[issue], &WorkflowConfig::default());
+        assert!(findings.is_empty());
     }
 
     #[test]
