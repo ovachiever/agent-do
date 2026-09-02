@@ -5,6 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BINARY_NAME="manna-core"
 
 find_binary() {
@@ -44,11 +45,118 @@ EOF
     exit 1
 }
 
+python_pin_path() {
+    local runtime_home="${AGENT_DO_HOME:-}"
+
+    if [[ -z "$runtime_home" && -n "${HOME:-}" ]]; then
+        runtime_home="$HOME/.agent-do"
+    fi
+    [[ -n "$runtime_home" ]] || return 1
+    printf '%s/python-path\n' "$runtime_home"
+}
+
+python_contract_supported() {
+    local candidate="${1:-}"
+
+    [[ "$candidate" == /* && -x "$candidate" ]] || return 1
+    "$candidate" -c \
+        'import sys, yaml; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+        >/dev/null 2>&1
+}
+
+record_python_runtime() {
+    local candidate="$1"
+    local pin_path=""
+    local pending=""
+
+    pin_path="$(python_pin_path 2>/dev/null || true)"
+    [[ -n "$pin_path" ]] || return 0
+    mkdir -p "$(dirname "$pin_path")" || return 1
+    if [[ -e "$pin_path" && ! -f "$pin_path" ]]; then
+        printf 'agent-manna: Python runtime pin is not a regular file: %s\n' "$pin_path" >&2
+        return 1
+    fi
+    pending="$(mktemp "$pin_path.XXXXXX")" || return 1
+    if ! printf '%s\n' "$candidate" > "$pending"; then
+        rm -f "$pending"
+        return 1
+    fi
+    if ! mv -f "$pending" "$pin_path"; then
+        rm -f "$pending"
+        return 1
+    fi
+}
+
+find_python_runtime() {
+    local candidate=""
+    local pin_path=""
+    local pinned=""
+    local runtime=""
+    local source="discovered"
+    local candidates=()
+
+    if [[ -n "${AGENT_DO_PYTHON:-}" ]]; then
+        runtime="$AGENT_DO_PYTHON"
+        if [[ "$runtime" != */* ]]; then
+            runtime="$(command -v "$runtime" 2>/dev/null || true)"
+        fi
+        source="override"
+    else
+        pin_path="$(python_pin_path 2>/dev/null || true)"
+    fi
+    if [[ "$source" == "discovered" && -n "$pin_path" && -e "$pin_path" ]]; then
+        if [[ ! -f "$pin_path" ]] || ! IFS= read -r pinned < "$pin_path"; then
+            printf 'agent-manna: Python runtime pin is unreadable: %s\n' "$pin_path" >&2
+            return 1
+        fi
+        runtime="$pinned"
+        source="pin"
+    fi
+
+    if [[ "$source" == "discovered" ]]; then
+        candidates=(
+            "$(command -v python3 2>/dev/null || true)"
+            "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}"
+            "$REPO_DIR/.venv/bin/python"
+            /opt/homebrew/bin/python3
+            /usr/local/bin/python3
+            /home/linuxbrew/.linuxbrew/bin/python3
+        )
+        for candidate in "${candidates[@]}"; do
+            if python_contract_supported "$candidate"; then
+                runtime="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if ! python_contract_supported "$runtime"; then
+        if [[ "$source" == "override" ]]; then
+            printf 'agent-manna: AGENT_DO_PYTHON must name Python 3.10+ with PyYAML: %s\n' \
+                "$AGENT_DO_PYTHON" >&2
+        elif [[ "$source" == "pin" ]]; then
+            printf 'agent-manna: pinned Python runtime is not Python 3.10+ with PyYAML: %s\n' \
+                "$runtime" >&2
+        else
+            printf 'agent-manna: estate and serve require Python 3.10+ with PyYAML.\n' >&2
+        fi
+        printf 'Run %s/install.sh or set AGENT_DO_PYTHON to an absolute interpreter path.\n' \
+            "$REPO_DIR" >&2
+        return 1
+    fi
+    if [[ "$source" == "discovered" ]] && ! record_python_runtime "$runtime"; then
+        printf 'agent-manna: could not record Python runtime at %s\n' "$pin_path" >&2
+        return 1
+    fi
+    printf '%s\n' "$runtime"
+}
+
 # `estate` is the agent-facing read of the machine registry. It calls the
 # same derivation as /api/boards but never starts or contacts the daemon.
 if [[ "${1:-}" == "estate" ]]; then
     shift
-    exec python3 "$SCRIPT_DIR/serve/estate.py" "$@"
+    PYTHON_RUNTIME="$(find_python_runtime)" || exit 1
+    exec "$PYTHON_RUNTIME" "$SCRIPT_DIR/serve/estate.py" "$@"
 fi
 
 # `serve` is the human window (Python beside the Rust core): a read-only
@@ -56,7 +164,8 @@ fi
 # touches the board, so it lives outside manna-core's transactional spine.
 if [[ "${1:-}" == "serve" ]]; then
     shift
-    exec python3 "$SCRIPT_DIR/serve/serve.py" "$@"
+    PYTHON_RUNTIME="$(find_python_runtime)" || exit 1
+    exec "$PYTHON_RUNTIME" "$SCRIPT_DIR/serve/serve.py" "$@"
 fi
 
 # Top-level help comes from the core; append the wrapper-provided verb so

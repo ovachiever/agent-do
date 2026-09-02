@@ -186,11 +186,14 @@ class WrapperContractTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (self.home / "python-path").write_text(sys.executable + "\n", encoding="utf-8")
+        self.stub_agent_do = make_agent_do(base)
         self.env = {
             **os.environ,
             "AGENT_DO_HOME": str(self.home),
-            "MANNA_SERVE_AGENT_DO": str(make_agent_do(base)),
+            "MANNA_SERVE_AGENT_DO": str(self.stub_agent_do),
         }
+        self.env.pop("AGENT_DO_PYTHON", None)
         self.wrapper = REPO / "tools" / "agent-manna" / "agent-manna"
 
     def tearDown(self) -> None:
@@ -264,6 +267,53 @@ class WrapperContractTests(unittest.TestCase):
         )
         self.assertEqual(top.returncode, 0, top.stderr)
         self.assertRegex(top.stdout, r"\n  estate\s{2,}")
+
+    def test_sparse_path_uses_the_pinned_runtime_for_estate_and_serve(self) -> None:
+        sparse_env = {
+            "PATH": "/usr/bin:/bin",
+            "AGENT_DO_HOME": str(self.home),
+            "MANNA_SERVE_AGENT_DO": str(self.stub_agent_do),
+        }
+        estate = subprocess.run(
+            [str(self.wrapper), "estate", "--json"],
+            cwd=self.tmp.name,
+            env=sparse_env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(estate.returncode, 0, estate.stderr)
+        self.assertEqual(json.loads(estate.stdout)["count"], 2)
+
+        try:
+            serve = subprocess.run(
+                [str(self.wrapper), "serve", "--json", "--port", "0"],
+                cwd=self.root,
+                env=sparse_env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(serve.returncode, 0, serve.stderr)
+            self.assertEqual(json.loads(serve.stdout)["daemon"], "started")
+        finally:
+            subprocess.run(
+                [str(self.wrapper), "serve", "--stop", "--json"],
+                cwd=self.root,
+                env=sparse_env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+    def test_invalid_pinned_runtime_fails_closed(self) -> None:
+        invalid = Path(self.tmp.name) / "invalid-python"
+        invalid.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        invalid.chmod(0o755)
+        (self.home / "python-path").write_text(str(invalid) + "\n", encoding="utf-8")
+        result = self.run_estate("--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pinned Python runtime is not Python 3.10+ with PyYAML", result.stderr)
 
 
 if __name__ == "__main__":

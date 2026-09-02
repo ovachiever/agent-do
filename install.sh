@@ -36,6 +36,7 @@ agent_do_ensure_supported_bash "$REPO_DIR/install.sh" "$@" || exit $?
 SYMLINK_DIR="$HOME/.local/bin"
 SYMLINK_PATH="$SYMLINK_DIR/agent-do"
 AGENT_DO_HOME="${AGENT_DO_HOME:-$HOME/.agent-do}"
+PYTHON_PIN_PATH="$AGENT_DO_HOME/python-path"
 CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_PATH:-$HOME/.claude/settings.json}"
 CODEX_HOOKS_DIR="$HOME/.codex/hooks"
@@ -347,6 +348,10 @@ uninstall() {
     if [ -f "$AGENT_DO_HOME/install-path" ]; then
         rm "$AGENT_DO_HOME/install-path"
         info "Removed breadcrumb $AGENT_DO_HOME/install-path"
+    fi
+    if [ -f "$PYTHON_PIN_PATH" ]; then
+        rm "$PYTHON_PIN_PATH"
+        info "Removed Python runtime pin $PYTHON_PIN_PATH"
     fi
 
     # Remove only an index carrying this repository's generated marker.
@@ -765,16 +770,51 @@ fi
 
 # 5. Python dependencies
 step "Installing Python dependencies"
-if command -v pip3 &>/dev/null; then
-    pip3 install -r "$REPO_DIR/requirements.txt" --quiet 2>/dev/null && \
-        info "Python dependencies installed" || \
-        warn "pip install failed — try: pip3 install -r requirements.txt"
-elif command -v pip &>/dev/null; then
-    pip install -r "$REPO_DIR/requirements.txt" --quiet 2>/dev/null && \
-        info "Python dependencies installed" || \
-        warn "pip install failed — try: pip install -r requirements.txt"
+PYTHON_BIN=""
+if [[ -n "${AGENT_DO_PYTHON:-}" ]]; then
+    PYTHON_BIN="$(command -v "$AGENT_DO_PYTHON" 2>/dev/null || true)"
+    [[ -z "$PYTHON_BIN" && -x "$AGENT_DO_PYTHON" ]] && PYTHON_BIN="$AGENT_DO_PYTHON"
+    if [[ -z "$PYTHON_BIN" ]] || ! "$PYTHON_BIN" -c \
+        'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+        >/dev/null 2>&1; then
+        warn "AGENT_DO_PYTHON must name Python 3.10 or newer: $AGENT_DO_PYTHON"
+        PYTHON_BIN=""
+    fi
 else
-    warn "pip not found — install Python deps manually: pip install -r requirements.txt"
+    for candidate in \
+        "$(command -v python3 2>/dev/null || true)" \
+        "$REPO_DIR/.venv/bin/python" \
+        /opt/homebrew/bin/python3 \
+        /usr/local/bin/python3 \
+        /home/linuxbrew/.linuxbrew/bin/python3
+    do
+        [[ -n "$candidate" && -x "$candidate" ]] || continue
+        if "$candidate" -c \
+            'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+            >/dev/null 2>&1; then
+            PYTHON_BIN="$candidate"
+            break
+        fi
+    done
+fi
+
+if [[ -n "$PYTHON_BIN" ]] && \
+    "$PYTHON_BIN" -m pip install -r "$REPO_DIR/requirements.txt" --quiet 2>/dev/null && \
+    "$PYTHON_BIN" -c 'import yaml' >/dev/null 2>&1; then
+    PYTHON_BIN="$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
+    python_pin_pending=""
+    if python_pin_pending="$(mktemp "$PYTHON_PIN_PATH.XXXXXX")" && \
+        printf '%s\n' "$PYTHON_BIN" > "$python_pin_pending" && \
+        mv -f "$python_pin_pending" "$PYTHON_PIN_PATH"; then
+        info "Python dependencies installed and runtime pinned: $PYTHON_BIN"
+    else
+        [[ -n "$python_pin_pending" ]] && rm -f "$python_pin_pending"
+        warn "Python dependencies installed, but runtime pin could not be written: $PYTHON_PIN_PATH"
+    fi
+elif [[ -n "$PYTHON_BIN" ]]; then
+    warn "Python dependency install failed. Try: $PYTHON_BIN -m pip install -r requirements.txt"
+else
+    warn "Python 3.10+ not found. Set AGENT_DO_PYTHON to an absolute interpreter path"
 fi
 
 # 6. Optional: Node.js tools

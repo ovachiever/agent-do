@@ -16,6 +16,10 @@ environments still execute the dispatcher and every child tool under the same
 supported Bash.
 Set `AGENT_DO_BASH=/absolute/path/to/bash` only when the supported interpreter
 lives outside the standard paths searched by the selector.
+Python-backed Manna commands similarly bind to one verified Python 3.10+
+interpreter with PyYAML. Installation records it at
+`~/.agent-do/python-path`; set `AGENT_DO_PYTHON=/absolute/path/to/python` to
+select a different runtime deliberately.
 
 ```bash
 ./install.sh                # Install; auto-installs Codex hooks if ~/.codex/ exists
@@ -31,7 +35,7 @@ What the installer actually does, in order:
 3. Generates the discovery index from `registry.yaml` via `bin/gen-index`
 4. Writes the Claude hook **wrappers** to `~/.claude/hooks/` (ten today): `agent-do-session-start.sh`, `agent-do-prompt-router.py`, `agent-do-correction-keys.py`, `agent-do-now-stamp.py`, `agent-do-pretooluse-check.py`, `agent-do-zpc-trigger.py`, `agent-do-quantity-check.py`, `agent-do-zpc-position-nudge.sh`, `agent-do-zpc-write-nudge.sh`, `agent-do-coord-stop.sh`
 5. Optionally writes five Codex wrappers to `~/.codex/hooks/` (the three event hooks plus `stop-quality-gate.sh`/`.py`)
-6. Installs Python dependencies (`pip3 install -r requirements.txt`)
+6. Installs Python dependencies through one Python 3.10+ interpreter and records that exact runtime at `~/.agent-do/python-path`
 7. Interactively offers `npm install` for browse/unbrowse and `cargo build --release` for manna
 8. Runs `agent-do --health`
 9. Prints the Claude `settings.json` snippet, the Codex `hooks.json` template when Codex install ran, and a project CLAUDE.md snippet

@@ -276,6 +276,7 @@ The second property the contracts machine holds: a command that caps its output 
 ## Environment
 
 - `AGENT_DO_HOME`: Config/state directory (default: `~/.agent-do`)
+- `AGENT_DO_PYTHON`: Explicit Python 3.10+ interpreter for Python-backed Manna commands; `install.sh` validates and records the selected runtime at `$AGENT_DO_HOME/python-path`
 - `ANTHROPIC_API_KEY`: Required for natural language mode and optional AI-backed suggest/UserPromptSubmit routing
 - `AGENT_DO_SUGGEST_AI`: `auto|on|off` for AI-backed suggest command selection
 - `AGENT_DO_HOOK_AI`: `auto|on|off` for AI-backed UserPromptSubmit full-catalog routing

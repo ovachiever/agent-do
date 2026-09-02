@@ -52,6 +52,16 @@ class InstallSpecCoherence(unittest.TestCase):
         self.assertEqual(sorted(installed - removed), [],
                          "installed but never uninstalled")
 
+    def test_python_dependencies_and_runtime_pin_share_one_interpreter(self) -> None:
+        self.assertIn('"$PYTHON_BIN" -m pip install', INSTALL)
+        self.assertIn('"$PYTHON_BIN" -c \'import yaml\'', INSTALL)
+        self.assertIn("PYTHON_PIN_PATH=", INSTALL)
+        self.assertIn('mv -f "$python_pin_pending" "$PYTHON_PIN_PATH"', INSTALL)
+
+    def test_uninstall_removes_the_python_runtime_pin(self) -> None:
+        uninstall = INSTALL[INSTALL.index("uninstall() {"):INSTALL.index("# 1. Symlink")]
+        self.assertIn('rm "$PYTHON_PIN_PATH"', uninstall)
+
 
 if __name__ == "__main__":
     result = unittest.main(exit=False).result
