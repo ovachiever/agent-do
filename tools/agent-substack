@@ -304,6 +304,26 @@ def markdown_to_doc(md_text: str, *, image_resolver=None) -> dict[str, Any]:
             content.append({"type": "horizontal_rule"})
             i += 1
             continue
+        # Substack button widgets; node shapes copied verbatim from a
+        # hand-formatted draft (post 213632223), the layout Erik builds manually.
+        if line.strip().lower() == "[subscribe]":
+            content.append({"type": "button", "attrs": {
+                "url": "%%checkout_url%%", "text": "Subscribe now",
+                "action": None, "class": None}})
+            i += 1
+            continue
+        if line.strip().lower() == "[comment]":
+            content.append({"type": "button", "attrs": {
+                "url": "%%half_magic_comments_url%%", "text": "Leave a comment",
+                "action": None, "class": None}})
+            i += 1
+            continue
+        if line.strip().lower() == "[share]":
+            content.append({"type": "button", "attrs": {
+                "url": "%%share_url%%", "text": "Share",
+                "action": None, "class": None}})
+            i += 1
+            continue
         image = _IMAGE_LINE_RE.match(line)
         if image:
             alt, src = image.group(1), image.group(2)
