@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (102 tools)
+## Summary (103 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -83,6 +83,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [metrics](#metrics) | System metrics and monitoring (CPU, memory, disk, network, processes) | read | 8 |
 | [midi](#midi) | MIDI control | mixed | 3 |
 | [models](#models) | Capability-aware model roles for agent-do's internal LLM calls | mixed | 3 |
+| [mongo](#mongo) | MongoDB/CosmosDB profiles, discovery, queries, aggregation, and safe writes | mixed | 15 |
 | [namecheap](#namecheap) | Namecheap domain and DNS management — domains, DNS records (safe upsert with exact verification), nameservers, SSL, availability | write | 13 |
 | [network](#network) | Network diagnostics | read | 4 |
 | [notion](#notion) | Notion team operating layer for pages, data sources, tasks, decisions, handoffs, comments, cache, and webhooks | mixed | 22 |
@@ -2933,6 +2934,90 @@ agent-do models resolve vision --json
 - Read-only (snapshot/verify; safe to parallelize): `list`, `resolve`
 - Write (connect/interact/save): `doctor`
 - composite (one call performs several beats internally): `doctor`
+
+### mongo
+
+MongoDB/CosmosDB profiles, discovery, queries, aggregation, and safe writes
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- manage named connection profiles (MongoDB and CosmosDB)
+- import connection strings from AKS Kubernetes secrets
+- snapshot all databases and collections with document counts
+- infer collection schemas from document samples
+- list collection indexes
+- query documents with filters (JSON or key=value shorthand)
+- count documents matching a filter
+- run aggregation pipelines (inline JSON or @file)
+- explain query execution plans (useful for CosmosDB RU cost)
+- insert documents with dry-run preview
+- update documents with dry-run preview (--where required)
+- delete documents safely (--confirm required, --where required)
+
+**Commands**
+
+- `connections list`: List saved connection profiles
+- `connections add`: Save a new connection profile
+- `connections remove`: Remove a saved profile
+- `connections set-default`: Change the default profile
+- `connections import-from-aks`: Import URI from a Kubernetes secret
+- `snapshot`: All databases, collections, and document counts
+- `schema`: Infer field types from a document sample
+- `indexes`: List collection indexes
+- `query`: Find documents with optional filter, projection, sort
+- `count`: Count documents matching a filter
+- `aggregate`: Run an aggregation pipeline
+- `explain`: Show query execution plan (RU cost on CosmosDB)
+- `insert`: Insert a document (supports --dry-run)
+- `update`: Update documents matching a filter (supports --dry-run)
+- `delete`: Delete documents matching a filter (requires --confirm)
+
+**Examples**
+
+```bash
+# list mongodb connections
+agent-do mongo connections list
+# add a cosmosdb connection
+printf '%s' "$COSMOS_URI" | agent-do mongo connections add app --stdin --provider cosmosdb --default
+# import cosmos connection from aks secret
+agent-do mongo connections import-from-aks --secret cosmos-uri --namespace app --profile app
+# snapshot all mongo databases
+agent-do mongo snapshot
+# infer schema of events collection
+agent-do mongo schema appdb events
+# list indexes on events
+agent-do mongo indexes appdb events
+# query expectations where externalId is x001
+agent-do mongo query appdb events --where externalId=x001 --json
+# count pending expectations
+agent-do mongo count appdb events --where status=pending
+# run aggregation pipeline on events
+agent-do mongo aggregate appdb events --pipeline '[{"$group":{"_id":"$status","count":{"$sum":1}}}]'
+# explain query plan for externalId lookup
+agent-do mongo explain appdb events --where externalId=x001
+# preview inserting a document
+agent-do mongo insert appdb events --doc '{"externalId":"y001","status":"pending"}' --dry-run
+# update status to done for externalId x001
+agent-do mongo update appdb events --where externalId=x001 --set status=done --dry-run
+# delete a document by externalId
+agent-do mongo delete appdb events --where externalId=x001 --dry-run
+```
+
+**Credentials**
+
+- Optional: `MONGO_CONNECTION_STRING`
+- Note: Save profile URIs with 'agent-do mongo connections add \<name> --stdin' to keep credentials out of argv and shell history; profile URI files are written mode 0600 under AGENT_DO_HOME.
+- Note: Profile URI fallback uses MONGO_CONNECTION_\<PROFILE> from the environment or agent-do creds store, with the profile uppercased and hyphens converted to underscores.
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `connections list`, `count`, `explain`, `indexes`, `query`, `schema`, `snapshot`
+- Write (connect/interact/save): `aggregate`, `connections add`, `connections import-from-aks`, `connections remove`, `connections set-default`, `delete`, `insert`, `update`
+- destructive (irreversible data loss; confirm before auto-running): `aggregate`, `connections remove`, `delete`
+- polymorphic (beat decided by payload or flag at call time): `aggregate`
+- own_state (writes only its own cache/state; parallel-safe): `connections add`, `connections import-from-aks`, `connections remove`, `connections set-default`
 
 ### namecheap
 

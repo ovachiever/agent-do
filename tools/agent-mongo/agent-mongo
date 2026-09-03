@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# agent-mongo - MongoDB / CosmosDB (Mongo API) tool for agent-do
+# Supports connection profiles, schema discovery, querying, and safe writes.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+show_help() {
+    cat << 'EOF'
+agent-mongo - MongoDB / CosmosDB exploration and querying
+
+CONNECTION MANAGEMENT
+  connections list                          List saved connection profiles
+  connections add <name> --stdin            Save a connection profile from stdin
+    [--provider cosmosdb]                   Tag provider for CosmosDB-aware behaviour
+    [--default]                             Set as default connection
+  connections add <name>                    Register a profile whose URI is in agent-do creds
+  connections remove <name>                 Remove a profile
+  connections set-default <name>            Change the default profile
+  connections import-from-aks               Import URI from a Kubernetes secret
+    --secret <name> --namespace <ns>
+    [--key <key>]                           Secret data key (default: connectionString)
+    [--profile <name>]                      Profile name to save under
+
+DISCOVERY (snapshot before you query)
+  snapshot [--connection <name>]            All databases, collections, doc counts
+  schema <db> <collection>                  Infer schema from a sample of documents
+    [--sample N]                            Sample size (default: 20)
+    [--connection <name>]
+  indexes <db> <collection>                 List indexes on a collection
+    [--connection <name>]
+
+QUERYING
+  query <db> <collection>                   Find documents
+    [--where <filter>]                      JSON or key=value (e.g. externalId=x)
+    [--projection <proj>]                   JSON field projection
+    [--sort <sort>]                         JSON sort spec (e.g. '{"createdAt":-1}')
+    [--limit N]                             Max results (default: 20; 0 = unlimited)
+    [--skip N]                              Skip N documents
+    [--connection <name>]
+    [--json]                                Structured envelope output
+  count <db> <collection>                   Count matching documents
+    [--where <filter>]
+    [--connection <name>]
+  aggregate <db> <collection>               Run an aggregation pipeline
+    --pipeline <json-or-@file>              Pipeline array as JSON or @path/to/file.json
+    [--confirm]                             Required for $out / $merge pipelines
+    [--dry-run]                             Preview pipeline without running it
+    [--connection <name>]
+    [--json]
+  explain <db> <collection>                 Show query execution plan (RU cost on CosmosDB)
+    [--where <filter>]
+    [--connection <name>]
+
+SAFE WRITES (always use --dry-run first)
+  insert <db> <collection>                  Insert a document
+    --doc <json>                            Document as JSON
+    [--dry-run]
+    [--connection <name>]
+  update <db> <collection>                  Update matching documents
+    --where <filter>                        Required — filter for documents to update
+    --set <json-or-key=val>                 Fields to set (e.g. status=done)
+    [--upsert]                              Insert if not found
+    [--multi]                               Update all matches (default: first only)
+    [--dry-run]
+    [--connection <name>]
+  delete <db> <collection>                  Delete matching documents
+    --where <filter>                        Required
+    [--multi]                               Delete all matches (default: first only)
+    [--confirm]                             Required for non-dry-run deletes
+    [--dry-run]
+    [--connection <name>]
+
+ENVIRONMENT
+  MONGO_CONNECTION_STRING                   URI used when no profile is set/specified
+  MONGO_CONNECTION_<PROFILE>                Per-profile URI, resolved from env or agent-do creds
+  AGENT_DO_HOME                             Config dir (default: ~/.agent-do)
+
+EXIT CODES
+  0  Success
+  1  Error (connection failed, bad args, etc.)
+  2  Dry-run preview (no changes made)
+
+EXAMPLES
+  # Save your CosmosDB connection
+  printf '%s' "$COSMOS_CONNECTION_STRING" | \
+    agent-do mongo connections add app_cosmos --stdin --provider cosmosdb --default
+
+  # Or store the URI in agent-do creds first, then register profile metadata
+  printf '%s' "$COSMOS_CONNECTION_STRING" | \
+    agent-do creds store MONGO_CONNECTION_APP_COSMOS --stdin
+  agent-do mongo connections add app_cosmos --provider cosmosdb --default
+
+  # Or import from AKS secret
+  agent-do mongo connections import-from-aks \
+    --secret cosmos-connection-string --namespace app --profile app_cosmos
+
+  # Explore
+  agent-do mongo snapshot
+  agent-do mongo schema appdb events
+  agent-do mongo indexes appdb events
+
+  # Query
+  agent-do mongo query appdb events --where externalId=x --json
+  agent-do mongo query appdb events --where '{"status":"pending"}' --limit 5
+  agent-do mongo count appdb events --where status=pending
+  agent-do mongo explain appdb events --where externalId=x
+
+  # Safe writes
+  agent-do mongo insert appdb events --doc '{"externalId":"y"}' --dry-run
+  agent-do mongo update appdb events \
+    --where externalId=x --set status=done --dry-run
+  agent-do mongo delete appdb events \
+    --where externalId=x --dry-run
+  agent-do mongo delete appdb events \
+    --where externalId=x --confirm
+EOF
+}
+
+run_ops() {
+    python3 "$SCRIPT_DIR/mongo_ops.py" "$@"
+}
+
+check_pymongo() {
+    if ! python3 -c "import pymongo" 2>/dev/null; then
+        echo "Error: pymongo is not installed." >&2
+        echo '  pip install "pymongo[srv]"' >&2
+        exit 1
+    fi
+}
+
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    connections)
+        check_pymongo
+        run_ops "$@"
+        ;;
+    snapshot|schema|indexes|query|count|aggregate|explain|insert|update|delete)
+        check_pymongo
+        run_ops "$@"
+        ;;
+    *)
+        echo "Unknown command: ${1:-}" >&2
+        echo "Try: agent-do mongo --help" >&2
+        exit 1
+        ;;
+esac

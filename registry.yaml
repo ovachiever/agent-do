@@ -4970,6 +4970,140 @@ tools:
       - agent-do manna context
       default_command: serve
     concurrency: write
+  mongo:
+    description: MongoDB/CosmosDB profiles, discovery, queries, aggregation, and safe writes
+    capabilities:
+    - manage named connection profiles (MongoDB and CosmosDB)
+    - import connection strings from AKS Kubernetes secrets
+    - snapshot all databases and collections with document counts
+    - infer collection schemas from document samples
+    - list collection indexes
+    - query documents with filters (JSON or key=value shorthand)
+    - count documents matching a filter
+    - run aggregation pipelines (inline JSON or @file)
+    - explain query execution plans (useful for CosmosDB RU cost)
+    - insert documents with dry-run preview
+    - update documents with dry-run preview (--where required)
+    - delete documents safely (--confirm required, --where required)
+    commands:
+      'connections list': List saved connection profiles
+      'connections add': Save a new connection profile
+      'connections remove': Remove a saved profile
+      'connections set-default': Change the default profile
+      'connections import-from-aks': Import URI from a Kubernetes secret
+      snapshot: All databases, collections, and document counts
+      schema: Infer field types from a document sample
+      indexes: List collection indexes
+      query: Find documents with optional filter, projection, sort
+      count: Count documents matching a filter
+      aggregate: Run an aggregation pipeline
+      explain: Show query execution plan (RU cost on CosmosDB)
+      insert: Insert a document (supports --dry-run)
+      update: Update documents matching a filter (supports --dry-run)
+      delete: Delete documents matching a filter (requires --confirm)
+    examples:
+    - intent: list mongodb connections
+      command: agent-do mongo connections list
+    - intent: add a cosmosdb connection
+      command: printf '%s' "$COSMOS_URI" | agent-do mongo connections add app --stdin --provider cosmosdb --default
+    - intent: import cosmos connection from aks secret
+      command: agent-do mongo connections import-from-aks --secret cosmos-uri --namespace app --profile app
+    - intent: snapshot all mongo databases
+      command: agent-do mongo snapshot
+    - intent: infer schema of events collection
+      command: agent-do mongo schema appdb events
+    - intent: list indexes on events
+      command: agent-do mongo indexes appdb events
+    - intent: query expectations where externalId is x001
+      command: agent-do mongo query appdb events --where externalId=x001 --json
+    - intent: count pending expectations
+      command: agent-do mongo count appdb events --where status=pending
+    - intent: run aggregation pipeline on events
+      command: 'agent-do mongo aggregate appdb events --pipeline ''[{"$group":{"_id":"$status","count":{"$sum":1}}}]'''
+    - intent: explain query plan for externalId lookup
+      command: agent-do mongo explain appdb events --where externalId=x001
+    - intent: preview inserting a document
+      command: 'agent-do mongo insert appdb events --doc ''{"externalId":"y001","status":"pending"}'' --dry-run'
+    - intent: update status to done for externalId x001
+      command: agent-do mongo update appdb events --where externalId=x001 --set status=done --dry-run
+    - intent: delete a document by externalId
+      command: agent-do mongo delete appdb events --where externalId=x001 --dry-run
+    routing:
+      discover_keywords:
+      - mongodb
+      - mongo
+      - cosmosdb
+      - cosmos db
+      - nosql
+      - bson
+      - document database
+      - aggregation pipeline
+      - aks mongo
+      prompt_patterns:
+      - \b(mongo|mongodb|cosmosdb|cosmos\s*db)\b
+      - \b(collection|aggregat(e|ion)|pipeline)\b
+      - \bdocument\s+(database|store|query)\b
+      recommended_entrypoints:
+      - agent-do mongo snapshot
+      - agent-do mongo schema <db> <collection>
+      - agent-do mongo query <db> <collection> --where <filter> --json
+      default_command: snapshot
+      raw_cli_equivalents:
+      - pattern: \bmongosh\b
+        replacement: agent-do mongo
+        example: agent-do mongo query <db> <collection> --where <filter>
+        reason: agent-do mongo provides structured JSON output and dry-run safety for writes
+      project_signals:
+      - mongodb
+      - cosmosdb
+      - mongoose
+      - MONGO_CONNECTION_STRING
+      - COSMOS_CONNECTION_STRING
+      readiness:
+        check: python3 -c "import pymongo"
+        fix: pip install "pymongo[srv]"
+        note: CosmosDB connections require pymongo[srv] for TLS support
+    credentials:
+      optional:
+        - MONGO_CONNECTION_STRING
+      notes:
+        - "Save profile URIs with 'agent-do mongo connections add <name> --stdin' to keep credentials out of argv and shell history; profile URI files are written mode 0600 under AGENT_DO_HOME."
+        - "Profile URI fallback uses MONGO_CONNECTION_<PROFILE> from the environment or agent-do creds store, with the profile uppercased and hyphens converted to underscores."
+    contracts:
+      snapshot:
+      - connections list
+      - snapshot
+      - schema
+      - indexes
+      - query
+      - count
+      - aggregate
+      - explain
+      interact:
+      - connections add
+      - connections remove
+      - connections set-default
+      - connections import-from-aks
+      - aggregate
+      - insert
+      - update
+      - delete
+      attributes:
+        connections add:
+        - own_state
+        connections remove:
+        - own_state
+        - destructive
+        connections set-default:
+        - own_state
+        connections import-from-aks:
+        - own_state
+        aggregate:
+        - polymorphic
+        - destructive
+        delete:
+        - destructive
+    concurrency: mixed
   learn:
     description: Learning and pattern improvement
     capabilities:
