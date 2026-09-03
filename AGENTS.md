@@ -26,7 +26,7 @@ Applies to `agent-do/`.
 - `hooks/`: Claude Code integration hooks
 - `lib/`: shared library code (Python, Bash, Node.js)
 - `tests/`: test scripts
-- `tools/`: 101 tools (standalone scripts + directory-based tools)
+- `tools/`: 102 tools (standalone scripts + directory-based tools)
 - `agent-do`: main entry point (bash)
 - `registry.yaml`: master tool catalog
 - `models.yaml`: model roles and capability records for agent-do's own internal LLM calls
