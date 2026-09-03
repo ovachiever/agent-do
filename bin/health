@@ -322,6 +322,16 @@ PY
                     status="WARN"; note="HandBrakeCLI not found — brew install handbrake or set AGENT_HANDBRAKE_BIN"
                 fi
                 ;;
+            makemkv)
+                if command -v makemkvcon &>/dev/null \
+                    || [[ -x "${AGENT_MAKEMKV_BIN:-}" ]] \
+                    || { [[ -n "${AGENT_MAKEMKV_BIN:-}" ]] && command -v "$AGENT_MAKEMKV_BIN" &>/dev/null; } \
+                    || [[ -x "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon" ]]; then
+                    status="OK"
+                else
+                    status="WARN"; note="makemkvcon not found — install MakeMKV or set AGENT_MAKEMKV_BIN"
+                fi
+                ;;
             *)
                 status="OK"
                 ;;

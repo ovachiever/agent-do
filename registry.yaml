@@ -3908,6 +3908,101 @@ tools:
         - long_running
         - composite
     concurrency: mixed
+  makemkv:
+    description: Rip DVDs and Blu-rays to MKV via MakeMKV's headless CLI (makemkvcon robot mode) — enumerate optical drives, scan a disc's titles (duration, size, chapters), rip selected titles to .mkv, full decrypted disc backup, DLNA/UPnP streaming, and output verification
+    capabilities:
+    - enumerate optical drives and loaded discs
+    - scan a disc and list titles with duration, size, and chapter counts
+    - rip one title or all titles to MKV files
+    - full decrypted disc backup (Blu-ray/DVD)
+    - start a DLNA/UPnP streaming server
+    - verify ripped .mkv outputs (files and sizes)
+    - report MakeMKV version, drive state, and registration
+    - structured JSON output parsed from makemkvcon robot mode
+    commands:
+      drives: List optical drives and loaded discs
+      info: 'Scan a disc; list titles (duration, size, chapters): info <disc>'
+      scan: Alias for info
+      rip: 'Rip title(s) to MKV: rip <disc> <title|all> <outdir>'
+      backup: 'Full decrypted disc backup: backup <disc> <outdir>'
+      stream: 'Start DLNA/UPnP streaming server: stream [disc]'
+      verify: 'List .mkv outputs in a directory: verify <outdir>'
+      version: Show MakeMKV version
+      snapshot: Drives + version + registration state (JSON)
+    examples:
+    - intent: list optical drives
+      command: agent-makemkv drives
+    - intent: scan a disc and list its titles
+      command: agent-makemkv info disc:0
+    - intent: get disc titles as JSON
+      command: agent-makemkv info 0 --json
+    - intent: rip all titles from a disc to a folder
+      command: agent-makemkv rip disc:0 all ~/rips
+    - intent: rip a single title
+      command: agent-makemkv rip disc:0 3 ~/rips
+    - intent: back up a Blu-ray to a decrypted folder
+      command: agent-makemkv backup disc:0 ~/backup
+    - intent: verify ripped output files
+      command: agent-makemkv verify ~/rips
+    - intent: show what the rip command would run without executing
+      command: agent-makemkv rip disc:0 all ~/rips --dry-run
+    - intent: get a MakeMKV drives and version snapshot
+      command: agent-makemkv snapshot --json
+    routing:
+      discover_keywords:
+      - makemkv
+      - rip dvd
+      - rip blu-ray
+      - rip bluray
+      - rip disc
+      - dvd to mkv
+      - bluray to mkv
+      - makemkvcon
+      prompt_patterns:
+      - \bmakemkv\w*\b
+      - \brip\b.*\b(dvd|blu-?ray|disc)\b
+      - \b(dvd|blu-?ray)\b.*\b(to\s+mkv|rip)\b
+      recommended_entrypoints:
+      - agent-do makemkv drives
+      - agent-do makemkv info disc:0
+      - agent-do makemkv rip disc:0 all <outdir>
+      default_command: drives
+      raw_cli_equivalents:
+      - pattern: \bmakemkvcon\b
+        replacement: agent-do makemkv
+        example: agent-do makemkv info disc:0
+        reason: agent-do makemkv wraps makemkvcon robot mode with parsed JSON and output verification
+      project_signals:
+      - rip
+      - bluray
+      - dvd
+      - media
+      readiness:
+        check: agent-do makemkv drives
+        fix: Install MakeMKV (https://www.makemkv.com) or set AGENT_MAKEMKV_BIN
+        note: Requires the makemkvcon binary from MakeMKV; resolved from PATH, AGENT_MAKEMKV_BIN, or /Applications/MakeMKV.app
+    contracts:
+      snapshot:
+      - drives
+      - info
+      - scan
+      - version
+      - snapshot
+      interact:
+      - rip
+      - backup
+      - stream
+      verify:
+      - verify
+      attributes:
+        rip:
+        - long_running
+        backup:
+        - long_running
+        stream:
+        - long_running
+        - passthrough
+    concurrency: mixed
   printer:
     description: Printer control
     capabilities:

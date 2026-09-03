@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (102 tools)
+## Summary (103 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -76,6 +76,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [linear](#linear) | Control Linear | mixed | 3 |
 | [logs](#logs) | Control log aggregation | read | 3 |
 | [macos](#macos) | Control native macOS desktop applications via accessibility APIs | mixed | 6 |
+| [makemkv](#makemkv) | Rip DVDs and Blu-rays to MKV via MakeMKV's headless CLI (makemkvcon robot mode) — enumerate optical drives, scan a disc's titles (duration, size, chapters), rip selected titles to .mkv, full decrypted disc backup, DLNA/UPnP streaming, and output verification | mixed | 9 |
 | [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 27 |
 | [meet](#meet) | Google Meet control | mixed | 4 |
 | [meetings](#meetings) | Unified enterprise meeting orchestration across Zoom, Google Meet, and Microsoft Teams | mixed | 14 |
@@ -2617,6 +2618,65 @@ agent-do macos tree Finder
 
 - Read-only (snapshot/verify; safe to parallelize): `find`, `tree`
 - Write (connect/interact/save): `click`, `focus`, `menu`, `type`
+
+### makemkv
+
+Rip DVDs and Blu-rays to MKV via MakeMKV's headless CLI (makemkvcon robot mode) — enumerate optical drives, scan a disc's titles (duration, size, chapters), rip selected titles to .mkv, full decrypted disc backup, DLNA/UPnP streaming, and output verification
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- enumerate optical drives and loaded discs
+- scan a disc and list titles with duration, size, and chapter counts
+- rip one title or all titles to MKV files
+- full decrypted disc backup (Blu-ray/DVD)
+- start a DLNA/UPnP streaming server
+- verify ripped .mkv outputs (files and sizes)
+- report MakeMKV version, drive state, and registration
+- structured JSON output parsed from makemkvcon robot mode
+
+**Commands**
+
+- `drives`: List optical drives and loaded discs
+- `info`: Scan a disc; list titles (duration, size, chapters): info \<disc>
+- `scan`: Alias for info
+- `rip`: Rip title(s) to MKV: rip \<disc> \<title|all> \<outdir>
+- `backup`: Full decrypted disc backup: backup \<disc> \<outdir>
+- `stream`: Start DLNA/UPnP streaming server: stream [disc]
+- `verify`: List .mkv outputs in a directory: verify \<outdir>
+- `version`: Show MakeMKV version
+- `snapshot`: Drives + version + registration state (JSON)
+
+**Examples**
+
+```bash
+# list optical drives
+agent-do makemkv drives
+# scan a disc and list its titles
+agent-do makemkv info disc:0
+# get disc titles as JSON
+agent-do makemkv info 0 --json
+# rip all titles from a disc to a folder
+agent-do makemkv rip disc:0 all ~/rips
+# rip a single title
+agent-do makemkv rip disc:0 3 ~/rips
+# back up a Blu-ray to a decrypted folder
+agent-do makemkv backup disc:0 ~/backup
+# verify ripped output files
+agent-do makemkv verify ~/rips
+# show what the rip command would run without executing
+agent-do makemkv rip disc:0 all ~/rips --dry-run
+# get a MakeMKV drives and version snapshot
+agent-do makemkv snapshot --json
+```
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `drives`, `info`, `scan`, `snapshot`, `verify`, `version`
+- Write (connect/interact/save): `backup`, `rip`, `stream`
+- passthrough (arbitrary-payload escape hatch; beat decided by the argument): `stream`
+- long_running (daemon/stream/session; may never return): `backup`, `rip`, `stream`
 
 ### manna
 
