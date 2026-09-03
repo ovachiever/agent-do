@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# agent-jira — Jira Cloud and Server/Data Center plugin for agent-do
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../../lib/json-output.sh" 2>/dev/null || true
+
+show_help() {
+    cat << 'EOF'
+agent-jira — Jira Cloud and Server/Data Center for agent-do
+
+CONNECTION MANAGEMENT
+  connections list [--json]                 List saved connection profiles
+  connections add <name>                    Save a connection profile
+    --url <jira-url>                        Base URL (e.g. https://company.atlassian.net)
+    --email <email>                         Email (Cloud) or username (Server)
+    --token-stdin                           Read API token/PAT from stdin
+    [--token <api-token>]                   Legacy interactive use only; visible in ps/history
+    [--server]                              Flag as Server/Data Center (uses API v2)
+    [--default]                             Set as default connection
+  connections remove <name> [--json]        Remove a profile
+  connections set-default <name> [--json]   Change the default profile
+
+DISCOVERY
+  snapshot [--connection <name>] [--json]   All projects with issue counts
+  whoami [--connection <name>] [--json]     Show authenticated user info
+
+ISSUES
+  issue view <ISSUE-KEY>                    View issue details
+    [--comments] [--connection <name>] [--json]
+  issue list <PROJECT-KEY>                  List issues in a project
+    [--status <status>]                     Filter by status name
+    [--assignee <email-or-account-id>]      Filter by assignee
+    [--mine]                                Shorthand for --assignee currentUser()
+    [--type <Bug|Story|Task|...>]           Filter by issue type
+    [--priority <priority>]                 Filter by priority
+    [--label <label>]                       Filter by label
+    [--limit N]                             Max results (default: 50)
+    [--connection <name>] [--json]
+  issue create <PROJECT-KEY>                Create an issue
+    --summary <text>                        Issue title (required)
+    [--description <text>]                  Issue body
+    [--type <Bug|Story|Task|Epic>]          Issue type (default: Task)
+    [--assignee <email-or-account-id>]      Assign to user
+    [--priority <Highest|High|Medium|Low>]  Set priority
+    [--label <label>]                       Add label (repeatable)
+    [--parent <ISSUE-KEY>]                  Set parent issue/epic
+    [--sprint <id>]                         Add to sprint by ID at creation
+    [--sprint-field <customfield_N>]        Sprint custom field (default: JIRA_SPRINT_FIELD or customfield_10020)
+    [--dry-run] [--json] [--connection <name>]
+  issue link <ISSUE-KEY>                    Create a linked work item relationship
+    --to <ISSUE-KEY>                        Other issue to link to (required)
+    --type <blocks|is blocked by|clones|is cloned by|duplicates|is duplicated by|relates to>
+                                            Jira link type / direction (default: relates to)
+    [--dry-run] [--json] [--connection <name>]
+  issue delete <ISSUE-KEY>                  Delete an issue
+    [--dry-run]                             Preview deletion only
+    [--confirm]                             Actually delete the issue
+    [--json] [--connection <name>]
+  issue comment <ISSUE-KEY>                 Add a comment
+    --body <text>                           Comment text (required)
+    [--dry-run] [--json] [--connection <name>]
+  issue assign <ISSUE-KEY>                  Assign an issue
+    --to <email-or-account-id>             Assignee (use "none" to unassign)
+    [--dry-run] [--json] [--connection <name>]
+  issue transition <ISSUE-KEY>              Move issue to a new status
+    --to <status-name>                      Target status (e.g. "In Progress", "Done")
+    [--dry-run] [--json] [--connection <name>]
+  issue label <ISSUE-KEY>                   Add or remove labels
+    [--add <label>]                         Add label (repeatable)
+    [--remove <label>]                      Remove label (repeatable)
+    [--dry-run] [--json] [--connection <name>]
+  issue edit <ISSUE-KEY>                    Edit issue fields
+    [--summary <text>]                      New title
+    [--description <text>]                  New description
+    [--priority <priority>]                 New priority
+    [--dry-run] [--json] [--connection <name>]
+  transitions <ISSUE-KEY>                   List available transitions for an issue
+    [--connection <name>] [--json]
+
+USERS
+  user find <query>                         Find users by name, email, or username
+    [--email <email>]                       Search by email address
+    [--connection <name>] [--json]
+
+SEARCH
+  search '<JQL>'                            Run a JQL query
+    [--limit N]                             Max results (default: 50)
+    [--fields <field,field>]                Comma-separated fields to return
+    [--connection <name>] [--json]
+
+SPRINTS
+  board list [--project <PROJECT-KEY>]      List boards
+    [--connection <name>] [--json]
+  sprint list <BOARD-ID>                    List sprints for a board
+    [--state active|closed|future]          Filter by state (default: active)
+    [--connection <name>] [--json]
+  sprint active <BOARD-ID>                  Show active sprint and its issues
+    [--connection <name>] [--json]
+  sprint add <ISSUE-KEY> --sprint <id>      Add issue to a sprint
+    [--dry-run] [--connection <name>] [--json]
+
+ENVIRONMENT
+  JIRA_URL                                  Jira base URL
+  JIRA_EMAIL                                Email / username
+  JIRA_API_TOKEN                            API token / password / PAT
+  AGENT_DO_HOME                             Config dir (default: ~/.agent-do)
+
+EXIT CODES
+  0  Success
+  1  Error
+
+EXAMPLES
+  agent-do jira connections add work \
+    --url https://company.atlassian.net --email me@company.com --token-stdin --default
+
+  agent-do jira snapshot
+  agent-do jira issue list PROJ --status "In Progress" --json
+  agent-do jira issue view PROJ-123 --comments
+  agent-do jira issue create PROJ --summary "Fix login bug" --type Bug --priority High --dry-run
+  agent-do jira issue link PROJ-2 --to PROJ-1 --type blocks
+  agent-do jira issue delete PROJ-2 --dry-run
+  agent-do jira issue transition PROJ-123 --to "In Progress"
+  agent-do jira issue assign PROJ-123 --to me@company.com
+  agent-do jira search 'assignee = currentUser() AND status != Done ORDER BY priority DESC'
+  agent-do jira sprint active 42 --json
+  agent-do jira user find me@company.com
+  agent-do jira issue list PROJ --mine --status "In Progress"
+EOF
+}
+
+run_ops() {
+    python3 "$SCRIPT_DIR/jira_ops.py" "$@"
+}
+
+case "${1:-help}" in
+    help|--help|-h)
+        show_help
+        ;;
+    connections|whoami|snapshot|user|issue|transitions|search|board|sprint)
+        run_ops "$@"
+        ;;
+    *)
+        if [[ " $* " == *" --json "* ]]; then
+            OUTPUT_FORMAT=json
+            json_error "Unknown command: ${1:-}" 1
+        else
+            echo "Unknown command: ${1:-}" >&2
+            echo "Try: agent-do jira --help" >&2
+        fi
+        exit 1
+        ;;
+esac

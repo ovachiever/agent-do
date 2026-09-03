@@ -3251,6 +3251,175 @@ tools:
         portfolio remove:
         - own_state
     concurrency: mixed
+  jira:
+    description: Jira issues, sprints, and JQL management
+    capabilities:
+    - manage saved Jira connection profiles (Cloud and Server/Data Center)
+    - view, create, comment on, assign, label, transition, and edit issues
+    - search issues with JQL
+    - list projects and open issue counts (snapshot)
+    - list boards and sprint contents; add issues to sprints
+    commands:
+      connections: Manage saved connection profiles (add, list, remove, set-default)
+      whoami: Show authenticated user info
+      snapshot: All projects with open issue counts
+      'issue view': View issue details (--comments to include comments)
+      'issue list': List issues in a project with JQL filters
+      'issue create': Create an issue (--dry-run to preview)
+      'issue link': Create a relationship between two issues (--dry-run to preview)
+      'issue delete': Delete an issue (--dry-run to preview, --confirm to execute)
+      'issue comment': Add a comment to an issue (--dry-run to preview)
+      'issue assign': Assign or unassign an issue (--dry-run to preview)
+      'issue transition': Move issue to a new status by name (--dry-run to preview)
+      'issue label': Add or remove labels on an issue (--dry-run to preview)
+      'issue edit': Edit summary, description, or priority (--dry-run to preview)
+      transitions: List available workflow transitions for an issue
+      'user find': Find Jira users by name, email, or username
+      search: Run a raw JQL query
+      'board list': List Scrum/Kanban boards
+      'sprint list': List sprints for a board
+      'sprint active': Show the active sprint and its issues
+      'sprint add': Add an issue to a sprint (--dry-run to preview)
+    examples:
+    - intent: list Jira connection profiles
+      command: agent-jira connections list
+    - intent: add a Jira Cloud connection
+      command: printf '%s\n' "$JIRA_API_TOKEN" | agent-jira connections add work --url https://company.atlassian.net --email me@company.com --token-stdin --default
+    - intent: view a Jira issue
+      command: agent-jira issue view PROJ-123 --comments
+    - intent: list open bugs in a Jira project
+      command: agent-jira issue list PROJ --status "In Progress" --type Bug
+    - intent: create a Jira issue
+      command: agent-jira issue create PROJ --summary "Fix login bug" --type Bug --priority High --dry-run
+    - intent: link two Jira issues
+      command: agent-jira issue link PROJ-123 --to PROJ-456 --type blocks
+    - intent: delete a Jira issue after previewing
+      command: agent-jira issue delete PROJ-123 --dry-run
+    - intent: move a Jira issue to Done
+      command: agent-jira issue transition PROJ-123 --to Done
+    - intent: assign a Jira issue
+      command: agent-jira issue assign PROJ-123 --to me@company.com
+    - intent: find a Jira user account ID
+      command: agent-jira user find me@company.com
+    - intent: search Jira with JQL
+      command: agent-jira search 'assignee = currentUser() AND status != Done ORDER BY priority DESC'
+    - intent: show active sprint on a Jira board
+      command: agent-jira sprint active 42 --json
+    routing:
+      default_command: snapshot
+      recommended_entrypoints:
+      - agent-do jira snapshot
+      - agent-do jira issue list <PROJECT-KEY>
+      - agent-do jira search '<JQL>'
+      discover_keywords:
+      - jira
+      - jira issue
+      - jira ticket
+      - jira sprint
+      - jira board
+      - jira project
+      - issue tracker
+      - atlassian
+      - jql
+      prompt_patterns:
+      - '\bjira\b'
+      - '\b(?:create|view|transition|assign|comment\s+on)\s+(?:a\s+)?(?:jira\s+)?issue\b'
+      - '\bJQL\b'
+      - '\b(?:sprint|board)\b.*\bjira\b'
+      raw_cli_equivalents:
+      - pattern: '^\s*(?:curl|http).*atlassian\.net/rest/api'
+        replacement: agent-do jira
+        example: agent-do jira issue view PROJ-123
+        reason: agent-do jira wraps Jira Cloud and Server/DC REST APIs with connection profiles, dry-run, and JSON output
+      project_signals:
+      - jira
+      - jira issue
+      - jira ticket
+      - jira sprint
+      - jira board
+      - jira project
+      - issue tracker
+      - atlassian
+      - jql
+      readiness:
+        check: agent-do jira whoami --json
+        fix: printf '%s\n' "$JIRA_API_TOKEN" | agent-do jira connections add work --url https://company.atlassian.net --email me@company.com --token-stdin --default
+        note: Requires Jira credentials via env vars or a saved connection profile
+    credentials:
+      required:
+      - JIRA_URL
+      - JIRA_EMAIL
+      - JIRA_API_TOKEN
+      optional:
+      - JIRA_SPRINT_FIELD
+      notes:
+      - Credentials may be saved per-profile in ~/.agent-do/jira/.creds/ (0o600) when using connection profiles; prefer --token-stdin over --token.
+      - JIRA_SPRINT_FIELD overrides the site-specific sprint custom field used by issue create --sprint.
+    contracts:
+      connect:
+      - connections add
+      - connections remove
+      - connections set-default
+      snapshot:
+      - connections list
+      - whoami
+      - snapshot
+      - issue view
+      - issue list
+      - transitions
+      - user find
+      - search
+      - board list
+      - sprint list
+      - sprint active
+      interact:
+      - issue create
+      - issue link
+      - issue delete
+      - issue comment
+      - issue assign
+      - issue transition
+      - issue label
+      - issue edit
+      - sprint add
+      save:
+      - issue create
+      - issue link
+      - issue delete
+      - issue comment
+      - issue assign
+      - issue transition
+      - issue label
+      - issue edit
+      - sprint add
+      attributes:
+        connections add:
+        - sensitive
+        - own_state
+        connections remove:
+        - own_state
+        connections set-default:
+        - own_state
+        issue delete:
+        - destructive
+        - composite
+        issue create:
+        - composite
+        issue link:
+        - composite
+        issue comment:
+        - composite
+        issue assign:
+        - composite
+        issue transition:
+        - composite
+        issue label:
+        - composite
+        issue edit:
+        - composite
+        sprint add:
+        - composite
+    concurrency: mixed
   logs:
     description: Control log aggregation
     capabilities:

@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (102 tools)
+## Summary (103 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -68,6 +68,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [ide](#ide) | Control VS Code/Cursor editor | read | 5 |
 | [image](#image) | Image processing | mixed | 3 |
 | [ios](#ios) | Control iOS Simulator | mixed | 10 |
+| [jira](#jira) | Jira issues, sprints, and JQL management | mixed | 20 |
 | [jupyter](#jupyter) | Control Jupyter notebooks | mixed | 4 |
 | [k8s](#k8s) | Control Kubernetes clusters | write | 5 |
 | [lab](#lab) | JupyterLab management | mixed | 4 |
@@ -2341,6 +2342,88 @@ agent-do ios shutdown
 
 - Read-only (snapshot/verify; safe to parallelize): `list`, `screenshot`, `status`, `tree`
 - Write (connect/interact/save): `boot`, `launch`, `shutdown`, `swipe`, `tap`, `type`
+
+### jira
+
+Jira issues, sprints, and JQL management
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- manage saved Jira connection profiles (Cloud and Server/Data Center)
+- view, create, comment on, assign, label, transition, and edit issues
+- search issues with JQL
+- list projects and open issue counts (snapshot)
+- list boards and sprint contents; add issues to sprints
+
+**Commands**
+
+- `connections`: Manage saved connection profiles (add, list, remove, set-default)
+- `whoami`: Show authenticated user info
+- `snapshot`: All projects with open issue counts
+- `issue view`: View issue details (--comments to include comments)
+- `issue list`: List issues in a project with JQL filters
+- `issue create`: Create an issue (--dry-run to preview)
+- `issue link`: Create a relationship between two issues (--dry-run to preview)
+- `issue delete`: Delete an issue (--dry-run to preview, --confirm to execute)
+- `issue comment`: Add a comment to an issue (--dry-run to preview)
+- `issue assign`: Assign or unassign an issue (--dry-run to preview)
+- `issue transition`: Move issue to a new status by name (--dry-run to preview)
+- `issue label`: Add or remove labels on an issue (--dry-run to preview)
+- `issue edit`: Edit summary, description, or priority (--dry-run to preview)
+- `transitions`: List available workflow transitions for an issue
+- `user find`: Find Jira users by name, email, or username
+- `search`: Run a raw JQL query
+- `board list`: List Scrum/Kanban boards
+- `sprint list`: List sprints for a board
+- `sprint active`: Show the active sprint and its issues
+- `sprint add`: Add an issue to a sprint (--dry-run to preview)
+
+**Examples**
+
+```bash
+# list Jira connection profiles
+agent-do jira connections list
+# add a Jira Cloud connection
+printf '%s\n' "$JIRA_API_TOKEN" | agent-do jira connections add work --url https://company.atlassian.net --email me@company.com --token-stdin --default
+# view a Jira issue
+agent-do jira issue view PROJ-123 --comments
+# list open bugs in a Jira project
+agent-do jira issue list PROJ --status "In Progress" --type Bug
+# create a Jira issue
+agent-do jira issue create PROJ --summary "Fix login bug" --type Bug --priority High --dry-run
+# link two Jira issues
+agent-do jira issue link PROJ-123 --to PROJ-456 --type blocks
+# delete a Jira issue after previewing
+agent-do jira issue delete PROJ-123 --dry-run
+# move a Jira issue to Done
+agent-do jira issue transition PROJ-123 --to Done
+# assign a Jira issue
+agent-do jira issue assign PROJ-123 --to me@company.com
+# find a Jira user account ID
+agent-do jira user find me@company.com
+# search Jira with JQL
+agent-do jira search 'assignee = currentUser() AND status != Done ORDER BY priority DESC'
+# show active sprint on a Jira board
+agent-do jira sprint active 42 --json
+```
+
+**Credentials**
+
+- Required: `JIRA_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`
+- Optional: `JIRA_SPRINT_FIELD`
+- Note: Credentials may be saved per-profile in ~/.agent-do/jira/.creds/ (0o600) when using connection profiles; prefer --token-stdin over --token.
+- Note: JIRA_SPRINT_FIELD overrides the site-specific sprint custom field used by issue create --sprint.
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `board list`, `connections list`, `issue list`, `issue view`, `search`, `snapshot`, `sprint active`, `sprint list`, `transitions`, `user find`, `whoami`
+- Write (connect/interact/save): `connections add`, `connections remove`, `connections set-default`, `issue assign`, `issue comment`, `issue create`, `issue delete`, `issue edit`, `issue label`, `issue link`, `issue transition`, `sprint add`
+- destructive (irreversible data loss; confirm before auto-running): `issue delete`
+- sensitive (emits or persists secret material; guard output): `connections add`
+- composite (one call performs several beats internally): `issue assign`, `issue comment`, `issue create`, `issue delete`, `issue edit`, `issue label`, `issue link`, `issue transition`, `sprint add`
+- own_state (writes only its own cache/state; parallel-safe): `connections add`, `connections remove`, `connections set-default`
 
 ### jupyter
 
