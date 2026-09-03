@@ -173,6 +173,78 @@ class DerivationTests(unittest.TestCase):
         private = {"claim_token_hash", "legacy_migration", "act_token", "actor"}
         self.assertFalse(private & nested_keys(payload))
 
+    def test_state_cli_attaches_hash_current_presentation_cache_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_board(Path(tmp) / "project").resolve()
+            issue_path = root / ".manna" / "issues.jsonl"
+            issues = [json.loads(line) for line in issue_path.read_text(encoding="utf-8").splitlines()]
+            cached_issue = next(issue for issue in issues if issue["id"] == "mn-aaaaaa")
+            cached_issue.update({
+                "title": "Ship “Résumé” — compass 🧭",
+                "description": "Line one\nLine two\x7f",
+                "type": "item",
+            })
+            issue_path.write_text(
+                "".join(json.dumps(issue) + "\n" for issue in issues),
+                encoding="utf-8",
+            )
+
+            home = Path(tmp) / "home"
+            serve_home = home / "manna" / "serve"
+            digest_home = serve_home / "digests"
+            digest_home.mkdir(parents=True)
+            (serve_home / "boards.json").write_text(json.dumps({
+                "version": 1,
+                "boards": {"Project Board": {"path": str(root)}},
+            }), encoding="utf-8")
+            content_hash = digest_lib.content_hash(cached_issue)
+            self.assertEqual(content_hash, "6843e053b291818f")
+            cache_path = digest_home / "Project_Board.json"
+            cache_path.write_text(json.dumps({
+                "version": 1,
+                "digests": {
+                    "mn-aaaaaa": {
+                        "hash": content_hash,
+                        "digest": "Render one shared line everywhere",
+                        "summary": "Every human-facing client reads this same cached explanation.",
+                        "summary_hash": f"{content_hash}:{digest_lib.SUMMARY_MAX_CHARS}:{digest_lib.SUMMARY_MAX_WORDS}",
+                    },
+                    "mn-bbbbbb": {
+                        "hash": "stale-content-hash",
+                        "digest": "Never attach stale presentation",
+                    },
+                },
+            }, sort_keys=True), encoding="utf-8")
+            before = cache_path.read_bytes()
+            env = {
+                **os.environ,
+                "AGENT_DO_HOME": str(home),
+                "MANNA_STATE_AGENT_DO": "none",
+            }
+            completed = subprocess.run(
+                [str(board_lib._state_binary()), "state", "--json", "--cached-drift"],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(completed.stdout)
+            attached = next(row for row in payload["all"] if row["id"] == "mn-aaaaaa")
+            self.assertEqual(attached["digest"], "Render one shared line everywhere")
+            self.assertEqual(
+                attached["summary"],
+                "Every human-facing client reads this same cached explanation.",
+            )
+            next_copy = next(row for row in payload["next"] if row["id"] == "mn-aaaaaa")
+            self.assertEqual(next_copy["digest"], attached["digest"])
+            miss = next(row for row in payload["all"] if row["id"] == "mn-bbbbbb")
+            self.assertNotIn("digest", miss)
+            self.assertNotIn("summary", miss)
+            self.assertEqual(cache_path.read_bytes(), before, "state is attach-only")
+
     def test_serve_adapter_returns_the_core_model_without_a_second_derivation(self) -> None:
         env = {**os.environ, "MANNA_STATE_AGENT_DO": "none"}
         direct = subprocess.run(
@@ -441,6 +513,20 @@ class DigestTests(unittest.TestCase):
         report = digest_lib.apply("proj", self.rows)
         self.assertIsNone(self.rows[0]["digest"])
         self.assertEqual([r["id"] for r in report["missing_rows"]], ["mn-aaaaaa"])
+
+    def test_plan_reports_gaps_without_reattaching_rows(self) -> None:
+        digest_lib.generate(
+            "proj",
+            self.rows[:1],
+            caller=lambda prompt: ({"mn-aaaaaa": "Make the first thing real"}, "stub-model"),
+        )
+        rows = [dict(row) for row in self.rows]
+        rows[0]["digest"] = "Make the first thing real"
+        before = json.dumps(rows, sort_keys=True)
+        report = digest_lib.plan("proj", rows)
+        self.assertEqual(report["ready"], 1)
+        self.assertEqual(report["missing"], 1)
+        self.assertEqual(json.dumps(rows, sort_keys=True), before)
 
     def test_chunking_is_byte_bounded(self) -> None:
         many = [{"id": f"mn-{i:06d}", "title": "t" * 40, "description": "d" * 400, "kind": "item"} for i in range(30)]
@@ -733,6 +819,7 @@ class RegistryAndHttpTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn("javascript", ctype)
             self.assertIn(b"RELATIONS", app)
+            self.assertIn(b"r.summary", app)
         finally:
             server.stopping = True
             server.shutdown()
@@ -757,6 +844,7 @@ class ServeRegressionTests(unittest.TestCase):
         self.original_cache = serve_lib.CACHE
         self.cache = serve_lib.BoardCache()
         serve_lib.CACHE = self.cache
+        serve_lib.register_board(self.root)
 
     def tearDown(self) -> None:
         serve_lib.AGENT_DO = self.original_agent_do

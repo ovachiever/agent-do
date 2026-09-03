@@ -304,6 +304,10 @@ function renderInspector(s) {
   }
   const r = (s.all || []).find((x) => x.id === sel.id);
   if (!r) { setInspector(el, '<p class="empty">that item is no longer on the board</p>'); return; }
+  const summaryKey = itemSummaryKey(r);
+  const priorSummary = summaries.get(r.id);
+  if (priorSummary && priorSummary.key !== summaryKey) summaries.delete(r.id);
+  if (r.summary) summaries.set(r.id, { summary: r.summary, error: null, key: summaryKey });
   const st = r.effective;
   const cl = r.claimant;
   const relations = relationMarkup(r.relations || []);
@@ -325,10 +329,11 @@ function renderInspector(s) {
     </div>
     ${relations}
     <div class="actions"><span class="muted">copy:</span>${r.prompt ? `<button type="button" data-copy-handoff="${esc(r.id)}" data-label="handoff" title="copy the handoff document">[handoff]</button>` : ""}<button type="button" data-copy="${esc(r.id)}" data-label="id">[id]</button><button type="button" data-copy="agent-do manna show ${esc(r.id)}" data-label="show cmd">[show cmd]</button></div>`);
-  ensureSummary(r.id);
+  ensureSummary(r.id, summaryKey);
 }
 const summaries = new Map(); // id -> {summary, error, pending}
 const SUMMARY_OPEN_KEY = "manna-serve-summary-open";
+const itemSummaryKey = (r) => JSON.stringify([r.title || "", r.description || "", r.type || "item"]);
 function summaryOpen() { try { return localStorage.getItem(SUMMARY_OPEN_KEY) !== "0"; } catch { return true; } }
 document.addEventListener("toggle", (e) => { if (e.target?.id === "summary-block") { try { localStorage.setItem(SUMMARY_OPEN_KEY, e.target.open ? "1" : "0"); } catch {} } }, true);
 function summaryBody(id) {
@@ -337,16 +342,20 @@ function summaryBody(id) {
   if (st.summary) return st.summary.split(/\n\n/).map((p) => `<p>${esc(p)}</p>`).join("");
   return `<p class="pending">${esc(st.error || "no summary")}</p>`;
 }
-async function ensureSummary(id) {
+async function ensureSummary(id, key) {
   const st = summaries.get(id);
   if (st && (st.pending || st.summary)) return;
-  summaries.set(id, { pending: true });
+  summaries.set(id, { pending: true, key });
   try {
     const r = await fetch(`${api("api/summary")}?id=${encodeURIComponent(id)}`, { cache: "no-store" });
     const d = await r.json();
-    summaries.set(id, { summary: d.summary || null, error: d.error || null });
+    if (summaries.get(id)?.key === key) {
+      summaries.set(id, { summary: d.summary || null, error: d.error || null, key });
+    }
   } catch (e) {
-    summaries.set(id, { summary: null, error: "summary request failed" });
+    if (summaries.get(id)?.key === key) {
+      summaries.set(id, { summary: null, error: "summary request failed", key });
+    }
   }
   if (app.selected?.kind === "item" && app.selected.id === id) { const el = $("#summary-block .summary-body"); if (el) el.innerHTML = summaryBody(id); }
 }

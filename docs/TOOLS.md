@@ -2637,7 +2637,7 @@ Concurrency: `write`
 - `init`: Initialize .manna plus the tracked .handoff workflow scaffold
 - `migrate`: Atomically admit a legacy board into strict paired workflow state
 - `status`: Show current session and claimed issues
-- `state`: Emit the full derived board model as JSON or YAML, including graph buckets, receipts, federation, drift, and coord attention
+- `state`: Emit the full derived board model as JSON or YAML, including graph buckets, receipts, federation, drift, coord attention, and hash-current cached presentation fields
 - `estate`: Emit every registered board as the /api/boards model without starting or contacting the serve daemon
 - `create`: Create an issue; actionable items generate a linked .handoff work order (--type track|item|dream, --track, --source)
 - `claim`: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted)

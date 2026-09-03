@@ -443,7 +443,13 @@ and a status strip whose `debug ▸` opens live reconcile findings and the
 daemon's own numbers. Rows carry model-written one-line digests and each item a
 collapsible summary (fast role, hash-keyed cache under
 `$AGENT_DO_HOME/manna/serve/digests/`, outside the board, title as fallback);
-the bar's Enter asks the deep role a question answered from board rows only,
+`manna state --json` resolves the board through the serve registry and attaches
+only hash-current cached values to its repeated rows. The core never generates
+or writes presentation state. Any human-facing client can therefore render the
+same cached words, while agents ignore these optional presentation fields and
+continue to reason from durable board facts. Serve itself only schedules cache
+gaps after derivation. The bar's Enter asks the deep role a question answered
+from board rows only,
 citing ids. Two-clock cache: board+git state re-derives on file signature
 (that is where live `reconcile --json` and the trailer-commit log run);
 coord presence refreshes on a ten-second cadence with a content digest so

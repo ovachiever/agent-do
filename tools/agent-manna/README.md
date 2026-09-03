@@ -188,6 +188,11 @@ It joins the complete public issue rows with unresolved blockers, reverse
 dependents, handoff priority and existence, claimant liveness and pulse, Manna
 trailer commits, federation resolution, Git state, drift, and the derived
 `now`, `next`, `decisions`, `waves`, `dreams`, and `tracks` sections.
+For a board registered with `manna serve`, it also reads the shared local
+presentation cache and attaches hash-current `digest` and `summary` fields to
+every matching row copy. This path is attach-only: it never registers a board,
+creates cache state, or invokes a model. A missing or stale cache value leaves
+the optional field absent.
 
 ```bash
 agent-do manna state --json
@@ -200,6 +205,8 @@ consumers do not need to join `list` and `show` themselves. Custom decision
 markers can be added with repeated `--decision-marker '[NAME]'` flags. Because
 the sections and counts claim whole-board coverage, a malformed JSONL row
 fails `state` closed instead of being silently omitted.
+The optional digest and summary fields are presentation material for human
+interfaces. Agents continue to ground decisions in the durable board fields.
 
 ### `estate [--json]`
 
@@ -501,8 +508,10 @@ board:
 - **⌘K / jump**: sheets, items, peers, other boards
 - **digests**: each row shows a one-line digest of the item (fast model,
   hash-keyed cache under `$AGENT_DO_HOME/manna/serve/digests/`, regenerated
-  only when title or description change, title as fallback); the manna title
-  stays in the inspector. Set `AGENT_DO_SERVE_AI=off` to keep titles only.
+  only when title or description change, title as fallback). The Rust
+  `manna state` contract attaches current cache values for every human-facing
+  client; serve only schedules missing values. The manna title stays in the
+  inspector. Set `AGENT_DO_SERVE_AI=off` to keep titles only.
 
 Finish: ledger density on a 12px floor, one-line rows, zebra, a severity
 stripe leading each row, outlined state pills, prompt headers (`$ manna next`),
