@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (102 tools)
+## Summary (103 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -47,6 +47,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [coord](#coord) | Project-local agent state and interrupt broker | mixed | 23 |
 | [creds](#creds) | Secure credential storage and resolution for agent-do tools | mixed | 8 |
 | [cronitor](#cronitor) | Cronitor scheduled job and uptime monitoring | mixed | 11 |
+| [datadog](#datadog) | Datadog observability — monitors, logs, metrics, incidents, dashboards, and SLOs with cross-tool incident response | mixed | 23 |
 | [db](#db) | Control database clients | mixed | 5 |
 | [debug](#debug) | Control debuggers | read | 5 |
 | [discord](#discord) | Control Discord | mixed | 2 |
@@ -1385,6 +1386,87 @@ echo '{"type":"job","key":"my-job","schedules":["0 * * * *"]}' | agent-do cronit
 - Write (connect/interact/save): `create`, `delete`, `pause`, `ping`, `resume`
 - destructive (irreversible data loss; confirm before auto-running): `delete`
 - composite (one call performs several beats internally): `create`, `pause`, `ping`, `resume`
+
+### datadog
+
+Datadog observability — monitors, logs, metrics, incidents, dashboards, and SLOs with cross-tool incident response
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- list, inspect, mute, unmute, create, and delete monitors
+- query monitor alert state summary (alerting/warn/ok breakdown)
+- search logs with service, status, and time range filters
+- query metric timeseries and list available metrics
+- list and post events
+- create, update, resolve, and inspect incidents (JSON:API v2)
+- list and inspect dashboards
+- list SLOs and retrieve error budget history
+- list service catalog definitions
+- observability snapshot combining monitors, events, and SLOs
+- dry-run mode for all write commands (exit 0; text preview by default, structured JSON preview with --json)
+- automation exit codes: monitor-status and snapshot return 1 when monitors are alerting
+
+**Commands**
+
+- `monitors`: List monitors: monitors [--tag env:prod] [--name CPU] [--state Alert]
+- `monitor`: Get one monitor: monitor \<id>
+- `monitor-status`: Alert state summary: monitor-status [--tag env:prod] (exits 1 when any monitor is alerting)
+- `monitor-mute`: Mute monitor: monitor-mute \<id> [--end now+1h] [--scope host:web-01] [--message reason] [--dry-run]
+- `monitor-unmute`: Unmute monitor: monitor-unmute \<id> [--dry-run]
+- `monitor-create`: Create monitor: monitor-create --name N --type "metric alert" --query Q [--message M] [--tags t1,t2] [--priority 1-5] [--dry-run]
+- `monitor-delete`: Delete monitor: monitor-delete \<id> [--dry-run]
+- `logs`: Search logs: logs [query] [--from now-1h] [--to now] [--service svc] [--status error|warn|info|debug] [--limit 25] [--cursor TOKEN]
+- `metrics`: Query timeseries: metrics "avg:system.cpu.user{*}" [--from now-1h] [--to now]
+- `metrics-list`: List metrics: metrics-list [--prefix system]
+- `events`: List events: events [--from now-1h] [--priority normal|low] [--tags tag1]
+- `event-post`: Post event: event-post --title T --text B [--priority normal] [--tags t1,t2] [--alert-type error|warning|info|success] [--dry-run]
+- `incidents`: List incidents: incidents [--state active|stable|resolved]
+- `incident`: Get incident: incident \<id>
+- `incident-create`: Create incident: incident-create --title T [--severity SEV-1..SEV-5] [--customer-impacted] [--dry-run]
+- `incident-update`: Update incident: incident-update \<id> [--title T] [--status active|stable|resolved] [--severity S] [--dry-run]
+- `incident-resolve`: Resolve incident: incident-resolve \<id> [--dry-run]
+- `dashboards`: List all dashboards
+- `dashboard`: Get dashboard: dashboard \<id>
+- `slos`: List SLOs: slos [--tags team:platform]
+- `slo`: SLO history and error budget: slo \<id> [--from now-30d] [--to now]
+- `services`: List service catalog: services [--page-size 100]
+- `snapshot`: Observability snapshot: snapshot (exits 1 when any monitor is alerting)
+
+**Examples**
+
+```bash
+# check if any monitors are alerting
+agent-do datadog monitor-status
+# search logs for errors in the api service
+agent-do datadog logs "error" --service api --from now-1h
+# query cpu metrics for the last hour
+agent-do datadog metrics "avg:system.cpu.user{*}" --from now-1h
+# list active incidents
+agent-do datadog incidents --state active
+# create a datadog incident for a production outage
+agent-do datadog incident-create --title "Checkout errors" --severity SEV-1 --customer-impacted
+# resolve a datadog incident
+agent-do datadog incident-resolve inc-001
+# mute a monitor during a deploy
+agent-do datadog monitor-mute 12345 --end now+1h --message "Deploying v2.4.0"
+# get SLO error budget status
+agent-do datadog slo slo-001
+# get a combined observability snapshot
+agent-do datadog snapshot --json
+```
+
+**Credentials**
+
+- Required: `DD_API_KEY`, `DD_APP_KEY`
+- Optional: `DD_SITE`, `DD_API_BASE_URL`
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `dashboard`, `dashboards`, `events`, `incident`, `incidents`, `logs`, `metrics`, `metrics-list`, `monitor`, `monitor-status`, `monitors`, `services`, `slo`, `slos`, `snapshot`
+- Write (connect/interact/save): `event-post`, `incident-create`, `incident-resolve`, `incident-update`, `monitor-create`, `monitor-delete`, `monitor-mute`, `monitor-unmute`
+- destructive (irreversible data loss; confirm before auto-running): `monitor-delete`
 
 ### db
 

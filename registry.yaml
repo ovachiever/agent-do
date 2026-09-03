@@ -5150,6 +5150,139 @@ tools:
         dns-del:
         - destructive
     concurrency: write
+  datadog:
+    description: Datadog observability — monitors, logs, metrics, incidents, dashboards, and SLOs with cross-tool incident response
+    capabilities:
+    - list, inspect, mute, unmute, create, and delete monitors
+    - query monitor alert state summary (alerting/warn/ok breakdown)
+    - search logs with service, status, and time range filters
+    - query metric timeseries and list available metrics
+    - list and post events
+    - create, update, resolve, and inspect incidents (JSON:API v2)
+    - list and inspect dashboards
+    - list SLOs and retrieve error budget history
+    - list service catalog definitions
+    - observability snapshot combining monitors, events, and SLOs
+    - dry-run mode for all write commands (exit 0; text preview by default, structured JSON preview with --json)
+    - 'automation exit codes: monitor-status and snapshot return 1 when monitors are alerting'
+    commands:
+      monitors: 'List monitors: monitors [--tag env:prod] [--name CPU] [--state Alert]'
+      monitor: 'Get one monitor: monitor <id>'
+      monitor-status: 'Alert state summary: monitor-status [--tag env:prod] (exits 1 when any monitor is alerting)'
+      monitor-mute: 'Mute monitor: monitor-mute <id> [--end now+1h] [--scope host:web-01] [--message reason] [--dry-run]'
+      monitor-unmute: 'Unmute monitor: monitor-unmute <id> [--dry-run]'
+      monitor-create: 'Create monitor: monitor-create --name N --type "metric alert" --query Q [--message M] [--tags t1,t2] [--priority 1-5] [--dry-run]'
+      monitor-delete: 'Delete monitor: monitor-delete <id> [--dry-run]'
+      logs: 'Search logs: logs [query] [--from now-1h] [--to now] [--service svc] [--status error|warn|info|debug] [--limit 25] [--cursor TOKEN]'
+      metrics: 'Query timeseries: metrics "avg:system.cpu.user{*}" [--from now-1h] [--to now]'
+      metrics-list: 'List metrics: metrics-list [--prefix system]'
+      events: 'List events: events [--from now-1h] [--priority normal|low] [--tags tag1]'
+      event-post: 'Post event: event-post --title T --text B [--priority normal] [--tags t1,t2] [--alert-type error|warning|info|success] [--dry-run]'
+      incidents: 'List incidents: incidents [--state active|stable|resolved]'
+      incident: 'Get incident: incident <id>'
+      incident-create: 'Create incident: incident-create --title T [--severity SEV-1..SEV-5] [--customer-impacted] [--dry-run]'
+      incident-update: 'Update incident: incident-update <id> [--title T] [--status active|stable|resolved] [--severity S] [--dry-run]'
+      incident-resolve: 'Resolve incident: incident-resolve <id> [--dry-run]'
+      dashboards: List all dashboards
+      dashboard: 'Get dashboard: dashboard <id>'
+      slos: 'List SLOs: slos [--tags team:platform]'
+      slo: 'SLO history and error budget: slo <id> [--from now-30d] [--to now]'
+      services: 'List service catalog: services [--page-size 100]'
+      snapshot: 'Observability snapshot: snapshot (exits 1 when any monitor is alerting)'
+    examples:
+    - intent: check if any monitors are alerting
+      command: agent-datadog monitor-status
+    - intent: search logs for errors in the api service
+      command: agent-datadog logs "error" --service api --from now-1h
+    - intent: query cpu metrics for the last hour
+      command: agent-datadog metrics "avg:system.cpu.user{*}" --from now-1h
+    - intent: list active incidents
+      command: agent-datadog incidents --state active
+    - intent: create a datadog incident for a production outage
+      command: agent-datadog incident-create --title "Checkout errors" --severity SEV-1 --customer-impacted
+    - intent: resolve a datadog incident
+      command: agent-datadog incident-resolve inc-001
+    - intent: mute a monitor during a deploy
+      command: agent-datadog monitor-mute 12345 --end now+1h --message "Deploying v2.4.0"
+    - intent: get SLO error budget status
+      command: agent-datadog slo slo-001
+    - intent: get a combined observability snapshot
+      command: agent-datadog snapshot --json
+    credentials:
+      required:
+      - DD_API_KEY
+      - DD_APP_KEY
+      optional:
+      - DD_SITE
+      - DD_API_BASE_URL
+    routing:
+      discover_keywords:
+      - datadog
+      - dd monitor
+      - dd logs
+      - dd metrics
+      - dd incident
+      - observability
+      - apm
+      - slo
+      - error budget
+      prompt_patterns:
+      - \bdatadog\b
+      - \bdd\s+(monitor|logs|metrics|incident|slo|alert)\b
+      - \bmonitor[s]?\s+(alert|warn|status|mute)\b
+      - \bcheck\s+(logs|metrics|monitors)\b
+      - \bslo\s+(status|budget|burn)\b
+      - \bincident\s+(create|resolve|update)\b
+      recommended_entrypoints:
+      - agent-do datadog monitor-status
+      - agent-do datadog snapshot --json
+      - agent-do datadog logs "*" --from now-1h --service <svc>
+      - agent-do datadog incidents --state active
+      default_command: snapshot
+      raw_cli_equivalents:
+      - pattern: \bcurl\b.*\bapi\.datadoghq\.com\b
+        replacement: agent-do datadog
+        example: agent-do datadog monitors
+        reason: agent-do datadog wraps the Datadog REST API with structured output and dry-run support
+      project_signals:
+      - datadog
+      - monitoring
+      - observability
+      - slo
+      readiness:
+        check: agent-do datadog monitors
+        fix: agent-do creds check --tool datadog
+        note: Requires DD_API_KEY and DD_APP_KEY; store both with agent-do creds store <KEY> --stdin. Optional DD_SITE for non-US1 regions
+    contracts:
+      snapshot:
+      - monitors
+      - monitor
+      - monitor-status
+      - logs
+      - metrics
+      - metrics-list
+      - events
+      - incidents
+      - incident
+      - dashboards
+      - dashboard
+      - slos
+      - slo
+      - services
+      - snapshot
+      interact:
+      - monitor-mute
+      - monitor-unmute
+      - monitor-create
+      - monitor-delete
+      - event-post
+      - incident-create
+      - incident-update
+      - incident-resolve
+      attributes:
+        monitor-delete:
+        - destructive
+    concurrency: mixed
   resend:
     description: Resend domain management and DNS verification — exact records, verification state, and public DNS checks
     capabilities:

@@ -104,6 +104,11 @@ def load_registry() -> dict:
 
 def build_registry_context(registry: dict) -> str:
     """Build compact tool summary for LLM context."""
+    # This is prompt context, not a complete reference document.  Keep the
+    # executable surface and safety markers for every tool, then retain up to
+    # two examples per tool only while they fit the context budget.  Otherwise
+    # a perfectly valid registry addition can make the contracts gate fail.
+    max_context_chars = 39_000
     lines = []
     for tool, info in sorted(registry.get('tools', {}).items()):
         lines.append(f"## {tool}")
@@ -139,9 +144,14 @@ def build_registry_context(registry: dict) -> str:
 
         examples = info.get('examples', [])
         if examples:
-            lines.append("Examples:")
-            for ex in examples[:3]:
-                lines.append(f"  \"{ex.get('intent', '')}\" → `{ex.get('command', '')}`")
+            example_lines = ["Examples:"]
+            for ex in examples[:2]:
+                example_lines.append(f"  \"{ex.get('intent', '')}\" → `{ex.get('command', '')}`")
+            # Account for the separating newline added by join() as well as
+            # this tool's trailing blank line.
+            prospective = "\n".join([*lines, *example_lines, ""])
+            if len(prospective) <= max_context_chars:
+                lines.extend(example_lines)
 
         lines.append("")
 
