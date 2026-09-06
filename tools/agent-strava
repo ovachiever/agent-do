@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+"""Personal, local-only Strava dashboard for agent-do.
+
+Secrets are resolved by the dispatcher or agent-do creds.  This program never
+writes a token to the profile or activity cache.
+"""
+from __future__ import annotations
+
+import argparse, json, os, secrets, subprocess, sys, urllib.parse, urllib.request, webbrowser
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do")) / "strava"
+PROFILE, CACHE, DASHBOARD = HOME / "profile.json", HOME / "activities.json", HOME / "dashboard.html"
+AUTH_URL, TOKEN_URL, API = "https://www.strava.com/oauth/authorize", "https://www.strava.com/oauth/token", "https://www.strava.com/api/v3"
+
+def write_json(path, value):
+    HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+    tmp.chmod(0o600); tmp.replace(path)
+
+def read_json(path, label):
+    if not path.exists(): raise SystemExit(f"No Strava {label} found. Run: agent-do strava init")
+    return json.loads(path.read_text())
+
+def secret(name):
+    if os.environ.get(name): return os.environ[name]
+    result = subprocess.run([str(ROOT / "agent-do"), "creds", "get", name, "--reveal"], capture_output=True, text=True)
+    if result.returncode == 0 and result.stdout.strip(): return result.stdout.strip()
+    raise SystemExit(f"Missing {name}. Run: agent-do strava init")
+
+def store_secret(name, value):
+    result = subprocess.run([str(ROOT / "agent-do"), "creds", "store", name, "--stdin"], input=value, capture_output=True, text=True)
+    if result.returncode: raise SystemExit(result.stderr.strip() or f"Could not store {name}")
+
+def request(url, data=None, token=None):
+    body = urllib.parse.urlencode(data).encode() if data else None
+    req = urllib.request.Request(url, data=body, headers={"Accept": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response: return json.load(response)
+    except Exception as exc: raise SystemExit(f"Strava request failed: {exc}") from exc
+
+def refresh(profile):
+    reply = request(TOKEN_URL, {"client_id": profile["client_id"], "client_secret": secret("STRAVA_CLIENT_SECRET"), "grant_type": "refresh_token", "refresh_token": secret("STRAVA_REFRESH_TOKEN")})
+    store_secret("STRAVA_REFRESH_TOKEN", reply["refresh_token"])
+    return reply["access_token"]
+
+def init(args):
+    print("agent-strava keeps your profile, cache, and secrets on this device only.")
+    print("Create your own Strava API application at https://www.strava.com/settings/api.")
+    print(f"Set its Authorization Callback Domain to {urllib.parse.urlparse(args.redirect_uri).hostname}, then provide its client ID and secret below.")
+    client_id = args.client_id or input("Strava client ID: ").strip()
+    if not client_id: raise SystemExit("A Strava client ID is required.")
+    client_secret = None
+    if not client_secret and sys.stdin.isatty():
+        import getpass; client_secret = getpass.getpass("Strava client secret (stored in OS secure storage): ")
+    if not client_secret: raise SystemExit("Provide --client-secret-stdin or run interactively.")
+    store_secret("STRAVA_CLIENT_SECRET", client_secret)
+    write_json(PROFILE, {"client_id": client_id, "redirect_uri": args.redirect_uri, "units": "imperial", "created_at": datetime.now(timezone.utc).isoformat()})
+    print("Profile initialized locally. Next run: agent-do strava connect")
+
+def connect(args):
+    profile = read_json(PROFILE, "profile")
+    state, received = secrets.token_urlsafe(24), {}
+    class Callback(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.update({k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).items()})
+            self.send_response(200); self.end_headers(); self.wfile.write(b"Strava connected. You may return to agent-do.")
+        def log_message(self, *unused): pass
+    parsed = urllib.parse.urlparse(profile["redirect_uri"])
+    if parsed.hostname not in ("127.0.0.1", "localhost") or not parsed.port: raise SystemExit("This initial local-only version requires a localhost redirect URI with a port.")
+    server = HTTPServer((parsed.hostname, parsed.port), Callback)
+    query = urllib.parse.urlencode({"client_id": profile["client_id"], "redirect_uri": profile["redirect_uri"], "response_type": "code", "approval_prompt": "force", "scope": "activity:read,activity:read_all", "state": state})
+    url = f"{AUTH_URL}?{query}"
+    print("Opening Strava authorization in your browser…")
+    webbrowser.open(url)
+    server.timeout = args.timeout
+    server.handle_request()
+    if received.get("state") != state or not received.get("code"): raise SystemExit("Authorization was not completed or state validation failed.")
+    reply = request(TOKEN_URL, {"client_id": profile["client_id"], "client_secret": secret("STRAVA_CLIENT_SECRET"), "code": received["code"], "grant_type": "authorization_code"})
+    store_secret("STRAVA_REFRESH_TOKEN", reply["refresh_token"])
+    athlete = reply.get("athlete", {})
+    profile.update({"athlete_id": athlete.get("id"), "athlete_name": " ".join(filter(None, [athlete.get("firstname"), athlete.get("lastname")])), "scopes": "activity:read,activity:read_all", "connected_at": datetime.now(timezone.utc).isoformat()})
+    write_json(PROFILE, profile)
+    print(f"Connected locally as {profile.get('athlete_name') or profile['athlete_id']}. Run: agent-do strava sync")
+
+def sync(args):
+    profile, token = read_json(PROFILE, "profile"), refresh(read_json(PROFILE, "profile"))
+    after = int((datetime.now(timezone.utc) - timedelta(days=args.days)).timestamp())
+    activities, page = [], 1
+    while True:
+        batch = request(f"{API}/athlete/activities?{urllib.parse.urlencode({'after': after, 'per_page': 100, 'page': page})}", token=token)
+        activities.extend(batch)
+        if len(batch) < 100: break
+        page += 1
+    write_json(CACHE, {"synced_at": datetime.now(timezone.utc).isoformat(), "activities": activities})
+    profile["last_sync_at"] = datetime.now(timezone.utc).isoformat(); write_json(PROFILE, profile)
+    print(f"Synced {len(activities)} activities from the last {args.days} days.")
+
+def started(activity):
+    return datetime.fromisoformat(activity["start_date"].replace("Z", "+00:00"))
+
+def activity_kind(activity):
+    return activity.get("sport_type") or activity.get("type") or "Other"
+
+def summarize(activities, days=7, activity_type=None):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    selected = [a for a in activities if started(a) >= cutoff and (not activity_type or activity_kind(a) == activity_type)]
+    weeks = {}
+    for activity in selected:
+        stamp = started(activity)
+        monday = (stamp - timedelta(days=stamp.weekday())).date().isoformat()
+        bucket = weeks.setdefault(monday, {"week": monday, "distance_km": 0, "moving_minutes": 0})
+        bucket["distance_km"] += activity.get("distance", 0) / 1000
+        bucket["moving_minutes"] += activity.get("moving_time", 0) / 60
+    return {
+        "days": days,
+        "distance_km": round(sum(a.get("distance", 0) for a in selected) / 1000, 1),
+        "elevation_m": round(sum(a.get("total_elevation_gain", 0) for a in selected)),
+        "moving_minutes": round(sum(a.get("moving_time", 0) for a in selected) / 60),
+        "activity_count": len(selected),
+        "activities": sorted(selected, key=started, reverse=True),
+        "weekly": [{**bucket, "distance_km": round(bucket["distance_km"], 1), "moving_minutes": round(bucket["moving_minutes"])} for _, bucket in sorted(weeks.items())],
+    }
+
+def detail_for_activity(activity_id):
+    cached = read_json(CACHE, "activity cache; run Sync now after connecting")["activities"]
+    if not any(str(activity.get("id")) == str(activity_id) for activity in cached):
+        raise SystemExit("Activity is not present in the local cache")
+    profile = read_json(PROFILE, "profile")
+    token = refresh(profile)
+    detail = request(f"{API}/activities/{activity_id}?include_all_efforts=true", token=token)
+    stream_query = urllib.parse.urlencode({"keys": "time,distance,altitude,heartrate,latlng,velocity_smooth,grade_smooth,cadence,watts,temp,moving", "key_by_type": "true"})
+    streams = request(f"{API}/activities/{activity_id}/streams?{stream_query}", token=token)
+    try:
+        zones = request(f"{API}/activities/{activity_id}/zones", token=token)
+    except SystemExit:
+        zones = []
+    return {"detail": detail, "streams": streams, "zones": zones}
+
+DYNAMIC_DASHBOARD = """<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>agent-strava</title>
+<style>:root{color-scheme:dark;--bg:#111827;--panel:#1f2937;--line:#374151;--muted:#94a3b8;--accent:#b8f23d}*{box-sizing:border-box}body{font:16px system-ui,sans-serif;background:var(--bg);color:#f8fafc;margin:0}.wrap{max-width:1180px;margin:auto;padding:clamp(18px,4vw,52px)}header{display:flex;justify-content:space-between;gap:18px;align-items:start;flex-wrap:wrap}h1{font-size:clamp(2rem,5vw,3.5rem);margin:0}.accent{color:var(--accent)}button,select{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:#fff;padding:10px 14px;font:inherit;cursor:pointer}button.active,button.primary{background:var(--accent);color:#111827;border-color:var(--accent)}.controls,.cards{display:flex;gap:10px;flex-wrap:wrap}.controls{margin:28px 0 14px}.filter{display:flex;align-items:center;gap:8px;color:var(--muted)}.activity-banner{background:linear-gradient(105deg,#1f2937,#162233);border-left:4px solid var(--accent)}.activity-banner h2{font-size:clamp(1.5rem,3vw,2.2rem);margin:5px 0 0}.cards{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));margin:14px 0}.card,section,.chart-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}.label,small{color:var(--muted)}strong{display:block;color:var(--accent);font-size:clamp(1.7rem,4vw,2.5rem);margin-top:8px}section{margin-top:16px}.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}.chart-card h2{font-size:1.1rem;margin:0 0 12px}.bar-chart{height:180px;display:flex;align-items:end;gap:8px;border-bottom:1px solid var(--line);padding:8px 2px}.bar-wrap{height:100%;min-width:28px;flex:1;display:flex;flex-direction:column;justify-content:end;align-items:center;gap:6px}.bar{width:100%;min-height:2px;background:var(--accent);border-radius:5px 5px 0 0}.bar-label{font-size:.68rem;color:var(--muted);white-space:nowrap}.empty{color:var(--muted);align-self:center;margin:auto}table{border-collapse:collapse;width:100%;table-layout:fixed}td,th{padding:12px;text-align:left;border-bottom:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}th{color:var(--muted);font-weight:500;position:relative}.activity-row{cursor:pointer}.activity-row:hover,.activity-row:focus{background:#263448;outline:none}.column-grip{position:absolute;right:-4px;top:0;width:9px;height:100%;cursor:col-resize;touch-action:none}.column-grip:hover,.column-grip:active{background:var(--accent)}dialog{color:#f8fafc;background:var(--bg);border:1px solid var(--line);border-radius:16px;width:min(860px,calc(100% - 28px));max-height:90vh;padding:0}dialog::backdrop{background:#020617bb}.detail{padding:24px}.detail-head{display:flex;justify-content:space-between;gap:12px;align-items:start}.detail-head h2{margin:4px 0}.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}.detail-stat{background:var(--panel);padding:12px;border-radius:10px}.detail-stat b{display:block;margin-top:4px}.stream{margin-top:18px}.stream h3{font-size:1rem;margin:0 0 6px}.stream svg{display:block;width:100%;height:130px;background:var(--panel);border-radius:10px}.stream polyline{fill:none;stroke:var(--accent);stroke-width:2}.error{color:#fca5a5}@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}.hide-sm{display:none}.card,section,.chart-card{padding:15px}.detail-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:380px){.cards{grid-template-columns:1fr}}</style>
+<main class=wrap><header><div><h1>Your training, <span class=accent>locally.</span></h1><small id=status>Loading local cache…</small></div><div class=controls><button id=units aria-pressed=false>Units: Imperial</button><button class=primary id=sync>Sync now</button></div></header><nav class=controls aria-label="Dashboard filters"><button data-days=7>7 days</button><button class=active data-days=28>4 weeks</button><button data-days=30>Month</button><button data-days=365>Year</button><label class=filter>Activity <select id=activity-type><option value="">All activities</option></select></label></nav><section class=activity-banner><small>Training overview</small><h2 id=activity-heading>All activities</h2></section><div class=cards><div class=card><span class=label>Distance</span><strong id=distance>—</strong></div><div class=card><span class=label>Moving time</span><strong id=time>—</strong></div><div class=card><span class=label>Elevation</span><strong id=elevation>—</strong></div><div class=card><span class=label>Activities</span><strong id=count>—</strong></div></div><div class=charts><article class=chart-card><h2>Distance per week</h2><div id=distance-chart class=bar-chart></div></article><article class=chart-card><h2>Moving time per week</h2><div id=time-chart class=bar-chart></div></article></div><section><h2>Recent activity</h2><small>Click an activity for its expanded summary. Drag a header edge to resize a column.</small><table id=activity-table><colgroup><col style="width:22%"><col style="width:31%"><col style="width:16%"><col style="width:16%"><col style="width:15%"></colgroup><thead><tr><th>Date &amp; time</th><th>Activity</th><th class=hide-sm>Sport</th><th>Distance</th><th>Time</th></tr></thead><tbody id=activities></tbody></table></section><small>Served only from this computer. Data is sent to Strava only when you choose Sync now.</small></main><dialog id=activity-dialog><div id=activity-detail class=detail></div></dialog>
+<script>let days=28,metric=false,unitsLoaded=false,activityType='';const $=id=>document.getElementById(id),text=v=>String(v??'');const friendly=v=>text(v).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ');const kind=a=>a.sport_type||a.type||'';const distance=(km,type='')=>type==='WeightTraining'?'--':metric?km.toFixed(1)+' km':(km*.621371).toFixed(1)+' mi';const elevation=m=>metric?Math.round(m)+' m':Math.round(m*3.28084)+' ft';const duration=m=>Math.floor(m/60)+'h '+Math.round(m%60)+'m';const when=a=>new Date(a.start_date_local||a.start_date).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});const el=(tag,value,cls)=>{const node=document.createElement(tag);if(value!==undefined)node.textContent=text(value);if(cls)node.className=cls;return node};function showUnits(){const b=$('units');b.textContent='Units: '+(metric?'Metric':'Imperial');b.setAttribute('aria-pressed',String(metric))}function showTypes(types){const s=$('activity-type');if(s.options.length>1)return;for(const type of types){const o=el('option',friendly(type));o.value=type;s.append(o)}}function drawBars(id,weeks,key,format){const chart=$(id);chart.replaceChildren();if(!weeks.length){chart.append(el('span','No activity in this range.','empty'));return}if(key==='distance_km'&&activityType==='WeightTraining'){chart.append(el('span','Distance is not recorded for Weight Training.','empty'));return}const max=Math.max(1,...weeks.map(w=>w[key]));for(const week of weeks){const wrap=el('div',undefined,'bar-wrap'),bar=el('div',undefined,'bar'),label=el('span',new Date(week.week+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}),'bar-label');bar.style.height=Math.max(2,week[key]/max*100)+'%';bar.title=format(week[key]);wrap.append(bar,label);chart.append(wrap)}}function renderRows(activities){$('activities').replaceChildren(...activities.slice(0,10).map(a=>{const row=el('tr',undefined,'activity-row');row.tabIndex=0;row.title='Open expanded activity summary';for(const value of [when(a),a.name||'Activity',friendly(kind(a)),distance(a.distance/1000,kind(a)),Math.round(a.moving_time/60)+' min'])row.append(el('td',value));row.children[2].className='hide-sm';row.onclick=()=>openActivity(a.id);row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openActivity(a.id)}};return row}))}async function load(){try{const r=await fetch('/api/stats?days='+days+'&type='+encodeURIComponent(activityType)),d=await r.json();if(!r.ok)throw Error(d.error);if(!unitsLoaded){metric=d.units==='metric';unitsLoaded=true;showUnits()}showTypes(d.activity_types);$('activity-heading').textContent=activityType?friendly(activityType):'All activities';$('distance').textContent=distance(d.distance_km,activityType);$('time').textContent=duration(d.moving_minutes);$('elevation').textContent=elevation(d.elevation_m);$('count').textContent=d.activity_count;renderRows(d.activities);drawBars('distance-chart',d.weekly,'distance_km',v=>distance(v));drawBars('time-chart',d.weekly,'moving_minutes',v=>duration(v));$('status').textContent='Showing the last '+d.days+' days from your local cache.';$('status').className=''}catch(e){$('status').textContent=e.message;$('status').className='error'}}function streamChart(title,stream){if(!stream||!Array.isArray(stream.data)||stream.data.length<2)return null;const values=stream.data.filter(Number.isFinite),min=Math.min(...values),max=Math.max(...values),span=max-min||1,points=values.map((v,i)=>Math.round(i/(values.length-1)*100)+','+Math.round(118-(v-min)/span*106)).join(' '),box=el('div',undefined,'stream');box.append(el('h3',title));const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),line=document.createElementNS('http://www.w3.org/2000/svg','polyline');line.setAttribute('points',points);svg.setAttribute('viewBox','0 0 100 130');svg.setAttribute('preserveAspectRatio','none');svg.append(line);box.append(svg);return box}function stat(label,value){const box=el('div',undefined,'detail-stat');box.append(el('small',label),el('b',value));return box}async function openActivity(id){const dialog=$('activity-dialog'),content=$('activity-detail');content.replaceChildren(el('p','Loading activity details…'));dialog.showModal();try{const r=await fetch('/api/activity/'+encodeURIComponent(id)),data=await r.json();if(!r.ok)throw Error(data.error);const a=data.detail,head=el('div',undefined,'detail-head'),heading=el('div');heading.append(el('small',friendly(kind(a))),el('h2',a.name||'Activity'),el('small',when(a)));const close=el('button','Close');close.onclick=()=>dialog.close();head.append(heading,close);content.replaceChildren(head);const grid=el('div',undefined,'detail-grid');grid.append(stat('Distance',distance((a.distance||0)/1000,kind(a))),stat('Moving time',duration((a.moving_time||0)/60)),stat('Elevation',elevation(a.total_elevation_gain||0)),stat('Average heart rate',a.average_heartrate?Math.round(a.average_heartrate)+' bpm':'Not available'),stat('Max heart rate',a.max_heartrate?Math.round(a.max_heartrate)+' bpm':'Not available'),stat('Photos',a.photos&&a.photos.count?a.photos.count:'None'));content.append(grid);if(a.description)content.append(el('p',a.description));const streams=data.streams||{};const altitude=streamChart('Elevation profile',streams.altitude),heart=streamChart('Heart rate',streams.heartrate);if(altitude)content.append(altitude);if(heart)content.append(heart);if(!altitude&&!heart)content.append(el('small','No detailed elevation or heart-rate stream is available for this activity.'))}catch(e){content.replaceChildren(el('button','Close'),el('p',e.message,'error'));content.firstChild.onclick=()=>dialog.close()}}function enableColumnResize(){const cols=document.querySelectorAll('#activity-table colgroup col');document.querySelectorAll('#activity-table th').forEach((header,index)=>{const grip=el('span',undefined,'column-grip');grip.setAttribute('aria-hidden','true');grip.onpointerdown=e=>{e.preventDefault();const start=e.clientX,width=cols[index].getBoundingClientRect().width;const move=event=>cols[index].style.width=Math.max(90,width+event.clientX-start)+'px';const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)};header.append(grip)})}document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{days=+b.dataset.days;document.querySelectorAll('[data-days]').forEach(x=>x.classList.toggle('active',x===b));load()});$('activity-type').onchange=e=>{activityType=e.target.value;load()};$('units').onclick=async()=>{metric=!metric;showUnits();try{const r=await fetch('/api/preferences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({units:metric?'metric':'imperial'})});if(!r.ok)throw Error((await r.json()).error);await load()}catch(e){metric=!metric;showUnits();$('status').textContent=e.message;$('status').className='error'}};$('sync').onclick=async()=>{const b=$('sync');b.disabled=true;b.textContent='Syncing…';try{const r=await fetch('/api/sync',{method:'POST'}),d=await r.json();if(!r.ok)throw Error(d.error);await load()}catch(e){$('status').textContent=e.message;$('status').className='error'}finally{b.disabled=false;b.textContent='Sync now'}};showUnits();enableColumnResize();load()</script></html>"""
+
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "Served only from this computer. Data is sent to Strava only when you choose Sync now.",
+    "Served only from this computer. Strava is contacted only when you choose Sync now or open an activity detail.",
+)
+_CHARTS = "<div class=charts><article class=chart-card><h2>Distance per week</h2><div id=distance-chart class=bar-chart></div></article><article class=chart-card><h2>Moving time per week</h2><div id=time-chart class=bar-chart></div></article></div>"
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(_CHARTS, "").replace(
+    "</section><small>Served only from this computer. Strava is contacted only when you choose Sync now or open an activity detail.",
+    f"</section>{_CHARTS}<small>Served only from this computer. Strava is contacted only when you choose Sync now or open an activity detail.",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "</style>",
+    "td+td,th+th{border-left:1px solid var(--line)}</style>",
+).replace(
+    "Math.round(a.moving_time/60)+' min'",
+    "activityDuration(a.moving_time/60)",
+).replace(
+    "</script>",
+    ";function activityDuration(value){const minutes=Math.round(value),hours=Math.floor(minutes/60),remaining=minutes%60;if(!hours)return minutes+' min';return hours+' hour'+(hours===1?'':'s')+(remaining?' '+remaining+' minute'+(remaining===1?'':'s'):'')}</script>",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "td+td,th+th{border-left:1px solid var(--line)}",
+    "th+th{border-left:1px solid var(--line)}th{color:var(--accent);font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:.8rem}",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "<div id=distance-chart class=bar-chart></div>",
+    "<div class=chart-frame><div id=distance-axis class=chart-axis></div><div id=distance-chart class=bar-chart></div></div>",
+).replace(
+    "<div id=time-chart class=bar-chart></div>",
+    "<div class=chart-frame><div id=time-axis class=chart-axis></div><div id=time-chart class=bar-chart></div></div>",
+).replace(
+    "</style>",
+    ".chart-frame{display:grid;grid-template-columns:62px minmax(0,1fr);gap:10px}.chart-axis{height:180px;padding:8px 0 24px;display:flex;flex-direction:column;justify-content:space-between;align-items:end;color:var(--muted);font-size:.72rem}.axis-label{white-space:nowrap}</style>",
+).replace(
+    "drawBars('distance-chart',d.weekly,'distance_km',v=>distance(v));drawBars('time-chart',d.weekly,'moving_minutes',v=>duration(v));",
+    "drawBars('distance-chart',d.weekly,'distance_km',v=>distance(v));drawAxis('distance-axis',d.weekly,'distance_km',v=>distance(v));drawBars('time-chart',d.weekly,'moving_minutes',v=>duration(v));drawAxis('time-axis',d.weekly,'moving_minutes',v=>duration(v));",
+).replace(
+    "</script>",
+    ";function drawAxis(id,weeks,key,format){const axis=$(id);axis.replaceChildren();if(!weeks.length)return;const max=Math.max(1,...weeks.map(w=>w[key]));for(const value of [max,max/2,0])axis.append(el('span',format(value),'axis-label'))}</script>",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "</style>",
+    ".bar-chart{position:relative}.chart-grid{position:absolute;inset:8px 0 25px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}.chart-grid span{border-top:1px dashed #64748b}.bar-wrap{position:relative;z-index:1}.chart-tooltip{position:absolute;z-index:2;transform:translate(-50%,-100%);background:#020617;color:#f8fafc;border:1px solid var(--accent);border-radius:6px;padding:5px 8px;font-size:.78rem;white-space:nowrap;pointer-events:none}</style>",
+).replace(
+    "</script>",
+    ";function niceStep(max){const raw=max/4,base=Math.pow(10,Math.floor(Math.log10(raw||1))),fraction=raw/base;return(fraction<=1.5?1:fraction<=3?2:fraction<=7?5:10)*base}function chartScale(weeks,key){const values=weeks.map(w=>key==='distance_km'?(metric?w[key]:w[key]*.621371):w[key]/60),maximum=Math.max(0,...values),step=niceStep(maximum),max=Math.ceil(maximum/step)*step||step;return{values,step,max}}function tickLabel(value,key){if(key==='distance_km')return(Number.isInteger(value)?value:value.toFixed(1))+(metric?' km':' mi');return value+'h'}function drawBars(id,weeks,key,format){const chart=$(id);chart.replaceChildren();if(!weeks.length){chart.append(el('span','No activity in this range.','empty'));return}if(key==='distance_km'&&activityType==='WeightTraining'){chart.append(el('span','Distance is not recorded for Weight Training.','empty'));return}const scale=chartScale(weeks,key),grid=el('div',undefined,'chart-grid');for(let i=0;i<=Math.round(scale.max/scale.step);i++)grid.append(el('span'));chart.append(grid);const tooltip=el('div',undefined,'chart-tooltip');tooltip.hidden=true;for(let index=0;index<weeks.length;index++){const week=weeks[index],wrap=el('div',undefined,'bar-wrap'),bar=el('div',undefined,'bar'),label=el('span',new Date(week.week+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}),'bar-label');bar.style.height=Math.max(2,scale.values[index]/scale.max*100)+'%';bar.tabIndex=0;const show=()=>{const box=bar.getBoundingClientRect(),parent=chart.getBoundingClientRect();tooltip.textContent=format(week[key]);tooltip.style.left=box.left-parent.left+box.width/2+'px';tooltip.style.top=Math.max(28,box.top-parent.top)+'px';tooltip.hidden=false},hide=()=>tooltip.hidden=true;bar.onmouseenter=show;bar.onmouseleave=hide;bar.onfocus=show;bar.onblur=hide;wrap.append(bar,label);chart.append(wrap)}chart.append(tooltip)}function drawAxis(id,weeks,key){const axis=$(id);axis.replaceChildren();if(!weeks.length)return;const scale=chartScale(weeks,key);for(let tick=scale.max;tick>=-scale.step/100;tick-=scale.step)axis.append(el('span',tickLabel(Math.max(0,tick),key),'axis-label'))}</script>",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "</style>",
+    ".bar-chart{height:180px;padding:0 2px}.bar-wrap{height:147px;margin-top:8px;display:flex;align-items:flex-end;justify-content:center}.bar-label{position:absolute;top:calc(100% + 6px)}.chart-axis{position:relative;display:block;padding:0}.axis-label{position:absolute;right:0;transform:translateY(-50%)}</style>",
+).replace(
+    "</script>",
+    ";function drawAxis(id,weeks,key){const axis=$(id);axis.replaceChildren();if(!weeks.length)return;const scale=chartScale(weeks,key),count=Math.round(scale.max/scale.step),plotTop=8,plotHeight=147;for(let index=0;index<=count;index++){const label=el('span',tickLabel(scale.max-index*scale.step,key),'axis-label');label.style.top=plotTop+index/count*plotHeight+'px';axis.append(label)}}</script>",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "height:147px;margin-top:8px;display:flex;align-items:flex-end;justify-content:center",
+    "height:147px;margin-top:8px;display:flex;align-items:center;justify-content:flex-end",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "bar.style.height=Math.max(2,scale.values[index]/scale.max*100)+'%'",
+    "bar.style.height=Math.max(2,scale.values[index]/scale.max*147)+'px'",
+).replace(
+    "new Date(week.week+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'})",
+    "weekLabel(week.week)",
+).replace(
+    "</script>",
+    ";function weekLabel(value){const start=new Date(value+'T00:00:00'),end=new Date(start);end.setDate(start.getDate()+6);const options={month:'short',day:'numeric'};if(start.getMonth()===end.getMonth())return start.toLocaleDateString(undefined,{month:'short',day:'numeric'})+'–'+end.getDate();return start.toLocaleDateString(undefined,options)+'–'+end.toLocaleDateString(undefined,options)}</script>",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    ".bar-chart{height:180px;padding:0 2px}",
+    ".bar-chart{height:180px;padding:0 2px;align-items:flex-start}",
+)
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace(
+    "</script>",
+    ";function activityPace(a){if(!a.distance||!a.moving_time)return 'Not available';if(kind(a).includes('Run')||kind(a)==='Walk'){const miles=a.distance/1609.344,seconds=a.moving_time/miles;return Math.floor(seconds/60)+':'+String(Math.round(seconds%60)).padStart(2,'0')+' /mi'}const mph=a.average_speed?a.average_speed*2.23694:0;return mph?mph.toFixed(1)+' mph':'Not available'}function localRoute(stream){if(!stream||!Array.isArray(stream.data)||stream.data.length<2)return null;const points=stream.data.filter(p=>Array.isArray(p)&&p.length===2),lats=points.map(p=>p[0]),lngs=points.map(p=>p[1]),minLat=Math.min(...lats),maxLat=Math.max(...lats),minLng=Math.min(...lngs),maxLng=Math.max(...lngs),latSpan=maxLat-minLat||.001,lngSpan=maxLng-minLng||.001,svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),line=document.createElementNS('http://www.w3.org/2000/svg','polyline'),box=el('div',undefined,'stream');box.append(el('h3','Route'));svg.setAttribute('viewBox','0 0 100 130');svg.setAttribute('preserveAspectRatio','none');line.setAttribute('points',points.map(p=>((p[1]-minLng)/lngSpan*92+4)+','+((maxLat-p[0])/latSpan*112+9)).join(' '));svg.append(line);box.append(svg,el('small','Local route plot — no map tiles or coordinates leave this computer.'));return box}function detailTable(title,headers,rows){if(!rows||!rows.length)return null;const section=el('div',undefined,'stream'),heading=el('h3',title),table=document.createElement('table'),head=document.createElement('thead'),tr=document.createElement('tr'),body=document.createElement('tbody');for(const header of headers)tr.append(el('th',header));head.append(tr);for(const values of rows){const row=document.createElement('tr');for(const value of values)row.append(el('td',value));body.append(row)}table.append(head,body);section.append(heading,table);return section}function openActivity(id){const dialog=$('activity-dialog'),content=$('activity-detail');content.replaceChildren(el('p','Loading activity details…'));dialog.showModal();fetch('/api/activity/'+encodeURIComponent(id)).then(r=>r.json().then(data=>({r,data}))).then(({r,data})=>{if(!r.ok)throw Error(data.error);const a=data.detail,raw=data.streams||{},streams=Array.isArray(raw)?Object.fromEntries(raw.map(s=>[s.type,s])):raw,head=el('div',undefined,'detail-head'),heading=el('div'),close=el('button','Close');heading.append(el('small',friendly(kind(a))),el('h2',a.name||'Activity'),el('small',when(a)));close.onclick=()=>dialog.close();head.append(heading,close);content.replaceChildren(head);const grid=el('div',undefined,'detail-grid'),facts=[['Distance',distance((a.distance||0)/1000,kind(a))],['Moving time',duration((a.moving_time||0)/60)],['Elapsed time',duration((a.elapsed_time||0)/60)],['Elevation',elevation(a.total_elevation_gain||0)],['Pace / speed',activityPace(a)],['Calories',a.calories?Math.round(a.calories)+' kcal':'Not available'],['Average heart rate',a.average_heartrate?Math.round(a.average_heartrate)+' bpm':'Not available'],['Max heart rate',a.max_heartrate?Math.round(a.max_heartrate)+' bpm':'Not available'],['Cadence',a.average_cadence?Math.round(a.average_cadence)+' spm':'Not available'],['Average power',a.average_watts?Math.round(a.average_watts)+' W':'Not available'],['Temperature',a.average_temp!==undefined?(metric?Math.round(a.average_temp)+' °C':Math.round(a.average_temp*9/5+32)+' °F'):'Not available'],['Relative effort',a.suffer_score||'Not available']];for(const [label,value]of facts)grid.append(stat(label,value));content.append(grid);if(a.description)content.append(el('p',a.description));if(a.device_name||a.gear&&a.gear.name)content.append(el('small',[a.device_name,a.gear&&a.gear.name].filter(Boolean).join(' · ')));const route=localRoute(streams.latlng);if(route)content.append(route);for(const [title,key]of [['Pace / speed','velocity_smooth'],['Elevation profile','altitude'],['Heart rate','heartrate'],['Cadence','cadence'],['Power','watts'],['Temperature','temp']]){const chart=streamChart(title,streams[key]);if(chart)content.append(chart)}const splits=detailTable('Splits',['#','Distance','Moving time','Elevation'],(a.splits_standard||a.splits_metric||[]).map(s=>[s.split,distance((s.distance||0)/1000),duration((s.moving_time||0)/60),elevation(s.elevation_difference||0)]));if(splits)content.append(splits);const laps=detailTable('Laps',['Lap','Distance','Moving time'],(a.laps||[]).map((lap,index)=>[index+1,distance((lap.distance||0)/1000),duration((lap.moving_time||0)/60)]));if(laps)content.append(laps);const efforts=detailTable('Best efforts',['Effort','Time','PR'],(a.best_efforts||[]).slice(0,8).map(e=>[e.name,duration((e.moving_time||e.elapsed_time||0)/60),e.pr_rank?'#'+e.pr_rank:'—']));if(efforts)content.append(efforts);const segments=detailTable('Segments',['Segment','Time','PR'],(a.segment_efforts||[]).slice(0,8).map(e=>[e.name,duration((e.elapsed_time||0)/60),e.pr_rank?'#'+e.pr_rank:'—']));if(segments)content.append(segments);if(data.zones&&data.zones.length)content.append(el('small','Heart-rate / power zone data is available for this activity.'))}).catch(error=>{content.replaceChildren(el('button','Close'),el('p',error.message,'error'));content.firstChild.onclick=()=>dialog.close()})}</script>",
+)
+
+DYNAMIC_DASHBOARD = DYNAMIC_DASHBOARD.replace("</title>", "</title><link rel=stylesheet href=https://unpkg.com/leaflet@1.9.4/dist/leaflet.css><script src=https://unpkg.com/leaflet@1.9.4/dist/leaflet.js></script>").replace("<button class=active data-days=28>4 weeks</button><button data-days=30>Month</button>", "<button class=active data-days=30>1 month</button><button data-days=90>3 months</button>").replace("let days=28,", "let days=30,").replace("</script>", ";function localRoute(stream){if(!stream||!Array.isArray(stream.data)||stream.data.length<2)return null;const points=stream.data.filter(p=>Array.isArray(p)&&p.length===2),box=el('div',undefined,'stream'),map=el('div');box.append(el('h3','Route map'),map,el('small','Map tiles are provided by OpenStreetMap.'));map.style.height='310px';setTimeout(()=>{if(!window.L){map.textContent='Map library unavailable.';return}const view=L.map(map,{scrollWheelZoom:false});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(view);const line=L.polyline(points,{color:'#b8f23d',weight:4}).addTo(view);view.fitBounds(line.getBounds(),{padding:[20,20]})},0);return box}</script>")
+
+class LocalDashboard(BaseHTTPRequestHandler):
+    def reply(self, status, payload, content_type="application/json; charset=utf-8"):
+        body = payload.encode() if isinstance(payload, str) else json.dumps(payload).encode()
+        self.send_response(status); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *unused): pass
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/": return self.reply(200, DYNAMIC_DASHBOARD, "text/html; charset=utf-8")
+        if parsed.path.startswith("/api/activity/"):
+            activity_id = parsed.path.removeprefix("/api/activity/")
+            if not activity_id.isdigit(): return self.reply(400, {"error": "Activity ID must be numeric"})
+            try: return self.reply(200, detail_for_activity(activity_id))
+            except SystemExit as exc: return self.reply(400, {"error": str(exc)})
+        if parsed.path != "/api/stats": return self.reply(404, {"error": "Not found"})
+        try:
+            days = int(urllib.parse.parse_qs(parsed.query).get("days", [28])[0])
+            if not 1 <= days <= 3660: raise ValueError
+            data = read_json(CACHE, "activity cache; run Sync now after connecting")
+            result = summarize(data["activities"], days, urllib.parse.parse_qs(parsed.query).get("type", [None])[0])
+            result["synced_at"] = data.get("synced_at")
+            result["units"] = (json.loads(PROFILE.read_text()).get("units") if PROFILE.exists() else None) or "imperial"
+            result["activity_types"] = sorted({activity_kind(activity) for activity in data["activities"]})
+            return self.reply(200, result)
+        except (ValueError, SystemExit) as exc: return self.reply(400, {"error": str(exc)})
+    def do_POST(self):
+        if self.path == "/api/preferences":
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+                if size > 1024: raise ValueError("Preference request is too large")
+                units = json.loads(self.rfile.read(size) or b"{}").get("units")
+                if units not in ("imperial", "metric"): raise ValueError("Units must be imperial or metric")
+                profile = read_json(PROFILE, "profile")
+                profile["units"] = units; write_json(PROFILE, profile)
+                return self.reply(200, {"units": units})
+            except (ValueError, json.JSONDecodeError, SystemExit) as exc: return self.reply(400, {"error": str(exc)})
+        if self.path == "/api/sync":
+            try:
+                sync(argparse.Namespace(days=90)); return self.reply(200, {"ok": True})
+            except SystemExit as exc: return self.reply(400, {"error": str(exc)})
+        return self.reply(404, {"error": "Not found"})
+
+def serve(args):
+    if args.host not in ("127.0.0.1", "localhost"): raise SystemExit("The dashboard can only bind to localhost.")
+    if not args.no_sync:
+        try:
+            sync(argparse.Namespace(days=args.days))
+        except SystemExit as exc:
+            print(f"Startup sync skipped: {exc}", file=sys.stderr)
+            print("Serving the last local cache, if available.", file=sys.stderr)
+    server = HTTPServer((args.host, args.port), LocalDashboard)
+    url = f"http://{args.host}:{server.server_port}"
+    print(f"agent-strava dashboard listening at {url}")
+    if args.open: webbrowser.open(url)
+    try: server.serve_forever()
+    except KeyboardInterrupt: print("\nDashboard stopped.")
+    finally: server.server_close()
+
+def dashboard(args):
+    data = read_json(CACHE, "activity cache; run: agent-do strava sync")
+    activities = data["activities"]
+    week = datetime.now(timezone.utc) - timedelta(days=7)
+    recent = [a for a in activities if datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")) >= week]
+    distance = sum(a.get("distance", 0) for a in recent) / 1000
+    elevation = sum(a.get("total_elevation_gain", 0) for a in recent)
+    rows = "".join(f"<tr><td>{a.get('name','Activity')}</td><td>{a.get('type','')}</td><td>{a.get('distance',0)/1000:.1f} km</td><td>{a.get('moving_time',0)//60} min</td></tr>" for a in activities[:8]) or "<tr><td colspan='4'>No activities in the local cache.</td></tr>"
+    html = f"""<!doctype html><meta charset=utf-8><title>agent-strava</title><style>body{{font:16px system-ui;background:#111827;color:#f8fafc;margin:0;padding:48px;max-width:1100px}}h1{{font-size:42px}}.tag{{color:#b8f23d}}.cards{{display:flex;gap:16px;flex-wrap:wrap}}.card,section{{background:#1f2937;border:1px solid #374151;border-radius:14px;padding:22px;margin:18px 0}}.card{{min-width:180px;flex:1}}strong{{font-size:30px;color:#b8f23d}}table{{width:100%;border-collapse:collapse}}td{{padding:12px;border-bottom:1px solid #374151}}small{{color:#94a3b8}}</style><h1>Your training, <span class=tag>locally.</span></h1><small>Last sync: {data['synced_at']}</small><div class=cards><div class=card>This week<br><strong>{distance:.1f} km</strong></div><div class=card>Elevation<br><strong>{elevation:.0f} m</strong></div><div class=card>Activities<br><strong>{len(recent)}</strong></div></div><section><h2>Recent activity</h2><table>{rows}</table></section><small>Private local dashboard generated by agent-do. No data is sent anywhere except Strava during sync.</small>"""
+    DASHBOARD.write_text(html); DASHBOARD.chmod(0o600)
+    print(DASHBOARD)
+    if args.open: webbrowser.open(DASHBOARD.as_uri())
+
+def status(args):
+    if not PROFILE.exists():
+        if args.json:
+            print(json.dumps({"configured": False, "cache_present": False, "next_command": "agent-do strava init"}))
+        else:
+            print("No local Strava profile. Run: agent-do strava init")
+        return
+    profile = json.loads(PROFILE.read_text()); result = {k: profile.get(k) for k in ("athlete_id", "athlete_name", "scopes", "connected_at", "last_sync_at", "redirect_uri", "units")}
+    result["units"] = result["units"] or "imperial"
+    result["configured"] = True; result["cache_present"] = CACHE.exists()
+    print(json.dumps(result, indent=2) if args.json else "\n".join(f"{k}: {v}" for k,v in result.items()))
+
+def main():
+    parser = argparse.ArgumentParser(description="Private, local-only Strava dashboard")
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("init", help="Initialize a local profile and store the app secret securely"); p.add_argument("--client-id"); p.add_argument("--client-secret-stdin", action="store_true"); p.add_argument("--redirect-uri", default="http://localhost:8787/callback")
+    p = sub.add_parser("connect", help="Authorize the local Strava profile"); p.add_argument("--timeout", type=int, default=300)
+    p = sub.add_parser("sync", help="Refresh and sync activity data"); p.add_argument("--days", type=int, default=90)
+    p = sub.add_parser("dashboard", help="Generate the local HTML dashboard"); p.add_argument("--open", action="store_true")
+    p = sub.add_parser("serve", help="Sync once, then serve the responsive local dashboard"); p.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost")); p.add_argument("--port", type=int, default=8765); p.add_argument("--days", type=int, default=90); p.add_argument("--no-sync", action="store_true", help="Serve the existing cache without syncing"); p.add_argument("--open", action="store_true")
+    p = sub.add_parser("status", help="Show local profile status"); p.add_argument("--json", action="store_true", help="Print structured status")
+    args = parser.parse_args()
+    if getattr(args, "client_secret_stdin", False): args.client_secret = sys.stdin.read().strip()
+    {"init": init, "connect": connect, "sync": sync, "dashboard": dashboard, "serve": serve, "status": status}[args.command](args)
+if __name__ == "__main__": main()
