@@ -135,6 +135,7 @@ check_cmd "context retrieve authority tests" python3 "$SCRIPT_DIR/tests/test_con
 check_cmd "api template tests" python3 "$SCRIPT_DIR/tests/test_api_templates.py"
 check_cmd "supabase management tests" python3 "$SCRIPT_DIR/tests/test_supabase_management.py"
 check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
+check_cmd "strava local-profile tests" python3 "$SCRIPT_DIR/tests/test_strava.py"
 check_cmd "notion tests" python3 "$SCRIPT_DIR/tests/test_notion.py"
 check_cmd "bash runtime tests" python3 "$SCRIPT_DIR/tests/test_bash_runtime.py"
 check_cmd "dispatch tests" python3 "$SCRIPT_DIR/tests/test_dispatch.py"

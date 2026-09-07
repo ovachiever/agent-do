@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (102 tools)
+## Summary (103 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -106,6 +106,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [sms](#sms) | SMS messaging | write | 8 |
 | [spec](#spec) | Repo-local specifications and change artifacts for intended behavior, change deltas, and archive readiness | mixed | 5 |
 | [ssh](#ssh) | Control remote server sessions | write | 5 |
+| [strava](#strava) | Personal, local-only Strava activity sync and dashboard | mixed | 6 |
 | [substack](#substack) | Draft and publish Substack essays through the editor API — markdown to ProseMirror drafts, auth rides a saved agent-browse session | mixed | 11 |
 | [supabase](#supabase) | Supabase project lifecycle + management + data access (full Management API, REST API, SQL, and agent-db) | write | 64 |
 | [swarm](#swarm) | Multi-agent orchestration | write | 4 |
@@ -4103,6 +4104,55 @@ agent-do ssh exec server1 'df -h'
 - Read-only (snapshot/verify; safe to parallelize): `list`
 - Write (connect/interact/save): `connect`, `download`, `upload`
 - passthrough (arbitrary-payload escape hatch; beat decided by the argument): `exec`
+
+### strava
+
+Personal, local-only Strava activity sync and dashboard
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- keep each athlete's profile, activity cache, and generated dashboard under that user's AGENT_DO_HOME
+- store Strava client and refresh secrets in the operating system's secure credential store
+- guide an athlete through a localhost OAuth connection with activity:read access
+- refresh access tokens and sync recent activities without sending data to any shared agent-do service
+- serve a responsive localhost dashboard that refreshes from the local activity cache without regenerating its HTML
+- summarize 1-week, 1-month, 3-month, and 1-year training ranges with paginated activities and local-only charts
+
+**Commands**
+
+- `init`: Create a local profile: init [--client-id ID] [--client-secret-stdin] [--redirect-uri URI]
+- `connect`: Authorize the local profile in a browser: connect [--timeout seconds]
+- `status`: Show local profile and cache status: status [--json]
+- `sync`: Refresh credentials and sync activities: sync [--days N]
+- `dashboard`: Generate a local HTML dashboard: dashboard [--open]
+- `serve`: Sync once, then serve the responsive local dashboard: serve [--days N] [--no-sync] [--host 127.0.0.1|localhost] [--port 8765] [--open]
+
+**Examples**
+
+```bash
+# set up a private Strava profile on this computer
+agent-do strava init
+# connect this local profile to Strava
+agent-do strava connect
+# sync my recent training activities
+agent-do strava sync --days 90
+# show my private training dashboard
+agent-do strava serve --open
+```
+
+**Credentials**
+
+- Optional: `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN`
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `status`
+- Write (connect/interact/save): `connect`, `dashboard`, `init`, `serve`, `sync`
+- sensitive (emits or persists secret material; guard output): `connect`, `init`
+- long_running (daemon/stream/session; may never return): `connect`, `serve`
+- composite (one call performs several beats internally): `connect`, `dashboard`, `init`, `serve`, `sync`
 
 ### substack
 
