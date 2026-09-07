@@ -56,6 +56,21 @@ def test_summary_filters_by_specific_strava_sport_type():
     assert result["activity_count"] == 1 and result["distance_km"] == 5
     assert strava.activity_kind({"sport_type": "WeightTraining"}) == "WeightTraining"
 
+def test_summary_pace_uses_only_run_and_walk_activities():
+    now = strava.datetime.now(strava.timezone.utc)
+    activities = [
+        {"start_date": (now - strava.timedelta(days=1)).isoformat(), "sport_type": "Run", "distance": 5000, "moving_time": 1800},
+        {"start_date": (now - strava.timedelta(days=1)).isoformat(), "sport_type": "Walk", "distance": 1000, "moving_time": 600},
+        {"start_date": (now - strava.timedelta(days=1)).isoformat(), "sport_type": "Ride", "distance": 20000, "moving_time": 3600},
+    ]
+    result = strava.summarize(activities, days=7)
+    assert result["pace_metric"] == "pace"
+    assert result["weekly"][0]["pace_seconds_per_km"] == 400
+    assert result["pace_seconds_per_km"] == 400
+    bike = strava.summarize(activities, days=7, activity_type="Ride")
+    assert bike["pace_metric"] == "speed" and bike["weekly"][0]["average_speed_mps"] == 5.56
+    assert strava.summarize(activities, days=7, activity_type="Swim")["pace_metric"] is None
+
 def test_responsive_dashboard_uses_manual_sync_without_polling():
     assert "/api/sync" in strava.DYNAMIC_DASHBOARD
     assert "/api/preferences" in strava.DYNAMIC_DASHBOARD
@@ -68,8 +83,29 @@ def test_responsive_dashboard_uses_manual_sync_without_polling():
     assert "setInterval" not in strava.DYNAMIC_DASHBOARD
     assert "localStorage" not in strava.DYNAMIC_DASHBOARD
     assert "Units: Imperial" in strava.DYNAMIC_DASHBOARD
+    assert '<button data-days=7>1 week</button>' in strava.DYNAMIC_DASHBOARD
+    assert '<button class=active data-days=30>1 month</button>' in strava.DYNAMIC_DASHBOARD
+    assert '<button data-days=90>3 months</button>' in strava.DYNAMIC_DASHBOARD
+    assert '<button data-days=365>1 year</button>' in strava.DYNAMIC_DASHBOARD
+    assert "let days=30," in strava.DYNAMIC_DASHBOARD
+    assert "4 weeks" not in strava.DYNAMIC_DASHBOARD
+    assert "activity-pagination" in strava.DYNAMIC_DASHBOARD
+    assert "ACTIVITIES_PER_PAGE=10" in strava.DYNAMIC_DASHBOARD
+    assert "Showing '+(first+1)+'–'+last+' of '+activities.length" in strava.DYNAMIC_DASHBOARD
+    assert "</table><nav id=activity-pagination" in strava.DYNAMIC_DASHBOARD
+    assert "function weekLabelStep(count)" in strava.DYNAMIC_DASHBOARD
+    assert "count<=26?4:8" in strava.DYNAMIC_DASHBOARD
+    assert "index%labelStep===0||index===weeks.length-1" in strava.DYNAMIC_DASHBOARD
+    assert "week-pace-card" in strava.DYNAMIC_DASHBOARD
+    assert "weekly-charts" in strava.DYNAMIC_DASHBOARD
+    assert "function updateOneWeekSummary(data)" in strava.DYNAMIC_DASHBOARD
+    assert "paceChart.hidden=true" in strava.DYNAMIC_DASHBOARD
+    assert "charts.style.display=oneWeek?'none':''" in strava.DYNAMIC_DASHBOARD
     assert "Distance per week" in strava.DYNAMIC_DASHBOARD
     assert "Moving time per week" in strava.DYNAMIC_DASHBOARD
+    assert "Average pace per week" in strava.DYNAMIC_DASHBOARD
+    assert "pace-card" in strava.DYNAMIC_DASHBOARD
+    assert "pace-axis" in strava.DYNAMIC_DASHBOARD
     assert "distance-axis" in strava.DYNAMIC_DASHBOARD
     assert "time-axis" in strava.DYNAMIC_DASHBOARD
     assert "drawAxis" in strava.DYNAMIC_DASHBOARD
@@ -94,6 +130,8 @@ def test_responsive_dashboard_uses_manual_sync_without_polling():
     assert "hour'+(hours===1?'':'s')" in strava.DYNAMIC_DASHBOARD
     assert "activity-dialog" in strava.DYNAMIC_DASHBOARD
     assert "/api/activity/" in strava.DYNAMIC_DASHBOARD
+    assert "stream-axis" in strava.DYNAMIC_DASHBOARD
+    assert "filter(([,value])=>present(value))" in strava.DYNAMIC_DASHBOARD
     result = run("serve", "--help")
     assert result.returncode == 0 and "--no-sync" in result.stdout
 
@@ -101,4 +139,4 @@ def test_connect_requests_private_activity_scope():
     assert "activity:read,activity:read_all" in strava.connect.__code__.co_consts
 
 if __name__ == "__main__":
-    test_status_without_profile(); test_status_json_without_profile_is_machine_readable(); test_profile_units_are_local_configuration(); test_dashboard_uses_local_cache_only(); test_summary_calculates_selected_range(); test_summary_filters_by_specific_strava_sport_type(); test_responsive_dashboard_uses_manual_sync_without_polling(); test_connect_requests_private_activity_scope(); print("ok")
+    test_status_without_profile(); test_status_json_without_profile_is_machine_readable(); test_profile_units_are_local_configuration(); test_dashboard_uses_local_cache_only(); test_summary_calculates_selected_range(); test_summary_filters_by_specific_strava_sport_type(); test_summary_pace_uses_only_run_and_walk_activities(); test_responsive_dashboard_uses_manual_sync_without_polling(); test_connect_requests_private_activity_scope(); print("ok")

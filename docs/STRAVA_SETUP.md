@@ -96,13 +96,22 @@ Use the **Activity** selector to view totals and recent sessions for an
 individual Strava activity type—such as Ride, Run, Walk, Swim, or TrailRun.
 The available choices come from your own synced activities.
 
-The dashboard also charts distance and moving time by week for the selected
-range and activity type. Drag a recent-activity table header edge to resize
-that column for the current browser session. Click a recent activity to open
-its expanded summary. That request fetches the selected activity's richer
-detail, route coordinates, available analysis streams, splits, laps, efforts,
-segments, and zones on demand; it is not bulk-saved into the activity cache.
-The route is drawn locally without external map tiles.
+Choose one of four ranges: **1 week**, **1 month** (the default), **3 months**,
+or **1 year**. The header summarizes distance, moving time, elevation,
+activity count, and average pace for runs and walks. With a cycling-only
+filter, the pace summary instead shows average speed. It is hidden for sport
+types that do not have a meaningful pace or speed measurement.
+
+For ranges longer than one week, the dashboard charts distance and moving time
+by week. Labels are thinned automatically for longer ranges so they remain
+readable. The one-week view has no charts because its distance and moving-time
+totals are already in the header. Recent activities are paginated ten at a
+time. Drag a recent-activity table header edge to resize that column for the
+current browser session. Click a recent activity to open its expanded summary.
+That request fetches the selected activity's richer detail, route coordinates,
+available analysis streams, splits, laps, efforts, segments, and zones on
+demand; it is not bulk-saved into the activity cache. The route is drawn
+locally without external map tiles.
 
 ## Where data lives
 

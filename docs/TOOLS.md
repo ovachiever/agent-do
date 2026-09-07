@@ -4118,6 +4118,7 @@ Concurrency: `mixed`
 - guide an athlete through a localhost OAuth connection with activity:read access
 - refresh access tokens and sync recent activities without sending data to any shared agent-do service
 - serve a responsive localhost dashboard that refreshes from the local activity cache without regenerating its HTML
+- summarize 1-week, 1-month, 3-month, and 1-year training ranges with paginated activities and local-only charts
 
 **Commands**
 

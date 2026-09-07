@@ -21,10 +21,13 @@ The first implementation stores a local profile and activity cache under
 localhost dashboard from that cache. The browser does not call Strava itself;
 its explicit Sync button asks the local server to refresh the cache.
 
-The current dashboard includes weekly distance and moving-time charts, table
-column resizing, and on-demand activity summaries with available elevation and
-heart-rate streams. It does not persist those detailed responses after the
-browser request completes.
+The current dashboard has 1-week, 1-month, 3-month, and 1-year selectors;
+header summaries for distance, moving time, elevation, activity count, and
+pace or speed; paginated recent activities; and weekly distance and moving-time
+charts for ranges longer than one week. It also supports table-column resizing
+and on-demand activity summaries with available elevation and heart-rate
+streams. It does not persist those detailed responses after the browser request
+completes.
 
 ## Product principles
 
@@ -42,14 +45,12 @@ browser request completes.
 read-only API over the local cache and serves the dashboard UI. A lightweight
 browser client refreshes data after a sync without regenerating an HTML file.
 
-The first dynamic interface should include:
+The next dynamic-interface additions could include:
 
-- date-range selectors: 7 days, 4 weeks, month-to-date, year-to-date, custom;
-- sport and activity-type filters;
-- distance, moving time, elevation, pace/speed, and activity-count trends;
-- weekly/monthly consistency and recent activity detail;
+- a custom date range;
+- weekly/monthly consistency and training-load summaries;
 - user-owned goals and progress; and
-- a visible "last synced" state plus an explicit sync action.
+- a visible "last synced" state alongside the existing explicit sync action.
 
 Use plain JavaScript first. Introduce React or another UI framework only when
 interactive state, views, and component complexity justify the dependency.
