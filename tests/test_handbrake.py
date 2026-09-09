@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for agent-handbrake — HandBrakeCLI MKV-to-MP4 transcode wrapper.
+"""Tests for the media family's handbrake provider — HandBrakeCLI MKV-to-MP4 transcode wrapper.
 
 Covers: help, preset-list parsing, --json scan parsing, convert output naming
 and auto-verify, batch skip/overwrite behavior, dry-run, JSON output, and the
@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOL = ROOT / "tools" / "agent-handbrake"
+TOOL = ROOT / "tools" / "agent-media" / "providers" / "handbrake"
 
 # A mock HandBrakeCLI that emits realistic output for --version,
 # --preset-list, --scan --json, and encodes (writes a fake .mp4 to -o).
@@ -132,7 +132,7 @@ def main() -> int:
     def test_help():
         r = run_tool("--help", bin_override=None)
         require(r.returncode == 0, "help should exit 0")
-        require("agent-handbrake" in r.stdout, "help should name the tool")
+        require("media provider: handbrake" in r.stdout, "help should name the provider")
         require("convert <input>" in r.stdout, "help should document convert")
 
     check("--help lists commands", test_help)

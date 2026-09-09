@@ -12,7 +12,7 @@ agent-do is the workshop's answer to both problems: a standard, known shape, tha
 agent-do <tool> <command> [args...]
 ```
 
-Behind that shape sit 102 tools exposing 930 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
+Behind that shape sit 102 tools exposing 937 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
 
 ## The tools on the bench
 

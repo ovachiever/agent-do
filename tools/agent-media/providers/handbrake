@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# agent-handbrake - Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI
+# media provider: handbrake - Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI
+#
+# Provider engine behind `agent-do media convert|batch|presets|scan` (see tools/agent-media).
+# Reachable in full through the `agent-do media handbrake <command>` passthrough.
 #
 # Wraps HandBrakeCLI, whose --json scan output is purpose-built for automation.
 # Follows the universal Connect -> Snapshot -> Interact -> Verify:
@@ -13,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 if [[ -f "$REPO_ROOT/lib/json-output.sh" ]]; then
     # shellcheck source=lib/json-output.sh
@@ -27,7 +30,10 @@ PRESET="${AGENT_HANDBRAKE_PRESET:-Fast 1080p30}"
 
 show_help() {
     cat << 'EOF'
-agent-handbrake - Convert ripped video to Plex-ready MP4 (wraps HandBrakeCLI)
+media provider: handbrake - Convert ripped video to Plex-ready MP4 (wraps HandBrakeCLI)
+
+Family surface: agent-do media convert|batch|presets|scan route here; every command
+below is reachable as agent-do media handbrake <command>.
 
 Commands:
   presets                                List available encode presets
@@ -53,13 +59,13 @@ Environment:
   AGENT_HANDBRAKE_PRESET                 Default preset when --preset is not given
 
 Examples:
-  agent-handbrake presets
-  agent-handbrake scan ~/rips/title_t00.mkv --json
-  agent-handbrake convert ~/rips/title_t00.mkv
-  agent-handbrake convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
-  agent-handbrake batch ~/rips ~/plex
-  agent-handbrake verify ~/plex
-  agent-handbrake snapshot --json
+  agent-do media handbrake presets
+  agent-do media handbrake scan ~/rips/title_t00.mkv --json
+  agent-do media handbrake convert ~/rips/title_t00.mkv
+  agent-do media handbrake convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
+  agent-do media handbrake batch ~/rips ~/plex
+  agent-do media handbrake verify ~/plex
+  agent-do media handbrake snapshot --json
 EOF
 }
 

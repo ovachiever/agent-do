@@ -61,7 +61,6 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [gh](#gh) | GitHub repository, pull request, review, and merge work-state across accessible repos | mixed | 24 |
 | [ghidra](#ghidra) | Ghidra reverse engineering automation | read | 4 |
 | [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 19 |
-| [handbrake](#handbrake) | Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs | mixed | 7 |
 | [hardware](#hardware) | Unified hardware device control across serial, bluetooth, USB, printers, and MIDI | mixed | 6 |
 | [harness](#harness) | Observable agent-do harness inventory, evidence, and change-manifest front door | mixed | 8 |
 | [homekit](#homekit) | HomeKit/smart home control | mixed | 3 |
@@ -77,6 +76,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [logs](#logs) | Control log aggregation | read | 3 |
 | [macos](#macos) | Control native macOS desktop applications via accessibility APIs | mixed | 6 |
 | [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 27 |
+| [media](#media) | Unified media family surface — rip optical discs to MKV and convert video to Plex-ready MP4 through neutral verbs, with the disc engine (makemkv) and the transcode engine (handbrake) as providers underneath | mixed | 12 |
 | [meet](#meet) | Google Meet control | mixed | 4 |
 | [meetings](#meetings) | Unified enterprise meeting orchestration across Zoom, Google Meet, and Microsoft Teams | mixed | 14 |
 | [memory](#memory) | Persistent memory and context | mixed | 4 |
@@ -2037,62 +2037,6 @@ agent-do git sweep
 - destructive (irreversible data loss; confirm before auto-running): `snap restore`, `sweep`, `worktree remove`
 - polymorphic (beat decided by payload or flag at call time): `branch`, `sweep`
 
-### handbrake
-
-Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs
-
-Concurrency: `mixed`
-
-**Capabilities**
-
-- list available HandBrake encode presets by category
-- probe a video file's titles, duration, resolution, and audio/subtitle streams
-- transcode one file to MP4 with a chosen preset
-- batch-transcode every .mkv in a directory, skipping already-converted files
-- verify transcoded .mp4 outputs (files and sizes)
-- report HandBrake version and a preset-availability snapshot
-- structured JSON output parsed from HandBrakeCLI --json scan mode
-
-**Commands**
-
-- `presets`: List available encode presets
-- `scan`: Probe a file; list titles, streams, duration: scan \<input>
-- `convert`: Transcode one file to .mp4: convert \<input> [output]
-- `batch`: Transcode every .mkv in a directory: batch \<indir> \<outdir>
-- `verify`: List .mp4 outputs (dir) or check one file: verify \<path>
-- `version`: Show HandBrake version
-- `snapshot`: Version + preset availability (JSON)
-
-**Examples**
-
-```bash
-# list handbrake presets
-agent-do handbrake presets
-# probe a ripped mkv's streams
-agent-do handbrake scan ~/rips/title_t00.mkv --json
-# convert an mkv to mp4 for plex
-agent-do handbrake convert ~/rips/title_t00.mkv
-# convert with a specific preset and destination
-agent-do handbrake convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
-# convert all ripped mkvs in a folder to mp4
-agent-do handbrake batch ~/rips ~/plex
-# re-encode a folder even if outputs exist
-agent-do handbrake batch ~/rips ~/plex --overwrite
-# verify transcoded output files
-agent-do handbrake verify ~/plex
-# show what the convert command would run without executing
-agent-do handbrake convert ~/rips/title_t00.mkv --dry-run
-# get a HandBrake version and preset snapshot
-agent-do handbrake snapshot --json
-```
-
-**Safety (from contracts)**
-
-- Read-only (snapshot/verify; safe to parallelize): `presets`, `scan`, `snapshot`, `verify`, `version`
-- Write (connect/interact/save): `batch`, `convert`
-- long_running (daemon/stream/session; may never return): `batch`, `convert`
-- composite (one call performs several beats internally): `batch`
-
 ### hardware
 
 Unified hardware device control across serial, bluetooth, USB, printers, and MIDI
@@ -2713,6 +2657,76 @@ agent-do manna relations --resolve --check
 - long_running (daemon/stream/session; may never return): `serve`
 - polymorphic (beat decided by payload or flag at call time): `federation`, `reconcile`, `relations`
 - composite (one call performs several beats internally): `federation`, `migrate`, `order`, `sync`
+
+### media
+
+Unified media family surface — rip optical discs to MKV and convert video to Plex-ready MP4 through neutral verbs, with the disc engine (makemkv) and the transcode engine (handbrake) as providers underneath
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- report provider readiness, drives, engine versions, and preset availability in one snapshot
+- enumerate optical drives and loaded discs
+- probe a disc's titles or a video file's streams through one scan verb
+- rip one title or all titles from a disc to MKV files
+- transcode one file or every .mkv in a directory to MP4 with a chosen preset
+- verify pipeline outputs (.mkv and .mp4) with sizes and completeness
+- keep each provider fully reachable through a passthrough verb
+
+**Commands**
+
+- `snapshot`: Provider readiness, drives, versions, and preset availability (JSON)
+- `providers`: List providers and whether each engine is installed
+- `drives`: List optical drives and loaded discs
+- `scan`: Probe a disc or a video file: scan \<disc|file> [--provider makemkv|handbrake]
+- `rip`: Rip title(s) from a disc to MKV: rip \<disc> \<title|all> \<outdir>
+- `convert`: Transcode one video file to .mp4: convert \<input> [output] [--preset \<name>]
+- `batch`: Transcode every .mkv in a directory: batch \<indir> \<outdir> [--overwrite]
+- `presets`: List available encode presets
+- `verify`: List .mkv/.mp4 outputs (dir) or check one file: verify \<path>
+- `version`: Show provider engine versions
+- `makemkv`: Disc provider passthrough: makemkv \<command> [args...]
+- `handbrake`: Transcode provider passthrough: handbrake \<command> [args...]
+
+**Examples**
+
+```bash
+# check which media engines are installed
+agent-do media providers
+# list optical drives
+agent-do media drives
+# scan a disc and list its titles
+agent-do media scan disc:0
+# rip all titles from a disc to a folder
+agent-do media rip disc:0 all ~/rips
+# rip a single title
+agent-do media rip disc:0 3 ~/rips
+# probe a ripped mkv's streams
+agent-do media scan ~/rips/title_t00.mkv --json
+# convert an mkv to mp4 for plex
+agent-do media convert ~/rips/title_t00.mkv
+# convert with a specific preset and destination
+agent-do media convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
+# convert all ripped mkvs in a folder to mp4
+agent-do media batch ~/rips ~/plex
+# verify ripped and converted output files
+agent-do media verify ~/plex
+# show what the rip command would run without executing
+agent-do media rip disc:0 all ~/rips --dry-run
+# back up a disc through the disc provider
+agent-do media makemkv backup disc:0 ~/backup
+# get a media readiness snapshot
+agent-do media snapshot --json
+```
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `drives`, `presets`, `providers`, `scan`, `snapshot`, `verify`, `version`
+- Write (connect/interact/save): `batch`, `convert`, `handbrake`, `makemkv`, `rip`
+- long_running (daemon/stream/session; may never return): `batch`, `convert`, `rip`
+- polymorphic (beat decided by payload or flag at call time): `handbrake`, `makemkv`
+- composite (one call performs several beats internally): `batch`
 
 ### meet
 

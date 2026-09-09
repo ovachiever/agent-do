@@ -3821,92 +3821,138 @@ tools:
       interact:
       - eject
     concurrency: mixed
-  handbrake:
-    description: Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs
+  media:
+    description: Unified media family surface — rip optical discs to MKV and convert video to Plex-ready MP4 through neutral verbs, with the disc engine (makemkv) and the transcode engine (handbrake) as providers underneath
     capabilities:
-    - list available HandBrake encode presets by category
-    - probe a video file's titles, duration, resolution, and audio/subtitle streams
-    - transcode one file to MP4 with a chosen preset
-    - batch-transcode every .mkv in a directory, skipping already-converted files
-    - verify transcoded .mp4 outputs (files and sizes)
-    - report HandBrake version and a preset-availability snapshot
-    - structured JSON output parsed from HandBrakeCLI --json scan mode
+    - report provider readiness, drives, engine versions, and preset availability in one snapshot
+    - enumerate optical drives and loaded discs
+    - probe a disc's titles or a video file's streams through one scan verb
+    - rip one title or all titles from a disc to MKV files
+    - transcode one file or every .mkv in a directory to MP4 with a chosen preset
+    - verify pipeline outputs (.mkv and .mp4) with sizes and completeness
+    - keep each provider fully reachable through a passthrough verb
     commands:
+      snapshot: Provider readiness, drives, versions, and preset availability (JSON)
+      providers: List providers and whether each engine is installed
+      drives: List optical drives and loaded discs
+      scan: 'Probe a disc or a video file: scan <disc|file> [--provider makemkv|handbrake]'
+      rip: 'Rip title(s) from a disc to MKV: rip <disc> <title|all> <outdir>'
+      convert: 'Transcode one video file to .mp4: convert <input> [output] [--preset <name>]'
+      batch: 'Transcode every .mkv in a directory: batch <indir> <outdir> [--overwrite]'
       presets: List available encode presets
-      scan: 'Probe a file; list titles, streams, duration: scan <input>'
-      convert: 'Transcode one file to .mp4: convert <input> [output]'
-      batch: 'Transcode every .mkv in a directory: batch <indir> <outdir>'
-      verify: 'List .mp4 outputs (dir) or check one file: verify <path>'
-      version: Show HandBrake version
-      snapshot: Version + preset availability (JSON)
+      verify: 'List .mkv/.mp4 outputs (dir) or check one file: verify <path>'
+      version: Show provider engine versions
+      makemkv: 'Disc provider passthrough: makemkv <command> [args...]'
+      handbrake: 'Transcode provider passthrough: handbrake <command> [args...]'
     examples:
-    - intent: list handbrake presets
-      command: agent-handbrake presets
+    - intent: check which media engines are installed
+      command: agent-media providers
+    - intent: list optical drives
+      command: agent-media drives
+    - intent: scan a disc and list its titles
+      command: agent-media scan disc:0
+    - intent: rip all titles from a disc to a folder
+      command: agent-media rip disc:0 all ~/rips
+    - intent: rip a single title
+      command: agent-media rip disc:0 3 ~/rips
     - intent: probe a ripped mkv's streams
-      command: agent-handbrake scan ~/rips/title_t00.mkv --json
+      command: agent-media scan ~/rips/title_t00.mkv --json
     - intent: convert an mkv to mp4 for plex
-      command: agent-handbrake convert ~/rips/title_t00.mkv
+      command: agent-media convert ~/rips/title_t00.mkv
     - intent: convert with a specific preset and destination
-      command: agent-handbrake convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
+      command: agent-media convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
     - intent: convert all ripped mkvs in a folder to mp4
-      command: agent-handbrake batch ~/rips ~/plex
-    - intent: re-encode a folder even if outputs exist
-      command: agent-handbrake batch ~/rips ~/plex --overwrite
-    - intent: verify transcoded output files
-      command: agent-handbrake verify ~/plex
-    - intent: show what the convert command would run without executing
-      command: agent-handbrake convert ~/rips/title_t00.mkv --dry-run
-    - intent: get a HandBrake version and preset snapshot
-      command: agent-handbrake snapshot --json
+      command: agent-media batch ~/rips ~/plex
+    - intent: verify ripped and converted output files
+      command: agent-media verify ~/plex
+    - intent: show what the rip command would run without executing
+      command: agent-media rip disc:0 all ~/rips --dry-run
+    - intent: back up a disc through the disc provider
+      command: agent-media makemkv backup disc:0 ~/backup
+    - intent: get a media readiness snapshot
+      command: agent-media snapshot --json
     routing:
       discover_keywords:
+      - media
+      - rip dvd
+      - rip blu-ray
+      - rip bluray
+      - rip disc
+      - dvd to mkv
+      - bluray to mkv
+      - makemkv
+      - makemkvcon
       - handbrake
+      - handbrakecli
       - transcode
       - mkv to mp4
       - convert mkv
       - encode video
       - plex
-      - handbrakecli
       prompt_patterns:
+      - \bmakemkv\w*\b
       - \bhandbrake\w*\b
+      - \brip\b.*\b(dvd|blu-?ray|disc)\b
+      - \b(dvd|blu-?ray)\b.*\b(to\s+mkv|rip)\b
       - \b(transcode|convert|encode)\b.*\b(mkv|mp4|video)\b
       - \bmkv\b.*\bmp4\b
       recommended_entrypoints:
-      - agent-do handbrake scan <input>
-      - agent-do handbrake convert <input>
-      - agent-do handbrake batch <indir> <outdir>
-      default_command: presets
+      - agent-do media providers
+      - agent-do media scan disc:0
+      - agent-do media rip disc:0 all <outdir>
+      - agent-do media convert <input>
+      - agent-do media batch <indir> <outdir>
+      default_command: providers
       raw_cli_equivalents:
+      - pattern: \bmakemkvcon\b
+        replacement: agent-do media
+        example: agent-do media scan disc:0
+        reason: agent-do media wraps makemkvcon robot mode with parsed JSON, rip-tied-to-output success, and verification
       - pattern: \bHandBrakeCLI\b
-        replacement: agent-do handbrake
-        example: agent-do handbrake convert ~/rips/title_t00.mkv
-        reason: agent-do handbrake wraps HandBrakeCLI with parsed JSON scans, batch skip logic, and output verification
+        replacement: agent-do media
+        example: agent-do media convert ~/rips/title_t00.mkv
+        reason: agent-do media wraps HandBrakeCLI with parsed JSON scans, batch skip logic, and output verification
       project_signals:
-      - transcode
-      - handbrake
-      - plex
       - media
+      - rip
+      - bluray
+      - dvd
+      - transcode
+      - plex
       readiness:
-        check: agent-do handbrake version
-        fix: Install HandBrakeCLI (brew install handbrake) or set AGENT_HANDBRAKE_BIN
-        note: Requires the HandBrakeCLI binary (the HandBrake GUI app does not bundle it); resolved from PATH or AGENT_HANDBRAKE_BIN
+        check: agent-do media providers
+        fix: Install MakeMKV (https://www.makemkv.com) and/or HandBrakeCLI (brew install handbrake), or set AGENT_MAKEMKV_BIN / AGENT_HANDBRAKE_BIN
+        note: Each provider resolves its own engine binary (PATH, env override, or the app bundle); the family reports per-provider readiness and degrades per provider
     contracts:
       snapshot:
-      - presets
-      - scan
-      - version
       - snapshot
+      - providers
+      - drives
+      - scan
+      - presets
+      - version
+      - makemkv
+      - handbrake
       interact:
+      - rip
       - convert
       - batch
+      - makemkv
+      - handbrake
       verify:
       - verify
       attributes:
+        rip:
+        - long_running
         convert:
         - long_running
         batch:
         - long_running
         - composite
+        makemkv:
+        - polymorphic
+        handbrake:
+        - polymorphic
     concurrency: mixed
   printer:
     description: Printer control

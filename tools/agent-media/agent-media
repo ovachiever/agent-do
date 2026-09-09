@@ -1,0 +1,460 @@
+#!/usr/bin/env bash
+# agent-media - Unified media family surface: rip optical discs and convert video
+#
+# The family owns neutral verbs; providers sit underneath in providers/:
+#   makemkv   -> optical-disc engine (drives, scan <disc>, rip)
+#   handbrake -> transcode engine   (presets, scan <file>, convert, batch)
+# Same shape as agent-hardware / agent-meetings: one registry entry, provider
+# dependencies and readiness live at the implementation layer, and each
+# provider stays fully reachable through its passthrough verb.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [[ -f "$REPO_ROOT/lib/json-output.sh" ]]; then
+    # shellcheck source=lib/json-output.sh
+    source "$REPO_ROOT/lib/json-output.sh"
+else
+    echo "agent-media: missing $REPO_ROOT/lib/json-output.sh" >&2
+    exit 1
+fi
+
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-text}"
+PROVIDER_DIR="${AGENT_DO_MEDIA_PROVIDER_DIR:-$SCRIPT_DIR/providers}"
+PROVIDERS=(makemkv handbrake)
+
+show_help() {
+    cat << 'EOF'
+agent-media - Unified media ripping and conversion (optical disc -> MKV -> MP4)
+
+Commands:
+  snapshot                               Provider readiness, drives, versions, presets (JSON)
+  providers                              List providers and whether each engine is installed
+  drives                                 List optical drives and loaded discs
+  scan <disc|file>                       Probe a disc (titles) or a video file (streams)
+  rip <disc> <title|all> <outdir>        Rip title(s) from a disc to MKV files in outdir
+  convert <input> [output]               Transcode one video file to .mp4
+  batch <indir> <outdir>                 Transcode every .mkv in indir to .mp4 in outdir
+  presets                                List available encode presets
+  verify <path>                          List .mkv/.mp4 outputs (dir) or check one file
+  version                                Show provider engine versions
+  makemkv <command> [args...]            Disc provider passthrough (backup, stream, info, ...)
+  handbrake <command> [args...]          Transcode provider passthrough
+
+Targets:
+  scan routes by operand: "disc:0", a bare index, "dev:", "iso:", "file:", or a
+  path ending in .iso go to the disc provider; any other path goes to the
+  transcode provider. --provider makemkv|handbrake forces the choice.
+
+Options:
+  --json                                 Structured JSON (provider output wrapped with success/exit_code)
+  --provider <name>                      Force the provider for scan
+  --dry-run                              Passed through: print the engine command without running it
+  --preset <name> / --overwrite          Passed through to convert/batch
+  --minlength <sec>                      Passed through to scan <disc>/rip
+
+Environment:
+  AGENT_MAKEMKV_BIN                      Path to makemkvcon (else PATH, else MakeMKV.app)
+  AGENT_HANDBRAKE_BIN                    Path to HandBrakeCLI (else PATH, else /Applications)
+  AGENT_HANDBRAKE_PRESET                 Default encode preset
+  AGENT_DO_MEDIA_TIMEOUT                 Seconds allowed per provider probe in snapshot/version (default 60)
+
+Examples:
+  agent-do media providers
+  agent-do media drives
+  agent-do media scan disc:0
+  agent-do media rip disc:0 all ~/rips
+  agent-do media scan ~/rips/title_t00.mkv --json
+  agent-do media convert ~/rips/title_t00.mkv ~/plex/movie.mp4 --preset "HQ 1080p30 Surround"
+  agent-do media batch ~/rips ~/plex
+  agent-do media verify ~/plex
+  agent-do media makemkv backup disc:0 ~/backup
+  agent-do media snapshot --json
+EOF
+}
+
+resolve_provider_exec() {
+    local provider="$1"
+    local exec_path="$PROVIDER_DIR/$provider"
+    if [[ -x "$exec_path" ]]; then
+        echo "$exec_path"
+        return 0
+    fi
+    return 1
+}
+
+# A provider is "ready" when its engine binary resolves. Every provider's
+# `version --dry-run` prints the engine command without running it and exits
+# 127 when the binary is missing, so readiness reuses the provider's own
+# resolution rules instead of duplicating them here.
+provider_ready() {
+    local provider="$1" exec_path
+    exec_path="$(resolve_provider_exec "$provider")" || return 1
+    "$exec_path" version --dry-run >/dev/null 2>&1
+}
+
+delegate_provider() {
+    local provider="$1"
+    shift || true
+
+    local provider_exec
+    if ! provider_exec="$(resolve_provider_exec "$provider")"; then
+        json_error "media provider '$provider' is not installed under $PROVIDER_DIR" 1
+        return 1
+    fi
+
+    if [[ "${OUTPUT_FORMAT:-text}" != "json" ]]; then
+        exec "$provider_exec" "$@"
+    fi
+
+    local stdout_file stderr_file status
+    stdout_file="$(mktemp)"
+    stderr_file="$(mktemp)"
+
+    set +e
+    "$provider_exec" "$@" --json >"$stdout_file" 2>"$stderr_file"
+    status=$?
+    set -e
+
+    python3 - "$provider" "$status" "$stdout_file" "$stderr_file" "$@" <<'PY'
+import json
+import pathlib
+import sys
+
+provider = sys.argv[1]
+status = int(sys.argv[2])
+stdout_path = pathlib.Path(sys.argv[3])
+stderr_path = pathlib.Path(sys.argv[4])
+command = sys.argv[5:]
+
+stdout = stdout_path.read_text()
+stderr = stderr_path.read_text()
+stdout_path.unlink(missing_ok=True)
+stderr_path.unlink(missing_ok=True)
+
+result = stdout.strip()
+try:
+    parsed_result = json.loads(result)
+except Exception:
+    parsed_result = result
+
+payload = {
+    "success": status == 0,
+    "tool": "media",
+    "provider": provider,
+    "command": command,
+    "exit_code": status,
+    "result": parsed_result,
+}
+if stderr.strip():
+    payload["stderr"] = stderr.strip()
+
+print(json.dumps(payload, indent=2))
+PY
+
+    return "$status"
+}
+
+# Strip --provider <name> from the argument list; everything else passes through.
+parse_provider_flag() {
+    SELECTED_PROVIDER=""
+    REMAINING_ARGS=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --provider)
+                SELECTED_PROVIDER="${2:-}"
+                shift 2 || shift
+                ;;
+            --provider=*)
+                SELECTED_PROVIDER="${1#*=}"
+                shift
+                ;;
+            *)
+                REMAINING_ARGS+=("$1")
+                shift
+                ;;
+        esac
+    done
+}
+
+# Disc-shaped operands belong to the disc provider; file paths to the transcoder.
+provider_for_scan_target() {
+    local target="$1"
+    case "$target" in
+        ''|disc:*|dev:*|iso:*|file:*) echo makemkv ;;
+        *)
+            if [[ "$target" =~ ^[0-9]+$ ]]; then
+                echo makemkv
+            elif [[ "$target" =~ \.[iI][sS][oO]$ ]]; then
+                echo makemkv
+            else
+                echo handbrake
+            fi
+            ;;
+    esac
+}
+
+cmd_scan() {
+    parse_provider_flag "$@"
+    local target="${REMAINING_ARGS[0]:-}"
+    local provider="$SELECTED_PROVIDER"
+    if [[ -z "$provider" ]]; then
+        provider="$(provider_for_scan_target "$target")"
+    fi
+    case "$provider" in
+        makemkv)
+            # A bare .iso path is a disc image; hand it over in makemkvcon's spelling.
+            if [[ "$target" =~ \.[iI][sS][oO]$ && "$target" != iso:* && "$target" != file:* ]]; then
+                REMAINING_ARGS[0]="iso:$target"
+            fi
+            delegate_provider makemkv info "${REMAINING_ARGS[@]}"
+            ;;
+        handbrake)
+            delegate_provider handbrake scan "${REMAINING_ARGS[@]}"
+            ;;
+        *)
+            json_error "Unknown provider '$provider' (use --provider makemkv|handbrake)" 2
+            return 2
+            ;;
+    esac
+}
+
+# Family-owned verify: the pipeline's artifacts are .mkv (rip) and .mp4 (convert),
+# so one listing covers both stages. Needs no engine binary.
+cmd_verify() {
+    local target="${1:-}"
+    if [[ -z "$target" ]]; then
+        json_error "verify: path required" 2
+        return 2
+    fi
+    if [[ ! -e "$target" ]]; then
+        json_error "Not found: $target" 1
+        return 1
+    fi
+    python3 - "$target" "${OUTPUT_FORMAT:-text}" <<'PY'
+import json
+import os
+import sys
+
+target, fmt = sys.argv[1], sys.argv[2]
+exts = (".mkv", ".mp4")
+files = []
+if os.path.isdir(target):
+    for name in sorted(os.listdir(target)):
+        if name.lower().endswith(exts):
+            files.append((name, os.path.join(target, name)))
+else:
+    files.append((os.path.basename(target), target))
+
+out = []
+for name, path in files:
+    size = os.path.getsize(path)
+    out.append({
+        "file": name,
+        "path": path,
+        "kind": os.path.splitext(name)[1].lower().lstrip("."),
+        "size_bytes": size,
+        "size_mb": round(size / 1048576, 1),
+        "complete": size > 0,
+    })
+by_kind = {}
+for f in out:
+    by_kind[f["kind"]] = by_kind.get(f["kind"], 0) + 1
+result = {"target": target, "count": len(out), "by_kind": by_kind, "files": out}
+if fmt == "json":
+    print(json.dumps({"success": True, "tool": "media", "result": result}, indent=2))
+else:
+    if not out:
+        print(f"No .mkv or .mp4 files in {target}")
+    else:
+        for f in out:
+            flag = "" if f["complete"] else "  (empty)"
+            print(f"{f['size_mb']:>9.1f} MB  {f['file']}{flag}")
+        total = round(sum(f["size_bytes"] for f in out) / 1048576, 1)
+        kinds = ", ".join(f"{n} {k}" for k, n in sorted(by_kind.items()))
+        print(f"\n{len(out)} file(s) ({kinds}), {total} MB total")
+PY
+}
+
+# Composite read across providers. Every provider degrades on its own: a
+# missing script, a missing engine, or a failed probe is reported in place
+# with its reason, never as an absent field.
+cmd_snapshot() {
+    local mode="${1:-snapshot}"
+    local timeout_secs="${AGENT_DO_MEDIA_TIMEOUT:-60}"
+    python3 - "$mode" "$PROVIDER_DIR" "$timeout_secs" "${OUTPUT_FORMAT:-text}" "${PROVIDERS[@]}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+mode, provider_dir, timeout_secs, fmt = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+providers = sys.argv[5:]
+ROLES = {"makemkv": "disc", "handbrake": "transcode"}
+
+
+def probe(provider: str) -> dict:
+    path = os.path.join(provider_dir, provider)
+    entry = {"role": ROLES.get(provider, "unknown"), "available": os.access(path, os.X_OK)}
+    if not entry["available"]:
+        entry["ready"] = False
+        entry["error"] = f"provider script missing: {path}"
+        return entry
+    ready = subprocess.run([path, "version", "--dry-run"], capture_output=True, text=True, check=False)
+    entry["ready"] = ready.returncode == 0
+    if not entry["ready"]:
+        entry["error"] = (ready.stderr.strip() or ready.stdout.strip() or "engine binary not found")
+        return entry
+    verb = "version" if mode == "version" else "snapshot"
+    try:
+        completed = subprocess.run(
+            [path, verb, "--json"], capture_output=True, text=True, check=False, timeout=timeout_secs
+        )
+    except subprocess.TimeoutExpired:
+        entry["error"] = f"{provider} {verb} timed out after {timeout_secs:g}s"
+        entry["timed_out"] = True
+        return entry
+    entry["exit_code"] = completed.returncode
+    stdout = completed.stdout.strip()
+    try:
+        parsed = json.loads(stdout)
+    except Exception:
+        parsed = {"raw": stdout} if stdout else {}
+    if completed.returncode != 0:
+        entry["error"] = completed.stderr.strip() or parsed.get("error") or f"{verb} failed"
+    if isinstance(parsed, dict) and "result" in parsed:
+        parsed = parsed["result"]
+    entry[verb] = parsed
+    if verb == "snapshot" and isinstance(parsed, dict) and "version" in parsed:
+        entry["version"] = parsed.get("version")
+    if verb == "version" and isinstance(parsed, dict):
+        entry["version"] = parsed.get("version")
+    return entry
+
+
+report = {
+    "tool": "media",
+    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "providers": {p: probe(p) for p in providers},
+}
+report["ready_count"] = sum(1 for p in report["providers"].values() if p.get("ready"))
+report["provider_count"] = len(providers)
+
+if fmt == "json":
+    print(json.dumps(report, indent=2))
+    sys.exit(0)
+
+print(f"media providers: {report['ready_count']} of {report['provider_count']} ready")
+for name, entry in report["providers"].items():
+    state = "ready" if entry.get("ready") else ("installed, engine missing" if entry.get("available") else "missing")
+    version = entry.get("version")
+    line = f"  {name:<10} {entry['role']:<10} {state}"
+    if version:
+        line += f"  v{version}" if not str(version).lower().startswith(("v", "handbrake", "makemkv")) else f"  {version}"
+    print(line)
+    if entry.get("error"):
+        print(f"             {entry['error']}")
+    if mode != "version" and entry.get("ready") and isinstance(entry.get("snapshot"), dict):
+        snap = entry["snapshot"]
+        if "drives" in snap:
+            drives = snap.get("drives") or []
+            print(f"             drives: {len(drives)}")
+            for d in drives:
+                if isinstance(d, dict):
+                    label = d.get("disc_name") or d.get("disc") or ""
+                    print(f"               - {d.get('drive_name') or d.get('name') or d.get('device') or '?'}  {label}")
+        if "preset_count" in snap:
+            print(f"             presets: {snap['preset_count']}  default: {snap.get('default_preset', '')}")
+PY
+}
+
+cmd_providers() {
+    if [[ "${OUTPUT_FORMAT:-text}" == "json" ]]; then
+        python3 - "$PROVIDER_DIR" "${PROVIDERS[@]}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+provider_dir = sys.argv[1]
+roles = {"makemkv": "disc", "handbrake": "transcode"}
+out = []
+for name in sys.argv[2:]:
+    path = os.path.join(provider_dir, name)
+    available = os.access(path, os.X_OK)
+    ready = False
+    if available:
+        ready = subprocess.run([path, "version", "--dry-run"], capture_output=True, check=False).returncode == 0
+    out.append({"name": name, "role": roles.get(name, "unknown"), "available": available, "ready": ready})
+print(json.dumps({"tool": "media", "providers": out}, indent=2))
+PY
+        return 0
+    fi
+    local p
+    for p in "${PROVIDERS[@]}"; do
+        if provider_ready "$p"; then
+            printf '%-10s ready\n' "$p"
+        elif resolve_provider_exec "$p" >/dev/null; then
+            printf '%-10s engine missing\n' "$p"
+        else
+            printf '%-10s not installed\n' "$p"
+        fi
+    done
+}
+
+parse_output_format "${@:-}"
+ARGS=("${PARSED_ARGS[@]+"${PARSED_ARGS[@]}"}")
+command="${ARGS[0]:-help}"
+
+case "$command" in
+    snapshot|status)
+        cmd_snapshot snapshot
+        ;;
+    version)
+        cmd_snapshot version
+        ;;
+    providers|list)
+        cmd_providers
+        ;;
+    drives)
+        delegate_provider makemkv drives "${ARGS[@]:1}"
+        ;;
+    scan|info)
+        cmd_scan "${ARGS[@]:1}"
+        ;;
+    rip)
+        delegate_provider makemkv rip "${ARGS[@]:1}"
+        ;;
+    convert)
+        delegate_provider handbrake convert "${ARGS[@]:1}"
+        ;;
+    batch)
+        delegate_provider handbrake batch "${ARGS[@]:1}"
+        ;;
+    presets)
+        delegate_provider handbrake presets "${ARGS[@]:1}"
+        ;;
+    verify)
+        cmd_verify "${ARGS[@]:1}"
+        ;;
+    makemkv|handbrake)
+        if [[ ${#ARGS[@]} -lt 2 ]]; then
+            json_error "Subcommand required for $command (try: agent-do media $command --help)" 1
+            exit 1
+        fi
+        delegate_provider "$command" "${ARGS[@]:1}"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        json_error "Unknown command: $command" 1
+        if [[ "${OUTPUT_FORMAT:-text}" != "json" ]]; then
+            echo "Try: agent-do media help" >&2
+        fi
+        exit 1
+        ;;
+esac

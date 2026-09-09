@@ -312,14 +312,24 @@ PY
             latex)
                 command -v pdflatex &>/dev/null && { status="OK"; } || { status="WARN"; note="pdflatex not found"; }
                 ;;
-            handbrake)
-                if command -v HandBrakeCLI &>/dev/null \
+            media)
+                local media_missing=()
+                if ! { command -v makemkvcon &>/dev/null \
+                    || [[ -x "${AGENT_MAKEMKV_BIN:-}" ]] \
+                    || { [[ -n "${AGENT_MAKEMKV_BIN:-}" ]] && command -v "$AGENT_MAKEMKV_BIN" &>/dev/null; } \
+                    || [[ -x "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon" ]]; }; then
+                    media_missing+=("makemkvcon (install MakeMKV or set AGENT_MAKEMKV_BIN)")
+                fi
+                if ! { command -v HandBrakeCLI &>/dev/null \
                     || [[ -x "${AGENT_HANDBRAKE_BIN:-}" ]] \
                     || { [[ -n "${AGENT_HANDBRAKE_BIN:-}" ]] && command -v "$AGENT_HANDBRAKE_BIN" &>/dev/null; } \
-                    || [[ -x "/Applications/HandBrakeCLI" ]]; then
+                    || [[ -x "/Applications/HandBrakeCLI" ]]; }; then
+                    media_missing+=("HandBrakeCLI (brew install handbrake or set AGENT_HANDBRAKE_BIN)")
+                fi
+                if [[ ${#media_missing[@]} -eq 0 ]]; then
                     status="OK"
                 else
-                    status="WARN"; note="HandBrakeCLI not found — brew install handbrake or set AGENT_HANDBRAKE_BIN"
+                    status="WARN"; note="engine missing: $(printf '%s; ' "${media_missing[@]}")"; note="${note%; }"
                 fi
                 ;;
             *)
