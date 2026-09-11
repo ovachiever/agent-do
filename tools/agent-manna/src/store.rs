@@ -12,7 +12,7 @@ use fs2::FileExt;
 use rand::{rngs::OsRng, RngCore};
 
 use crate::error::{MannaError, Result};
-use crate::issue::{Issue, SessionEvent, SessionIdentity};
+use crate::issue::{Issue, IssueStatus, SessionEvent, SessionIdentity};
 
 /// Directory name for Manna storage.
 const MANNA_DIR: &str = ".manna";
@@ -35,6 +35,12 @@ const BOARD_IDENTITY_FILE: &str = "board.yaml";
 pub struct MannaStore {
     /// Base directory containing `.manna/`.
     base_dir: PathBuf,
+}
+
+/// The completed row and dependents that became unblocked in the same write.
+pub struct CompletedIssue {
+    pub issue: Issue,
+    pub released: Vec<String>,
 }
 
 impl MannaStore {
@@ -447,27 +453,65 @@ impl MannaStore {
     /// Complete a claimed issue only for the session that owns it.
     pub fn complete_issue(&self, id: &str, session: &SessionIdentity) -> Result<Issue> {
         self.complete_issue_checked(id, session, |_, _| Ok(()))
+            .map(|completed| completed.issue)
     }
 
     /// Complete only after rechecking an external integrity precondition under
     /// the same board lock as the lifecycle transition. Strict workflows use
     /// this to prevent `done` from hiding a handoff edit made after claim.
+    /// Removing the completed blocker from every dependent shares that lock
+    /// and atomic write, so readers never observe a half-completed cascade.
     pub fn complete_issue_checked<F>(
         &self,
         id: &str,
         session: &SessionIdentity,
         precondition: F,
-    ) -> Result<Issue>
+    ) -> Result<CompletedIssue>
     where
         F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
     {
-        self.mutate_issue_locked(id, |issue, issues| {
-            if issue.issue_type == crate::issue::IssueType::Dream {
-                issue.close_dream(session)
-            } else {
-                precondition(issue, issues)?;
-                issue.complete(session)
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+
+        let _board_lock = self.lock_board()?;
+        let mut issues = self.load_issues()?;
+        let index = issues
+            .iter()
+            .position(|issue| issue.id == id)
+            .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        let mut issue = issues[index].clone();
+        if issue.issue_type == crate::issue::IssueType::Dream {
+            issue.close_dream(session)
+        } else {
+            precondition(&issue, &issues).map_err(MannaError::MutationRejected)?;
+            issue.complete(session)
+        }
+        .map_err(MannaError::MutationRejected)?;
+        issue.validate().map_err(MannaError::MutationRejected)?;
+        issues[index] = issue.clone();
+
+        let mut released = Vec::new();
+        for dependent in &mut issues {
+            if !dependent.blocked_by.iter().any(|blocker| blocker == id) {
+                continue;
             }
+            let was_blocked = dependent.status == IssueStatus::Blocked;
+            dependent.blocked_by.retain(|blocker| blocker != id);
+            dependent.update_blocked_status();
+            dependent.updated_at = issue.updated_at;
+            dependent.validate().map_err(MannaError::MutationRejected)?;
+            if was_blocked && dependent.blocked_by.is_empty() {
+                released.push(dependent.id.clone());
+            }
+        }
+        if self.board_is_strict()? {
+            Self::validate_strict_row_shapes(&issues)?;
+        }
+        self.write_issues_locked(&issues)?;
+        Ok(CompletedIssue {
+            issue: issues[index].clone(),
+            released,
         })
     }
 
@@ -1122,6 +1166,157 @@ mod tests {
             });
         assert!(matches!(result, Err(MannaError::MutationRejected(_))));
         assert_eq!(store.load_issues().unwrap()[0].title, "Owned");
+    }
+
+    fn completion_board() -> (TempDir, MannaStore, SessionIdentity) {
+        let (temp, store) = setup_store();
+        let owner = session("ses_completion");
+        for id in ["mn-first", "mn-second", "mn-single", "mn-multi", "mn-other"] {
+            store
+                .append_issue(&Issue::new(id.to_string(), id.to_string()).unwrap())
+                .unwrap();
+        }
+        for id in ["mn-first", "mn-second"] {
+            store.claim_issue(id, &owner).unwrap();
+        }
+        for (dependent, blocker) in [
+            ("mn-single", "mn-first"),
+            ("mn-multi", "mn-first"),
+            ("mn-multi", "mn-second"),
+        ] {
+            store.add_blocker(dependent, blocker, &owner).unwrap();
+        }
+        (temp, store, owner)
+    }
+
+    #[test]
+    fn completion_releases_only_dependents_with_no_remaining_blockers() {
+        let (_temp, store, owner) = completion_board();
+        let before = store.load_issues().unwrap();
+        let first = store
+            .complete_issue_checked("mn-first", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(first.issue.status, IssueStatus::Done);
+        assert_eq!(first.released, ["mn-single"]);
+
+        let after = store.load_issues().unwrap();
+        assert_eq!(after[2].status, IssueStatus::Open);
+        assert!(after[2].blocked_by.is_empty());
+        assert_eq!(after[3].status, IssueStatus::Blocked);
+        assert_eq!(after[3].blocked_by, ["mn-second"]);
+        assert_eq!(after[2].updated_at, first.issue.updated_at);
+        assert_eq!(after[3].updated_at, first.issue.updated_at);
+        assert_eq!(after[1], before[1]);
+        assert_eq!(after[4], before[4]);
+
+        let second = store
+            .complete_issue_checked("mn-second", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(second.released, ["mn-multi"]);
+        let after_second = store.load_issues().unwrap();
+        assert_eq!(after_second[3].status, IssueStatus::Open);
+        assert!(after_second[3].blocked_by.is_empty());
+        assert_eq!(after_second[2], after[2]);
+        assert_eq!(after_second[4], before[4]);
+        store.claim_issue("mn-multi", &owner).unwrap();
+    }
+
+    #[test]
+    fn completion_preserves_dependent_ownership_and_closed_status() {
+        let (_temp, store, owner) = completion_board();
+        let other_owner = session("ses_other_owner");
+        store.claim_issue("mn-other", &other_owner).unwrap();
+        let claimed = store
+            .add_blocker("mn-other", "mn-first", &other_owner)
+            .unwrap();
+        store.complete_issue("mn-second", &owner).unwrap();
+        store.add_blocker("mn-second", "mn-first", &owner).unwrap();
+
+        let completed = store
+            .complete_issue_checked("mn-first", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(completed.released, ["mn-single", "mn-multi", "mn-other"]);
+        let after = store.load_issues().unwrap();
+        assert_eq!(after[1].status, IssueStatus::Done);
+        assert!(after[1].blocked_by.is_empty());
+        assert_eq!(after[4].status, IssueStatus::InProgress);
+        assert!(after[4].blocked_by.is_empty());
+        assert_eq!(after[4].claimed_by, claimed.claimed_by);
+        assert_eq!(after[4].claimed_at, claimed.claimed_at);
+        assert_eq!(after[4].claim_token_hash, claimed.claim_token_hash);
+    }
+
+    #[test]
+    fn completion_refusals_leave_the_entire_board_unchanged() {
+        let (_temp, store, owner) = completion_board();
+        let before = fs::read(store.issues_path()).unwrap();
+        let refused = store.complete_issue("mn-first", &session("ses_intruder"));
+        assert!(matches!(refused, Err(MannaError::MutationRejected(_))));
+        assert_eq!(fs::read(store.issues_path()).unwrap(), before);
+
+        let refused = store.complete_issue_checked("mn-first", &owner, |_, _| {
+            Err("handoff binding is stale".to_string())
+        });
+        assert!(matches!(refused, Err(MannaError::MutationRejected(_))));
+        assert_eq!(fs::read(store.issues_path()).unwrap(), before);
+
+        let refused = store.complete_issue("mn-other", &owner);
+        assert!(matches!(refused, Err(MannaError::MutationRejected(_))));
+        assert_eq!(fs::read(store.issues_path()).unwrap(), before);
+    }
+
+    #[test]
+    fn completion_removes_all_occurrences_without_sweeping_missing_blockers() {
+        let (_temp, store, owner) = completion_board();
+        let mut rows = store.load_issues().unwrap();
+        rows[2].blocked_by.push("mn-first".to_string());
+        rows[3].blocked_by.push("mn-missing".to_string());
+        // Legacy or hand-edited board fixture, never a production mutation.
+        store.write_issues_locked(&rows).unwrap();
+
+        let completed = store
+            .complete_issue_checked("mn-first", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(completed.released, ["mn-single"]);
+        store.complete_issue("mn-second", &owner).unwrap();
+        let after = store.load_issues().unwrap();
+        assert!(after[2].blocked_by.is_empty());
+        assert_eq!(after[3].blocked_by, ["mn-missing"]);
+        assert_eq!(after[3].status, IssueStatus::Blocked);
+    }
+
+    #[test]
+    fn completion_of_concurrent_blockers_releases_shared_dependent_once() {
+        let (_temp, store, owner) = completion_board();
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = ["mn-first", "mn-second"]
+            .into_iter()
+            .map(|id| {
+                let store = store.clone();
+                let owner = owner.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    store
+                        .complete_issue_checked(id, &owner, |_, _| Ok(()))
+                        .unwrap()
+                        .released
+                })
+            })
+            .collect();
+        let mut released: Vec<_> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        released.sort();
+        assert_eq!(released, ["mn-multi", "mn-single"]);
+        let after = store.load_issues().unwrap();
+        assert_eq!(after[0].status, IssueStatus::Done);
+        assert_eq!(after[1].status, IssueStatus::Done);
+        for dependent in &after[2..4] {
+            assert!(dependent.blocked_by.is_empty());
+            assert_eq!(dependent.status, IssueStatus::Open);
+        }
     }
 
     #[test]

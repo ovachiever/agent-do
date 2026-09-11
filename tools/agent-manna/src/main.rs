@@ -405,6 +405,13 @@ struct IssueData {
     age: IssueAge,
 }
 
+#[derive(Serialize)]
+struct DoneData {
+    #[serde(flatten)]
+    completed: IssueData,
+    released: Vec<String>,
+}
+
 /// The two distances a reader of one issue actually asks about: how long ago
 /// it was filed, and how long since anything happened to it.
 #[derive(Serialize)]
@@ -1253,7 +1260,7 @@ fn cmd_done(id: String) -> ! {
 
     let _ = load_board_workflow(&store);
     let session = require_session_identity();
-    let issue = match store.complete_issue_checked(&id, &session, |current, current_board| {
+    let completed = match store.complete_issue_checked(&id, &session, |current, current_board| {
         let current_workflow = load_workflow_for_board(Path::new("."), current_board)?;
         if let Some(config) = current_workflow
             .as_ref()
@@ -1276,9 +1283,12 @@ fn cmd_done(id: String) -> ! {
         Err(error) => handle_manna_error(error),
     };
 
-    output_success(IssueData {
-        age: (&issue).into(),
-        issue,
+    output_success(DoneData {
+        completed: IssueData {
+            age: (&completed.issue).into(),
+            issue: completed.issue,
+        },
+        released: completed.released,
     });
 }
 

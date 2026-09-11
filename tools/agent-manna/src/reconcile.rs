@@ -230,8 +230,9 @@ pub fn check_landed_open(issues: &[Issue], landed: &HashMap<String, Vec<String>>
 
 /// blocker_desync: blocked status out of sync with the blocked_by list.
 ///
-/// Routine drift since done never auto-unblocks dependents. A blocker counts
-/// as resolved when it is done or no longer exists on the board.
+/// Backstop for deleted blockers, older binaries, and hand-edited boards;
+/// `done` releases its dependents inline. A blocker counts as resolved when
+/// it is done or no longer exists on the board.
 pub fn check_blocker_desync(issues: &[Issue]) -> Vec<Finding> {
     let by_id: HashMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     let mut findings = Vec::new();

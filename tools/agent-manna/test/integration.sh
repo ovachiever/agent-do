@@ -90,6 +90,24 @@ extract_id() {
     echo "$output" | grep -o 'id: mn-[a-f0-9]*' | head -1 | awk '{print $2}'
 }
 
+# Assert the complete release list, including the empty-list response contract.
+check_released() {
+    local output="$1"
+    local desc="$2"
+    shift 2
+    if DONE_OUTPUT="$output" python3 - "$@" <<'PY'
+import os, sys, yaml
+data = yaml.safe_load(os.environ['DONE_OUTPUT'])
+assert data['success'] is True
+assert data['released'] == sys.argv[1:], data
+PY
+    then
+        pass "$desc"
+    else
+        fail "$desc" "$output"
+    fi
+}
+
 # ============================================================================
 # Test Suite
 # ============================================================================
@@ -337,6 +355,7 @@ echo "Test 9: done"
 output=$("$MANNA" done "$ID1" 2>&1) || true
 check_yaml "$output" "success: true" "done returns success"
 check_yaml "$output" "status: done" "done sets status to done"
+check_released "$output" "done reports an empty release list without dependents"
 
 # Verify done issue shows in list
 output=$("$MANNA" list --status done 2>&1) || true
@@ -754,14 +773,62 @@ check_yaml "$output" '"clean":true' "lint --json reports clean"
 # ----------------------------------------------------------------------------
 echo ""
 echo "Test G5: reconcile"
-# Manufacture a blocker desync: A blocks B, A completes, B stays blocked.
+# Completion releases dependents inline, with no intervening reconcile or sync.
 output=$("$MANNA" create "Blocker work" --track "$TRACK_ID" 2>&1) || true
 A_ID=$(extract_id "$output")
 output=$("$MANNA" create "Dependent work" --track "$TRACK_ID" 2>&1) || true
 B_ID=$(extract_id "$output")
+output=$("$MANNA" create "Second blocker work" --track "$TRACK_ID" 2>&1) || true
+C_ID=$(extract_id "$output")
+output=$("$MANNA" create "Dependent with two blockers" --track "$TRACK_ID" 2>&1) || true
+D_ID=$(extract_id "$output")
 "$MANNA" block "$B_ID" "$A_ID" >/dev/null 2>&1
+"$MANNA" block "$D_ID" "$A_ID" >/dev/null 2>&1
+"$MANNA" block "$D_ID" "$C_ID" >/dev/null 2>&1
 "$MANNA" claim "$A_ID" >/dev/null 2>&1
-"$MANNA" done "$A_ID" >/dev/null 2>&1
+done_exit=0
+output=$("$MANNA" done "$A_ID" 2>&1) || done_exit=$?
+check_exit 0 "$done_exit" "done with dependents exits 0"
+check_released "$output" "done lists only the fully released dependent" "$B_ID"
+output=$("$MANNA" show "$B_ID" 2>&1) || true
+check_yaml "$output" "status: open" "done immediately opens its single dependent"
+check_yaml "$output" "blocked_by: []" "done removes the completed blocker edge"
+output=$("$MANNA" show "$D_ID" 2>&1) || true
+check_yaml "$output" "status: blocked" "two-blocker dependent stays blocked after the first done"
+if ISSUE_OUTPUT="$output" python3 - "$C_ID" <<'PY'
+import os, sys, yaml
+assert yaml.safe_load(os.environ['ISSUE_OUTPUT'])['issue']['blocked_by'] == [sys.argv[1]]
+PY
+then
+    pass "only the unfinished blocker remains on the dependent"
+else
+    fail "only the unfinished blocker remains on the dependent" "$output"
+fi
+claim_exit=0
+"$MANNA" claim "$B_ID" >/dev/null 2>&1 || claim_exit=$?
+check_exit 0 "$claim_exit" "released dependent is immediately claimable"
+"$MANNA" abandon "$B_ID" >/dev/null 2>&1
+"$MANNA" claim "$C_ID" >/dev/null 2>&1
+done_exit=0
+output=$("$MANNA" done "$C_ID" 2>&1) || done_exit=$?
+check_exit 0 "$done_exit" "last blocker completion exits 0"
+check_released "$output" "last blocker done lists the newly released dependent" "$D_ID"
+output=$("$MANNA" show "$D_ID" 2>&1) || true
+check_yaml "$output" "status: open" "two-blocker dependent opens after both complete"
+check_yaml "$output" "blocked_by: []" "both completed blocker edges are removed"
+
+# Deliberately hand-edit this isolated fixture to emulate an older binary's
+# stale board. Reconcile must still repair it, although current done cannot
+# produce the desync through the normal lifecycle path.
+python3 - "$B_ID" "$A_ID" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path('.manna/issues.jsonl')
+rows = [json.loads(line) for line in path.read_text().splitlines()]
+dependent = next(row for row in rows if row['id'] == sys.argv[1])
+dependent['status'] = 'blocked'
+dependent['blocked_by'] = [sys.argv[2]]
+path.write_text(''.join(json.dumps(row, separators=(',', ':')) + '\n' for row in rows))
+PY
 "$MANNA" sync >/dev/null 2>&1
 
 rec_exit=0

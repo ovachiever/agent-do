@@ -469,7 +469,7 @@ surface verbatim. The page never edits a file.
 - Once claimed, mutations require both the exact `claimed_by` session and its bearer-token proof. The board stores only `claim_token_hash`, so the visible owner string cannot impersonate the claim
 - `done` requires owner plus `in_progress` and revalidates the authoritative handoff seal and absence of shadow work orders under the board lock; the sole exception is closing an unclaimed dream, because dreams are deliberately unclaimable
 - `abandon` requires the owner plus an active claim (`in_progress` or `blocked`); it returns to `open` when clear or remains `blocked` while dependencies remain
-- `block`/`unblock` maintain `blocked_by` and derive `blocked` status; completing a blocker does **not** auto-unblock dependents. That residue is deliberate: `reconcile` reports it (`blocker_desync`) and `reconcile --fix` clears it through the same state machine
+- `block`/`unblock` maintain `blocked_by` and derive `blocked` status. `done` removes the completed ID from every dependent in the same locked, atomic board write and reports newly unblocked IDs as `released`. A dependent with no blockers returns to `open`, or `in_progress` if already claimed; other blockers keep it `blocked`, and completed dependents stay `done`. `reconcile` retains `blocker_desync` as the backstop for deleted blockers, older binaries, and hand-edited boards; `reconcile --fix` repairs those through the existing state machine
 - `update --status` is rejected. Status moves only through lifecycle verbs
 - Validation invariants: `in_progress` requires `claimed_by`; `claimed_by`, `claimed_at`, and `claim_token_hash` come and go together; handoff digests use the pinned SHA-256 shape
 

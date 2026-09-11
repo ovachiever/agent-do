@@ -314,7 +314,10 @@ issue:
 
 ### `done <id>`
 
-Mark an issue as completed.
+Mark an issue as completed and remove its ID from every dependent's
+`blocked_by` list in the same locked, atomic board write. Dependents whose last
+blocker clears return to `open`, or `in_progress` if already claimed. Dependents
+with other blockers remain `blocked`; completed dependents stay `done`.
 
 ```bash
 agent-do manna done mn-abc123
@@ -327,7 +330,14 @@ issue:
   id: mn-abc123
   title: Fix login bug
   status: done
+released:
+  - mn-def456
 ```
+
+`released` lists the dependents that became unblocked, in board order, and is
+`[]` when none did. They are ready immediately after `done` returns. Deleted or
+missing blockers and stale boards from older binaries remain the responsibility
+of `reconcile --fix`.
 
 ### `abandon <id>`
 
@@ -373,7 +383,10 @@ issue:
 
 ### `unblock <id> <blocker_id>`
 
-Remove a blocker dependency. If no blockers remain, status reverts to `open`.
+Manually remove a blocker dependency. If no blockers remain, status returns to
+`open`, or `in_progress` if already claimed; completed issues stay `done`.
+Completing a blocker with `done` removes its edges automatically, so no manual
+`unblock` is needed for completed work.
 
 ```bash
 agent-do manna unblock mn-abc123 mn-def456
