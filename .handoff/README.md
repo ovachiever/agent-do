@@ -76,3 +76,7 @@ Rules:
 | 42 | `mn-c2d546` | in_progress | none | `.handoff/42-mn-c2d546-dpt-taste-instrument-verify-wild-hunt-candidates-against-the-rul.md` |
 | 43 | `mn-fa98a3` | open | none | `.handoff/43-mn-fa98a3-manna-handoff-the-completion-section-states-the-closing-rule.md` |
 | 44 | `mn-00160d` | open | none | `.handoff/44-mn-00160d-manna-reconcile-stale-claim-finding-for-claims-whose-liveness-ca.md` |
+| 45 | `mn-9517e0` | open | none | `.handoff/45-mn-9517e0-manna-reconcile-doc-reference-findings-flooded-200x-scope-the-sc.md` |
+| 46 | `mn-e6e2e0` | open | none | `.handoff/46-mn-e6e2e0-deai-prose-tell-linter-as-a-first-class-tool-with-register-packs.md` |
+| 47 | `mn-005efa` | open | none | `.handoff/47-mn-005efa-hook-posttooluse-prose-lint-on-write-edit-calls-deai.md` |
+| 48 | `mn-78ebe6` | open | none | `.handoff/48-mn-78ebe6-guard-pre-commit-prose-lint-for-non-claude-harnesses-calls-deai.md` |
