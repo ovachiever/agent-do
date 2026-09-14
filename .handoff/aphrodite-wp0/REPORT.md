@@ -1,5 +1,11 @@
 # Aphrodite WP-0: measured result
 
+**Human-response update, 2026-09-14:** Erik prefers A overall, A over D, and
+C over B. The frozen spacing prediction is contradicted. See the
+[attributed verdict and interpretation](HUMAN-VERDICT-2026-09-14.md).
+The original C/D comparison remains unreported. The report below retains the
+pre-response experiment record; its pending language describes that earlier state.
+
 **The bounded experiment is built. Candidate aphrodite-wp0-v1 failed its readiness
 checks. Do not build the full generator around this scorer.** Its numerical targets
 were not changed after the result. The four-page conditional comparison is ready;
