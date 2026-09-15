@@ -12,7 +12,7 @@ agent-do is the workshop's answer to both problems: a standard, known shape, tha
 agent-do <tool> <command> [args...]
 ```
 
-Behind that shape sit 102 tools exposing 930 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
+Behind that shape sit 103 tools exposing 948 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
 
 ## The tools on the bench
 
@@ -33,6 +33,8 @@ A declaration is only worth what checks it, and these are checked in three ways:
 Verify is the beat where the vessel checks its own act against the world. `browse wait --stable` blocks until the network is quiet and the page has stopped moving. `namecheap` reads a DNS record back from the provider after writing it and compares the bytes. `manna lint` grades the work board's grammar and exits nonzero on findings.
 
 The vessel also has a crude sense of visual craft, and it is worth saying exactly how crude. `dpt` scores a live web page from 0 to 100 against 65 rules across five layers of perception. In August the project tested it with controlled pages and wrote the result down in `.handoff/dpt-audit-2026-08-22.md`: a deliberately broken page scored 29, correctly, with four named faults; the owner's ratified design scored 67, and a banned neon template scored 66. One point apart. So dpt is proprioception, a sense of whether the act landed roughly where it should have. It stays on the bench as a floor check for unreadable text and invisible buttons, and workers are told never to chase its score. A faculty whose limits are written down beside it is worth more than one that is simply trusted.
+
+[Aphrodite](tools/agent-aphrodite/README.md) adds constructive design: nodes, typed relationships and shared variables generate original pages, and nine contextual mathematical families select among actual browser renders. A revision changes connected relationships and measures the result again. Its frozen engine travels with the brief to a fresh session. The initial perspectives are explicit hypotheses; its preference-learning workflow records human responses separately from computed predictions.
 
 ### The key locker (creds)
 

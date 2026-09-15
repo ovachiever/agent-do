@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Aphrodite 0.1.0: complete relational design tool with nine computable contextual families, deterministic grammar search, actual browser selection, coupled revision, attributed offline preference learning, immutable fresh-session packets, and original responsive demonstrations. Seed perspectives remain explicitly unvalidated hypotheses. Includes unit and production browser-path tests. (mn-da6e1b)
+
 - `manna done` now releases dependents in the same locked, atomic board write as completion. Satisfied blocker edges disappear immediately; the last blocker clearing opens an unclaimed dependent or resumes its existing claim. The success payload reports newly unblocked IDs in `released`, including an empty list when none changed. Reconcile remains the repair backstop for deleted blockers and stale boards. (mn-0364a0)
 
 - `coord focus set --phase building` now warns a writer when another active writer is already building in the same checkout, even when their source paths are disjoint. The advisory explains that dirty compile state and build artifacts are checkout-wide, points the joining lane to `agent-do git worktree add <branch>`, preserves the primary-board caveat, remains visible through `coord interrupts` and `status`, and stays silent for lone builders, read-only roles, non-building phases, and `AGENT_DO_COORD_ISOLATION_NUDGE=0`. (mn-6a43ba)

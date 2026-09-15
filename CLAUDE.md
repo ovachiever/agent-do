@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 102 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 103 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` (instant, no LLM)
 - **Natural Language** (humans): `agent-do -n "what you want"` (LLM-routed via Claude)
 
@@ -139,7 +139,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # filterEntries: removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth: identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill: writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 102 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 103 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog: tool descriptions, commands, examples
 ```
 
@@ -188,6 +188,7 @@ Registries merge in reverse priority order (higher-priority wins):
 | `agent-obsidian` | Bash + Python | Obsidian vault surface with obsidian-cli fallback plus local SQLite FTS5 and semantic chunk index mode. With `AGENT_OBSIDIAN_VAULT_PATH` or `--vault /path/to/vault`, supports `refresh`, `embed status|refresh`, keyword/semantic/hybrid `search`, `context build`, `chat`, structured `read/query/relate/summarize`, conventions-backed `save/save-group`, unified tasks, graph/audit, templates, journaled move/delete, and `+live` eval/dev/plugin escape hatches. |
 | `bin/notify` + `lib/notify.py` | Python | Root notification contract over `sms`, `email`, `slack`, `messenger`, and `pipe`. Supports recipient aliases and groups under `~/.agent-do/notify/recipients.json`, event rules under `~/.agent-do/notify/rules.json`, cooldown state under `~/.agent-do/notify/state.json`, append-only delivery history in `~/.agent-do/notify/history.jsonl`, built-in templates for common rule types, provider preference order, fallback routing, cooldown-aware `emit`, `history`, `reset-state`, `delete-rule`, dry-run planning, and live-gated Messenger delivery without adding another public registry tool. |
 | `agent-dpt` | Bash + Python | Design Perception Tensor: full-page visual quality scoring across 5 perception layers (65 rules, 0-100 score). |
+| `agent-aphrodite` | Bash + Node | Relational design generation: nine contextual families, observed selection, coupled revision, offline preference fitting and fresh-session packets. |
 | `agent-context/` | Bash + Python | **Knowledge library.** Fetches external reference docs (URLs, HTML sites, llms.txt, GitHub repos, local skills). SQLite FTS5 index with BM25 + trust-tier and version-currency ranking. Token-budgeted retrieval (knapsack). Annotations, feedback-influenced scoring, bounded HTML crawl, version checks, and local HTML dashboard. Storage: `~/.agent-do/context/` (global, per-user). |
 | `agent-zpc/` | Bash + Python | **Experience journal.** Structured lessons (context/problem/solution/takeaway), architectural decisions (options/chosen/rationale/confidence), pattern consolidation via harvest. Git history review, swarm checkpoints, lesson promotion (local → team → global). `position` holds a verdict with its falsifier and refuses (exit 2) any flip that names no evidence; `counsel` spawns a fresh `claude -p` whose whole input is a receipts-only brief, so a second opinion exists that never saw the argument. `inject` (and counsel's auto-brief) fit themselves to a budget resolved at call time from the quantity authority — `min(max_tokens)`, one delivery's worth, held in bytes because no token is shorter than one byte — cut whole records in value order, and state the magnitude of everything they drop; `--max-tokens` hands the budget to the caller. Machine-wide lessons are gated at `promote --to global` (rule + why + `when` trigger + a cross-project receipt, or exit 2 and nothing written; machine-written rows never qualify) and delivered by trigger: `inject --trigger prompt|command|path <value>` answers the hook that fires at that moment (`hooks/claude/agent-do-zpc-trigger.py`, registered on UserPromptSubmit, PreToolUse Bash, PostToolUse Edit/Write), session start carries only `always` rows and a count, and every firing leaves a receipt in `~/.agent-do/zpc/deliveries.jsonl`. Storage: `.zpc/` (per-project). Sources `lib/json-output.sh` + `lib/snapshot.sh` + `lib/quantities.py`. |
 | `agent-pdf2md` | Bash | PDF-to-Markdown converter. Auto-detects tabular vs prose PDFs. Uses `pdftotext -layout` for tables, `markitdown` for prose. |
@@ -249,7 +250,7 @@ The board (`.manna/`) is the single backlog; tracked `.handoff/` is the single w
 1. Create executable at `tools/agent-<name>` (must support `--help` flag)
 2. Add entry to `registry.yaml` with `description`, `capabilities`, `commands`, `examples`
    - add `routing` metadata for discovery keywords, raw CLI equivalents, readiness hints, and project signals when the tool should participate in `suggest`, UserPromptSubmit AI catalog routing, or PreToolUse hard nudges
-3. **Declare `contracts:` — mandatory.** Map each command verb to its beats (`connect`/`snapshot`/`interact`/`verify`/`save`) plus `attributes:` flags where they apply (`destructive`, `long_running`, `polymorphic`, `composite`, `sensitive`, `passthrough`). Draft it with `agent-do harness contracts propose --tool <name>`; the gate (`tests/test_contracts_gate.py`, run by `./test.sh` and CI) fails any registry tool without a contracts block. All 102 tools declare contracts; contract warnings must stay at zero.
+3. **Declare `contracts:` — mandatory.** Map each command verb to its beats (`connect`/`snapshot`/`interact`/`verify`/`save`) plus `attributes:` flags where they apply (`destructive`, `long_running`, `polymorphic`, `composite`, `sensitive`, `passthrough`). Draft it with `agent-do harness contracts propose --tool <name>`; the gate (`tests/test_contracts_gate.py`, run by `./test.sh` and CI) fails any registry tool without a contracts block. All 103 tools declare contracts; contract warnings must stay at zero.
 4. `--list` auto-discovers tools via filesystem scan of `tools/agent-*`
 
 ### Quantity authority
