@@ -1,4 +1,8 @@
-# Aphrodite 0.1.0: implemented HLD and LLD
+# Aphrodite 0.2.0: native design and legacy engine
+
+The default workflow equips the host AI to design in its existing frontend. An open dependency graph carries chosen numerical relationships through revisions; native code and visual judgment remain with the designer. See [Version 0.2: native frontend authorship](#version-02-native-frontend-authorship) for the implementation and its limits.
+
+The architecture below describes the preserved 0.1 experimental generator, available through explicit engine commands and `packet --mode engine`.
 
 Work item: `mn-da6e1b`. This describes executable behavior, not a promise that all human beauty has been solved. The historical Aphrodite plan and WP-0 artifacts remain unchanged. The user's authorization to build the complete instrument supersedes the earlier planning-only stop; it does not change any earlier experiment's result.
 
@@ -132,3 +136,16 @@ The implementation covers AP-WP-00 model binding, AP-WP-01 kernel/relationship e
 Tests establish numeric interaction, affine closure, typed-contract distinctions, duplicate rejection, missing-evidence refusal, immutable provenance, context isolation, dependency invalidation, deterministic proposals, constrained diversity, native interaction, actual geometry and fresh-package operation. Synthetic observations are test fixtures only. A mathematical non-additivity result is not evidence of human-perceived emergent beauty.
 
 The first release is a complete working relational instrument for its declared semantic HTML domain. Additional adapters and larger models are optional expansion. Evidence that its choices improve human appreciation is still required before claiming dependable learned taste or universal beauty.
+## Version 0.2: native frontend authorship
+
+The recommended path is now `packet --mode native`, the default. The host AI keeps the project's existing frontend and its normal design capabilities. The packet provides `native/START-HERE.md`, a vocabulary of conditional relationships, an initially empty graph, and a portable runtime. It does not include the legacy renderer or nine-family model. `packet --mode engine` preserves the earlier implementation documented below.
+
+`src/relations.js` is a browser-compatible numerical dependency evaluator. Inputs have names, values, explanations, and optional authored ranges. Derived nodes contain expression trees with references to other nodes. Bindings attach values to arbitrary CSS custom properties. It uses a topological traversal, rejects cycles/missing references/nonfinite arithmetic, and evaluates the entire graph before application. There are no default aesthetic constants or selected layouts. Units are applied at bindings; dimensional consistency remains the author's responsibility.
+
+`src/native.js` packages the workflow and records native revisions. `describe --relations` resolves a graph without modifying a page. `revise --relations` changes declared inputs and emits a successor graph, CSS, resolved values, and a transitive dependency receipt. It marks the resulting page as unobserved. `src/relation-cli.js` calls the same revision implementation inside portable packets. `applyRelations` changes only the named custom properties on a supplied element. Host code retains markup, layout, assets, interactions, and responsive topology.
+
+The design workflow begins with the intended encounter, uses normal AI composition, then makes consequential relationships explicit and revises through them. The host supplies semantic and visual interpretation openly. Numerical calculation verifies that a chosen relationship executes correctly; it does not rank the result's beauty. The practical saved-before/saved-after comparison is not a blinded baseline experiment.
+
+Validation must distinguish two claims: preservation and propagation can be tested mechanically, while an improvement over normal AI design requires actual comparable designs and judgments. No result from the earlier generator or this module's software tests establishes the latter. This release also does not implement the separately proposed arbitrary-page bench adapter, `mn-74982c`.
+
+---

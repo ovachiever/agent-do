@@ -94,12 +94,13 @@ export function exportRun(dir,out,{release=false}={}) {
 }
 export function packet(context,out) {
   validateContext(context);const dest=directory(out);write(path.join(dest,'context.json'),context);
-  fs.cpSync(path.join(ROOT,'src'),path.join(dest,'engine','src'),{recursive:true});fs.cpSync(path.join(ROOT,'models'),path.join(dest,'engine','models'),{recursive:true});fs.copyFileSync(path.join(ROOT,'package.json'),path.join(dest,'engine','package.json'));
+  freezeEngine(dest);
   fs.writeFileSync(path.join(dest,'START-HERE.md'),`# Aphrodite fresh-session entry\n\nThe executable relationships own selection. Read the bound content and perspective in context.json. Public copy belongs only to brief.nodes and disclosure titles. The intent reading is internal.\n\n1. Run \`node engine/src/cli.js describe --context context.json\`.\n2. Run \`node engine/src/cli.js compose --context context.json --out run --seed 1 --budget 6\`.\n3. Inspect run/index.html, the selected page, observed images, and per-relation values.\n4. Make a relationship change with \`node engine/src/cli.js revise --run run --set presence=1.2 --out revision\`. It invalidates dependent measurements and observes the successor.\n5. Export with \`node engine/src/cli.js export --run revision --out site\`.\n\nPrerequisites: Node 20 or newer and the existing agent-do browse installation. There are no npm dependencies. Preserve this manifest and the model. Each run uses a new directory. A human preference needs its exact source; never turn a critic's prose into a human label. Current support: ${context.model.support.claim}. Interpret each rule through its declared perspective and domain. Generalize corrections through relationships instead of page-specific CSS.\n`,{flag:'wx'});
   seal(dest);return {directory:dest,entry:path.join(dest,'START-HERE.md'),contextDigest:context.digest};
 }
 function freezeEngine(dest) {
   fs.cpSync(path.join(ROOT,'src'),path.join(dest,'engine','src'),{recursive:true});
+  fs.cpSync(path.join(ROOT,'native'),path.join(dest,'engine','native'),{recursive:true});
   fs.cpSync(path.join(ROOT,'models'),path.join(dest,'engine','models'),{recursive:true});
   fs.copyFileSync(path.join(ROOT,'package.json'),path.join(dest,'engine','package.json'));
 }

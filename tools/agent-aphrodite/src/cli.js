@@ -10,6 +10,8 @@ import {productionCatalog} from './construct.js';
 import {compose,revise,loadRun,exportRun,packet,select} from './engine.js';
 import {evaluate} from './evaluate.js';
 import {feedback,fit,adopt} from './learn.js';
+import {nativePacket,nativeRevision,parseAssignments} from './native.js';
+import {resolveRelations} from './relations.js';
 
 const HELP=`agent-aphrodite - Contextual relational design instrument
 
@@ -17,10 +19,10 @@ Commands:
   doctor        Check Node, model and the existing browse transport (no launch)
   perspectives  Read the named perspectives, equations, controls and provenance
   init          Bind a real brief and materials, or copy an original example
-  describe      Read a bound context, semantic relations and construction vocabulary
+  describe      Read an open relationship graph or a legacy bound context
   compose       Generate, render, measure and select within a fixed perspective
   vary          Generate a structurally distinct alternative within an affinity tolerance
-  revise        Change shared relationship controls and remeasure their consequences
+  revise        Propagate native design relationships, or remeasure a legacy run
   observe       Remeasure a selected program in the current browser environment
   evaluate      Recompute saved observed values under full, pairs or parts objectives
   study         Compare all three objectives on an identical frozen proposal pool
@@ -28,10 +30,14 @@ Commands:
   fit           Propose new model weights from grouped preference records
   adopt         Adopt a model only with explicit attributable context acceptance
   export        Export a selected functional page and its construction receipt
-  packet        Package the executable model and brief for a fresh AI session
+  packet        Equip a native frontend AI session; --mode engine keeps legacy replay
   verify        Verify an immutable artifact bundle
 
 Inputs: --brief <json> or --context <json>; optional --model <json>
+Native design: packet [--brief <text-or-json>] [--relations <json>] --out <path>
+               describe --relations <json>
+               revise --relations <json> --set inputName=1.2 --out <path>
+Packet mode: --mode native (default) | engine (legacy generator)
 Artifacts: --run <directory>, --out <new path>, --candidate <id>
 Construction: --seed <string>, --budget <1..48>, --steps <0..budget-1>
 Perspectives: --objective full|pairs|parts; --set presence=1.2 (repeatable)
@@ -47,7 +53,7 @@ Every output path must be new. No external publishing or model calls occur.
 Current seed perspectives are proposals. Values compare alternatives within one
 context; they are not absolute beauty scores. Browser operations use agent-do browse.
 `;
-const OPTIONS=Object.fromEntries(['brief','context','model','run','out','candidate','seed','budget','steps','objective','distance','tolerance','example','left','right','choice','quote','source','author','group','iterations','acceptance'].map(k=>[k,{type:'string'}]));
+const OPTIONS=Object.fromEntries(['brief','context','model','run','out','candidate','seed','budget','steps','objective','distance','tolerance','example','left','right','choice','quote','source','author','group','iterations','acceptance','mode','relations'].map(k=>[k,{type:'string'}]));
 OPTIONS.set={type:'string',multiple:true};OPTIONS.records={type:'string',multiple:true};OPTIONS.holdout={type:'string',multiple:true};OPTIONS.release={type:'boolean'};OPTIONS.help={type:'boolean',short:'h'};
 const required=(o,key)=>{check(o[key],'ARGUMENT',`--${key} is required.`);return o[key];};
 function contextFrom(o) {
@@ -79,6 +85,8 @@ export async function main(argv=process.argv.slice(2)) {
       write(path.join(out,'context.json'),context);write(path.join(out,'brief.json'),context.brief);seal(out);result={directory:out,context:path.join(out,'context.json'),contextDigest:context.digest,domainDigest:context.domainDigest};break;
     }
     case 'describe': {
+      if(o.relations){check(!o.brief&&!o.context&&!o.model,'INPUT','An open relationship graph does not use an engine context or scoring model.');result=resolveRelations(read(o.relations));break;}
+      if(!o.brief&&!o.context){check(!o.model,'INPUT','A scoring model needs a legacy brief or context.');result={mode:'native',entry:path.join(ROOT,'native','START-HERE.md'),relationships:path.join(ROOT,'native','RELATIONSHIPS.md'),workflow:'The host AI designs in the existing frontend. Aphrodite carries the intention and executes open numerical relationships. Render and use normal visual judgment; no affinity ranking governs native designs.',start:'agent-do aphrodite packet --brief BRIEF.md --out .dev/design-session'};break;}
       const c=contextFrom(o);result={contextDigest:c.digest,domainDigest:c.domainDigest,title:c.brief.title,perspective:c.brief.intent,model:c.model.id,support:c.model.support,nodes:c.brief.nodes,relations:c.brief.relations,constellations:c.brief.constellations,controls:c.model.controls,grammar:productionCatalog,conditions:{viewports:c.brief.viewports,states:c.brief.states}};break;
     }
     case 'compose':result=await compose(contextFrom(o),searchOptions(o));break;
@@ -86,7 +94,11 @@ export async function main(argv=process.argv.slice(2)) {
       const {context,result:previous}=loadRun(required(o,'run'));check(previous.selection.selected,'NO_SELECTION','The source run has no selected design.');
       result=await compose(context,{...searchOptions(o),minimumDistance:numeric(o,'distance',.25),archive:[previous.candidates.find(c=>c.id===previous.selection.selected).signature]});break;
     }
-    case 'revise':result=await revise(required(o,'run'),{changes:changes(o),out:required(o,'out'),progress});break;
+    case 'revise': {
+      if(o.relations){check(!o.run&&!o.context&&!o.brief&&!o.model,'INPUT','Choose native relationships or a legacy run.');result=nativeRevision(read(o.relations),parseAssignments(o.set),required(o,'out'));}
+      else result=await revise(required(o,'run'),{changes:changes(o),out:required(o,'out'),progress});
+      break;
+    }
     case 'observe':result=await revise(required(o,'run'),{out:required(o,'out'),progress});break;
     case 'evaluate': {
       const {context,result:run}=loadRun(required(o,'run'));const selected=o.candidate??run.selection.selected;check(selected&&run.candidates.some(c=>c.id===selected),'CANDIDATE','No such candidate.');
@@ -109,7 +121,12 @@ export async function main(argv=process.argv.slice(2)) {
       const model=adopt(loadModel(required(o,'model')),read(required(o,'acceptance')));write(required(o,'out'),model);result={model:model.id,path:o.out,support:model.support};break;
     }
     case 'export':result=exportRun(required(o,'run'),required(o,'out'),{release:o.release??false});break;
-    case 'packet':result=packet(contextFrom(o),required(o,'out'));break;
+    case 'packet': {
+      const mode=o.mode??'native';check(['native','engine'].includes(mode),'MODE','Choose native or engine packet mode.');
+      if(mode==='engine'){check(!o.relations,'INPUT','Open relationships belong to native mode.');result=packet(contextFrom(o),required(o,'out'));}
+      else {check(!o.model,'INPUT','Native design does not use a scoring model.');check(!(o.brief&&o.context),'INPUT','Choose a plain brief or an existing engine context.');result=nativePacket({brief:o.brief,context:o.context?validateContext(read(o.context)):null,relations:o.relations,out:required(o,'out')});}
+      break;
+    }
     case 'verify':result=verify(required(o,'run'));break;
     default:throw new Fault('COMMAND',`Unknown command: ${command}`);
   }

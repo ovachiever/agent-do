@@ -25,7 +25,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [3d](#3d) | 3D modeling and rendering control | mixed | 4 |
 | [agent](#agent) | Control AI coding agent sessions (Claude, OpenCode, Droid, Amp) | mixed | 10 |
 | [android](#android) | Control Android Emulator | mixed | 5 |
-| [aphrodite](#aphrodite) | Contextual relational design generation, observation, revision and preference learning | read | 16 |
+| [aphrodite](#aphrodite) | Native AI frontend design guidance and executable design relationships | read | 16 |
 | [api](#api) | API testing plus canonical API integration templates for agents | mixed | 13 |
 | [appleevents](#appleevents) | Control scriptable macOS apps through AppleEvents, AppleScript, and JXA | mixed | 9 |
 | [audio](#audio) | Audio processing | mixed | 3 |
@@ -248,27 +248,27 @@ agent-do android launch com.android.chrome
 
 ### aphrodite
 
-Contextual relational design generation, observation, revision and preference learning
+Native AI frontend design guidance and executable design relationships
 
 Concurrency: `read`
 
 **Capabilities**
 
-- construct original semantic websites from coupled geometric and material relationships
-- evaluate nine perspective-conditioned law families on actual browser observations
-- vary composition through bounded deterministic search and structural distance
-- revise shared controls and remeasure every required viewport and state
-- fit attributed preferences offline and package a frozen engine for fresh sessions
+- equip a fresh AI session to design in its existing frontend with full creative authorship
+- express geometry, material and meaning through contextual design relationships
+- propagate arbitrary named numerical relationships into owned CSS custom properties
+- preserve native markup, assets, interactions and responsive layout during coupled revisions
+- retain the experimental generator, observation and preference-fitting paths for explicit research replay
 
 **Commands**
 
 - `doctor`: Check Node, model and browse transport without launching a browser
 - `perspectives`: Read perspective equations, controls and source declarations
 - `init`: Bind a brief and local materials into an immutable context
-- `describe`: Read semantic nodes, relations, grammar and observation conditions
+- `describe`: Read the native workflow, an open relationship graph or a legacy context
 - `compose`: Construct, observe and select a bounded set of original compositions
 - `vary`: Construct a structurally distinct composition within a declared affinity tolerance
-- `revise`: Change shared relationship controls and observe the successor
+- `revise`: Propagate native relationships into CSS variables or remeasure a legacy run
 - `observe`: Remeasure a selected composition in the current browser environment
 - `evaluate`: Recompute full, pair or part objectives from saved observations
 - `study`: Compare objectives on an identical frozen proposal pool
@@ -276,18 +276,18 @@ Concurrency: `read`
 - `fit`: Propose model weights using grouped preferences and declared holdouts
 - `adopt`: Bind an explicit model acceptance to its exact semantic and material domain
 - `export`: Export a selected functional page and its construction receipt
-- `packet`: Save the executable model and brief for a fresh session
+- `packet`: Save a native design packet or an explicit legacy engine packet for a fresh session
 - `verify`: Verify the content hashes of an artifact bundle
 
 **Examples**
 
 ```bash
-# build a website using relational design
-agent-do aphrodite compose --brief brief.json --out run --seed 1 --budget 6
-# make the headline more present and recompute the composition
-agent-do aphrodite revise --run run --set presence=1.2 --out revision
-# package a design perspective for a fresh session
-agent-do aphrodite packet --context context.json --out packet
+# improve native AI frontend design with a relational workflow
+agent-do aphrodite packet --brief BRIEF.md --out packet
+# revise a chosen relationship in an existing frontend
+agent-do aphrodite revise --relations relations.json --set presence=1.2 --out revision
+# inspect open design relationships
+agent-do aphrodite describe --relations relations.json
 ```
 
 **Safety (from contracts)**
@@ -295,6 +295,7 @@ agent-do aphrodite packet --context context.json --out packet
 - Read-only (snapshot/verify; safe to parallelize): `describe`, `doctor`, `evaluate`, `perspectives`, `verify`
 - Write (connect/interact/save): `adopt`, `compose`, `export`, `feedback`, `fit`, `init`, `observe`, `packet`, `revise`, `study`, `vary`
 - long_running (daemon/stream/session; may never return): `compose`, `observe`, `revise`, `vary`
+- polymorphic (beat decided by payload or flag at call time): `revise`
 - composite (one call performs several beats internally): `compose`, `observe`, `revise`, `vary`
 - own_state (writes only its own cache/state; parallel-safe): `adopt`, `compose`, `export`, `feedback`, `fit`, `init`, `observe`, `packet`, `revise`, `study`, `vary`
 

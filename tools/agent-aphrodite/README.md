@@ -1,10 +1,36 @@
 # Aphrodite
 
-Aphrodite constructs original semantic web pages by varying shared geometric and material relationships, measuring their rendered consequences, and selecting under a frozen perspective. It also revises compositions, records attributed comparisons, proposes learned weights, and packages the same executable system for another session.
+Aphrodite helps a normal frontend AI develop a composition and keep its relationships coherent through changes. The AI retains authorship, its existing design skills, and the project's native code. The default fresh-session packet supplies a design workflow, an open relationship vocabulary, and a small executable graph for coupled CSS variables.
 
-The operating principle is relational: a correction changes the relationship that produced an outcome. The engine does not accept a CSS patch as a revision. Content, intended roles, material sources, and perspective are explicit inputs. A site's identity is not a template selector.
+Version 0.2.0 changes the default path after the restricted generator produced results Erik rejected. It has no evidence yet that this new workflow improves on ordinary AI frontend design. Its immediate engineering contract is to preserve that design freedom and execute the relationships the designer chooses.
 
-Version 0.1.0 includes all nine family evaluators and the complete generation-to-export workflow. Its initial perspectives are authored hypotheses. Their numerical outputs are within-context predictions of harmony, not established measurements of human beauty. Historical WP-0 failures remain failures. This software release does not claim that the prospective human study has passed.
+## Native design: start here
+
+```bash
+agent-do aphrodite describe
+agent-do aphrodite packet --brief BRIEF.md --out .dev/design-session
+```
+
+Hand the session `.dev/design-session/START-HERE.md` and the working project. A brief can be ordinary text, Markdown, or JSON; no node taxonomy or layout grammar is required. Omit `--brief` to use the conversation and current project. Existing engine contexts can be supplied with `--context`; they are retained as source material, not imposed as a construction system. Plain briefs' linked files remain in their original locations.
+
+The AI develops the visual intention, builds using its normal frontend ability, identifies important relationships, implements them in native code, renders, and revises using visual judgment. Geometry, materials, meaning, and behavior can interact without being reduced to a numerical grade. See the packaged [design workflow](native/START-HERE.md) and [relationship vocabulary](native/RELATIONSHIPS.md).
+
+For numerical coupling, the AI authors `relations.json`: arbitrary named inputs, derived expressions, and CSS custom-property bindings. There are no prescribed fonts, colors, layout primitives, five-control limit, or taste weights. CSS can express relationships directly when a graph would add unnecessary machinery.
+
+```bash
+agent-do aphrodite describe --relations relations.json
+agent-do aphrodite revise --relations relations.json --set presence=1.2 --out .dev/revision
+```
+
+The revision emits a successor graph, resolved CSS variables, and an affected-dependency receipt. It does not edit or grade the frontend. Load the emitted CSS in the existing page and inspect the result. A portable Node CLI and browser-compatible `applyRelations(element, graph, overrides)` ship in the packet, so neither a new framework nor an external model service is required. The host AI supplies creative interpretation and visual judgment.
+
+The separate `mn-74982c` proposal to apply legacy measurements to arbitrary pages is not implemented here. Native design is usable without that adapter.
+
+## Legacy experimental generator
+
+The commands below preserve the earlier generator, research, and replay path. They are not the recommended route for product design. This engine constructs semantic pages from a small grammar, observes their renders, and selects using nine authored feature families. The features are computable proxies whose ordering has not demonstrated reliable aesthetic judgment. Functional eligibility means the checks passed; it does not mean the page is beautiful.
+
+Historical WP-0 failures remain failures. The initial numerical perspectives are authored hypotheses. Ordinary native frontend designs should not be routed through their affinity ranking.
 
 ## Start
 
@@ -73,11 +99,11 @@ Fitting proposes a new model file and never adopts it automatically. An optional
 ## Fresh session and artifacts
 
 ```bash
-agent-do aphrodite packet --context .dev/tideline-context/context.json --out .dev/tideline-packet
+agent-do aphrodite packet --mode engine --context .dev/tideline-context/context.json --out .dev/tideline-packet
 agent-do aphrodite verify --run .dev/tideline-run
 ```
 
-Hand the new session `START-HERE.md` from the packet. It contains the bound brief, embedded material bytes, frozen model, and executable engine. The engine in that folder can generate, evaluate, revise and export with Node and the existing browse transport. It needs no conversation history. A bound packet carries one project's context; author a new brief to change the project.
+An explicit `--mode engine` packet contains the bound brief, embedded material bytes, frozen model, and executable engine for reproducing this legacy workflow. Its `START-HERE.md` concerns that experiment. The default native packet above contains neither this renderer nor its scoring model.
 
 Each run retains its request, context, grammar beam, complete candidate programs, original HTML, viewport/state observations and screenshots, family/relationship decompositions, failed attempts, browser-operation receipts, selection, and SHA-256 manifest. A frozen engine accompanies each run. If installed code changes, replay with the included `engine/src/cli.js`. Verification authenticates listed artifact content against its manifest; it does not authenticate a human author's identity or prohibit additional unlisted files.
 
@@ -91,6 +117,7 @@ The nine families are computable proxies. Optical mass, type fingerprint, image 
 cd tools/agent-aphrodite
 npm test
 node test/integration.js
+node test/native-browser.js
 ```
 
 The integration test uses the actual `agent-do aphrodite` and `agent-do browse` paths, retains evidence under `.dev/`, verifies the coupled dimensions on actual renders, exercises pointer/keyboard actions, checks a fresh packet, and refuses an unearned calibrated release. The root `./test.sh` includes both suites. Algebraic fixtures are explicitly synthetic and never enter human calibration.

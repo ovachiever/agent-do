@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "kind": "native-design-relations",
+  "intent": "Syntax demonstration: increasing one presence contracts supporting space. All values below are invented construction examples, not learned preferences.",
+  "inputs": {
+    "presence": {"value": 1, "range": [0.5, 2], "why": "Relative size compared with this demonstration's starting composition."},
+    "headingReference": {"value": 4, "why": "An invented reference heading size in rem, chosen only to demonstrate the runtime."},
+    "gapReference": {"value": 2, "why": "An invented reference gap in rem, not a recommended spacing value."},
+    "elasticity": {"value": -1, "why": "A reciprocal relation makes the algebra easy to inspect; choose a relationship appropriate to the real design."}
+  },
+  "relations": {
+    "headingSize": {"expr": {"op": "multiply", "args": ["headingReference", "presence"]}, "why": "Heading size follows the relative presence."},
+    "supportGap": {"expr": {"op": "multiply", "args": ["gapReference", {"op": "power", "args": ["presence", "elasticity"]}]}, "why": "Supporting space follows the declared relationship to presence."}
+  },
+  "bindings": {
+    "--heading-size": {"node": "headingSize", "unit": "rem"},
+    "--support-gap": {"node": "supportGap", "unit": "rem"}
+  }
+}

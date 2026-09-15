@@ -10,6 +10,7 @@ import {read,write,verify,seal} from '../src/core.js';
 import {Browser} from '../src/browser.js';
 import {separation} from '../src/math.js';
 import {temp} from './helpers.js';
+import {nativeBrowserTest} from './native-browser.js';
 
 const dir=temp(),repo=path.resolve(ROOT,'../..'),owner=path.join(repo,'agent-do');
 const receipts=[];
@@ -22,6 +23,7 @@ function cli(args,{executable=owner,prefix=['aphrodite'],expect=0,cwd=repo}={}) 
 }
 try {
   cli(['doctor']);
+  const nativeEvidence=await nativeBrowserTest();
   const contextDir=path.join(dir,'context');
   cli(['init','--example','tideline','--out',contextDir]);
   const context=read(path.join(contextDir,'context.json'));
@@ -53,7 +55,7 @@ try {
   assert.equal(read(path.join(site,'construction-receipt.json')).humanBeautyGuarantee,false);
   cli(['export','--run',revisedDir,'--out',path.join(dir,'unearned-release'),'--release'],{expect:1});
   assert.ok(!fs.existsSync(path.join(dir,'unearned-release')));
-  const packet=path.join(dir,'packet');cli(['packet','--context',path.join(contextDir,'context.json'),'--out',packet]);
+  const packet=path.join(dir,'packet');cli(['packet','--mode','engine','--context',path.join(contextDir,'context.json'),'--out',packet]);
   const frozen=path.join(packet,'engine','src','cli.js');
   const again=cli(['evaluate','--run',run],{executable:process.execPath,prefix:[frozen],cwd:packet}).data;
   assert.deepEqual(again,evaluation,'The independent frozen package must reproduce the complete evaluation.');
@@ -74,7 +76,7 @@ try {
     assert.equal((await browser.call('eval','location.hash')).result,action.href);
   } finally {await browser.close();}
   const bundles=[contextDir,run,revisedDir,study,site,packet,packetRun].map(p=>({path:p,...verify(p)}));
-  write(path.join(dir,'validation.json'),{success:true,bundles,receipts,claims:['all nine computed on actual renders','four viewport/state conditions','coupled change matches actual dimensions','native pointer and keyboard actions','fresh package generates and replays','unadopted release refused'],humanTasteValidation:false});
+  write(path.join(dir,'validation.json'),{success:true,bundles,receipts,nativeEvidence,claims:['all nine computed on actual renders','four viewport/state conditions','coupled change matches actual dimensions','native pointer and keyboard actions','fresh package generates and replays','unadopted release refused'],humanTasteValidation:false});
   seal(dir);process.stdout.write(`Aphrodite browser integration passed. Evidence: ${dir}\n`);
 } catch(error) {
   write(path.join(dir,'failure.json'),{success:false,message:error.message,stack:error.stack,receipts});
