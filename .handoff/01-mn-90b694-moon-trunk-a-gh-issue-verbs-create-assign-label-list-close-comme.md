@@ -6,7 +6,7 @@ source: null
 base_commit: d6bad082a06b9c64f472151f399e3d576108ca38
 scope: 'Moon trunk A: gh issue verbs (create/assign/label/list/close/comment) + pr create --declare'
 inputs: []
-binding: sha256:65daf8f6986b8a2c4a2c1eff3abfec4e4cdf477ca92b5ef125f6937b4633ee50
+binding: sha256:c3298a7f54aff9075d716abf5f105f50d3c9b8f569f2cd522c90dea3c32c0e72
 ---
 
 # Handoff: Moon trunk A: gh issue verbs (create/assign/label/list/close/comment) + pr create --declare
@@ -98,8 +98,14 @@ Harness-derived stamping and authentication of provenance remain the separate
 trunk C work order; GitHub/Manna synchronization remains trunk B; policy floors
 remain trunk D. This lane consumes committed stamps and never invents them.
 
-Lessons logged: 4 (new) | Decisions logged: 0 (new).
-Lesson receipts: `les-d902eb`, `les-b0473b`, `les-156c66`, `les-ab5c33`.
+Canonical completion also removed `mn-90b694` from `mn-404dd7`'s blockers.
+That dependent remains blocked by `mn-807f18` and `mn-c3145f`. The completion
+payload's `released: []` lists newly unblocked rows, not every updated row;
+the dependent's automatic update is included in the closure commits.
+
+Lessons logged: 5 (new) | Decisions logged: 0 (new).
+Lesson receipts: `les-d902eb`, `les-b0473b`, `les-156c66`, `les-ab5c33`, and
+`les-0f67fb` (corrected with the exact canonical dependency-release diff).
 
 ## Completion
 
