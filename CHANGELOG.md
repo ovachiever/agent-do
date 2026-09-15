@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `gh issue` now supports create/list/assign/unassign/label/close/comment with explicit issue targeting, complete paginated issue counts, body-file/stdin input, and read-back receipts. `gh pr create --declare` preserves every branch commit's provenance, checks the published head, and verifies the created PR's head/body. Its local preview never calls GitHub, and creation never implicitly pushes or forks. Existing PR inspection syntax is preserved. (mn-90b694)
+
 - Aphrodite 0.1.0: complete relational design tool with nine computable contextual families, deterministic grammar search, actual browser selection, coupled revision, attributed offline preference learning, immutable fresh-session packets, and original responsive demonstrations. Seed perspectives remain explicitly unvalidated hypotheses. Includes unit and production browser-path tests. (mn-da6e1b)
 
 - `manna done` now releases dependents in the same locked, atomic board write as completion. Satisfied blocker edges disappear immediately; the last blocker clearing opens an unclaimed dependent or resumes its existing claim. The success payload reports newly unblocked IDs in `released`, including an empty list when none changed. Reconcile remains the repair backstop for deleted blockers and stale boards. (mn-0364a0)

@@ -59,7 +59,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [excel](#excel) | AI-first Excel CLI for workbook automation | mixed | 11 |
 | [figma](#figma) | Control Figma | read | 3 |
 | [gcp](#gcp) | Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials | mixed | 19 |
-| [gh](#gh) | GitHub repository, pull request, review, and merge work-state across accessible repos | mixed | 24 |
+| [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 32 |
 | [ghidra](#ghidra) | Ghidra reverse engineering automation | read | 4 |
 | [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 19 |
 | [handbrake](#handbrake) | Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs | mixed | 7 |
@@ -1922,13 +1922,15 @@ agent-do gcp snapshot
 
 ### gh
 
-GitHub repository, pull request, review, and merge work-state across accessible repos
+GitHub issues, pull requests, reviews, and merges
 
 Concurrency: `mixed`
 
 **Capabilities**
 
 - discover accessible GitHub repositories
+- create, list, assign, unassign, label, close, and comment on GitHub issues
+- create pull requests with committed provenance declarations and a local preview
 - list actionable pull requests across repos
 - inspect pull request details, diffs, checks, and unresolved review threads
 - classify changed files by review-risk tier (critical/elevated/standard)
@@ -1946,6 +1948,14 @@ Concurrency: `mixed`
 - `awaiting`: Show open PRs likely awaiting your review by broad review heuristics
 - `prs`: Search pull requests
 - `pr`: Show PR details
+- `pr create`: Create a PR with explicit title, body and base; --declare copies every branch commit's provenance, --dry-run previews locally without pushing
+- `issue create`: Create an issue with --title and --body or --body-file, then read it back
+- `issue list`: List all repository issues with exact totals; optional state, assignee, author, label filters and display limit
+- `issue assign`: Add issue assignees (--assignee, repeatable; default @me); additive GitHub assignment, not exclusive claim arbitration
+- `issue unassign`: Remove issue assignees (--assignee, repeatable; default @me)
+- `issue label`: Add or remove issue labels (--add and --remove, repeatable)
+- `issue close`: Close an issue with --reason completed or "not planned", then read it back
+- `issue comment`: Comment on an issue with --body or --body-file, then read it back
 - `diff`: Show PR diff
 - `threads`: Show unresolved PR review threads
 - `checks`: Show PR checks
@@ -1967,6 +1977,16 @@ Concurrency: `mixed`
 **Examples**
 
 ```bash
+# list assigned issues
+agent-do gh issue list --repo ovachiever/agent-do --assignee @me --json
+# create an issue
+agent-do gh issue create --repo ovachiever/agent-do --title "Fix export" --body-file issue.md
+# assign an issue
+agent-do gh issue assign ovachiever/agent-do#12
+# update GitHub issue labels
+agent-do gh issue label ovachiever/agent-do#12 --add in-progress --remove ready
+# preview a pull request with provenance
+agent-do gh pr create --title "Fix export" --base main --body-file pr.md --declare --dry-run --json
 # show GitHub pull requests that need me
 agent-do gh inbox
 # show PRs awaiting my review in VID repos
@@ -1993,8 +2013,10 @@ agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-nee
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `diff`, `doctrine`, `inbox`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
-- Write (connect/interact/save): `approve`, `checkout`, `close`, `comment`, `draft`, `edit`, `merge`, `portfolio add`, `portfolio remove`, `ready`, `reopen`, `request-changes`, `update-branch`
+- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `diff`, `doctrine`, `inbox`, `issue list`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
+- Write (connect/interact/save): `approve`, `checkout`, `close`, `comment`, `draft`, `edit`, `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`, `merge`, `portfolio add`, `portfolio remove`, `pr create`, `ready`, `reopen`, `request-changes`, `update-branch`
+- polymorphic (beat decided by payload or flag at call time): `pr create`
+- composite (one call performs several beats internally): `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`
 - own_state (writes only its own cache/state; parallel-safe): `portfolio add`, `portfolio remove`
 
 ### ghidra

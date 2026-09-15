@@ -3123,9 +3123,11 @@ tools:
       - trigger
     concurrency: write
   gh:
-    description: GitHub repository, pull request, review, and merge work-state across accessible repos
+    description: GitHub issues, pull requests, reviews, and merges
     capabilities:
     - discover accessible GitHub repositories
+    - create, list, assign, unassign, label, close, and comment on GitHub issues
+    - create pull requests with committed provenance declarations and a local preview
     - list actionable pull requests across repos
     - inspect pull request details, diffs, checks, and unresolved review threads
     - classify changed files by review-risk tier (critical/elevated/standard)
@@ -3141,6 +3143,14 @@ tools:
       awaiting: Show open PRs likely awaiting your review by broad review heuristics
       prs: Search pull requests
       pr: Show PR details
+      pr create: Create a PR with explicit title, body and base; --declare copies every branch commit's provenance, --dry-run previews locally without pushing
+      issue create: Create an issue with --title and --body or --body-file, then read it back
+      issue list: List all repository issues with exact totals; optional state, assignee, author, label filters and display limit
+      issue assign: Add issue assignees (--assignee, repeatable; default @me); additive GitHub assignment, not exclusive claim arbitration
+      issue unassign: Remove issue assignees (--assignee, repeatable; default @me)
+      issue label: Add or remove issue labels (--add and --remove, repeatable)
+      issue close: Close an issue with --reason completed or "not planned", then read it back
+      issue comment: Comment on an issue with --body or --body-file, then read it back
       diff: Show PR diff
       threads: Show unresolved PR review threads
       checks: Show PR checks
@@ -3159,6 +3169,16 @@ tools:
       ready: Mark a PR ready for review
       draft: Convert a PR to draft
     examples:
+    - intent: list assigned issues
+      command: agent-gh issue list --repo ovachiever/agent-do --assignee @me --json
+    - intent: create an issue
+      command: agent-gh issue create --repo ovachiever/agent-do --title "Fix export" --body-file issue.md
+    - intent: assign an issue
+      command: agent-gh issue assign ovachiever/agent-do#12
+    - intent: update GitHub issue labels
+      command: agent-gh issue label ovachiever/agent-do#12 --add in-progress --remove ready
+    - intent: preview a pull request with provenance
+      command: agent-gh pr create --title "Fix export" --base main --body-file pr.md --declare --dry-run --json
     - intent: show GitHub pull requests that need me
       command: agent-gh inbox
     - intent: show PRs awaiting my review in VID repos
@@ -3185,6 +3205,7 @@ tools:
       default_command: inbox
       recommended_entrypoints:
       - agent-do gh inbox
+      - agent-do gh issue list --repo <owner/repo> --json
       - agent-do gh awaiting --owner <owner>
       - agent-do gh awaiting --owner <owner> --audit --replies --probe-deploys
       - agent-do gh prs --state open
@@ -3192,6 +3213,9 @@ tools:
       - agent-do gh review owner/repo#123 --summary
       discover_keywords:
       - github pull request
+      - github issue
+      - assign issue
+      - create pull request
       - github pr
       - github code review
       - pr code review
@@ -3206,11 +3230,15 @@ tools:
       - merge pr
       - github inbox
       prompt_patterns:
-      - '\b(?:github|gh)\b.*\b(?:pull request|pr|review|merge|approve|checks?)\b'
+      - '\b(?:github|gh)\b.*\b(?:issues?|pull request|pr|review|merge|approve|checks?)\b'
       - '\b(?:what|which)\s+prs?\s+(?:need|needs|want|wants)\s+me\b'
       - '\bprs?\b.*\b(?:awaiting|waiting)\b.*\b(?:my|me)\b.*\breview\b'
       - '\bunresolved\s+(?:review\s+)?comments?\b'
       raw_cli_equivalents:
+      - pattern: '^\s*gh\s+(?:issue\s+(?:create|list|edit|close|comment)|pr\s+create)\b'
+        replacement: agent-do gh
+        example: agent-do gh issue list --json
+        reason: agent-do gh provides structured issue operations and declared PR creation
       - pattern: '^\s*gh\s+(?:search\s+prs|pr\s+(?:view|diff|checks|review|merge|ready))\b'
         replacement: agent-do gh
         example: agent-do gh inbox
@@ -3223,6 +3251,7 @@ tools:
       - awaiting
       - prs
       - pr
+      - issue list
       - diff
       - threads
       - checks
@@ -3230,6 +3259,13 @@ tools:
       - doctrine
       - portfolio list
       interact:
+      - pr create
+      - issue create
+      - issue assign
+      - issue unassign
+      - issue label
+      - issue close
+      - issue comment
       - approve
       - request-changes
       - comment
@@ -3245,7 +3281,27 @@ tools:
       - portfolio remove
       verify:
       - audit
+      - issue create
+      - issue assign
+      - issue unassign
+      - issue label
+      - issue close
+      - issue comment
       attributes:
+        pr create:
+        - polymorphic
+        issue create:
+        - composite
+        issue assign:
+        - composite
+        issue unassign:
+        - composite
+        issue label:
+        - composite
+        issue close:
+        - composite
+        issue comment:
+        - composite
         portfolio add:
         - own_state
         portfolio remove:
