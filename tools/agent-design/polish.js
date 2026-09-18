@@ -2,6 +2,9 @@
  * Policy: corpus/design/rounds/home1/round2, Erik's 2026-09-18 polish ruling.
  * This function is evaluated by agent-do browse in the rendered page. */
 async function designPolish(config = {}) {
+  for (const a of config.alignments || []) {
+    if (!a.source || !['top','center','bottom'].includes(a.mode)) throw new Error('alignment relationships require a source and top, center or bottom mode');
+  }
   await document.fonts.ready;
   await new Promise(requestAnimationFrame);
   const pixel = 1 / devicePixelRatio; // CSSOM physical-pixel resolution, not a taste threshold.
@@ -50,14 +53,23 @@ async function designPolish(config = {}) {
   while (walker.nextNode()) {
     const node=walker.currentNode, el=node.parentElement;
     if (!el || excluded(el) || !visible(el)) continue;
+    const style=getComputedStyle(el);
+    if (/rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/u.test(style.color) || style.webkitTextFillColor==='transparent') continue;
     const range=document.createRange(); range.selectNodeContents(node);
     const boxes=[...range.getClientRects()].filter(r=>r.width>0 && r.height>0);
     if (!boxes.length && !node.textContent.trim()) continue;
     if (!boxes.length) continue;
+    if (boxes.every(b=>b.right<=0 || b.bottom<=0)) continue;
     const block=owner(el);
     if (!groups.has(block)) groups.set(block,{el:block,nodes:[],words:[],text:''});
-    const g=groups.get(block); g.nodes.push(node); g.text+=node.textContent;
-    ordered.push({node,el,block,text:node.textContent,boxes});
+    const previous=ordered.at(-1);
+    let separator='';
+    if (previous) {
+      const between=document.createRange();between.setStartAfter(previous.node);between.setEndBefore(node);
+      if (between.cloneContents().querySelector('br')) separator='\n';
+    }
+    const g=groups.get(block); g.nodes.push(node); g.text+=separator+node.textContent;
+    ordered.push({node,el,block,text:separator+node.textContent,boxes});
     for (const match of node.textContent.matchAll(/\S+/gu)) {
       range.setStart(node,match.index); range.setEnd(node,match.index+match[0].length);
       for (const box of range.getClientRects()) if (box.width>0 && box.height>0) g.words.push({text:match[0],...rect(box)});
@@ -150,7 +162,7 @@ async function designPolish(config = {}) {
       copyBlocks[key]=row.block;
     }
     const node=row.el.closest('[data-node-id]'), fact=row.el.closest('[data-fact-id]');
-    bindings.push({text:row.text,selector:selector(row.el),node_id:node?.dataset.nodeId || null,fact_id:fact?.dataset.factId || null,copy_id:cp?.dataset.copyId || null});
+    bindings.push({text:row.text,selector:selector(row.el),node_id:node?.dataset.nodeId || null,node_instance:node?selector(node):null,fact_id:fact?.dataset.factId || null,copy_id:cp?.dataset.copyId || null});
   }
   for (const key of Object.keys(copies)) copies[key]=norm(copies[key]);
   const fontFailures=[...document.fonts].filter(f=>f.status==='error').map(f=>f.family);

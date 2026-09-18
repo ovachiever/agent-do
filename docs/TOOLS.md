@@ -50,7 +50,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [db](#db) | Control database clients | mixed | 5 |
 | [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | read-only | 4 |
 | [debug](#debug) | Control debuggers | read | 5 |
-| [design](#design) | Image-first design workflow with approved copy and measured browser polish | read | 1 |
+| [design](#design) | Image-first design workflow with approved copy and measured browser polish | read | 2 |
 | [discord](#discord) | Control Discord | mixed | 2 |
 | [dns](#dns) | DNS lookups and resolution diagnostics (read-only; record writes live in namecheap/cloudflare) | read | 2 |
 | [docker](#docker) | Control Docker containers | write | 7 |
@@ -1507,6 +1507,7 @@ Concurrency: `read`
 
 **Commands**
 
+- `brief`: brief --copy COPY --facts FACTS --round ROUND [--dry-run] [--json]
 - `polish`: polish \<url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--json]
 
 **Examples**
@@ -1518,9 +1519,9 @@ agent-do design polish page.html --viewport 1440x1000 --json
 
 **Safety (from contracts)**
 
-- Write (connect/interact/save): `polish`
-- composite (one call performs several beats internally): `polish`
-- own_state (writes only its own cache/state; parallel-safe): `polish`
+- Write (connect/interact/save): `brief`, `polish`
+- composite (one call performs several beats internally): `brief`, `polish`
+- own_state (writes only its own cache/state; parallel-safe): `brief`, `polish`
 
 ### discord
 

@@ -4,6 +4,19 @@ Image-first design rounds. The owner supplies copy and facts, chooses images, an
 
 Implementation order: polish, brief, imagine, measure, reproduce, ballot. The approved amendments are recorded under `.handoff/image-first-design/`. Retired tools are not dependencies.
 
+## Brief and round records
+
+```bash
+agent-do design brief --copy approved.md --facts facts.json --round .dev/design/new-surface --dry-run
+agent-do design brief --copy approved.md --facts facts.json --round .dev/design/new-surface
+```
+
+Facts use the node-tagged brief shape: `nodes` have stable IDs, roles and literal allowed text or structured `data`; `groups` describe content order; `frame` carries approved house tokens; `viewports` declares every required render size. Narrative lives only in the copy file. Source metadata, superseded sentences and forbidden examples are never an allowlist. Numeric data leaves receive stable fact IDs under their node. Supply source paths on nodes and provenance with measured house tokens.
+
+Each prompt contains the whole copy verbatim and all labels and facts. Exact records a specific two-column composition and house tokens (an optional `exact_design` replaces those design choices). Half releases numeric geometry. Open releases the complete visual design while retaining all content. These are prompt directions, not layout-engine primitives or beauty rules.
+
+Rounds freeze inputs and prompts by hash, retain every manifest revision, and use a process-held mutation lock. Stages advance from brief to images, image ballot, ruling, measurements, pages, page ballot and final ruling. Changed approved inputs require a new round. The copy checker reads rendered text boundaries, requires every paragraph once in order, rejects even short invented lines, and binds displayed figures to specific source facts.
+
 ## Polish
 
 ```bash

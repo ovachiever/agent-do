@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sys
 from design_browser import Browser, DesignError
+from design_contract import compile_contract, prompts
+from design_state import Round
 
 
 def viewport(value):
@@ -19,6 +21,12 @@ def viewport(value):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='agent-do design', description=__doc__)
     commands = parser.add_subparsers(dest='verb', required=True)
+    brief = commands.add_parser('brief', help='Freeze approved copy and node-tagged facts; emit exact, half and open image prompts')
+    brief.add_argument('--copy', type=Path, required=True)
+    brief.add_argument('--facts', type=Path, required=True)
+    brief.add_argument('--round', type=Path, required=True)
+    brief.add_argument('--dry-run', action='store_true')
+    brief.add_argument('--json', action='store_true')
     polish = commands.add_parser('polish', help='Measure live text, SVG, clipping, alignment and overflow')
     polish.add_argument('url')
     polish.add_argument('--session')
@@ -29,6 +37,16 @@ def main(argv=None):
     polish.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.verb == 'brief':
+            copy=args.copy.read_text();facts=json.loads(args.facts.read_text())
+            if args.dry_run:
+                contract=compile_contract(copy,facts,str(args.facts.resolve()))
+                result={'dry_run':True,'round':str(args.round),'paragraphs':len(contract['paragraphs']),
+                        'nodes':len(contract['nodes']),'levels':list(prompts(copy,contract)),'paid_requests':0}
+            else:
+                with Round(args.round,create=True) as record:
+                    result=record.initialize(copy,facts,str(args.facts.resolve()))
+            print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         browser = Browser(args.session)
         source = Path(args.url).expanduser()
         url = source.resolve().as_uri() if source.is_file() else args.url
@@ -36,10 +54,13 @@ def main(argv=None):
             raise DesignError('audit output exists; choose a new receipt path')
         if args.render and args.render.exists():
             raise DesignError('render exists; choose a new render path')
-        result = browser.polish(url, args.viewport, json.loads(args.config.read_text()) if args.config else {})
-        if args.render:
-            args.render.parent.mkdir(parents=True, exist_ok=True)
-            browser.screenshot(args.render)
+        try:
+            result = browser.polish(url, args.viewport, json.loads(args.config.read_text()) if args.config else {})
+            if args.render:
+                args.render.parent.mkdir(parents=True, exist_ok=True)
+                browser.screenshot(args.render)
+        finally:
+            if not args.session:browser.close()
         output = json.dumps(result, ensure_ascii=False, indent=2) + '\n'
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)

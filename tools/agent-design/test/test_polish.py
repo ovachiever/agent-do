@@ -86,6 +86,14 @@ class PolishBrowserTests(unittest.TestCase):
         self.assertNotIn('Secret', result['text']['rendered'])
         self.assertNotIn('p1', result['text']['copies'])
 
+    def test_br_is_a_rendered_word_boundary(self):
+        result = self.audit('<p data-copy-id="p1">First line<br>Second line</p>')
+        self.assertEqual(result['text']['copies']['p1'], 'First line Second line')
+
+    def test_transparent_or_offscreen_copy_does_not_count(self):
+        result = self.audit('<p data-copy-id="p1" style="color:transparent">Invisible.</p><p data-copy-id="p2" style="position:absolute;left:-9000px">Offscreen.</p>')
+        self.assertEqual(result['text']['copies'], {})
+
 
 if __name__ == '__main__':
     (TOOL.parents[1] / '.dev').mkdir(exist_ok=True)
