@@ -7,6 +7,7 @@ from design_browser import Browser, DesignError
 from design_contract import compile_contract, prompts
 from design_state import Round
 from design_imagine import imagine
+from design_measure import measure
 
 
 def viewport(value):
@@ -35,6 +36,12 @@ def main(argv=None):
     image.add_argument('--dry-run', action='store_true')
     image.add_argument('--retry-uncertain', action='store_true', help='Explicitly issue replacements for requests whose outcome was lost')
     image.add_argument('--json', action='store_true')
+    measurement = commands.add_parser('measure', help='Measure selected image pixels and OCR geometry; retain unknown fields as null')
+    measurement.add_argument('--round', type=Path, required=True)
+    measurement.add_argument('--regions', type=Path, help='Optional sourced image-pixel region annotations keyed by selected image ID')
+    measurement.add_argument('--selected', action='store_true', help='Only owner-selected images are ever measured')
+    measurement.add_argument('--dry-run', action='store_true')
+    measurement.add_argument('--json', action='store_true')
     polish = commands.add_parser('polish', help='Measure live text, SVG, clipping, alignment and overflow')
     polish.add_argument('url')
     polish.add_argument('--session')
@@ -45,6 +52,10 @@ def main(argv=None):
     polish.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.verb == 'measure':
+            with Round(args.round) as record:
+                result=measure(record,json.loads(args.regions.read_text()) if args.regions else None,args.dry_run)
+            print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         if args.verb == 'imagine':
             with Round(args.round) as record:
                 result=imagine(record,args.per_level,args.size,args.dry_run,args.retry_uncertain)

@@ -28,6 +28,17 @@ Each invocation refreshes OpenAI's official model catalog, selected model page a
 
 Credentials resolve privately through `agent-do creds`. Every requested generation runs, without a price prerequisite or local spend limit. Each request records prompt, level, requested/returned model, dimensions, null unsupported seed, provider request ID and actual usage (or `usage not returned`). PNG checksums and dimensions are verified. Partial rounds resume without regenerating successful slots; an uncertain transport outcome requires explicit `--retry-uncertain`. Failed requests remain in the record.
 
+## Measure
+
+```bash
+agent-do design measure --round .dev/design/new-surface --selected
+agent-do design measure --round .dev/design/new-surface --regions regions.json
+```
+
+Only images selected by a recorded owner ruling can enter this stage. Original PNGs are decoded in browse; every pixel in each sampled region is counted. Tesseract TSV supplies word and line bounding boxes, with original OCR confidence retained and no guessed confidence cutoff. Exact label matches associate observed glyph bounds with fact roles. CSS font size, font family and unsupported semantic assignments stay null.
+
+Optional region annotations are keyed by chosen image ID. Each region requires `id`, `source`, `x`, `y`, `width`, `height` in original image pixels, and may declare a `role` (`ground`, `ink`, `accent`, `column`, `section`, `diagram`) and diagram `kind`. The tool verifies real bounds and measures area, modal colors, edges, gutters and proportions. Supplied semantic names remain attributed annotations. Unannotated pixels and OCR geometry remain available without pretending that a color mode proves a semantic role. Each image gets measurement JSON, pixel samples, raw OCR and an SVG evidence overlay.
+
 ## Polish
 
 ```bash

@@ -112,6 +112,7 @@ check_cmd "deai prose and register tests" python3 "$SCRIPT_DIR/tests/test_deai.p
 check_cmd "design live browser polish tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_polish.py"
 check_cmd "design copy contract and durable state tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_contract.py"
 check_cmd "design provider and image generation tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_provider.py"
+check_cmd "design image measurement tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_measure.py"
 check_cmd "suggest AI routing tests" python3 "$SCRIPT_DIR/tests/test_suggest_ai.py"
 check_cmd "prompt hook AI routing tests" python3 "$SCRIPT_DIR/tests/test_prompt_hook_ai.py"
 check_cmd "model resolution tests" python3 "$SCRIPT_DIR/tests/test_models.py"

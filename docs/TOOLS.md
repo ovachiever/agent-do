@@ -50,7 +50,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [db](#db) | Control database clients | mixed | 5 |
 | [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | read-only | 4 |
 | [debug](#debug) | Control debuggers | read | 5 |
-| [design](#design) | Image-first design workflow with approved copy and measured browser polish | mixed | 3 |
+| [design](#design) | Image-first design workflow with approved copy and measured browser polish | mixed | 4 |
 | [discord](#discord) | Control Discord | mixed | 2 |
 | [dns](#dns) | DNS lookups and resolution diagnostics (read-only; record writes live in namecheap/cloudflare) | read | 2 |
 | [docker](#docker) | Control Docker containers | write | 7 |
@@ -1509,6 +1509,7 @@ Concurrency: `mixed`
 
 - `brief`: brief --copy COPY --facts FACTS --round ROUND [--dry-run] [--json]
 - `imagine`: imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]
+- `measure`: measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]
 - `polish`: polish \<url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--json]
 
 **Examples**
@@ -1520,10 +1521,10 @@ agent-do design polish page.html --viewport 1440x1000 --json
 
 **Safety (from contracts)**
 
-- Write (connect/interact/save): `brief`, `imagine`, `polish`
+- Write (connect/interact/save): `brief`, `imagine`, `measure`, `polish`
 - long_running (daemon/stream/session; may never return): `imagine`
-- composite (one call performs several beats internally): `brief`, `imagine`, `polish`
-- own_state (writes only its own cache/state; parallel-safe): `brief`, `polish`
+- composite (one call performs several beats internally): `brief`, `imagine`, `measure`, `polish`
+- own_state (writes only its own cache/state; parallel-safe): `brief`, `measure`, `polish`
 
 ### discord
 
