@@ -1,4 +1,40 @@
 tools:
+  deai:
+    description: Offline prose-tell linter with measured ceilings and explicit register policies
+    capabilities:
+    - lint essays, email, technical prose, and product answers without rewriting input
+    - report every finding with source line, column, rule, and measurement provenance
+    - preserve strict essay rules while allowing literal technical language in the default pack
+    - measure proposed rules on a local corpus with word denominators and content hashes
+    commands:
+      lint: 'lint <file...|-> [--register essay|email|default|product-answer] [--json]; exit 0 clean, 1 findings, 2 error'
+      packs: 'packs [--register NAME] [--json]; complete rules, ceilings, whitelists, and provenance'
+      measure: 'measure <file...> --rule-id ID --pattern REGEX --source CITATION [--json]; exact local corpus measurement'
+      validate: 'validate [--json]; reject missing measurements, changed patterns, or unattributed whitelists'
+    examples:
+    - intent: lint an essay for prose tells
+      command: agent-deai lint draft.md --register essay
+    - intent: check technical prose without banning literal engineering terms
+      command: agent-deai lint README.md --register default --json
+    - intent: inspect register policy and measured ceilings
+      command: agent-deai packs --register email --json
+    routing:
+      discover_keywords: [deai, prose, prose-tell, ai-speak, writing, register, linter]
+      prompt_patterns:
+      - '\b(lint|check)\b.*\b(prose|essay|ai.speak|prose.tells?)\b'
+      recommended_entrypoints:
+      - agent-do deai lint
+      - agent-do deai packs
+      default_command: packs
+    dependencies: [python3]
+    concurrency: read-only
+    contracts:
+      snapshot:
+      - packs
+      - measure
+      verify:
+      - lint
+      - validate
   brief:
     description: Estate briefing engine — joins GitHub PRs, the manna board, live coord sessions,
       and git into ranked threads, a delta since last look, one-tap suggestions carried as data,

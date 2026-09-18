@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `deai` is a first-class offline prose linter with essay, email, default, and product-answer packs. It carries source measurements and explicit register whitelists, permits literal technical language by default, reports source locations and JSON, and measures new rules with corpus receipts. The Substack essay gate delegates to this tool while preserving its advisory word-hunt interface. (mn-e6e2e0)
+
 - `gh issue` now supports create/list/assign/unassign/label/close/comment with explicit issue targeting, complete paginated issue counts, body-file/stdin input, and read-back receipts. `gh pr create --declare` preserves every branch commit's provenance, checks the published head, and verifies the created PR's head/body. Its local preview never calls GitHub, and creation never implicitly pushes or forks. Existing PR inspection syntax is preserved. (mn-90b694)
 
 - Aphrodite 0.1.0: complete relational design tool with nine computable contextual families, deterministic grammar search, actual browser selection, coupled revision, attributed offline preference learning, immutable fresh-session packets, and original responsive demonstrations. Seed perspectives remain explicitly unvalidated hypotheses. Includes unit and production browser-path tests. (mn-da6e1b)

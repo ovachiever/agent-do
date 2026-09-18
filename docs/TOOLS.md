@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (103 tools)
+## Summary (104 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -49,6 +49,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [creds](#creds) | Secure credential storage and resolution for agent-do tools | mixed | 8 |
 | [cronitor](#cronitor) | Cronitor scheduled job and uptime monitoring | mixed | 11 |
 | [db](#db) | Control database clients | mixed | 5 |
+| [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | read-only | 4 |
 | [debug](#debug) | Control debuggers | read | 5 |
 | [discord](#discord) | Control Discord | mixed | 2 |
 | [dns](#dns) | DNS lookups and resolution diagnostics (read-only; record writes live in namecheap/cloudflare) | read | 2 |
@@ -1475,6 +1476,41 @@ agent-do db query 'SELECT * FROM users'
 - Read-only (snapshot/verify; safe to parallelize): `describe`, `tables`
 - Write (connect/interact/save): `connect`, `export`, `query`
 - polymorphic (beat decided by payload or flag at call time): `query`
+
+### deai
+
+Offline prose-tell linter with measured ceilings and explicit register policies
+
+Concurrency: `read-only`
+
+**Capabilities**
+
+- lint essays, email, technical prose, and product answers without rewriting input
+- report every finding with source line, column, rule, and measurement provenance
+- preserve strict essay rules while allowing literal technical language in the default pack
+- measure proposed rules on a local corpus with word denominators and content hashes
+
+**Commands**
+
+- `lint`: lint \<file...|-> [--register essay|email|default|product-answer] [--json]; exit 0 clean, 1 findings, 2 error
+- `packs`: packs [--register NAME] [--json]; complete rules, ceilings, whitelists, and provenance
+- `measure`: measure \<file...> --rule-id ID --pattern REGEX --source CITATION [--json]; exact local corpus measurement
+- `validate`: validate [--json]; reject missing measurements, changed patterns, or unattributed whitelists
+
+**Examples**
+
+```bash
+# lint an essay for prose tells
+agent-do deai lint draft.md --register essay
+# check technical prose without banning literal engineering terms
+agent-do deai lint README.md --register default --json
+# inspect register policy and measured ceilings
+agent-do deai packs --register email --json
+```
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `lint`, `measure`, `packs`, `validate`
 
 ### debug
 

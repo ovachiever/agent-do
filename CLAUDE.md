@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-agent-do is a universal automation CLI for AI agents with 103 specialized tools. Two modes:
+agent-do is a universal automation CLI for AI agents with 104 specialized tools. Two modes:
 - **Structured API** (AI/scripts): `agent-do <tool> <command> [args...]` (instant, no LLM)
 - **Natural Language** (humans): `agent-do -n "what you want"` (LLM-routed via Claude)
 
@@ -139,7 +139,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 │       ├── filter.js       # filterEntries: removes static assets, CDN, deduplicates
 │       ├── auth.js         # extractAuth: identifies auth patterns in captured traffic
 │       └── generator.js    # generateSkill: writes skill package to ~/.agent-do/skills/
-├── tools/agent-*           # 103 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 104 tools (standalone scripts + directory-based tools)
 └── registry.yaml           # Master tool catalog: tool descriptions, commands, examples
 ```
 
@@ -250,7 +250,7 @@ The board (`.manna/`) is the single backlog; tracked `.handoff/` is the single w
 1. Create executable at `tools/agent-<name>` (must support `--help` flag)
 2. Add entry to `registry.yaml` with `description`, `capabilities`, `commands`, `examples`
    - add `routing` metadata for discovery keywords, raw CLI equivalents, readiness hints, and project signals when the tool should participate in `suggest`, UserPromptSubmit AI catalog routing, or PreToolUse hard nudges
-3. **Declare `contracts:` — mandatory.** Map each command verb to its beats (`connect`/`snapshot`/`interact`/`verify`/`save`) plus `attributes:` flags where they apply (`destructive`, `long_running`, `polymorphic`, `composite`, `sensitive`, `passthrough`). Draft it with `agent-do harness contracts propose --tool <name>`; the gate (`tests/test_contracts_gate.py`, run by `./test.sh` and CI) fails any registry tool without a contracts block. All 103 tools declare contracts; contract warnings must stay at zero.
+3. **Declare `contracts:` — mandatory.** Map each command verb to its beats (`connect`/`snapshot`/`interact`/`verify`/`save`) plus `attributes:` flags where they apply (`destructive`, `long_running`, `polymorphic`, `composite`, `sensitive`, `passthrough`). Draft it with `agent-do harness contracts propose --tool <name>`; the gate (`tests/test_contracts_gate.py`, run by `./test.sh` and CI) fails any registry tool without a contracts block. All 104 tools declare contracts; contract warnings must stay at zero.
 4. `--list` auto-discovers tools via filesystem scan of `tools/agent-*`
 
 ### Quantity authority
