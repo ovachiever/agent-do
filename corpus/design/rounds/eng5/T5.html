@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { background:#1B1917; }
+  body {
+    width:1440px; min-height:900px; margin:0 auto;
+    background:#1B1917; color:#E7E3DA;
+    font-family:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:12px; line-height:1.3;
+    font-variant-numeric:tabular-nums;
+  }
+  .wrap { padding:0 32px; }
+  .mono { font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace; }
+  .mut { color:#A69D90; }
+  .fnt { color:#6E675E; }           /* used at >=14px only */
+  .sg  { color:#A3B18A; }
+  .cl  { color:#C77B5B; }
+  .crm { color:#E7E3DA; }
+  .x   { text-decoration:line-through; }
+  .lbl {
+    font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    color:#A69D90; font-weight:600;
+  }
+  .lblrow { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px; }
+
+  /* ── nav ── */
+  nav {
+    display:flex; align-items:baseline; gap:24px;
+    padding:13px 0 11px; border-bottom:1px solid rgba(231,227,218,0.14);
+  }
+  .wordmark {
+    font-family:Georgia,"Times New Roman",serif; font-size:15px;
+    letter-spacing:.14em; text-transform:uppercase; color:#E7E3DA; font-weight:400;
+  }
+  nav a { text-decoration:none; color:#A69D90; font-size:13px; padding-bottom:3px; }
+  nav a.active { color:#E7E3DA; border-bottom:2px solid #A3B18A; }
+  nav .clock { margin-left:auto; font-size:12px; color:#A69D90; }
+
+  /* ── lede ── */
+  .lede { padding:12px 0 10px; border-bottom:1px solid rgba(231,227,218,0.14); }
+  .lede .toprow { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .lede .stamp { font-size:14px; color:#6E675E; }
+  .lede h1 {
+    font-family:Georgia,"Times New Roman",serif; font-weight:400;
+    font-size:21px; line-height:1.3; color:#E7E3DA;
+  }
+  .lede .facts { margin-top:5px; font-size:14px; line-height:1.45; color:#E7E3DA; }
+  .lede .facts .mono { font-size:13px; }
+
+  /* ── services strip (per-service ledger, top flank) ── */
+  .services { padding:9px 0 8px; border-bottom:1px solid rgba(231,227,218,0.14); }
+  .svcgrid { display:grid; grid-template-columns:repeat(6,1fr); }
+  .svc { padding:2px 12px 0 12px; border-left:1px solid rgba(231,227,218,0.14); }
+  .svc:first-child { border-left:none; padding-left:0; }
+  .svc .name { font-size:13px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:#E7E3DA; }
+  .svc .job { font-size:12px; color:#A69D90; margin-top:1px; }
+  .svc .row { font-size:12px; margin-top:2px; }
+  .svc .row .k { color:#A69D90; }
+
+  /* ── timetable ── */
+  .timetable { padding:9px 0 6px; }
+  table.grid { border-collapse:collapse; table-layout:fixed; width:1372px; }
+  .cc { width:71px; }
+  .nowcol { background:rgba(163,177,138,0.055); }
+  table.grid th, table.grid td {
+    border:1px solid rgba(231,227,218,0.14);
+    vertical-align:top; text-align:right;
+    padding:3px 5px 4px 4px; font-weight:400;
+  }
+  table.grid thead th { padding-top:4px; }
+  thead .n { display:block; font-size:13px; font-weight:600; color:#E7E3DA; }
+  thead .st { display:block; font-size:12px; color:#A69D90; font-weight:400; }
+  th.corner, th.stage { text-align:left; }
+  th.now { border-top:2px solid #A3B18A; }
+  .stage .sn { display:block; font-size:12px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:#E7E3DA; }
+  .stage .sv { display:block; font-size:12px; color:#A69D90; }
+  .stage .sw { display:block; font-size:12px; color:#A69D90; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  td .b { display:block; font-size:12px; color:#A69D90; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  td .a { display:block; font-size:12px; color:#E7E3DA; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  td .f { display:block; font-size:12px; color:#E7E3DA; font-weight:600; }
+  .lt { color:#C77B5B; font-weight:400; }
+  td.end, th.end { font-size:12px; color:#E7E3DA; }
+  thead th.end { text-align:right; }
+  tr.feet th { text-align:left; font-size:12px; color:#A69D90; font-weight:600; letter-spacing:.06em; text-transform:uppercase; }
+  tr.feet td { font-size:12px; font-weight:600; color:#E7E3DA; padding-top:4px; padding-bottom:4px; }
+  tr.feet td.est { color:#A69D90; font-weight:400; }
+  .legend { margin-top:6px; font-size:12px; color:#A69D90; }
+
+  /* ── incidents (bottom flank) ── */
+  .incidents { padding:8px 0 9px; border-top:1px solid rgba(231,227,218,0.14); }
+  .incgrid { display:grid; grid-template-columns:repeat(4,1fr); }
+  .inc { padding:0 12px; border-left:1px solid rgba(231,227,218,0.14); font-size:12px; line-height:1.35; color:#E7E3DA; }
+  .inc:first-child { border-left:none; padding-left:0; }
+  .inc .t { font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; color:#E7E3DA; }
+  .inc .tag { font-weight:600; letter-spacing:.05em; }
+  .inc .act { color:#A69D90; }
+
+  /* ── bottom band ── */
+  .band { display:grid; grid-template-columns:336px 322px 330px 336px; column-gap:16px;
+          padding:9px 0 10px; border-top:1px solid rgba(231,227,218,0.14); }
+  .band .col { font-size:12px; line-height:1.5; }
+  .band .col .ln { display:flex; justify-content:space-between; }
+  .band .col .ln .k { color:#A69D90; }
+  .band .col .ln .v { color:#E7E3DA; text-align:right; }
+  .bar { height:3px; background:rgba(231,227,218,0.14); position:relative; margin:5px 0 4px; }
+  .bar .fill { position:absolute; left:0; top:0; bottom:0; width:65.2%; background:#A3B18A; }
+  .bar .tick { position:absolute; left:69.7%; top:-2px; bottom:-2px; width:1px; background:#E7E3DA; }
+  .sched { font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12px; }
+  .sched .r { display:flex; justify-content:space-between; }
+  button.susp {
+    display:block; width:100%; height:42px; margin:2px 0 5px;
+    background:none; border:1px solid rgba(231,227,218,0.55); color:#E7E3DA;
+    font-family:inherit; font-size:13px; font-weight:600;
+    letter-spacing:.14em; text-transform:uppercase; cursor:pointer;
+  }
+  .consequence { font-size:12px; color:#A69D90; line-height:1.45; }
+
+  /* ── drill law ── */
+  .drill { border-top:1px solid rgba(231,227,218,0.14); border-bottom:1px solid rgba(231,227,218,0.14);
+           padding:7px 0; font-size:12px; line-height:1.45; color:#A69D90; }
+  .drill .dl { color:#A3B18A; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+
+  /* ── footer ── */
+  footer { display:flex; justify-content:space-between; align-items:baseline; padding:9px 0 14px; }
+  footer .motto { font-family:Georgia,"Times New Roman",serif; font-style:italic; font-size:14px; color:#6E675E; }
+  footer .build { font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12px; color:#A69D90; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <span class="wordmark">Palingenesis</span>
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#">Library</a>
+    <a href="#">Portfolio</a>
+    <a href="#">Simulation</a>
+    <a href="#" class="active">Engine Room</a>
+    <span class="clock mono">DAY 47 &nbsp;·&nbsp; CYCLE 746 OF 752 &nbsp;·&nbsp; 14:47</span>
+  </nav>
+
+  <section class="lede">
+    <div class="toprow">
+      <span class="lbl">Engine Room — operator truth, the complete record</span>
+      <span class="stamp">truth as of <span class="mono">14:47:12</span>, Saturday 22 August 2026 · rendered from the ledger, never a cache</span>
+    </div>
+    <h1>Running — within cap, one cancellation absorbed, every service answering.</h1>
+    <p class="facts">Ten of sixteen windows entered: eight closed, 744 cancelled into 745, cycle 746 sealing now — <strong>747 reads at <span class="mono">15:00</span></strong>. Spend <strong>$326.11 of the $500.00 August cap</strong> · pace $15.09/day · projected close $467.65 — $32.35 under.</p>
+  </section>
+
+  <section class="services">
+    <div class="lblrow">
+      <span class="lbl">Six services — per-service ledger, today</span>
+      <span class="mut">service Σ <span class="crm">$8.69</span> = cycle feet Σ, reconciled to the cent before render</span>
+    </div>
+    <div class="svcgrid">
+      <div class="svc">
+        <span class="name">Reader</span>
+        <div class="job">reads new agronomy papers</div>
+        <div class="row"><span class="k">state</span> idle · next <span class="mono">15:00</span></div>
+        <div class="row"><span class="k">today</span> 9 windows · 213 papers</div>
+        <div class="row"><span class="k">cost</span> $2.41</div>
+      </div>
+      <div class="svc">
+        <span class="name">Planner</span>
+        <div class="job">weighs candidates vs portfolio</div>
+        <div class="row"><span class="k">state</span> idle · next <span class="mono">15:25</span></div>
+        <div class="row"><span class="k">today</span> 360 in · 29 approved</div>
+        <div class="row"><span class="k">cost</span> $1.94</div>
+      </div>
+      <div class="svc">
+        <span class="name">Simulator</span>
+        <div class="job">runs growth models</div>
+        <div class="row"><span class="k">state</span> idle · next <span class="mono">15:40</span></div>
+        <div class="row"><span class="k">today</span> 548 runs · 0 failed</div>
+        <div class="row"><span class="k">cost</span> $3.38</div>
+      </div>
+      <div class="svc">
+        <span class="name">Recorder</span>
+        <div class="job">seals results, hash-chained</div>
+        <div class="row"><span class="k">state</span> <span class="sg">running</span> · 746, seal 2 of 3 done</div>
+        <div class="row"><span class="k">today</span> 28 sealed · 0 divergent</div>
+        <div class="row"><span class="k">cost</span> $0.56</div>
+      </div>
+      <div class="svc">
+        <span class="name">Bookkeeper</span>
+        <div class="job">prices stages; closes ledger</div>
+        <div class="row"><span class="k">state</span> waiting · 746 close ≈<span class="mono">14:53</span></div>
+        <div class="row"><span class="k">today</span> 8 closes · $8.69 booked</div>
+        <div class="row"><span class="k">cost</span> $0.24</div>
+      </div>
+      <div class="svc">
+        <span class="name">Scheduler</span>
+        <div class="job">books cycles; enforces cap</div>
+        <div class="row"><span class="k">state</span> standing · decision <span class="mono">14:55</span></div>
+        <div class="row"><span class="k">today</span> 16 booked · 1 cancelled</div>
+        <div class="row"><span class="k">cost</span> $0.16</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="timetable">
+    <div class="lblrow">
+      <span class="lbl">Timetable — 16 cycles × 5 stages · booked / actual / figure</span>
+      <span class="mut">one cycle = 85m booked + 5m margin · cycles 737–752 · day 47 · all times local, mono</span>
+    </div>
+    <table class="grid">
+      <colgroup>
+        <col style="width:132px">
+        <col span="7" class="cc">
+        <col class="cc">
+        <col class="cc">
+        <col class="cc nowcol">
+        <col span="6" class="cc">
+        <col style="width:104px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="corner"><span class="sn mut">Stage ▾ · cycle ▸</span></th>
+          <th><span class="n">737</span><span class="st">closed</span></th>
+          <th><span class="n">738</span><span class="st">closed</span></th>
+          <th><span class="n">739</span><span class="st">closed</span></th>
+          <th><span class="n">740</span><span class="st">closed</span></th>
+          <th><span class="n">741</span><span class="st">closed</span></th>
+          <th><span class="n">742</span><span class="st">closed <span class="lt">+11</span></span></th>
+          <th><span class="n">743</span><span class="st">closed</span></th>
+          <th><span class="n x mut">744</span><span class="st cl">cancelled</span></th>
+          <th><span class="n">745</span><span class="st">closed</span></th>
+          <th class="now"><span class="n">746</span><span class="st sg">sealing ◂ now</span></th>
+          <th><span class="n">747</span><span class="st crm">next 15:00</span></th>
+          <th><span class="n">748</span><span class="st">booked</span></th>
+          <th><span class="n">749</span><span class="st">booked</span></th>
+          <th><span class="n">750</span><span class="st">booked</span></th>
+          <th><span class="n">751</span><span class="st">booked</span></th>
+          <th><span class="n">752</span><span class="st">booked</span></th>
+          <th class="end"><span class="n">DAY</span><span class="st">totals</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th class="stage"><span class="sn">Read</span><span class="sv">Reader · papers</span><span class="sw">:00–:25</span></th>
+          <td><span class="b">00:00</span><span class="a">00:00</span><span class="f">22</span></td>
+          <td><span class="b">01:30</span><span class="a">01:30</span><span class="f">19</span></td>
+          <td><span class="b">03:00</span><span class="a">03:00</span><span class="f">17</span></td>
+          <td><span class="b">04:30</span><span class="a">04:30</span><span class="f">21</span></td>
+          <td><span class="b">06:00</span><span class="a">06:00</span><span class="f">24</span></td>
+          <td><span class="b">07:30</span><span class="a">07:30</span><span class="f">26</span></td>
+          <td><span class="b">09:00</span><span class="a">09:00</span><span class="f">28</span></td>
+          <td><span class="b x">10:30</span></td>
+          <td><span class="b">12:00</span><span class="a">12:00</span><span class="f">31</span></td>
+          <td><span class="b">13:30</span><span class="a">13:30</span><span class="f">25</span></td>
+          <td><span class="b">15:00</span></td>
+          <td><span class="b">16:30</span></td>
+          <td><span class="b">18:00</span></td>
+          <td><span class="b">19:30</span></td>
+          <td><span class="b">21:00</span></td>
+          <td><span class="b">22:30</span></td>
+          <td class="end">213 · 3h45m</td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sn">Deliberate</span><span class="sv">Planner · in/out</span><span class="sw">:25–:40</span></th>
+          <td><span class="b">00:25</span><span class="a">00:25</span><span class="f">38/3</span></td>
+          <td><span class="b">01:55</span><span class="a">01:56</span><span class="f">33/2</span></td>
+          <td><span class="b">03:25</span><span class="a">03:25</span><span class="f">29/2</span></td>
+          <td><span class="b">04:55</span><span class="a">04:55</span><span class="f">36/3</span></td>
+          <td><span class="b">06:25</span><span class="a">06:25</span><span class="f">41/3</span></td>
+          <td><span class="b">07:55</span><span class="a">07:55</span><span class="f">44/4</span></td>
+          <td><span class="b">09:25</span><span class="a">09:26</span><span class="f">47/4</span></td>
+          <td><span class="b x">10:55</span></td>
+          <td><span class="b">12:25</span><span class="a">12:26</span><span class="f">52/5</span></td>
+          <td><span class="b">13:55</span><span class="a">13:56</span><span class="f">40/3</span></td>
+          <td><span class="b">15:25</span></td>
+          <td><span class="b">16:55</span></td>
+          <td><span class="b">18:25</span></td>
+          <td><span class="b">19:55</span></td>
+          <td><span class="b">21:25</span></td>
+          <td><span class="b">22:55</span></td>
+          <td class="end">360/29 · 2h15m</td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sn">Simulate</span><span class="sv">Simulator · runs</span><span class="sw">:40–1:10</span></th>
+          <td><span class="b">00:40</span><span class="a">00:40</span><span class="f">61</span></td>
+          <td><span class="b">02:10</span><span class="a">02:11</span><span class="f">48</span></td>
+          <td><span class="b">03:40</span><span class="a">03:40</span><span class="f">44</span></td>
+          <td><span class="b">05:10</span><span class="a">05:10</span><span class="f">57</span></td>
+          <td><span class="b">06:40</span><span class="a">06:40</span><span class="f">59</span></td>
+          <td><span class="b">08:10</span><span class="a">08:10</span><span class="f">72 <span class="lt">+11m</span></span></td>
+          <td><span class="b">09:40</span><span class="a">09:40</span><span class="f">66</span></td>
+          <td><span class="b x">11:10</span></td>
+          <td><span class="b">12:40</span><span class="a">12:41</span><span class="f">78</span></td>
+          <td><span class="b">14:10</span><span class="a">14:13 <span class="lt">+3</span></span><span class="f">63</span></td>
+          <td><span class="b">15:40</span></td>
+          <td><span class="b">17:10</span></td>
+          <td><span class="b">18:40</span></td>
+          <td><span class="b">20:10</span></td>
+          <td><span class="b">21:40</span></td>
+          <td><span class="b">23:10</span></td>
+          <td class="end">548 · 4h41m</td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sn">Record</span><span class="sv">Recorder · sealed</span><span class="sw">1:10–1:20</span></th>
+          <td><span class="b">01:10</span><span class="a">01:10</span><span class="f">3</span></td>
+          <td><span class="b">02:40</span><span class="a">02:41</span><span class="f">2</span></td>
+          <td><span class="b">04:10</span><span class="a">04:10</span><span class="f">2</span></td>
+          <td><span class="b">05:40</span><span class="a">05:41</span><span class="f">3</span></td>
+          <td><span class="b">07:10</span><span class="a">07:10</span><span class="f">3</span></td>
+          <td><span class="b">08:40</span><span class="a">08:51 <span class="lt">+11</span></span><span class="f">4</span></td>
+          <td><span class="b">10:10</span><span class="a">10:10</span><span class="f">4</span></td>
+          <td><span class="b x">11:40</span></td>
+          <td><span class="b">13:10</span><span class="a">13:12 <span class="lt">+2</span></span><span class="f">5</span></td>
+          <td><span class="b">14:40</span><span class="a">14:43 <span class="lt">+3</span></span><span class="f">2/3 <span class="sg">◂</span></span></td>
+          <td><span class="b">16:10</span></td>
+          <td><span class="b">17:40</span></td>
+          <td><span class="b">19:10</span></td>
+          <td><span class="b">20:40</span></td>
+          <td><span class="b">22:10</span></td>
+          <td><span class="b">23:40</span></td>
+          <td class="end">28 · 1h24m</td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sn">Close</span><span class="sv">Bookkeeper · cycle $</span><span class="sw">1:20–1:25</span></th>
+          <td><span class="b">01:20</span><span class="a">01:20</span><span class="f">0.91</span></td>
+          <td><span class="b">02:50</span><span class="a">02:51</span><span class="f">0.84</span></td>
+          <td><span class="b">04:20</span><span class="a">04:20</span><span class="f">0.88</span></td>
+          <td><span class="b">05:50</span><span class="a">05:50</span><span class="f">1.02</span></td>
+          <td><span class="b">07:20</span><span class="a">07:20</span><span class="f">0.97</span></td>
+          <td><span class="b">08:50</span><span class="a">09:01 <span class="lt">+11</span></span><span class="f">1.31</span></td>
+          <td><span class="b">10:20</span><span class="a">10:20</span><span class="f">0.93</span></td>
+          <td><span class="b x">11:50</span></td>
+          <td><span class="b">13:20</span><span class="a">13:22 <span class="lt">+2</span></span><span class="f">1.12</span></td>
+          <td><span class="b">14:50</span><span class="a mut">≈14:53</span><span class="f mut">—</span></td>
+          <td><span class="b">16:20</span></td>
+          <td><span class="b">17:50</span></td>
+          <td><span class="b">19:20</span></td>
+          <td><span class="b">20:50</span></td>
+          <td><span class="b">22:20</span></td>
+          <td><span class="b">23:50</span></td>
+          <td class="end">8.69 so far</td>
+        </tr>
+        <tr class="feet">
+          <th>Cycle $ · ledger</th>
+          <td>0.91</td>
+          <td>0.84</td>
+          <td>0.88</td>
+          <td>1.02</td>
+          <td>0.97</td>
+          <td>1.31</td>
+          <td>0.93</td>
+          <td>0.03</td>
+          <td>1.12</td>
+          <td>0.68 <span class="sg">→</span></td>
+          <td class="est">est 1.00</td>
+          <td class="est">est 1.00</td>
+          <td class="est">est 1.00</td>
+          <td class="est">est 1.00</td>
+          <td class="est">est 1.00</td>
+          <td class="est">est 1.00</td>
+          <td class="end">est end 15.01</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="legend">cell = booked over actual (mono) · line 3 = row figure · <span class="lt">+m</span> = minutes late · ≈ = projected · struck = cancelled · <span class="sg">→</span> = still accruing · <span class="sg">◂</span> = running at 14:47 · est = mean of last 8 closes · feet = per-cycle ledger $ (incl. 744's $0.03 and 746's accrual) · row ends = day totals</p>
+  </section>
+
+  <section class="incidents">
+    <div class="lblrow">
+      <span class="lbl">Incidents &amp; exceptions — today</span>
+      <span class="mut">3 events · 1 sweep · each carries its action · newest first</span>
+    </div>
+    <div class="incgrid">
+      <div class="inc">
+        <span class="t">14:13</span> · <span class="tag mut">NOTE</span> — 746 Simulate started <span class="lt">+3</span> behind a Portfolio re-run; margin absorbed it. Record runs +3; close lands ≈<span class="t">14:53</span>. <span class="act">Action: none.</span>
+      </div>
+      <div class="inc">
+        <span class="t">10:34</span> · <span class="tag cl">CANCELLED</span> — 744: paper source refused twice. Scheduler cancelled the window, rolled it into 745 (read 31); $0.03 booked. <span class="act">Action: source back 11:52 · watch to 18:00.</span>
+      </div>
+      <div class="inc">
+        <span class="t">09:06</span> · <span class="tag cl">LATE</span> — 742 closed <span class="lt">+11</span>: Simulator retried convergence ×3 on candidate 1408 (loam drainage). <span class="act">Action: retry cap held; 1408 back to Planner; 743 on time.</span>
+      </div>
+      <div class="inc">
+        <span class="t">03:12</span> · <span class="tag sg">VERIFY</span> — nightly sweep walked 1,329 sealed records and the full hash chain: 0 divergent. Offsite copy confirmed <span class="t">05:00</span>. <span class="act">Action: none required.</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="band">
+    <div class="col">
+      <div class="lblrow"><span class="lbl">Ledger vs cap — August</span></div>
+      <div class="ln"><span class="k">spent</span><span class="v">$326.11 of $500.00 · $173.89 remains</span></div>
+      <div class="bar"><span class="fill"></span><span class="tick"></span></div>
+      <div class="ln"><span class="k">bar</span><span class="v">65.2% spent · tick = day 22 of 31 (69.7%)</span></div>
+      <div class="ln"><span class="k">pace</span><span class="v">$15.09/day · today $8.69 by 14:47</span></div>
+      <div class="ln"><span class="k">projected close</span><span class="v">31 Aug $467.65 — $32.35 under</span></div>
+      <div class="ln"><span class="k">hard stop</span><span class="v">no booking may pass $500.00</span></div>
+    </div>
+    <div class="col">
+      <div class="lblrow"><span class="lbl">Scheduler — next</span></div>
+      <div class="sched">
+        <div class="r"><span>747 &nbsp;15:00–16:25</span><span>est $1.00 <span class="sg">◂ next</span></span></div>
+        <div class="r"><span>748 &nbsp;16:30–17:55</span><span class="mut">est $1.00</span></div>
+        <div class="r"><span>749 &nbsp;18:00–19:25</span><span class="mut">est $1.00</span></div>
+        <div class="r"><span>750–752 &nbsp;19:30→23:55</span><span class="mut">est $3.00</span></div>
+      </div>
+      <div class="ln"><span class="k">decision for 747</span><span class="v mono">14:55</span></div>
+      <div class="ln"><span class="k">before every booking</span><span class="v">cap check</span></div>
+      <div class="ln"><span class="k">standing</span><span class="v">verify 03:00 · offsite 05:00</span></div>
+    </div>
+    <div class="col">
+      <div class="lblrow"><span class="lbl">Data — stores</span></div>
+      <div class="ln"><span class="k">papers</span><span class="v">9,847 · 2.1 GB</span></div>
+      <div class="ln"><span class="k">candidates</span><span class="v">1,368 — sealed 1,352 · failed 14 · in flight 2</span></div>
+      <div class="ln"><span class="k">simulation runs</span><span class="v">25,904 · 6.8 GB</span></div>
+      <div class="ln"><span class="k">sealed records</span><span class="v">1,352 · 412 MB · hash-chained</span></div>
+      <div class="ln"><span class="k">ledger</span><span class="v">4,504 rows · every stage priced</span></div>
+      <div class="ln"><span class="k">store</span><span class="v">SQLite WAL · 9.4 GB · disk 41% free</span></div>
+    </div>
+    <div class="col">
+      <div class="lblrow"><span class="lbl">Control — hard stop</span></div>
+      <button class="susp" type="button">Suspend generation</button>
+      <p class="consequence">Stops Planner approvals and all future bookings at the next stage boundary, ≤90 seconds out. Work in flight — 746's seal and close — runs to completion; nothing is left half-written and the ledger closes clean. Resume is manual, from this room, and the ledger logs who pressed it.</p>
+    </div>
+  </div>
+
+  <div class="drill">
+    <span class="dl">Drill law</span> — every figure on this page opens: any number drills to the exact ledger rows and log lines that produced it, unabridged. The page is rebuilt from the ledger on every load; grid feet, the service split, and the August total must reconcile to the cent before it renders. A figure that cannot be opened does not ship. Log root <span class="mono">/var/palingenesis/log</span>.
+  </div>
+
+  <footer>
+    <span class="motto">Palingenesis — the whole machine, nothing hidden.</span>
+    <span class="build">engine v0.9.3 · continuous since 7 July 2026 · this render: ledger @ 14:47:12</span>
+  </footer>
+
+</div>
+</body>
+</html>

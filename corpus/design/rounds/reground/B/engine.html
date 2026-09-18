@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#050505;
+  --band:#080808;
+  --panel:#0b0b0a;
+  --line:#1d1d1b;
+  --line2:#2b2b28;
+  --ink:#f2f1eb;
+  --ink2:#b6b5ad;
+  --mut:#8f8e86;
+  --dim:#6f6e67;
+  --green:#6fd98b;
+  --green-deep:#2f6b45;
+  --amber:#dca55e;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+  --sans:"Inter",-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{background:#050505}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  font-optical-sizing:auto;
+  overflow-x:clip;
+}
+a{color:inherit}
+.top-rule{height:2px;background:var(--green)}
+.wrap{max-width:1240px;margin:0 auto;padding:0 48px}
+
+/* ---------- top bar ---------- */
+.bar{display:flex;align-items:center;gap:20px;height:66px;border-bottom:1px solid var(--line)}
+.word{
+  display:inline-flex;align-items:center;gap:10px;
+  font-family:var(--serif);font-weight:500;font-size:23px;line-height:1;
+  letter-spacing:-0.01em;color:var(--ink);text-decoration:none;white-space:nowrap;
+}
+.bar nav{display:flex;margin-left:16px}
+.bar nav a{
+  display:inline-flex;align-items:center;height:66px;padding:0 13px;
+  font-size:12px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--mut);text-decoration:none;
+  border-bottom:2px solid #05050500;
+}
+.bar nav a:hover{color:var(--ink2)}
+.bar nav a.now{color:var(--ink);border-bottom:2px solid var(--green)}
+.clock{margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink2);white-space:nowrap}
+
+/* ---------- course + lede ---------- */
+.course{
+  margin-top:28px;display:flex;align-items:center;gap:22px;
+  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--green);
+  padding:18px 22px;
+}
+.course .k{font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--green)}
+.course .val{font-family:var(--serif);font-weight:500;font-size:22px;line-height:1.2;color:var(--ink);white-space:nowrap}
+.course .meta{font-family:var(--mono);font-size:12.5px;color:var(--mut);white-space:nowrap}
+.btn{
+  margin-left:auto;display:inline-flex;align-items:center;height:38px;padding:0 18px;
+  border:1px solid #45453f;
+  font-size:12.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink2);text-decoration:none;white-space:nowrap;
+}
+.btn:hover{border-color:var(--ink2);color:var(--ink)}
+.lede{margin-top:26px;display:flex;align-items:baseline;gap:14px}
+.lede .dot{width:9px;height:9px;border-radius:50%;background:var(--green);transform:translateY(-2px)}
+.lede p{font-family:var(--serif);font-weight:400;font-size:26px;line-height:1.35;color:var(--ink);letter-spacing:-0.008em}
+
+/* ---------- section heads ---------- */
+.sh{margin-top:52px;display:flex;align-items:center;gap:16px}
+.sh .k{
+  font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--mut);white-space:nowrap;
+}
+.sh .rule{flex:1;height:1px;background:var(--line)}
+
+/* ---------- wheels ---------- */
+.wheels{margin-top:16px;display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.wheel{
+  display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);
+  padding:18px 16px 15px;text-decoration:none;min-height:176px;
+}
+.wheel:hover{border-color:#45453f}
+.wheel.live{border-color:var(--green-deep)}
+.wheel.live:hover{border-color:var(--green)}
+.wname{font-family:var(--serif);font-weight:500;font-size:21px;line-height:1.1;color:var(--ink)}
+.wrole{margin-top:5px;font-size:12.5px;color:var(--mut)}
+.wstate{margin-top:15px;display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap}
+.badge{
+  display:inline-flex;align-items:center;height:22px;padding:0 9px;
+  border:1px solid #3d3d38;border-radius:999px;
+  font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mut);
+}
+.badge.live{border-color:var(--green-deep);color:var(--green)}
+.badge.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:6px}
+.wtime{font-family:var(--mono);font-size:12.5px;color:var(--dim);white-space:nowrap}
+.wvol{margin-top:auto;padding-top:14px;font-family:var(--serif);font-weight:400;font-size:25px;line-height:1;color:var(--ink)}
+.wvol span{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);margin-left:5px}
+.wopen{margin-top:12px;font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--green)}
+
+/* ---------- timetable ---------- */
+.tt{margin-top:16px;width:100%;border-collapse:collapse}
+.tt th{
+  text-align:left;padding:0 10px 10px;
+  font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--mut);border-bottom:1px solid var(--line2);white-space:nowrap;
+}
+.tt th small{font-family:var(--mono);font-size:12px;font-weight:400;color:var(--dim);letter-spacing:0;text-transform:none;margin-left:4px}
+.tt td{
+  padding:6px 10px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:12.5px;color:var(--mut);white-space:nowrap;
+}
+.tt .cy{color:var(--dim)}
+.tt a.rid{display:inline-flex;align-items:center;min-height:24px;color:var(--ink2);text-decoration:none}
+.tt a.rid:hover{color:var(--green)}
+.tt a.rid .arw{color:var(--green);font-size:12px;margin-left:5px}
+.tt .st{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.tt tr.closed .st{color:var(--mut)}
+.tt tr.live td{color:var(--ink2)}
+.tt tr.live .st,.tt td.golive{color:var(--green);font-weight:500}
+.tt td.golive::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:7px;transform:translateY(-1px)}
+.tt tr.booked td{color:var(--dim)}
+.tt tr.booked .st{color:var(--dim)}
+.tt tr.struck td{color:var(--dim)}
+.tt tr.struck .tx{text-decoration:line-through}
+.tt tr.struck .st,.tt td.late,.tt tr.late .st{color:var(--amber)}
+.tt td.late{font-weight:500}
+.ttnote{margin-top:12px;font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+.ttnote b{font-weight:500;color:var(--amber)}
+
+/* ---------- volumes band ---------- */
+.vband{
+  margin-top:56px;background:var(--band);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+}
+.vband-inner{max-width:1240px;margin:0 auto;padding:34px 48px 38px;display:flex;align-items:center;gap:24px}
+.vband .k{font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);width:120px}
+.vstats{flex:1;display:grid;grid-template-columns:repeat(6,1fr)}
+.vstat{display:block;text-decoration:none;text-align:center;padding:2px 8px;border-left:1px solid var(--line)}
+.vstat .n{display:block;font-family:var(--serif);font-weight:400;font-size:27px;line-height:1;color:var(--ink)}
+.vstat .l{display:block}
+.vstat .arw{font-size:13px;font-weight:600;color:var(--green);margin-left:3px}
+.vstat .l{margin-top:8px;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
+.vstat:hover .n{color:var(--green)}
+
+/* ---------- panels ---------- */
+.duo{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.duo2{margin-top:20px;display:grid;grid-template-columns:1fr 1.6fr;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);padding:20px 22px 10px}
+.panel .pk{
+  font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--mut);padding-bottom:14px;
+}
+.prow{display:flex;align-items:center;min-height:40px;border-top:1px solid var(--line);gap:16px}
+.prow .rl{width:110px;flex-shrink:0;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
+.prow .rv{
+  margin-left:auto;display:inline-flex;align-items:center;gap:8px;min-height:24px;
+  font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink2);text-decoration:none;
+  text-align:right;
+}
+.prow a.rv:hover{color:var(--ink)}
+.prow .rv .arw{color:var(--green);font-size:12px}
+.prow .chipd{
+  display:inline-flex;align-items:center;height:22px;padding:0 9px;margin-left:auto;
+  border:1px solid var(--line2);border-radius:999px;
+  font-family:var(--mono);font-size:12px;color:var(--dim);
+}
+.prow .rvplain{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink2);margin-left:auto}
+
+/* ---------- log ---------- */
+.lrow{display:flex;align-items:center;min-height:38px;border-top:1px solid var(--line);gap:14px}
+.lrow .lt{width:52px;flex-shrink:0;font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+.lrow .lx{font-size:13px;color:var(--ink2)}
+.lrow .lx b{font-weight:500;color:var(--ink)}
+.lrow .who{
+  margin-left:auto;display:inline-flex;align-items:center;height:22px;padding:0 9px;
+  border:1px solid var(--green-deep);border-radius:999px;
+  font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--green);
+}
+.lrow .dur{margin-left:auto;font-family:var(--mono);font-size:12.5px;color:var(--amber)}
+.lsum{display:flex;align-items:center;min-height:44px;border-top:1px solid var(--line2);gap:14px}
+.lsum .rl{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
+.lsum a{
+  margin-left:auto;display:inline-flex;align-items:center;gap:8px;min-height:24px;
+  font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink);text-decoration:none;
+}
+.lsum a .arw{color:var(--green);font-size:12px}
+.lsum a:hover{color:var(--green)}
+
+/* ---------- control ---------- */
+.control{
+  margin-top:56px;display:flex;align-items:center;gap:28px;
+  background:#0b0906;border:1px solid #3c2f1c;padding:24px 26px;
+}
+.suspend{
+  display:inline-flex;align-items:center;height:48px;padding:0 30px;flex-shrink:0;
+  border:1px solid var(--amber);
+  font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  color:#e3b06b;text-decoration:none;
+}
+.suspend:hover{background:#1a1207}
+.consequence{font-size:13px;line-height:1.6;color:var(--mut);max-width:560px}
+
+/* ---------- footer ---------- */
+footer{margin-top:64px;border-top:1px solid var(--line);padding:34px 0 44px;text-align:center}
+.motto{font-family:var(--serif);font-style:italic;font-weight:400;font-size:14px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="top-rule"></div>
+
+<header class="wrap bar">
+  <a class="word" href="#">
+    <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#6fd98b" d="M12 13.2C6.7 13.2 3.3 9.6 3 3.6c6 .3 9.6 3.7 9.9 9.6z"/>
+      <path fill="#2f6b45" d="M12.4 11.9c.2-4.6 2.9-7 8.6-7.4-.3 5.7-3 8.2-8.6 8.6z"/>
+      <path fill="#6fd98b" d="M11.2 11h1.6v11h-1.6z"/>
+    </svg>
+    Palingenesis
+  </a>
+  <nav>
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#">Library</a>
+    <a href="#">Portfolio</a>
+    <a href="#">Simulation</a>
+    <a class="now" href="#" aria-current="page">Engine Room</a>
+  </nav>
+  <span class="clock">17:26:08&ensp;&middot;&ensp;Fri 22 Aug</span>
+</header>
+
+<main class="wrap">
+  <div class="course">
+    <span class="k">Course</span>
+    <span class="val">drought-tolerant wheat</span>
+    <span class="meta">cycles 13&ndash;24&ensp;&middot;&ensp;set 10:00 by Erik</span>
+    <a class="btn" href="#">Change course</a>
+  </div>
+
+  <div class="lede">
+    <span class="dot"></span>
+    <p>Nominal &mdash; ten cycles closed, one struck; cycle 12 mid-Simulate; 13 opens 18:00:00.</p>
+  </div>
+
+  <div class="sh"><span class="k">Wheels</span><span class="rule"></span></div>
+  <div class="wheels">
+    <a class="wheel" href="#">
+      <span class="wname">Scout</span>
+      <span class="wrole">stocks the docket</span>
+      <span class="wstate"><span class="badge">idle</span><span class="wtime">last 17:00</span></span>
+      <span class="wvol">132<span>sources</span></span>
+      <span class="wopen">Open &#8599;</span>
+    </a>
+    <a class="wheel" href="#">
+      <span class="wname">Reader</span>
+      <span class="wrole">reads the stack</span>
+      <span class="wstate"><span class="badge">idle</span><span class="wtime">last 17:04</span></span>
+      <span class="wvol">64<span>papers</span></span>
+      <span class="wopen">Open &#8599;</span>
+    </a>
+    <a class="wheel" href="#">
+      <span class="wname">Council</span>
+      <span class="wrole">votes the verdict</span>
+      <span class="wstate"><span class="badge">idle</span><span class="wtime">last 17:12</span></span>
+      <span class="wvol">10<span>verdicts</span></span>
+      <span class="wopen">Open &#8599;</span>
+    </a>
+    <a class="wheel live" href="#">
+      <span class="wname">Simulator</span>
+      <span class="wrole">runs the trial</span>
+      <span class="wstate"><span class="badge live">live</span><span class="wtime">last 17:22</span></span>
+      <span class="wvol">11<span>trials</span></span>
+      <span class="wopen">Open &#8599;</span>
+    </a>
+    <a class="wheel" href="#">
+      <span class="wname">Archivist</span>
+      <span class="wrole">writes lineage</span>
+      <span class="wstate"><span class="badge">waits</span><span class="wtime">last 16:34</span></span>
+      <span class="wvol">10<span>lineages</span></span>
+      <span class="wopen">Open &#8599;</span>
+    </a>
+    <a class="wheel" href="#">
+      <span class="wname">Courier</span>
+      <span class="wrole">posts and closes</span>
+      <span class="wstate"><span class="badge">waits</span><span class="wtime">last 16:41</span></span>
+      <span class="wvol">10<span>digests</span></span>
+      <span class="wopen">Open &#8599;</span>
+    </a>
+  </div>
+
+  <div class="sh"><span class="k">Timetable</span><span class="rule"></span></div>
+  <table class="tt">
+    <thead>
+      <tr>
+        <th>Cy</th><th>Open</th><th>Run</th>
+        <th>Scout<small>+0</small></th>
+        <th>Reader<small>+4</small></th>
+        <th>Council<small>+12</small></th>
+        <th>Simulate<small>+22</small></th>
+        <th>Archive<small>+34</small></th>
+        <th>Post<small>+41</small></th>
+        <th>State</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="closed">
+        <td class="cy">01</td><td>06:00</td><td><a class="rid" href="#">r-2201<span class="arw">&#8599;</span></a></td>
+        <td>06:00</td><td>06:04</td><td>06:12</td><td>06:22</td><td>06:34</td><td>06:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">02</td><td>07:00</td><td><a class="rid" href="#">r-2202<span class="arw">&#8599;</span></a></td>
+        <td>07:00</td><td>07:04</td><td>07:12</td><td>07:22</td><td>07:34</td><td>07:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">03</td><td>08:00</td><td><a class="rid" href="#">r-2203<span class="arw">&#8599;</span></a></td>
+        <td>08:00</td><td>08:04</td><td>08:12</td><td>08:22</td><td>08:34</td><td>08:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">04</td><td>09:00</td><td><a class="rid" href="#">r-2204<span class="arw">&#8599;</span></a></td>
+        <td>09:00</td><td>09:04</td><td>09:12</td><td>09:22</td><td>09:34</td><td>09:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">05</td><td>10:00</td><td><a class="rid" href="#">r-2205<span class="arw">&#8599;</span></a></td>
+        <td>10:00</td><td>10:04</td><td>10:12</td><td>10:22</td><td>10:34</td><td>10:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">06</td><td>11:00</td><td><a class="rid" href="#">r-2206<span class="arw">&#8599;</span></a></td>
+        <td>11:00</td><td>11:04</td><td>11:12</td><td>11:22</td><td>11:34</td><td>11:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="struck">
+        <td class="cy">07</td><td>12:00</td><td><a class="rid" href="#">r-2207<span class="arw">&#8599;</span></a></td>
+        <td class="tx">12:00</td><td class="tx">12:04</td><td class="tx">12:12</td><td class="tx">12:22</td><td class="tx">12:34</td><td class="tx">12:41</td>
+        <td class="st">struck</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">08</td><td>13:00</td><td><a class="rid" href="#">r-2208<span class="arw">&#8599;</span></a></td>
+        <td>13:00</td><td>13:04</td><td>13:12</td><td>13:22</td><td>13:34</td><td>13:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed late">
+        <td class="cy">09</td><td>14:00</td><td><a class="rid" href="#">r-2209<span class="arw">&#8599;</span></a></td>
+        <td>14:00</td><td>14:04</td><td>14:12</td><td class="late">14:43&#8202;&thinsp;+21</td><td>14:34</td><td>14:41</td>
+        <td class="st">closed 15:02</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">10</td><td>15:00</td><td><a class="rid" href="#">r-2210<span class="arw">&#8599;</span></a></td>
+        <td>15:00</td><td>15:04</td><td>15:12</td><td>15:22</td><td>15:34</td><td>15:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="closed">
+        <td class="cy">11</td><td>16:00</td><td><a class="rid" href="#">r-2211<span class="arw">&#8599;</span></a></td>
+        <td>16:00</td><td>16:04</td><td>16:12</td><td>16:22</td><td>16:34</td><td>16:41</td>
+        <td class="st">closed</td>
+      </tr>
+      <tr class="live">
+        <td class="cy">12</td><td>17:00</td><td><a class="rid" href="#">r-2212<span class="arw">&#8599;</span></a></td>
+        <td>17:00</td><td>17:04</td><td>17:12</td><td class="golive">17:22 live</td><td>17:34</td><td>17:41</td>
+        <td class="st">live</td>
+      </tr>
+      <tr class="booked">
+        <td class="cy">13</td><td>18:00</td><td><a class="rid" href="#">r-2213<span class="arw">&#8599;</span></a></td>
+        <td>18:00</td><td>18:04</td><td>18:12</td><td>18:22</td><td>18:34</td><td>18:41</td>
+        <td class="st">booked</td>
+      </tr>
+      <tr class="booked">
+        <td class="cy">14</td><td>19:00</td><td><a class="rid" href="#">r-2214<span class="arw">&#8599;</span></a></td>
+        <td>19:00</td><td>19:04</td><td>19:12</td><td>19:22</td><td>19:34</td><td>19:41</td>
+        <td class="st">booked</td>
+      </tr>
+      <tr class="booked">
+        <td class="cy">15</td><td>20:00</td><td><a class="rid" href="#">r-2215<span class="arw">&#8599;</span></a></td>
+        <td>20:00</td><td>20:04</td><td>20:12</td><td>20:22</td><td>20:34</td><td>20:41</td>
+        <td class="st">booked</td>
+      </tr>
+      <tr class="booked">
+        <td class="cy">16</td><td>21:00</td><td><a class="rid" href="#">r-2216<span class="arw">&#8599;</span></a></td>
+        <td>21:00</td><td>21:04</td><td>21:12</td><td>21:22</td><td>21:34</td><td>21:41</td>
+        <td class="st">booked</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="ttnote">07 &middot; feed empty &middot; struck &middot; kept on book&emsp;&emsp;09 &middot; Simulate booked 14:22 &middot; actual 14:43 <b>+21</b> &middot; closed 15:02</p>
+</main>
+
+<section class="vband">
+  <div class="vband-inner">
+    <span class="k">Volumes</span>
+    <div class="vstats">
+      <a class="vstat" href="#"><span class="n">132<span class="arw">&#8599;</span></span><span class="l">sources</span></a>
+      <a class="vstat" href="#"><span class="n">64<span class="arw">&#8599;</span></span><span class="l">papers</span></a>
+      <a class="vstat" href="#"><span class="n">409<span class="arw">&#8599;</span></span><span class="l">claims</span></a>
+      <a class="vstat" href="#"><span class="n">11<span class="arw">&#8599;</span></span><span class="l">trials</span></a>
+      <a class="vstat" href="#"><span class="n">10<span class="arw">&#8599;</span></span><span class="l">verdicts</span></a>
+      <a class="vstat" href="#"><span class="n">10<span class="arw">&#8599;</span></span><span class="l">digests</span></a>
+    </div>
+  </div>
+</section>
+
+<main class="wrap" style="margin-top:0">
+  <div class="duo">
+    <div class="panel">
+      <p class="pk">Scheduler</p>
+      <div class="prow"><span class="rl">Cadence</span><a class="rv" href="#">one open per hour &middot; 06:00&ndash;21:00 <span class="arw">&#8599;</span></a></div>
+      <div class="prow"><span class="rl">Strike</span><a class="rv" href="#">past +25 &middot; worst +21 <span class="arw">&#8599;</span></a></div>
+      <div class="prow"><span class="rl">Next open</span><a class="rv" href="#">18:00:00 &middot; cycle 13 &middot; r-2213 <span class="arw">&#8599;</span></a></div>
+      <div class="prow"><span class="rl">Farm local</span><a class="rv" href="#">UTC&minus;05 <span class="arw">&#8599;</span></a></div>
+    </div>
+    <div class="panel">
+      <p class="pk">Data</p>
+      <div class="prow"><span class="rl">Snapshot</span><a class="rv" href="#">17:15:09 &middot; 412 MB &middot; verified <span class="arw">&#8599;</span></a></div>
+      <div class="prow"><span class="rl">Archive</span><a class="rv" href="#">1,283 runs &middot; 9.6 GB <span class="arw">&#8599;</span></a></div>
+      <div class="prow"><span class="rl">Next snap</span><a class="rv" href="#">18:15 <span class="arw">&#8599;</span></a></div>
+    </div>
+  </div>
+
+  <div class="duo2">
+    <div class="panel">
+      <p class="pk">Standing orders</p>
+      <div class="prow"><span class="rl">Cadence</span><span class="rvplain">hourly</span><span class="chipd">default</span></div>
+      <div class="prow"><span class="rl">Strike</span><span class="rvplain">past +25</span><span class="chipd">default</span></div>
+      <div class="prow"><span class="rl">Retry</span><span class="rvplain">&times;1 then requeue</span><span class="chipd">default</span></div>
+      <div class="prow"><span class="rl">Snapshot</span><span class="rvplain">hourly :15</span><span class="chipd">default</span></div>
+    </div>
+    <div class="panel">
+      <p class="pk">Log</p>
+      <div class="lrow"><span class="lt">09:12</span><span class="lx">Simulator allot raised</span><span class="who">ERIK</span></div>
+      <div class="lrow"><span class="lt">10:00</span><span class="lx">course set: <b>drought wheat &times; 13&ndash;24</b></span><span class="who">ERIK</span></div>
+      <div class="lrow"><span class="lt">12:01</span><span class="lx">feed empty, cycle 07 &rarr; struck, kept on book</span></div>
+      <div class="lrow"><span class="lt">14:22</span><span class="lx">simulator queue stall, cycle 09 &rarr; requeued 14:43, closed 15:02</span><span class="dur">21.0 min</span></div>
+      <div class="lrow"><span class="lt">17:15</span><span class="lx">snapshot checksum fail &rarr; write 2 verified</span></div>
+      <div class="lsum"><span class="rl">Minutes lost</span><a href="#">21.2 of 960 <span class="arw">&#8599;</span></a></div>
+    </div>
+  </div>
+
+  <div class="control">
+    <a class="suspend" href="#">Suspend generation</a>
+    <p class="consequence">Cycle 12 runs to 17:41 &middot; 13&ndash;16 do not open &middot; resume reopens next booked hour.</p>
+  </div>
+</main>
+
+<footer class="wrap">
+  <p class="motto">Every claim sourced &middot; every cost computed &middot; every verdict recorded</p>
+</footer>
+</body>
+</html>

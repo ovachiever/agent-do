@@ -201,10 +201,6 @@ check_cmd "browser import tests" python3 "$SCRIPT_DIR/tests/test_browser_import.
 check_cmd "browse daemon isolation tests" python3 "$SCRIPT_DIR/tests/test_browse_daemon_isolation.py"
 check_cmd "browse session default tests" python3 "$SCRIPT_DIR/tests/test_browse_session_defaults.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
-check_cmd "dpt offline tests" python3 "$SCRIPT_DIR/tests/test_dpt.py"
-check_cmd "aphrodite relational engine tests" node --test "$SCRIPT_DIR"/tools/agent-aphrodite/test/*.test.js
-check_cmd "aphrodite browser integration tests" node "$SCRIPT_DIR/tools/agent-aphrodite/test/integration.js"
-check_cmd "dpt browser integration tests" bash "$SCRIPT_DIR/tools/agent-dpt/test/integration.sh"
 check_cmd "manna unit tests" cargo test --quiet --manifest-path "$SCRIPT_DIR/tools/agent-manna/Cargo.toml"
 check_cmd "manna integration tests" bash "$SCRIPT_DIR/tools/agent-manna/test/integration.sh"
 

@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --rule:rgba(231,227,218,0.14);
+    --rule-soft:rgba(231,227,218,0.08);
+    --sage:hsl(158,30%,55%);
+    --sage-bright:hsl(158,32%,62%);
+    --sage-dim:hsla(158,30%,55%,0.38);
+    --sage-ghost:hsla(158,30%,55%,0.12);
+    --on-sage:#14211B;
+    --raised:#211E1B;
+    --serif:Georgia,'Times New Roman',Times,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font:14px/1.55 var(--sans);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  ::selection{background:var(--sage);color:var(--on-sage)}
+  a{color:inherit;text-decoration:none}
+  a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--sage);outline-offset:2px;border-radius:3px}
+
+  .wrap{max-width:1352px;margin:0 auto;padding:0 44px}
+
+  /* ---------- links & controls ---------- */
+  .trace{
+    color:var(--sage);
+    text-decoration:underline;
+    text-decoration-color:var(--sage-dim);
+    text-underline-offset:3px;
+    text-decoration-thickness:1px;
+  }
+  .trace:hover{color:var(--sage-bright);text-decoration-color:var(--sage-bright)}
+  .namelink{
+    color:var(--ink);
+    text-decoration:underline;
+    text-decoration-color:rgba(231,227,218,0.32);
+    text-underline-offset:3px;
+  }
+  .namelink:hover{text-decoration-color:var(--ink)}
+  .action{
+    display:inline-flex;align-items:center;min-height:28px;
+    color:var(--sage);font-weight:600;font-size:13px;
+    text-decoration:underline;text-decoration-color:var(--sage-dim);text-underline-offset:3px;
+  }
+  .action:hover{color:var(--sage-bright);text-decoration-color:var(--sage-bright)}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-height:38px;padding:0 18px;border:0;border-radius:6px;
+    background:var(--sage);color:var(--on-sage);
+    font:600 13.5px var(--sans);letter-spacing:.01em;cursor:pointer;white-space:nowrap;
+  }
+  .btn:hover{background:var(--sage-bright)}
+  input[type="search"],input[type="text"]{
+    min-height:38px;background:var(--raised);
+    border:1px solid var(--rule);border-radius:6px;
+    color:var(--ink);padding:0 13px;font:13.5px var(--sans);width:100%;
+  }
+  input::placeholder{color:var(--muted);opacity:1}
+  input:focus{border-color:var(--sage);outline:none}
+
+  .mono{font-family:var(--mono)}
+  .fine{font-size:12px;color:var(--faint);line-height:1.6}
+  .fine b{color:var(--muted);font-weight:600}
+  .lab{
+    font-family:var(--sans);font-size:12px;font-weight:600;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+  }
+
+  /* ---------- top nav ---------- */
+  .topnav{border-bottom:1px solid var(--rule)}
+  .topnav .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
+  .wordmark{display:inline-flex;align-items:center;gap:10px;height:58px;font:20px var(--serif);letter-spacing:.02em;color:var(--ink)}
+  .wordmark .glyph{width:9px;height:9px;background:var(--sage);border-radius:1px 6px 1px 6px;display:inline-block}
+  .navlinks{display:flex;gap:30px}
+  .navlinks a{
+    display:inline-flex;align-items:center;height:58px;
+    font-size:13.5px;color:var(--muted);letter-spacing:.02em;
+  }
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.active{color:var(--sage);font-weight:600;box-shadow:inset 0 -2px 0 var(--sage)}
+  .nav-now{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.06em}
+
+  /* ---------- page head ---------- */
+  .pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:48px;margin:46px 0 34px}
+  .pagehead h1{font:400 40px/1.05 var(--serif);letter-spacing:.005em}
+  .standfirst{
+    font:italic 15.5px/1.6 var(--serif);color:var(--muted);
+    max-width:600px;margin-top:12px;
+  }
+  .headright{display:flex;flex-direction:column;align-items:flex-end;gap:10px;min-width:340px}
+  .asof{font-size:12px;color:var(--faint)}
+  .asof .mono{color:var(--muted)}
+  .search{width:340px}
+
+  /* ---------- stat strip ---------- */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+  .stat{padding:20px 28px 22px}
+  .stat + .stat{border-left:1px solid var(--rule)}
+  .stat .lab{color:var(--faint)}
+  .stat .num{font:600 27px/1.15 var(--sans);margin:8px 0 5px;letter-spacing:-.01em}
+  .stat .num .unit{font-size:14px;font-weight:400;color:var(--muted);margin-left:2px}
+
+  /* ---------- main grid ---------- */
+  .maingrid{display:grid;grid-template-columns:minmax(0,1fr) 384px;gap:64px;margin-top:44px}
+  section{margin-bottom:48px}
+  .shead{
+    display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+    border-bottom:1px solid var(--rule);padding-bottom:9px;
+  }
+  .shead .fine{text-align:right;white-space:nowrap}
+
+  /* ---------- overnight log ---------- */
+  .log{list-style:none}
+  .log li{
+    display:grid;grid-template-columns:48px 84px minmax(0,1fr) auto;
+    gap:16px;align-items:start;
+    padding:13px 0;border-bottom:1px solid var(--rule-soft);
+  }
+  .log li:hover{background:rgba(231,227,218,0.025)}
+  .log .t{font-family:var(--mono);font-size:12.5px;color:var(--faint);padding-top:2px}
+  .role{
+    font-size:12px;font-weight:600;letter-spacing:.09em;color:var(--muted);
+    border:1px solid var(--rule);border-radius:3px;
+    text-align:center;padding:2px 0;margin-top:-1px;
+  }
+  .log-main{font-size:13.5px;line-height:1.5}
+  .log-main b{font-weight:600}
+  .log .sub{margin-top:3px}
+  .cost{font-family:var(--mono);font-size:12.5px;color:var(--muted);text-align:right;padding-top:2px;white-space:nowrap}
+  .log-total{
+    display:flex;align-items:baseline;gap:12px;padding:13px 0 4px;
+  }
+  .log-total .label{font-size:13px;font-weight:600}
+  .leader{flex:1;border-bottom:1px dotted rgba(231,227,218,0.28);transform:translateY(-4px)}
+  .log-total .cost{font-size:13px;color:var(--ink);font-weight:600}
+  .log-foot{margin-top:6px}
+
+  /* ---------- evidence records ---------- */
+  .filters{display:flex;gap:8px;align-items:center;margin:14px 0 4px;flex-wrap:wrap}
+  .filter{
+    display:inline-flex;align-items:center;min-height:27px;padding:0 12px;
+    border:1px solid var(--rule);border-radius:999px;
+    font-size:12px;letter-spacing:.04em;color:var(--muted);
+  }
+  .filter:hover{border-color:rgba(231,227,218,0.4);color:var(--ink)}
+  .filter.on{color:var(--sage);border-color:var(--sage-dim);background:var(--sage-ghost)}
+  .filter .n{font-family:var(--mono);margin-left:6px;font-size:12px;color:var(--faint)}
+  .filter.on .n{color:var(--sage)}
+
+  .ev{padding:16px 0 15px;border-bottom:1px solid var(--rule-soft)}
+  .ev:hover{background:rgba(231,227,218,0.025)}
+  .ev-top{display:flex;align-items:baseline;gap:14px}
+  .ev-id{font-family:var(--mono);font-size:13px;font-weight:600}
+  .st{font-size:12px;letter-spacing:.06em;color:var(--faint)}
+  .st-ver::before{content:"✓ ";color:var(--sage);font-weight:700}
+  .st-con{
+    color:var(--ink);font-weight:600;border:1px solid rgba(231,227,218,0.38);
+    border-radius:3px;padding:1px 8px;letter-spacing:.08em;
+  }
+  .ev-cited{margin-left:auto;font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap}
+  .ev-cited .sect{color:var(--faint)}
+  .ev-claim{
+    font:15.5px/1.55 var(--serif);color:var(--ink);
+    margin:8px 0 7px;max-width:56em;
+  }
+  .ev-src{font-size:12.5px;color:var(--muted);line-height:1.65}
+  .ev-src i{font-style:italic}
+  .ev-src .doi{font-family:var(--mono);font-size:12px}
+  .ev-note{margin-top:6px;font-size:12.5px;color:var(--muted)}
+  .ev-note .flagword{color:var(--ink);font-weight:600}
+  .ev-listfoot{display:flex;justify-content:space-between;align-items:center;padding-top:14px}
+
+  /* ---------- right rail ---------- */
+  .rail section{margin-bottom:46px}
+
+  .sig{padding:12px 0 11px;border-bottom:1px solid var(--rule-soft)}
+  .sig-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .sig-src{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .sig-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:3px}
+  .sig-name{font-size:13.5px;color:var(--ink);line-height:1.4}
+  .sig-val{font:600 17px/1.2 var(--sans);white-space:nowrap;text-align:right}
+  .sig-val .unit{font-size:12px;font-weight:400;color:var(--muted)}
+  .sig-delta{font-size:12px;color:var(--muted);white-space:nowrap;text-align:right;display:block;margin-top:1px}
+  .sig .fine{margin-top:4px}
+  .railfoot{padding-top:12px}
+
+  .sweep{padding:13px 0 12px;border-bottom:1px solid var(--rule-soft)}
+  .sweep-top{display:flex;align-items:center;gap:10px}
+  .sweep-id{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  .schip{font-size:12px;font-weight:600;letter-spacing:.09em;border-radius:3px;padding:1px 8px;border:1px solid var(--rule);color:var(--faint)}
+  .schip.reading{color:var(--sage);border-color:var(--sage-dim);background:var(--sage-ghost)}
+  .schip.queued{color:var(--muted)}
+  .sweep-q{font:italic 14.5px/1.5 var(--serif);color:var(--ink);margin:6px 0 5px}
+  .commission{
+    margin-top:18px;background:var(--raised);
+    border:1px solid var(--rule);border-radius:8px;padding:16px 16px 14px;
+  }
+  .commission .lab{color:var(--faint);display:block;margin-bottom:10px}
+  .commission-row{display:flex;gap:8px}
+  .commission .fine{margin-top:10px}
+
+  .coll{padding:10px 0 12px;border-bottom:1px solid var(--rule-soft)}
+  .coll-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .coll-name{font-size:13.5px}
+  .coll-count{font-family:var(--mono);font-size:12.5px;color:var(--muted);white-space:nowrap}
+  .coll-count .grew{color:var(--sage);font-weight:600;margin-left:7px}
+  .bar{height:3px;background:rgba(231,227,218,0.10);margin-top:8px;border-radius:2px;overflow:hidden}
+  .bar .fill{height:100%;background:rgba(231,227,218,0.34);border-radius:2px}
+  .bar .fill.grewfill{background:var(--sage-dim)}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--rule);margin-top:34px}
+  footer .wrap{display:flex;justify-content:space-between;align-items:baseline;gap:24px;padding-top:22px;padding-bottom:44px}
+  .motto{font:italic 13.5px var(--serif);color:var(--muted)}
+  .footmeta{font-size:12px;color:var(--faint)}
+  .footmeta .mono{letter-spacing:.03em}
+</style>
+</head>
+<body>
+
+<nav class="topnav" aria-label="Primary">
+  <div class="wrap">
+    <a class="wordmark" href="#"><span class="glyph" aria-hidden="true"></span>Palingenesis</a>
+    <div class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#" class="active" aria-current="page">Library</a>
+      <a href="#">Engine Room</a>
+    </div>
+    <span class="nav-now">SAT 08·22·26 · 06:12 CDT</span>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <div class="pagehead">
+    <div>
+      <h1>Library</h1>
+      <p class="standfirst">Everything the machine has read — indexed, priced, and held to account. Every claim in every dossier resolves to a record on this page.</p>
+    </div>
+    <div class="headright">
+      <span class="asof">Index rebuilt <span class="mono">06:12</span> · Saturday, August 22, 2026</span>
+      <input class="search" type="search" aria-label="Search the corpus" placeholder="Search 12,847 works, 3,412 evidence records, DOIs…">
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <span class="lab">Works ingested</span>
+      <div class="num">12,847</div>
+      <p class="fine">Corpus index · counted at rebuild, 06:12 · <b>+70 overnight</b></p>
+    </div>
+    <div class="stat">
+      <span class="lab">Evidence records</span>
+      <div class="num">3,412</div>
+      <p class="fine">Each resolves one dossier claim to a source · <b>118 this week</b></p>
+    </div>
+    <div class="stat">
+      <span class="lab">Research sweeps</span>
+      <div class="num">41<span class="unit">done</span></div>
+      <p class="fine">Sweep ledger since Mar 2026 · <b>1 reading, 2 queued</b> now</p>
+    </div>
+    <div class="stat">
+      <span class="lab">Read spend, August</span>
+      <div class="num">$221.52</div>
+      <p class="fine">Metered by Engine Room · sum of 22 nightly sessions</p>
+    </div>
+  </div>
+
+  <div class="maingrid">
+
+    <!-- ============ LEFT COLUMN ============ -->
+    <div class="colmain">
+
+      <section aria-labelledby="lab-overnight">
+        <div class="shead">
+          <span class="lab" id="lab-overnight">Read overnight</span>
+          <span class="fine">Session 02:00–06:12 · 5 entries · <b>$9.12 metered</b></span>
+        </div>
+        <ul class="log">
+          <li>
+            <span class="t">02:14</span>
+            <span class="role">READER</span>
+            <div>
+              <p class="log-main">Ingested <b>43 papers</b> on manure valorization — sweep <a class="trace mono" href="#">SW-121</a>, thermochemical routes</p>
+              <p class="fine sub">39 full text · 4 abstract-only, flagged for retrieval · 6 duplicates turned away at the door</p>
+            </div>
+            <span class="cost">$4.12</span>
+          </li>
+          <li>
+            <span class="t">02:51</span>
+            <span class="role">READER</span>
+            <div>
+              <p class="log-main">Ingested <b>27 papers</b> on insect-meal digestibility — backfill for sweep <a class="trace mono" href="#">SW-120</a></p>
+              <p class="fine sub">All full text · 3 pre-2010 works admitted on citation weight</p>
+            </div>
+            <span class="cost">$2.66</span>
+          </li>
+          <li>
+            <span class="t">03:22</span>
+            <span class="role">INDEXER</span>
+            <div>
+              <p class="log-main">Wrote <b>61 evidence records</b>; linked 58 into collections, opened 3 candidate claims for review</p>
+              <p class="fine sub">Largest gains: Manure &amp; nutrient cycling +43 · Insect protein systems +27</p>
+            </div>
+            <span class="cost">$0.88</span>
+          </li>
+          <li>
+            <span class="t">04:05</span>
+            <span class="role">READER</span>
+            <div>
+              <p class="log-main">Rejected <b>11 items</b>: 6 duplicates, 3 paywalled abstract-only, 2 retracted</p>
+              <p class="fine sub">Retractions caught against the Crossref retraction feed, checked at ingest</p>
+            </div>
+            <span class="cost">$0.31</span>
+          </li>
+          <li>
+            <span class="t">05:40</span>
+            <span class="role">COUNCIL</span>
+            <div>
+              <p class="log-main">Flagged contradiction <a class="trace mono" href="#ev-2201">EV-2201</a> ↔ <a class="trace mono" href="#ev-3391">EV-3391</a> on DDGS and manure ammonia; review opened, verdict pending</p>
+              <p class="fine sub">Contradiction sweep <span class="mono">SW-123</span> auto-commissioned · affected dossier: <a class="namelink" href="#">STILLAIR</a> §3.2</p>
+            </div>
+            <span class="cost">$1.15</span>
+          </li>
+        </ul>
+        <div class="log-total">
+          <span class="label">Night total</span>
+          <span class="leader" aria-hidden="true"></span>
+          <span class="cost">$9.12</span>
+        </div>
+        <p class="fine log-foot">Sum of the five entries above · metered per call by Engine Room · session <span class="mono">rs-0822-n</span></p>
+      </section>
+
+      <section aria-labelledby="lab-evidence">
+        <div class="shead">
+          <span class="lab" id="lab-evidence">Evidence records</span>
+          <span class="fine">3,412 on file · every dossier claim resolves here</span>
+        </div>
+
+        <div class="filters">
+          <a class="filter on" href="#">All<span class="n">3,412</span></a>
+          <a class="filter" href="#">Contested<span class="n">12</span></a>
+          <a class="filter" href="#">Added this week<span class="n">118</span></a>
+          <a class="filter" href="#">Most-cited<span class="n">50</span></a>
+          <a class="filter" href="#">Signals-sourced<span class="n">204</span></a>
+        </div>
+
+        <article class="ev" id="ev-2201">
+          <div class="ev-top">
+            <a class="ev-id trace" href="#">EV-2201</a>
+            <span class="st st-con">CONTESTED</span>
+            <span class="ev-cited">cited by <a class="namelink" href="#">STILLAIR</a> <span class="sect">§3.2 · Risk</span></span>
+          </div>
+          <p class="ev-claim">Corn DDGS above 15% of the layer diet raises ammonia emission from stored manure by roughly 30%.</p>
+          <p class="ev-src">Roberts, S.A., Xin, H. &amp; Bregendahl, K. (2019). Corn DDGS inclusion and ammonia emission from laying-hen manure. <i>Poultry Science</i> 98(11): 5964–5972 · <a class="trace doi" href="#">doi:10.3382/ps/pez321</a> · ingested Nov 14, 2025</p>
+          <p class="ev-note"><span class="flagword">Contradicted</span> by <a class="trace mono" href="#ev-3391">EV-3391</a> · COUNCIL review opened today 05:40 · verdict pending · contradiction sweep <span class="mono">SW-123</span> queued</p>
+        </article>
+
+        <article class="ev" id="ev-3391">
+          <div class="ev-top">
+            <a class="ev-id trace" href="#">EV-3391</a>
+            <span class="st st-ver">VERIFIED · FULL TEXT</span>
+            <span class="ev-cited">cited by <a class="namelink" href="#">STILLAIR</a> <span class="sect">§3.2 · Risk</span></span>
+          </div>
+          <p class="ev-claim">Across 31 controlled trials, DDGS inclusion below 20% shows no significant effect on ammonia volatilization from stored layer manure.</p>
+          <p class="ev-src">Krähenbühl, P. &amp; Osei, D. (2026). Dietary DDGS and ammonia volatilization from stored layer manure: a meta-analysis of 31 trials. <i>Poultry Science</i> 105(4): 104112 · <a class="trace doi" href="#">doi:10.1016/j.psj.2026.104112</a> · ingested Aug 22, 02:14</p>
+          <p class="ev-note">Party to COUNCIL review with <a class="trace mono" href="#ev-2201">EV-2201</a> · effect sizes re-extracted from full text, not abstract</p>
+        </article>
+
+        <article class="ev">
+          <div class="ev-top">
+            <a class="ev-id trace" href="#">EV-3411</a>
+            <span class="st st-ver">VERIFIED · FULL TEXT</span>
+            <span class="ev-cited">cited by <a class="namelink" href="#">CINDERLOAM</a> <span class="sect">§2.3 · Process</span></span>
+          </div>
+          <p class="ev-claim">Pyrolysis of layer manure at 450&nbsp;°C retains 71% of total phosphorus in plant-available form.</p>
+          <p class="ev-src">Hoang, L. &amp; Meissner, K. (2025). Phosphorus speciation and plant availability in low-temperature pyrolysis chars from layer manure. <i>Journal of Analytical and Applied Pyrolysis</i> 189: 106402 · <a class="trace doi" href="#">doi:10.1016/j.jaap.2025.106402</a> · ingested Aug 22, 02:14</p>
+          <p class="ev-note">2 corroborating records · char yield and ash chemistry cross-checked against <span class="mono">EV-3155</span></p>
+        </article>
+
+        <article class="ev">
+          <div class="ev-top">
+            <a class="ev-id trace" href="#">EV-3402</a>
+            <span class="st st-ver">VERIFIED · FULL TEXT</span>
+            <span class="ev-cited">cited by <a class="namelink" href="#">GREENMANTLE</a> <span class="sect">§1.4 · Feedstock</span></span>
+          </div>
+          <p class="ev-claim">Duckweed (<i>Lemna minor</i>) grown on diluted poultry-lagoon effluent reaches 38% crude protein on a dry-weight basis.</p>
+          <p class="ev-src">Sørensen, A.K., Brandt, M. &amp; Ekwe, N. (2023). Crude protein and amino acid profile of <i>Lemna minor</i> cultivated on diluted poultry lagoon effluent. <i>Bioresource Technology</i> 384: 129301 · <a class="trace doi" href="#">doi:10.1016/j.biortech.2023.129301</a> · ingested Aug 20 · sweep <span class="mono">SW-119</span></p>
+          <p class="ev-note">3 corroborating records · lysine profile carried into GREENMANTLE ration model</p>
+        </article>
+
+        <article class="ev">
+          <div class="ev-top">
+            <a class="ev-id trace" href="#">EV-3389</a>
+            <span class="st st-ver">VERIFIED · FULL TEXT</span>
+            <span class="ev-cited">cited by <a class="namelink" href="#">MOTHWING</a> <span class="sect">§1.1 · Mechanism</span></span>
+          </div>
+          <p class="ev-claim">Black soldier fly larvae reared on laying-hen manure reduce its dry mass by 49–61% within 14 days.</p>
+          <p class="ev-src">Ortiz-Cabrera, M., Duffy, S. &amp; Wen, H. (2024). Mass reduction and nutrient recovery by <i>Hermetia illucens</i> larvae reared on laying-hen manure. <i>Waste Management</i> 178: 112–124 · <a class="trace doi" href="#">doi:10.1016/j.wasman.2024.02.031</a> · ingested Aug 21</p>
+          <p class="ev-note">4 corroborating records · range spans four substrate moisture regimes</p>
+        </article>
+
+        <div class="ev-listfoot">
+          <span class="fine">Showing 5 of 3,412 · sorted by last activity</span>
+          <a class="action" href="#">Browse all records →</a>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ============ RIGHT RAIL ============ -->
+    <aside class="rail">
+
+      <section aria-labelledby="lab-signals">
+        <div class="shead">
+          <span class="lab" id="lab-signals">Signals</span>
+          <span class="fine">5 of 14 feeds</span>
+        </div>
+
+        <div class="sig">
+          <div class="sig-head"><span class="sig-src">USDA ERS</span></div>
+          <div class="sig-row">
+            <span class="sig-name">Shell eggs, national wholesale large</span>
+            <span>
+              <span class="sig-val">$2.04<span class="unit">/doz</span></span>
+              <span class="sig-delta">▼ 0.07 w/w</span>
+            </span>
+          </div>
+          <p class="fine">Midwest · series <span class="mono">LDP-M-386</span> · retrieved Aug 20, 06:00</p>
+        </div>
+
+        <div class="sig">
+          <div class="sig-head"><span class="sig-src">Feedinfo</span></div>
+          <div class="sig-row">
+            <span class="sig-name">L-Lysine HCl spot, US Midwest</span>
+            <span>
+              <span class="sig-val">$1.42<span class="unit">/kg</span></span>
+              <span class="sig-delta">▲ 2.1% w/w</span>
+            </span>
+          </div>
+          <p class="fine">Daily quote sheet · retrieved today, 05:30</p>
+        </div>
+
+        <div class="sig">
+          <div class="sig-head"><span class="sig-src">CME</span></div>
+          <div class="sig-row">
+            <span class="sig-name">Soybean meal futures, Dec 2026</span>
+            <span>
+              <span class="sig-val">$312.40<span class="unit">/ton</span></span>
+              <span class="sig-delta">▼ 4.10 on the day</span>
+            </span>
+          </div>
+          <p class="fine">Settle Aug 21 · retrieved today, 05:30</p>
+        </div>
+
+        <div class="sig">
+          <div class="sig-head"><span class="sig-src">EIA</span></div>
+          <div class="sig-row">
+            <span class="sig-name">Natural gas, Henry Hub spot</span>
+            <span>
+              <span class="sig-val">$2.87<span class="unit">/MMBtu</span></span>
+              <span class="sig-delta">▲ 0.04 on the day</span>
+            </span>
+          </div>
+          <p class="fine">Dryer-fuel input to CINDERLOAM cost model · Aug 21</p>
+        </div>
+
+        <div class="sig">
+          <div class="sig-head"><span class="sig-src">US Drought Monitor</span></div>
+          <div class="sig-row">
+            <span class="sig-name">D2 coverage, western Corn Belt</span>
+            <span>
+              <span class="sig-val">14.2<span class="unit">% area</span></span>
+              <span class="sig-delta">▲ 3.1 pts w/w</span>
+            </span>
+          </div>
+          <p class="fine">NOAA/USDA weekly map · released Aug 19</p>
+        </div>
+
+        <div class="railfoot">
+          <a class="action" href="#">All 14 feeds →</a>
+          <p class="fine" style="margin-top:6px">All timestamps America/Chicago · feed registry lives in Engine Room</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="lab-sweeps">
+        <div class="shead">
+          <span class="lab" id="lab-sweeps">Commissioned sweeps</span>
+          <span class="fine">1 reading · 2 queued · 41 done</span>
+        </div>
+
+        <div class="sweep">
+          <div class="sweep-top">
+            <span class="sweep-id">SW-121</span>
+            <span class="schip reading">READING</span>
+          </div>
+          <p class="sweep-q">“Manure valorization beyond composting — thermochemical routes.”</p>
+          <p class="fine">43 of ~140 works read · <b>$4.12 metered so far</b> · commissioned Aug 21 by operator</p>
+        </div>
+
+        <div class="sweep">
+          <div class="sweep-top">
+            <span class="sweep-id">SW-122</span>
+            <span class="schip queued">QUEUED</span>
+          </div>
+          <p class="sweep-q">“Ammonia mitigation in high-rise layer houses, 2015–present.”</p>
+          <p class="fine">Est. 90–130 works · est. $9–13 at current read rates · commissioned Aug 22 by operator</p>
+        </div>
+
+        <div class="sweep">
+          <div class="sweep-top">
+            <span class="sweep-id">SW-123</span>
+            <span class="schip queued">QUEUED</span>
+          </div>
+          <p class="sweep-q">“DDGS inclusion vs. manure ammonia — resolve the contradiction.”</p>
+          <p class="fine">Est. 25–40 works · auto-commissioned by COUNCIL, today 05:41, after the <span class="mono">EV-2201</span> flag</p>
+        </div>
+
+        <div class="sweep">
+          <div class="sweep-top">
+            <span class="sweep-id">SW-119</span>
+            <span class="schip">DONE</span>
+          </div>
+          <p class="sweep-q">“Duckweed protein on lagoon effluent — cultivation yields.”</p>
+          <p class="fine">Closed Aug 20 · 84 works · <b>$7.91</b> · 61 evidence records filed → <a class="namelink" href="#">GREENMANTLE</a></p>
+        </div>
+
+        <div class="commission">
+          <span class="lab">Commission a sweep</span>
+          <div class="commission-row">
+            <input type="text" aria-label="What should the machine read next" placeholder="What should the machine read next?">
+            <button class="btn" type="button">Commission</button>
+          </div>
+          <p class="fine">State the question. The Reader finds the literature, reads it in full, files evidence records, and bills the metered cost to this ledger.</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="lab-collections">
+        <div class="shead">
+          <span class="lab" id="lab-collections">Collections</span>
+          <span class="fine">works by domain</span>
+        </div>
+
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Layer nutrition &amp; feed</span><span class="coll-count">2,318</span></div>
+          <div class="bar"><div class="fill" style="width:100%"></div></div>
+        </div>
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Manure &amp; nutrient cycling</span><span class="coll-count">1,247<span class="grew">+43 tonight</span></span></div>
+          <div class="bar"><div class="fill grewfill" style="width:54%"></div></div>
+        </div>
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Housing, air quality &amp; welfare</span><span class="coll-count">1,077</span></div>
+          <div class="bar"><div class="fill" style="width:46%"></div></div>
+        </div>
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Insect protein systems</span><span class="coll-count">667<span class="grew">+27 tonight</span></span></div>
+          <div class="bar"><div class="fill grewfill" style="width:29%"></div></div>
+        </div>
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Water &amp; effluent reuse</span><span class="coll-count">512</span></div>
+          <div class="bar"><div class="fill" style="width:22%"></div></div>
+        </div>
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Energy &amp; biogas</span><span class="coll-count">498</span></div>
+          <div class="bar"><div class="fill" style="width:21%"></div></div>
+        </div>
+        <div class="coll">
+          <div class="coll-row"><span class="coll-name">Markets &amp; policy</span><span class="coll-count">402</span></div>
+          <div class="bar"><div class="fill" style="width:17%"></div></div>
+        </div>
+
+        <div class="railfoot">
+          <p class="fine">7 of 21 collections shown · 6,721 of 12,847 works · counts from the 06:12 index</p>
+          <a class="action" href="#" style="margin-top:6px">Full corpus map in Engine Room →</a>
+        </div>
+      </section>
+
+    </aside>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="footmeta">Palingenesis Library · index <span class="mono">2026-08-22 06:12</span> · corpus <span class="mono">v418</span></span>
+  </div>
+</footer>
+
+</body>
+</html>

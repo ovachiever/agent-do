@@ -2809,7 +2809,7 @@ not a demonstrated guarantee or a replacement for the requested scope and evalua
 
 ### 2. Current corpus census
 
-Source root: `tools/agent-dpt/corpus/`. It contains **12 pin records and 29 image files in
+Source root: `corpus/design/`. It contains **12 pin records and 29 image files in
 shots/**: 18 user-supplied original JPEG excerpts across the first five sites and 11 headless
 PNG captures. These counts describe this snapshot, not an expected runtime corpus size.
 
@@ -2854,8 +2854,8 @@ preserving existing images and source words. It is separate work from this plann
 | `tools/agent-browse/package.json`, `protocol.js`, CLI help | Existing browser package supports explicit sessions, evaluation, viewport/capture and interaction operations | Core integrates through supported browse commands; missing capabilities belong to the browser owner |
 | `tools/agent-dpt/bin/agent-dpt`, `dpt-scan`, `build` | Existing DPT command/build path | `bin/build` assembles utilities/layers/synthesis and orchestration; no nonexistent `src/engine.js` is assumed |
 | `tools/agent-dpt/src/utils.js`, `src/synthesis.js`, `src/layers/` | Scanner rules, color support accounting and null/INCOMPLETE synthesis behavior | Existing scanner includes style assumptions as well as mechanical findings; no wholesale hard-floor promotion |
-| `tools/agent-dpt/corpus/README.md`, `pins/`, `shots/`, `rounds/` | Human-approved references, exact verdict records and current evidence gaps | Pin notes' interpretations remain model-authored; later images do not alter old experiments |
-| Original handoff for `mn-c2d546` and `tools/agent-dpt/research/` | Completed failed scalar-candidate study, frozen source/evaluation boundary | No retuning, relabeling, rereunning, lifecycle closure or alteration in this commission |
+| `corpus/design/README.md`, `pins/`, `shots/`, `rounds/` | Human-approved references, exact verdict records and current evidence gaps | Pin notes' interpretations remain model-authored; later images do not alter old experiments |
+| Original handoff for `mn-c2d546` and `corpus/design-research/` | Completed failed scalar-candidate study, frozen source/evaluation boundary | No retuning, relabeling, rereunning, lifecycle closure or alteration in this commission |
 | `.handoff/29-mn-7ec6dc-design-rounds-bake-the-taste-elicitation-loop-into-agent-do.md` | Proposed elicitation/round workflow with human verdict authority | It is a work order, not an implemented gallery or ingestion API |
 | Manna dream `mn-133b76` | Existing floor/style separation proposal | Still a proposal; not an adopted architecture or a shipped feature |
 | Frontend design skill | Content, typography, visual craft, state and responsive design guidance | Any stylistic defaults are optional techniques, subordinate to the user's expressive breadth |

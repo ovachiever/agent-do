@@ -405,7 +405,7 @@ The historic files remain unchanged. This is a new interpretation and developmen
 
 The exact extracted values and comparison identities are in
 [HISTORICAL-EVIDENCE.json](HISTORICAL-EVIDENCE.json). The source is
-`tools/agent-dpt/research/wildhunt-verify/scores.json`, with its hash recorded there.
+`corpus/design-research/wildhunt-verify/scores.json`, with its hash recorded there.
 
 | Measurement | Observed result | Development use |
 | --- | --- | --- |
