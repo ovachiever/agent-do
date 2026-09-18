@@ -6,7 +6,7 @@ source: null
 base_commit: 0d42ea467b9f57e356e1fb80e0f15ae71e42f9d1
 scope: 'deai: prose-tell linter as a first-class tool with register packs'
 inputs: []
-binding: sha256:dd0f128e79799b3d66fc10f66c44de38dfffe6779e01a2363ab6b92718ddf51a
+binding: sha256:f0d8c0246a94e86e26e1effbe8e3104776f185e5c46f391cb7bffed811767b79
 ---
 
 # Handoff: deai: prose-tell linter as a first-class tool with register packs
@@ -33,7 +33,9 @@ Erik-approved 2026-09-13 (the de-AIer global hookup, option B — the keystone t
 
 ### Delivery and verification (2026-09-18)
 
-The scoped implementation is verified. The first claim succeeded for
+The scoped implementation is verified and committed locally as `cda7e5c11df1c3150b15455bc04bc3cdf59c1503`
+(`feat(deai): add measured prose lint with register packs`, trailer
+`Manna: mn-e6e2e0`). The first claim succeeded for
 `codex-01a0b62545397b13`. The original normalized binding was verified against
 both the canonical Manna row and the requested
 `sha256:0ec382bff8f40b6333a4f36cf1850405d0059d3d68c710e5c5f1d6d416802033`.
