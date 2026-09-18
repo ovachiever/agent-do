@@ -60,8 +60,9 @@ def imagine(record,per_level=2,size=None,dry_run=False,retry_uncertain=False,pro
             else:write_new(image_path,data)
             image={'id':level+'-'+str(ordinal),'level':level,'ordinal':ordinal,'path':str(image_path.relative_to(record.path)),
                    'sha256':digest(data),'model_requested':request['model'],'model_returned':receipt['response'].get('model'),
-                   'size':request['size'],'quality':request['quality'],'seed':None,
-                   'seed_reason':'Images generation API exposes no generation seed',
+                   'size':request['size'],'quality':request['quality'],
+                   'seed':receipt['response']['data'][0].get('seed',receipt['response'].get('seed')),
+                   'seed_reason':'Preserve a returned seed; null when the provider returns none. No seed was requested.',
                    'prompt_sha256':digest(prompt),'request_id':receipt.get('request_id'),
                    'receipt':str((attempt/'response.json').relative_to(record.path)),'usage':receipt.get('usage','usage not returned')}
             record.state['images'].append(image)

@@ -23,6 +23,12 @@ def write_new(path, data):
     return {'path':str(path),'sha256':digest(raw),'bytes':len(raw)}
 
 
+def sync_directory(path):
+    fd=os.open(path,os.O_RDONLY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+
+
 class Round:
     def __init__(self,path,create=False):
         self.path=Path(path).expanduser().resolve();self.create=create;self.lock=None;self.state=None
@@ -39,6 +45,9 @@ class Round:
             manifest=self.path/'manifest.json'
             if manifest.exists():
                 self.state=json.loads(manifest.read_text());self.verify_inputs()
+            elif (self.path/'initialization.json').exists():
+                intent=json.loads((self.path/'initialization.json').read_text())
+                self.initialize(**intent)
             elif not self.create:raise DesignError('round has no completed brief manifest')
             return self
         except BaseException:
@@ -48,16 +57,28 @@ class Round:
         if self.lock:
             fcntl.flock(self.lock,fcntl.LOCK_UN);self.lock.close();self.lock=None
 
-    def initialize(self,copy,facts,source='facts.json'):
+    def initialize(self,copy,facts,source='facts.json',raw_facts=None):
         if self.state is not None:raise DesignError('round already initialized; use a new round for changed inputs')
-        if any(p.name!='.lock' for p in self.path.iterdir()):raise DesignError('round directory contains unfinished or unrelated files; preserve it and use a new round')
         contract=compile_contract(copy,facts,source)
+        intent={'copy':copy,'facts':facts,'source':source,'raw_facts':raw_facts}
+        marker=self.path/'initialization.json'
+        if marker.exists():
+            if json.loads(marker.read_text())!=intent:raise DesignError('interrupted brief inputs do not match the current inputs')
+        else:
+            if any(p.name!='.lock' for p in self.path.iterdir()):raise DesignError('round directory contains unrelated files; preserve it and use a new round')
+            write_new(marker,intent);sync_directory(self.path)
         self.state={'schema':1,'id':self.path.name,'created_at':now(),'stage':'briefed','inputs':{},'images':[],'measurements':{},'pages':[],'ballots':{},'usage':[]}
-        for name,data in [('copy.md',copy),('facts.json',facts),('contract.json',contract)]:
-            receipt=write_new(self.path/'inputs'/name,data);receipt['path']=str(Path(receipt['path']).relative_to(self.path));self.state['inputs'][name]=receipt
+        def preserve(path,data):
+            raw=(data if isinstance(data,str) else json.dumps(data,ensure_ascii=False,indent=2)+'\n').encode()
+            if path.exists():
+                if path.read_bytes()!=raw:raise DesignError('interrupted brief output changed: '+str(path))
+                return {'path':str(path.relative_to(self.path)),'sha256':digest(raw),'bytes':len(raw)}
+            receipt=write_new(path,raw);receipt['path']=str(path.relative_to(self.path));return receipt
+        for name,data in [('copy.md',copy),('facts.json',raw_facts if raw_facts is not None else facts),('contract.json',contract)]:
+            self.state['inputs'][name]=preserve(self.path/'inputs'/name,data)
         self.state['prompts']={}
         for level,text in prompts(copy,contract).items():
-            receipt=write_new(self.path/'prompts'/(level+'.txt'),text);receipt['path']=str(Path(receipt['path']).relative_to(self.path));self.state['prompts'][level]=receipt
+            self.state['prompts'][level]=preserve(self.path/'prompts'/(level+'.txt'),text)
         self.save('approved inputs compiled into three prompts')
         return self.state
 
@@ -80,7 +101,9 @@ class Round:
         write_new(self.path/'history'/(name+'.json'),snapshot)
         staging=self.path/('.manifest-'+name)
         write_new(staging,snapshot);os.replace(staging,self.path/'manifest.json')
-        self.state=snapshot
+        sync_directory(self.path)
+        # Keep live references to nested builder/attempt state attached across checkpoints.
+        self.state.update(updated_at=snapshot['updated_at'],reason=reason)
 
     def require(self,*stages):
         if self.state['stage'] not in stages:raise DesignError('stage '+self.state['stage']+' cannot run this operation; requires '+', '.join(stages))

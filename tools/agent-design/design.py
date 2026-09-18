@@ -8,6 +8,7 @@ from design_contract import compile_contract, prompts
 from design_state import Round
 from design_imagine import imagine
 from design_measure import measure
+from design_reproduce import reproduce
 
 
 def viewport(value):
@@ -42,6 +43,12 @@ def main(argv=None):
     measurement.add_argument('--selected', action='store_true', help='Only owner-selected images are ever measured')
     measurement.add_argument('--dry-run', action='store_true')
     measurement.add_argument('--json', action='store_true')
+    builder = commands.add_parser('reproduce', help='Build each chosen image with the strongest vision model; repair until live checks pass')
+    builder.add_argument('--round', type=Path, required=True)
+    builder.add_argument('--selected', action='store_true', help='Only owner-selected images are ever built')
+    builder.add_argument('--dry-run', action='store_true')
+    builder.add_argument('--retry-uncertain', action='store_true')
+    builder.add_argument('--json', action='store_true')
     polish = commands.add_parser('polish', help='Measure live text, SVG, clipping, alignment and overflow')
     polish.add_argument('url')
     polish.add_argument('--session')
@@ -50,8 +57,13 @@ def main(argv=None):
     polish.add_argument('--out', type=Path)
     polish.add_argument('--render', type=Path)
     polish.add_argument('--json', action='store_true')
+    polish.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.verb == 'reproduce':
+            with Round(args.round) as record:
+                result=reproduce(record,args.dry_run,args.retry_uncertain)
+            print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         if args.verb == 'measure':
             with Round(args.round) as record:
                 result=measure(record,json.loads(args.regions.read_text()) if args.regions else None,args.dry_run)
@@ -61,14 +73,14 @@ def main(argv=None):
                 result=imagine(record,args.per_level,args.size,args.dry_run,args.retry_uncertain)
             print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         if args.verb == 'brief':
-            copy=args.copy.read_text();facts=json.loads(args.facts.read_text())
+            copy=args.copy.read_text();raw_facts=args.facts.read_text();facts=json.loads(raw_facts)
             if args.dry_run:
                 contract=compile_contract(copy,facts,str(args.facts.resolve()))
                 result={'dry_run':True,'round':str(args.round),'paragraphs':len(contract['paragraphs']),
                         'nodes':len(contract['nodes']),'levels':list(prompts(copy,contract)),'paid_requests':0}
             else:
                 with Round(args.round,create=True) as record:
-                    result=record.initialize(copy,facts,str(args.facts.resolve()))
+                    result=record.initialize(copy,facts,str(args.facts.resolve()),raw_facts)
             print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         browser = Browser(args.session)
         source = Path(args.url).expanduser()
@@ -77,6 +89,8 @@ def main(argv=None):
             raise DesignError('audit output exists; choose a new receipt path')
         if args.render and args.render.exists():
             raise DesignError('render exists; choose a new render path')
+        if args.dry_run:
+            print(json.dumps({'dry_run':True,'url':url,'viewport':args.viewport,'paid_requests':0,'operation':'browse live polish and optional render'}));return 0
         try:
             result = browser.polish(url, args.viewport, json.loads(args.config.read_text()) if args.config else {})
             if args.render:

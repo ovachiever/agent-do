@@ -39,6 +39,17 @@ Only images selected by a recorded owner ruling can enter this stage. Original P
 
 Optional region annotations are keyed by chosen image ID. Each region requires `id`, `source`, `x`, `y`, `width`, `height` in original image pixels, and may declare a `role` (`ground`, `ink`, `accent`, `column`, `section`, `diagram`) and diagram `kind`. The tool verifies real bounds and measures area, modal colors, edges, gutters and proportions. Supplied semantic names remain attributed annotations. Unannotated pixels and OCR geometry remain available without pretending that a color mode proves a semantic role. Each image gets measurement JSON, pixel samples, raw OCR and an SVG evidence overlay.
 
+## Reproduce
+
+```bash
+agent-do design reproduce --round .dev/design/new-surface --dry-run
+agent-do design reproduce --round .dev/design/new-surface
+```
+
+One isolated vision-capable frontend builder receives each selected image, observations and frozen content contract. The current strongest text model is looked up, uses maximum supported reasoning and the full published output allowance, and writes ordinary HTML/CSS/inline SVG. There is no design grammar or aesthetic score. Builders see their prior page, actual renders and independently measured failures on repair. Repairs have no iteration limit. Network failures retain their evidence and stop safely; they never select a weaker model.
+
+This reproduction surface is inspectable static HTML with navigation, rather than executable app code. Scripts, frames, canvas, raster text and editable form values cannot stand in for auditable page content. Every viewport must pass the exact copy/fact checker and complete live polish before a page becomes a ballot candidate. Each attempt, implementation decision, audit, render and provider usage receipt is retained. A page ballot is still the owner's judgment; passing mechanical checks is not approval.
+
 ## Polish
 
 ```bash

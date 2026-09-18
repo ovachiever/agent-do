@@ -41,6 +41,11 @@ class PolishBrowserTests(unittest.TestCase):
         self.assertTrue(result['findings']['orphans'])
         self.assertEqual(result['findings']['orphans'][0]['last_word'], 'three')
 
+    def test_inline_fact_binding_does_not_split_layout_analysis(self):
+        result=self.audit('<p data-copy-id="p1" style="width:9ch">one two <span data-fact-id="n">three</span></p>')
+        self.assertEqual(result['findings']['orphans'][0]['last_word'],'three')
+        self.assertEqual(result['text']['copies']['p1'],'one two three')
+
     def test_protected_long_label_has_no_character_exemption(self):
         label = 'An explicitly protected caption with far more than sixty characters in this fixture'
         result = self.audit('<label style="display:block;width:24ch">' + label + '</label>')
@@ -93,6 +98,15 @@ class PolishBrowserTests(unittest.TestCase):
     def test_transparent_or_offscreen_copy_does_not_count(self):
         result = self.audit('<p data-copy-id="p1" style="color:transparent">Invisible.</p><p data-copy-id="p2" style="position:absolute;left:-9000px">Offscreen.</p>')
         self.assertEqual(result['text']['copies'], {})
+
+    def test_svg_rectangular_clip_path_is_measured(self):
+        result=self.audit('<svg width="400" height="80"><defs><clipPath id="clip"><rect width="80" height="60"/></clipPath></defs><g clip-path="url(#clip)"><text x="20" y="30">Long clipped caption</text></g></svg>')
+        self.assertTrue(result['findings']['clipped_text'])
+        self.assertTrue(any('clipPath' in f['clipped_by'] for f in result['findings']['clipped_text']))
+
+    def test_uninspectable_generated_text_cannot_pass(self):
+        result=self.audit('<p>Owner copy.</p>','p::after{content:"Invented motto."}')
+        self.assertFalse(result['complete']);self.assertTrue(result['coverage']['uninspected_generated_content'])
 
 
 if __name__ == '__main__':

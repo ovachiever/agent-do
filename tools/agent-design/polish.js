@@ -32,7 +32,8 @@ async function designPolish(config = {}) {
   const owner = el => {
     if (el.closest('svg text')) return el.closest('svg text');
     for (let p=el; p && p!==document.body; p=p.parentElement) {
-      if (p.matches('button,label,legend,figcaption,summary,[data-copy-id],[data-node-id],[data-fact-id]')) return p;
+      // Inline provenance spans must not split a paragraph's wrapping/duplicate analysis.
+      if (p.matches('button,label,legend,figcaption,summary,[data-polish-phrase]')) return p;
       const d=getComputedStyle(p).display;
       if (!['inline','contents'].includes(d)) return p;
     }
@@ -48,6 +49,29 @@ async function designPolish(config = {}) {
     return boxes.length ? Math.max(...boxes.map(r=>r.height)) : parseFloat(getComputedStyle(el).fontSize);
   };
   const findings={orphans:[],phrase_wraps:[],duplicates:[],floating_controls:[],clipped_text:[],overflow:[]};
+  const unsupportedClips=new Set();
+  const clipBounds=el=>{
+    const style=getComputedStyle(el),value=style.clipPath;
+    if (style.maskImage && style.maskImage!=='none') unsupportedClips.add(selector(el)+' mask');
+    if (!value || value==='none') return null;
+    const match=value.match(/url\(["']?(?:[^#]*)#([^"')]+)["']?\)/u);
+    const clip=match?document.getElementById(match[1]):null;
+    if (!(el instanceof SVGGraphicsElement) || !clip || clip.children.length!==1 || clip.children[0].localName!=='rect') {
+      unsupportedClips.add(selector(el)+' '+value);return null;
+    }
+    const shape=clip.children[0],box=shape.getBBox();
+    if (shape.rx.baseVal.value || shape.ry.baseVal.value) {unsupportedClips.add(selector(el)+' rounded clip');return null;}
+    let matrix=el.getScreenCTM();
+    if (clip.clipPathUnits.baseVal===SVGUnitTypes.SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
+      const target=el.getBBox();matrix=matrix.translate(target.x,target.y).scaleNonUniform(target.width,target.height);
+    }
+    const clipTransform=clip.transform.baseVal.consolidate();if (clipTransform) matrix=matrix.multiply(clipTransform.matrix);
+    const shapeTransform=shape.transform.baseVal.consolidate();if (shapeTransform) matrix=matrix.multiply(shapeTransform.matrix);
+    // A rotated clipping rectangle cannot be verified by its axis-aligned bounds alone.
+    if (matrix.b!==0 || matrix.c!==0) {unsupportedClips.add(selector(el)+' rotated clip');return null;}
+    const a=new DOMPoint(box.x,box.y).matrixTransform(matrix),b=new DOMPoint(box.x+box.width,box.y+box.height).matrixTransform(matrix);
+    return {left:Math.min(a.x,b.x),right:Math.max(a.x,b.x),top:Math.min(a.y,b.y),bottom:Math.max(a.y,b.y)};
+  };
   const groups=new Map(), ordered=[];
   const walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
@@ -115,6 +139,10 @@ async function designPolish(config = {}) {
     for (const word of words) {
       for (let p=g.el;p;p=p.parentElement) {
         const style=getComputedStyle(p), b=p.getBoundingClientRect();
+        const clipping=clipBounds(p);
+        if (clipping && (word.left<clipping.left-pixel || word.right>clipping.right+pixel || word.top<clipping.top-pixel || word.bottom>clipping.bottom+pixel)) {
+          if (!findings.clipped_text.some(f=>f.selector===sel && f.clipped_by===selector(p)+' clipPath')) findings.clipped_text.push({selector:sel,text,clipped_by:selector(p)+' clipPath',text_rect:word,clip_rect:clipping,tolerance_px:pixel,threshold_source:'one physical pixel converted through devicePixelRatio'});
+        }
         const clipX=['hidden','clip'].includes(style.overflowX), clipY=['hidden','clip'].includes(style.overflowY);
         if (!(clipX || clipY)) continue;
         const left=b.left+parseFloat(style.borderLeftWidth),right=b.right-parseFloat(style.borderRightWidth);
@@ -166,8 +194,22 @@ async function designPolish(config = {}) {
   }
   for (const key of Object.keys(copies)) copies[key]=norm(copies[key]);
   const fontFailures=[...document.fonts].filter(f=>f.status==='error').map(f=>f.family);
-  const coverage={text_runs:runs.length,svg_text_runs:runs.filter(r=>r.selector.includes('text')).length,fonts:document.fonts.status,font_failures:fontFailures,uninspected_frames:document.querySelectorAll('iframe').length,shadow_roots:all.filter(e=>e.shadowRoot).length};
-  const complete=fontFailures.length===0 && coverage.uninspected_frames===0 && coverage.shadow_roots===0;
+  const generated=all.flatMap(e=>['::before','::after'].flatMap(p=>{
+    const s=getComputedStyle(e,p),content=s.content;
+    return s.display!=='none' && content && !['none','normal','""','\'\''].includes(content)?[{selector:selector(e)+p,content}]:[];
+  }));
+  const frames=[...document.querySelectorAll('iframe')],verifiedFrames=[];
+  for (const frame of frames) {
+    const proof=(config.verified_frames || []).find(p=>frame.matches(p.selector));
+    if (!proof || frame.clientWidth!==proof.width || frame.clientHeight!==proof.height) continue;
+    const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(frame.srcdoc));
+    const hash=[...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    if (hash===proof.sha256) verifiedFrames.push({selector:proof.selector,source_sha256:hash,audit_sha256:proof.audit_sha256,viewport:{width:proof.width,height:proof.height}});
+  }
+  const coverage={text_runs:runs.length,svg_text_runs:runs.filter(r=>r.selector.includes('text')).length,fonts:document.fonts.status,font_failures:fontFailures,uninspected_frames:frames.length-verifiedFrames.length,independently_verified_frames:verifiedFrames,shadow_roots:all.filter(e=>e.shadowRoot).length,
+    uninspected_generated_content:generated,uninspected_canvas:all.filter(e=>e.localName==='canvas').length,
+    uninspected_clipping:[...unsupportedClips],uninspected_control_values:all.filter(e=>e.matches('input:not([type=hidden]),textarea') && (e.value || e.getAttribute('placeholder'))).map(e=>selector(e))};
+  const complete=fontFailures.length===0 && coverage.uninspected_frames===0 && coverage.shadow_roots===0 && generated.length===0 && coverage.uninspected_canvas===0 && coverage.uninspected_control_values.length===0 && unsupportedClips.size===0;
   return {schema:1,url:location.href,viewport:{width:innerWidth,height:innerHeight,device_pixel_ratio:devicePixelRatio},coverage,complete,
     clean:complete && Object.values(findings).every(a=>a.length===0),findings,runs,text:{rendered,copies,bindings},
     fact_marks:[...document.querySelectorAll('[data-fact-id][data-value]')].map(e=>({selector:selector(e),fact_id:e.dataset.factId,value:e.dataset.value,visible:visible(e)})),

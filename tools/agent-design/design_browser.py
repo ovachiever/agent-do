@@ -52,9 +52,16 @@ class Browser:
             raise DesignError('browse viewport did not take effect')
 
     def polish(self, url, viewport, config=None):
+        config=config or {}
+        for frame in config.get('verified_frames',[]):
+            raw=Path(frame['audit_path']).read_bytes();audit=json.loads(raw)
+            if hashlib.sha256(raw).hexdigest()!=frame['audit_sha256'] or not audit.get('clean') or audit.get('html_sha256')!=frame['sha256']:
+                raise DesignError('embedded frame proof does not match a passing source audit')
+            if not any(v.get('clean') and (v['viewport']['width'],v['viewport']['height'])==(frame['width'],frame['height']) for v in audit['viewports']):
+                raise DesignError('embedded frame viewport was not audited')
         self.open(url, viewport)
         source = (TOOL / 'polish.js').read_text()
-        result = self.evaluate('(' + source + ')(' + json.dumps(config or {}) + ')')
+        result = self.evaluate('(' + source + ')(' + json.dumps(config) + ')')
         result['audit_sha256'] = hashlib.sha256(source.encode()).hexdigest()
         result['session'] = self.session
         return result

@@ -115,6 +115,20 @@ class RoundTests(unittest.TestCase):
             r.initialize('Owner copy.',facts())
             with self.assertRaises(DesignError):r.transition('pages_ready')
 
+    def test_interrupted_initialization_resumes_original_bytes(self):
+        self.path.mkdir()
+        raw=json.dumps(facts(),indent=4)+'\n'
+        (self.path/'initialization.json').write_text(json.dumps({'copy':'Owner copy.','facts':facts(),'source':'facts.json','raw_facts':raw}))
+        with Round(self.path) as r:
+            self.assertEqual(r.state['stage'],'briefed')
+            self.assertEqual(r.resolve('inputs/facts.json').read_text(),raw)
+
+    def test_nested_state_references_survive_checkpoints(self):
+        with Round(self.path,create=True) as r:
+            r.initialize('Owner copy.',facts());nested=r.state.setdefault('builders',{})
+            r.save('checkpoint');nested['one']={'attempts':[]};r.save('second checkpoint')
+        with Round(self.path) as r:self.assertIn('one',r.state['builders'])
+
 
 if __name__=='__main__':
     (TOOL.parents[1]/'.dev').mkdir(exist_ok=True)

@@ -22,12 +22,12 @@ def compile_contract(copy, facts, source='facts.json'):
         raise DesignError('the approved copy is empty')
     whole=normalize(copy)
     nodes=[]; values={}; ids=set()
-    for raw in facts['nodes']:
+    for index,raw in enumerate(facts['nodes']):
         if not isinstance(raw,dict) or not isinstance(raw.get('id'),str) or not raw['id'] or raw['id'] in ids:
             raise DesignError('every fact node needs a unique nonempty id')
         node_id=raw['id'];ids.add(node_id)
         node={k:raw[k] for k in ('id','kind','role','group','text','href','order','data','unit','required','occurrences') if k in raw}
-        node['source']=raw.get('source') or source+'#/nodes/'+node_id
+        node['source']=raw.get('source') or source+'#/nodes/'+str(index)
         if 'text' in node and not isinstance(node['text'],str):
             raise DesignError('node text must be a string: '+node_id)
         if node.get('role') in ('body','prose','paragraph') and normalize(node.get('text','')) not in whole:

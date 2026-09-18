@@ -8,7 +8,8 @@ tools:
       brief: 'brief --copy COPY --facts FACTS --round ROUND [--dry-run] [--json]'
       imagine: 'imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]'
       measure: 'measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]'
-      polish: 'polish <url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--json]'
+      reproduce: 'reproduce --round ROUND [--selected] [--dry-run] [--retry-uncertain] [--json]'
+      polish: 'polish <url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--dry-run] [--json]'
     examples:
     - intent: check a design for clipped captions and orphan words
       command: agent-design polish page.html --viewport 1440x1000 --json
@@ -20,17 +21,26 @@ tools:
       - agent-do design polish
       default_command: polish
     dependencies: [python3, agent-browse, tesseract]
+    credentials:
+      optional: [OPENAI_API_KEY]
+      features:
+        OPENAI_API_KEY:
+          unlocks: Image generation and vision-capable frontend reproduction
+          required_for: [imagine, reproduce]
+          recommended: true
+          setup: agent-do creds store OPENAI_API_KEY --stdin
     concurrency: mixed
     contracts:
-      connect: [brief, imagine, measure, polish]
-      snapshot: [brief, imagine, measure, polish]
-      interact: [brief, imagine, measure, polish]
-      verify: [brief, imagine, measure, polish]
-      save: [brief, imagine, measure, polish]
+      connect: [brief, imagine, measure, reproduce, polish]
+      snapshot: [brief, imagine, measure, reproduce, polish]
+      interact: [brief, imagine, measure, reproduce, polish]
+      verify: [brief, imagine, measure, reproduce, polish]
+      save: [brief, imagine, measure, reproduce, polish]
       attributes:
         brief: [composite, own_state]
         imagine: [composite, long_running]
         measure: [composite, own_state]
+        reproduce: [composite, long_running]
         polish: [composite, own_state]
   deai:
     description: Offline prose-tell linter with measured ceilings and explicit register policies
