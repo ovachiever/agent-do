@@ -6,6 +6,7 @@ tools:
     - preserve audit evidence with viewport and threshold provenance
     commands:
       brief: 'brief --copy COPY --facts FACTS --round ROUND [--dry-run] [--json]'
+      imagine: 'imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]'
       polish: 'polish <url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--json]'
     examples:
     - intent: check a design for clipped captions and orphan words
@@ -18,15 +19,16 @@ tools:
       - agent-do design polish
       default_command: polish
     dependencies: [python3, agent-browse]
-    concurrency: read
+    concurrency: mixed
     contracts:
-      connect: [brief, polish]
-      snapshot: [brief, polish]
-      interact: [brief, polish]
-      verify: [brief, polish]
-      save: [brief, polish]
+      connect: [brief, imagine, polish]
+      snapshot: [brief, imagine, polish]
+      interact: [brief, imagine, polish]
+      verify: [brief, imagine, polish]
+      save: [brief, imagine, polish]
       attributes:
         brief: [composite, own_state]
+        imagine: [composite, long_running]
         polish: [composite, own_state]
   deai:
     description: Offline prose-tell linter with measured ceilings and explicit register policies

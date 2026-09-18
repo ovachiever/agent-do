@@ -17,6 +17,17 @@ Each prompt contains the whole copy verbatim and all labels and facts. Exact rec
 
 Rounds freeze inputs and prompts by hash, retain every manifest revision, and use a process-held mutation lock. Stages advance from brief to images, image ballot, ruling, measurements, pages, page ballot and final ruling. Changed approved inputs require a new round. The copy checker reads rendered text boundaries, requires every paragraph once in order, rejects even short invented lines, and binds displayed figures to specific source facts.
 
+## Imagine
+
+```bash
+agent-do design imagine --round .dev/design/new-surface --dry-run
+agent-do design imagine --round .dev/design/new-surface --per-level 2
+```
+
+Each invocation refreshes OpenAI's official model catalog, selected model page and image guide through `agent-do context`. It selects the uniquely described most capable model, uses maximum published quality and portrait area, and freezes the source documents. Unreadable or ambiguous capability changes are reported, never replaced by guessed defaults. Only an explicit model-availability error permits `gpt-image-2`; auth, rate-limit and server errors stop with their receipts.
+
+Credentials resolve privately through `agent-do creds`. Every requested generation runs, without a price prerequisite or local spend limit. Each request records prompt, level, requested/returned model, dimensions, null unsupported seed, provider request ID and actual usage (or `usage not returned`). PNG checksums and dimensions are verified. Partial rounds resume without regenerating successful slots; an uncertain transport outcome requires explicit `--retry-uncertain`. Failed requests remain in the record.
+
 ## Polish
 
 ```bash

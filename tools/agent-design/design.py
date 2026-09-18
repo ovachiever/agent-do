@@ -6,6 +6,7 @@ import sys
 from design_browser import Browser, DesignError
 from design_contract import compile_contract, prompts
 from design_state import Round
+from design_imagine import imagine
 
 
 def viewport(value):
@@ -27,6 +28,13 @@ def main(argv=None):
     brief.add_argument('--round', type=Path, required=True)
     brief.add_argument('--dry-run', action='store_true')
     brief.add_argument('--json', action='store_true')
+    image = commands.add_parser('imagine', help='Generate every requested image using refreshed strongest-model authority')
+    image.add_argument('--round', type=Path, required=True)
+    image.add_argument('--per-level', type=int, default=2, help='Generations per prompt level; owner trial default is 2')
+    image.add_argument('--size', help='Portrait WIDTHxHEIGHT within current provider limits; defaults to maximum published area')
+    image.add_argument('--dry-run', action='store_true')
+    image.add_argument('--retry-uncertain', action='store_true', help='Explicitly issue replacements for requests whose outcome was lost')
+    image.add_argument('--json', action='store_true')
     polish = commands.add_parser('polish', help='Measure live text, SVG, clipping, alignment and overflow')
     polish.add_argument('url')
     polish.add_argument('--session')
@@ -37,6 +45,10 @@ def main(argv=None):
     polish.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.verb == 'imagine':
+            with Round(args.round) as record:
+                result=imagine(record,args.per_level,args.size,args.dry_run,args.retry_uncertain)
+            print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         if args.verb == 'brief':
             copy=args.copy.read_text();facts=json.loads(args.facts.read_text())
             if args.dry_run:
