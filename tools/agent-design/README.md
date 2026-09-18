@@ -50,6 +50,34 @@ One isolated vision-capable frontend builder receives each selected image, obser
 
 This reproduction surface is inspectable static HTML with navigation, rather than executable app code. Scripts, frames, canvas, raster text and editable form values cannot stand in for auditable page content. Every viewport must pass the exact copy/fact checker and complete live polish before a page becomes a ballot candidate. Each attempt, implementation decision, audit, render and provider usage receipt is retained. A page ballot is still the owner's judgment; passing mechanical checks is not approval.
 
+## Claude ballots
+
+```bash
+agent-do design ballot images --round .dev/design/new-surface --claude-session SESSION
+# Claude publishes /ballot, then reads the submitted page and returns real receipts.
+agent-do design ballot images --round .dev/design/new-surface --submitted submitted.html --receipt artifact-read.json
+# After measurement and passing reproduction:
+agent-do design ballot pages --round .dev/design/new-surface --claude-session SESSION
+agent-do design ballot pages --round .dev/design/new-surface --submitted page-submitted.html --receipt page-read.json
+```
+
+The local command prepares, blinds and audits the ballot, then calls `agent-do coord drop add` for an active Claude Code session. If there is exactly one active Claude peer, it can be selected automatically. Publication remains **ballot pending**. The generated `CLAUDE-HANDOFF.md` tells that session to use `/ballot` with the Artifact capability, publish, verify readback, wait for Erik, and return the real submitted page and raw tool read receipt. There is no alternate publisher.
+
+Candidates use neutral shuffled labels, separate sealed keys for images and pages, and original judging dimensions. Image metadata is removed from public copies without changing pixels. Page copies are audited again after metadata removal and embedded in sandboxed frames without same-origin access. Independent source audits, exact frame bytes and viewport dimensions must match before frame coverage can pass the ballot-chrome audit.
+
+The self-saving runtime captures its original template at load and publishes only on Submit. It preserves note whitespace and typos, including safe handling of text containing `</script>`. Import checks the Claude URL/version/read receipt, exact candidate content, known note keys and full-note selection evidence. The raw Artifact read is supplied by the Claude host; this process cannot independently call that capability. Unknown or ambiguous selection stays pending. Each imported ruling archives the submitted page, receipt, exact notes and unsealed key; `labels.yaml` is the current projection of that append-only history.
+
+## Five-beat contracts
+
+| Verb | Connect | Snapshot | Interact | Verify | Save |
+| --- | --- | --- | --- | --- | --- |
+| brief | Approved copy and node-tagged facts | Original bytes and hashes | Compile three prompts | Complete copy, IDs, order and viewports | Inputs, prompts, manifest |
+| imagine | Refreshed official model authority and private creds | Request and capability evidence | Each requested image generation | PNG content, dimensions and request outcome | Images, errors, raw usage and provider receipts |
+| measure | Owner-selected images | Original pixels and sourced regions | Canvas samples and TSV OCR | Real bounds, confidence and unavailable fields | JSON measurements, OCR, SVG overlay |
+| reproduce | Image ruling, measurements and strongest text model | Isolated image/content packet | Frontend construction and uncapped repair | Independent copy, facts and live polish at every viewport | All attempts, final HTML, renders and usage |
+| ballot | Passing candidates and active Claude recipient, or actual Artifact read | Shuffled key and immutable public payload | Coord handoff, or import exact notes | Candidate identity, audits, receipt and explicit choices | Pending handoff, or append-only ruling and unsealed key |
+| polish | Dedicated browse session | Actual viewport, fonts and rendered text | Read-only geometry measurement | Sourced/relative thresholds and coverage | Complete clean/findings/incomplete audit |
+
 ## Polish
 
 ```bash
@@ -75,4 +103,4 @@ agent-do harness contracts validate
 ./test.sh
 ```
 
-The browser tests use the real browse command against local synthetic pages. They do not spend tokens or publish ballots.
+The browser tests use the real browse command against local synthetic pages. Provider and Artifact transports are clearly marked test fixtures; their receipts are never rehearsal evidence. Tests do not spend tokens or publish ballots. A rehearsal requires a new surface and owner-approved copy/facts. Home remains evidence and regression material. No-spend dry runs emit prerequisites and planned work; they never invent images, votes or successful audits.

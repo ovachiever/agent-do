@@ -158,7 +158,12 @@ def reproduce(record,dry_run=False,retry_uncertain=False,provider=None,lookup=au
                 pending={'path':str(folder.relative_to(record.path)),'finished':False};builder['attempts'].append(pending)
                 record.save('builder '+key+' request prepared')
                 payload=builder_request(current,contract,image,measurement,previous)
-                receipt=provider.post('responses',payload,folder)
+                try:receipt=provider.post('responses',payload,folder)
+                except DesignError:
+                    for name in ('error.json','uncertain.json'):
+                        if (folder/name).exists():record.record_usage(folder/name,json.loads((folder/name).read_text()),'reproduce')
+                    raise
+            record.record_usage(folder/'response.json',receipt,'reproduce')
             try:output=response_output(receipt)
             except DesignError as error:
                 pending['finished']=True;pending['status']='invalid_output';pending['error']=str(error)
@@ -177,7 +182,6 @@ def reproduce(record,dry_run=False,retry_uncertain=False,provider=None,lookup=au
                 audit=auditor(page,contract,check_path)
             pending.update({'finished':True,'status':'passed' if audit['clean'] else 'repair_needed',
                             'audit':str((check_path/'audit.json').relative_to(record.path)),'usage':receipt.get('usage','usage not returned')})
-            record.state['usage'].append({'stage':'reproduce','image_id':key,'receipt':str((folder/'response.json').relative_to(record.path)),'usage':pending['usage']})
             if audit['clean']:
                 record.state['pages'].append({'id':'page-'+key,'image_id':key,'path':str(page.relative_to(record.path)),
                     'sha256':digest(page.read_bytes()),'audit':pending['audit'],'audit_sha256':digest((check_path/'audit.json').read_bytes()),

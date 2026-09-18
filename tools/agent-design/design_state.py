@@ -116,3 +116,10 @@ class Round:
     def attempt(self,kind):
         path=self.path/kind/uuid.uuid4().hex;path.mkdir(parents=True)
         return path
+
+    def record_usage(self,path,receipt,stage):
+        relative=str(Path(path).relative_to(self.path))
+        if not any(row.get('receipt')==relative for row in self.state['usage']):
+            usage=receipt.get('usage')
+            self.state['usage'].append({'stage':stage,'receipt':relative,'usage':usage if usage is not None else 'usage not returned'})
+            self.save('provider receipt retained: '+relative)

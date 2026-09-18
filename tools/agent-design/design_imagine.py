@@ -48,11 +48,16 @@ def imagine(record,per_level=2,size=None,dry_run=False,retry_uncertain=False,pro
                     try:
                         receipt=provider.post('images/generations',request,attempt);break
                     except APIError as error:
+                        if (attempt/'error.json').exists():record.record_usage(attempt/'error.json',json.loads((attempt/'error.json').read_text()),'imagine')
                         if chosen['model']!=FALLBACK and error.model_unavailable():
                             chosen=lookup('image',model=FALLBACK)
                             write_new(attempt/'fallback.json',{'to':FALLBACK,'reason':str(error),'authority_checked_at':chosen['checked_at']})
                             continue
                         raise
+                    except DesignError:
+                        if (attempt/'uncertain.json').exists():record.record_usage(attempt/'uncertain.json',json.loads((attempt/'uncertain.json').read_text()),'imagine')
+                        raise
+            record.record_usage(attempt/'response.json',receipt,'imagine')
             data=image_from_response(receipt,request['size'])
             image_path=attempt/'image.png'
             if image_path.exists():
@@ -66,7 +71,6 @@ def imagine(record,per_level=2,size=None,dry_run=False,retry_uncertain=False,pro
                    'prompt_sha256':digest(prompt),'request_id':receipt.get('request_id'),
                    'receipt':str((attempt/'response.json').relative_to(record.path)),'usage':receipt.get('usage','usage not returned')}
             record.state['images'].append(image)
-            record.state['usage'].append({'stage':'imagine','id':image['id'],'receipt':image['receipt'],'usage':image['usage']})
             record.save('image '+image['id']+' decoded and preserved')
     record.transition('images_ready')
     return {'stage':record.state['stage'],'images':record.state['images'],'usage':record.state['usage']}

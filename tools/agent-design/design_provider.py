@@ -138,7 +138,7 @@ class Provider:
             with urllib.request.urlopen(request) as response:
                 result=self.redact(json.loads(response.read()))
                 receipt={'received_at':now(),'request_id':response.headers.get('x-request-id'),
-                         'client_request_id':request_id,'usage':result.get('usage','usage not returned'),'response':result}
+                         'client_request_id':request_id,'usage':result.get('usage') if result.get('usage') is not None else 'usage not returned','response':result}
                 write_new(folder/'response.json',receipt)
                 return receipt
         except urllib.error.HTTPError as error:
@@ -168,9 +168,23 @@ def png_size(data):
             offset+=length+12
             if tag==b'IEND':ended=True;break
         if not ended or not image_data or offset!=len(data):raise DesignError('incomplete PNG image')
+        width,height,depth,color,compression,filtering,interlace=struct.unpack('>IIBBBBB',data[16:29])
+        allowed={0:(1,2,4,8,16),2:(8,16),3:(1,2,4,8),4:(8,16),6:(8,16)}
+        if not width or not height or depth not in allowed.get(color,()) or compression or filtering or interlace not in (0,1):raise DesignError('invalid PNG header')
+        channels={0:1,2:3,3:1,4:2,6:4}[color]
         decoded=zlib.decompress(b''.join(image_data))
-        if not decoded:raise DesignError('empty PNG image')
-        return struct.unpack('>II',data[16:24])
+        # PNG scanline sizes and the seven Adam7 passes are format constants, not policy caps.
+        passes=[(0,0,1,1)] if interlace==0 else [(0,0,8,8),(4,0,8,8),(0,4,4,8),(2,0,4,4),(0,2,2,4),(1,0,2,2),(0,1,1,2)]
+        position=0
+        for x,y,dx,dy in passes:
+            columns=max(0,(width-x+dx-1)//dx);rows=max(0,(height-y+dy-1)//dy)
+            if not columns or not rows:continue
+            stride=1+(columns*channels*depth+7)//8
+            for _ in range(rows):
+                if position+stride>len(decoded) or decoded[position] not in range(5):raise DesignError('invalid PNG scanline data')
+                position+=stride
+        if position!=len(decoded):raise DesignError('PNG pixel data does not match its declared dimensions')
+        return width,height
     except (struct.error,zlib.error):raise DesignError('malformed PNG image') from None
 
 

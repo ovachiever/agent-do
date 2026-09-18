@@ -2,6 +2,10 @@ tools:
   design:
     description: Image-first design workflow with approved copy and measured browser polish
     capabilities:
+    - freeze owner copy and facts into exact, half and open image prompts
+    - generate images with current strongest-model authority and actual usage receipts
+    - measure chosen images and reproduce them with independent browser repair checks
+    - hand blind self-saving ballots to Claude Code and import verbatim owner rulings
     - measure rendered typography, inline text, SVG captions, clipping, controls and overflow
     - preserve audit evidence with viewport and threshold provenance
     commands:
@@ -9,17 +13,19 @@ tools:
       imagine: 'imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]'
       measure: 'measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]'
       reproduce: 'reproduce --round ROUND [--selected] [--dry-run] [--retry-uncertain] [--json]'
+      ballot: 'ballot images|pages --round ROUND [--publish] [--claude-session ID] [--submitted HTML --receipt JSON] [--dry-run] [--json]'
       polish: 'polish <url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--dry-run] [--json]'
     examples:
     - intent: check a design for clipped captions and orphan words
       command: agent-design polish page.html --viewport 1440x1000 --json
     routing:
-      discover_keywords: [design, polish, orphan, clipped, typography, layout]
+      discover_keywords: [design, image-first, ballot, reproduce, polish, orphan, clipped, typography, layout]
       prompt_patterns:
-      - '\b(design polish|polish audit|clipped captions)\b'
+      - '\b(design (brief|imagine|ballot|measure|reproduce|polish)|image.first design|polish audit|clipped captions)\b'
       recommended_entrypoints:
+      - agent-do design brief
       - agent-do design polish
-      default_command: polish
+      default_command: brief
     dependencies: [python3, agent-browse, tesseract]
     credentials:
       optional: [OPENAI_API_KEY]
@@ -31,16 +37,17 @@ tools:
           setup: agent-do creds store OPENAI_API_KEY --stdin
     concurrency: mixed
     contracts:
-      connect: [brief, imagine, measure, reproduce, polish]
-      snapshot: [brief, imagine, measure, reproduce, polish]
-      interact: [brief, imagine, measure, reproduce, polish]
-      verify: [brief, imagine, measure, reproduce, polish]
-      save: [brief, imagine, measure, reproduce, polish]
+      connect: [brief, imagine, measure, reproduce, ballot, polish]
+      snapshot: [brief, imagine, measure, reproduce, ballot, polish]
+      interact: [brief, imagine, measure, reproduce, ballot, polish]
+      verify: [brief, imagine, measure, reproduce, ballot, polish]
+      save: [brief, imagine, measure, reproduce, ballot, polish]
       attributes:
         brief: [composite, own_state]
         imagine: [composite, long_running]
         measure: [composite, own_state]
         reproduce: [composite, long_running]
+        ballot: [composite, polymorphic]
         polish: [composite, own_state]
   deai:
     description: Offline prose-tell linter with measured ceilings and explicit register policies

@@ -50,7 +50,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [db](#db) | Control database clients | mixed | 5 |
 | [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | read-only | 4 |
 | [debug](#debug) | Control debuggers | read | 5 |
-| [design](#design) | Image-first design workflow with approved copy and measured browser polish | mixed | 5 |
+| [design](#design) | Image-first design workflow with approved copy and measured browser polish | mixed | 6 |
 | [discord](#discord) | Control Discord | mixed | 2 |
 | [dns](#dns) | DNS lookups and resolution diagnostics (read-only; record writes live in namecheap/cloudflare) | read | 2 |
 | [docker](#docker) | Control Docker containers | write | 7 |
@@ -1502,6 +1502,10 @@ Concurrency: `mixed`
 
 **Capabilities**
 
+- freeze owner copy and facts into exact, half and open image prompts
+- generate images with current strongest-model authority and actual usage receipts
+- measure chosen images and reproduce them with independent browser repair checks
+- hand blind self-saving ballots to Claude Code and import verbatim owner rulings
 - measure rendered typography, inline text, SVG captions, clipping, controls and overflow
 - preserve audit evidence with viewport and threshold provenance
 
@@ -1511,6 +1515,7 @@ Concurrency: `mixed`
 - `imagine`: imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]
 - `measure`: measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]
 - `reproduce`: reproduce --round ROUND [--selected] [--dry-run] [--retry-uncertain] [--json]
+- `ballot`: ballot images|pages --round ROUND [--publish] [--claude-session ID] [--submitted HTML --receipt JSON] [--dry-run] [--json]
 - `polish`: polish \<url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--dry-run] [--json]
 
 **Examples**
@@ -1527,9 +1532,10 @@ agent-do design polish page.html --viewport 1440x1000 --json
 
 **Safety (from contracts)**
 
-- Write (connect/interact/save): `brief`, `imagine`, `measure`, `polish`, `reproduce`
+- Write (connect/interact/save): `ballot`, `brief`, `imagine`, `measure`, `polish`, `reproduce`
 - long_running (daemon/stream/session; may never return): `imagine`, `reproduce`
-- composite (one call performs several beats internally): `brief`, `imagine`, `measure`, `polish`, `reproduce`
+- polymorphic (beat decided by payload or flag at call time): `ballot`
+- composite (one call performs several beats internally): `ballot`, `brief`, `imagine`, `measure`, `polish`, `reproduce`
 - own_state (writes only its own cache/state; parallel-safe): `brief`, `measure`, `polish`
 
 ### discord
