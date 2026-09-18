@@ -1,4 +1,31 @@
 tools:
+  design:
+    description: Image-first design workflow with approved copy and measured browser polish
+    capabilities:
+    - measure rendered typography, inline text, SVG captions, clipping, controls and overflow
+    - preserve audit evidence with viewport and threshold provenance
+    commands:
+      polish: 'polish <url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--json]'
+    examples:
+    - intent: check a design for clipped captions and orphan words
+      command: agent-design polish page.html --viewport 1440x1000 --json
+    routing:
+      discover_keywords: [design, polish, orphan, clipped, typography, layout]
+      prompt_patterns:
+      - '\b(design polish|polish audit|clipped captions)\b'
+      recommended_entrypoints:
+      - agent-do design polish
+      default_command: polish
+    dependencies: [python3, agent-browse]
+    concurrency: read
+    contracts:
+      connect: [polish]
+      snapshot: [polish]
+      interact: [polish]
+      verify: [polish]
+      save: [polish]
+      attributes:
+        polish: [composite, own_state]
   deai:
     description: Offline prose-tell linter with measured ceilings and explicit register policies
     capabilities:
