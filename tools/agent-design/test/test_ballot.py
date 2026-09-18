@@ -64,6 +64,27 @@ class BallotTests(unittest.TestCase):
         result=import_ruling(self.r,'images',submitted,receipt)
         self.assertEqual(result['stage'],'image_ballot_pending');self.assertEqual(result['status'],'selection needs clarification')
 
+    def test_resolved_reading_of_same_notes_preserves_both_receipts(self):
+        submitted,receipt,note,field=self.submission(resolved=False)
+        import_ruling(self.r,'images',submitted,receipt)
+        prior=self.r.resolve(self.r.state['rulings'][0]['path'])/'artifact-receipt.json'
+        prior_bytes=prior.read_bytes()
+        value=json.loads(receipt.read_text());value['selection_status']='complete'
+        resolved=self.root/'resolved-receipt.json';resolved.write_text(json.dumps(value))
+        result=import_ruling(self.r,'images',submitted,resolved)
+        self.assertEqual(result['stage'],'images_ruled')
+        self.assertEqual(len(self.r.state['rulings']),2)
+        self.assertEqual(prior.read_bytes(),prior_bytes)
+        self.assertEqual(self.r.state['rulings'][0]['selected_labels'],None)
+        self.assertEqual(self.r.state['rulings'][1]['feedback'][field],note)
+        self.assertEqual(import_ruling(self.r,'images',submitted,resolved)['status'],'ruling already recorded')
+        value['selected_labels']=[];resolved.write_text(json.dumps(value))
+        with self.assertRaises(DesignError):import_ruling(self.r,'images',submitted,resolved)
+
+    def test_import_before_ballot_has_a_structured_prerequisite_error(self):
+        with self.assertRaisesRegex(DesignError,'no prepared images ballot'):
+            import_ruling(self.r,'images',self.root/'absent.html',self.root/'absent.json')
+
     def test_changed_candidate_or_fabricated_host_is_rejected(self):
         submitted,receipt,_,_=self.submission()
         original=submitted.read_text();submitted.write_text(original.replace('Candidate 1','Changed 1'))

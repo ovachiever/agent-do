@@ -182,7 +182,9 @@ Known note keys: {json.dumps(ballot['keys'])}
 
 def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
     pending,ruled=('image_ballot_pending','images_ruled') if kind=='images' else ('page_ballot_pending','ruled')
-    ballot=record.state['ballots'][kind];folder=record.resolve(ballot['path'])
+    ballot=record.state['ballots'].get(kind)
+    if not ballot:raise DesignError('no prepared '+kind+' ballot exists for this round')
+    folder=record.resolve(ballot['path'])
     source=Path(submitted).read_text();receipt=json.loads(Path(receipt_path).read_text())
     if ballot_fingerprint(source)!=ballot['fingerprint']:raise DesignError('submitted ballot changed content outside fb-state')
     state=json.loads(STATE.search(source)[1]);feedback=state.get('feedback')
@@ -206,7 +208,13 @@ def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
             if not any(e.get('label')==label and e.get('key') in feedback and e.get('quote')==feedback[e['key']] and e.get('quote','').strip() for e in evidence):
                 raise DesignError('selected candidate has no exact owner-note evidence: '+label)
     fingerprint=digest(source)
-    previous=next((r for r in record.state.get('rulings',[]) if r['submitted_sha256']==fingerprint),None)
+    # A host may first archive an ambiguous reading and then resolve the same
+    # submitted notes. Preserve both readings; only identical dispositions are
+    # idempotent. A changed choice after advancement still requires a new round.
+    disposition=selected if resolved else None
+    previous=next((r for r in reversed(record.state.get('rulings',[]))
+                   if r['stage']==kind and r['submitted_sha256']==fingerprint
+                   and r.get('selected_labels')==disposition),None)
     if previous:
         if not dry_run and previous.get('selected_labels') is not None and record.state['stage']==pending:record.transition(ruled)
         return {'status':'ruling already recorded','stage':record.state['stage'],'feedback':feedback}
@@ -218,7 +226,7 @@ def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
     write_new(revision/'artifact-read-original',raw_path.read_bytes())
     ruling={'stage':kind,'submitted_at':state['submitted_at'],'feedback':feedback,'artifact_url':receipt['artifact_url'],
             'artifact_version':receipt['artifact_version'],'submitted_sha256':fingerprint,'blind_key':mapping,'key_unsealed':True,
-            'selected_labels':selected if resolved else None,'selection_evidence':receipt.get('selection_evidence',[]),
+            'selected_labels':disposition,'selection_evidence':receipt.get('selection_evidence',[]),
             'path':str(revision.relative_to(record.path))}
     write_new(revision/'labels.yaml',ruling) # JSON is a YAML subset; avoids rewriting exact strings through a YAML emitter.
     write_new(revision/'unsealed-key.json',{'sealed':False,'mapping':mapping})
