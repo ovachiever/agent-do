@@ -121,7 +121,6 @@ agent-do browse screenshot /tmp/before.png   # BASELINE — view with Read tool
 agent-do browse reload
 agent-do browse wait --stable
 agent-do browse screenshot /tmp/after.png    # View with Read tool
-agent-do dpt score /tmp/after.png            # 0-100 score with breakdown
 ```
 
 ### Step 4: Structural audit
@@ -816,7 +815,7 @@ def main():
                 decision_tools.extend(context_tools)
                 decision_commands.extend(context_commands)
             if is_design:
-                decision_tools.extend(["browse", "dpt"])
+                decision_tools.extend(["browse"])
             record_hook_decision(
                 "UserPromptSubmit",
                 "prompt_router",
@@ -888,7 +887,7 @@ def main():
                     record_nudge_event(
                         "prompt_design_toolkit",
                         "prompt_router",
-                        tools=["browse", "dpt"],
+                        tools=["browse"],
                         prompt=prompt[:240],
                         cwd=cwd,
                     )
