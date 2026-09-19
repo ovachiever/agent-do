@@ -31,6 +31,11 @@ def imagine(record,per_level=2,size=None,dry_run=False,retry_uncertain=False,pro
             existing=[]
             for path in slot.iterdir():
                 if not path.is_dir():continue
+                if (path/'invalid-image.json').exists():
+                    invalid=json.loads((path/'invalid-image.json').read_text())
+                    if digest((path/'response.json').read_bytes())!=invalid['response_sha256']:
+                        raise DesignError('rejected image response changed: '+str(path))
+                    continue
                 if (path/'response.json').exists():existing.append(path)
                 elif (path/'request.json').exists() and not (path/'error.json').exists():
                     if not retry_uncertain:raise DesignError('uncertain prior image request at '+str(path)+'; inspect its receipt or explicitly use --retry-uncertain')
@@ -58,7 +63,12 @@ def imagine(record,per_level=2,size=None,dry_run=False,retry_uncertain=False,pro
                         if (attempt/'uncertain.json').exists():record.record_usage(attempt/'uncertain.json',json.loads((attempt/'uncertain.json').read_text()),'imagine')
                         raise
             record.record_usage(attempt/'response.json',receipt,'imagine')
-            data=image_from_response(receipt,request['size'])
+            try:data=image_from_response(receipt,request['size'])
+            except DesignError as error:
+                write_new(attempt/'invalid-image.json',{'error':str(error),
+                          'response_sha256':digest((attempt/'response.json').read_bytes()),
+                          'status':'invalid image retained; a later invocation can issue a new request for this slot'})
+                raise
             image_path=attempt/'image.png'
             if image_path.exists():
                 if image_path.read_bytes()!=data:raise DesignError('saved image differs from original provider response')

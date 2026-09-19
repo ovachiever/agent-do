@@ -96,6 +96,25 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(p.calls[1]['quality'],'high')
             self.assertEqual(len(list(r.path.rglob('fallback.json'))),1)
 
+    def test_invalid_image_receipt_is_retained_and_can_resume(self):
+        class InvalidOnce(FakeProvider):
+            def post(self,endpoint,payload,folder):
+                if self.calls:return super().post(endpoint,payload,folder)
+                self.calls.append(payload)
+                write_new(folder/'request.json',{'payload':payload})
+                receipt={'response':{'data':[{'b64_json':base64.b64encode(b'not a PNG').decode()}]},
+                         'usage':{'output_tokens':7}}
+                write_new(folder/'response.json',receipt);return receipt
+        with tempfile.TemporaryDirectory(dir=TOOL.parents[1]/'.dev') as tmp,Round(Path(tmp)/'round',create=True) as r:
+            r.initialize('Owner copy.',facts());p=InvalidOnce()
+            with self.assertRaises(DesignError):imagine(r,per_level=1,provider=p,lookup=lookup)
+            rejected=list(r.path.rglob('invalid-image.json'))
+            self.assertEqual(len(rejected),1);original=(rejected[0].parent/'response.json').read_bytes()
+            result=imagine(r,per_level=1,provider=p,lookup=lookup)
+            self.assertEqual(result['stage'],'images_ready');self.assertEqual(len(p.calls),4)
+            self.assertEqual((rejected[0].parent/'response.json').read_bytes(),original)
+            self.assertEqual(len(r.state['usage']),4)
+
     def test_dry_run_never_calls_credentials_or_paid_transport(self):
         with tempfile.TemporaryDirectory(dir=TOOL.parents[1]/'.dev') as tmp,Round(Path(tmp)/'round',create=True) as r:
             r.initialize('Owner copy.',facts());p=FakeProvider()
