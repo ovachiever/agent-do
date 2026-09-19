@@ -30,6 +30,7 @@ class ContractTests(unittest.TestCase):
             self.assertIn('42%',text)
             self.assertIn('Open',text)
             self.assertIn('No icons',text)
+            self.assertIn('viewport width of 800 CSS pixels',text)
         self.assertNotIn('#111111',p['open'])
         self.assertIn('palette, typefaces',p['open'])
         self.assertNotIn('productions',json.dumps(c))

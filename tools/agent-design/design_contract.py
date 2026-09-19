@@ -63,6 +63,9 @@ def compile_contract(copy, facts, source='facts.json'):
 def prompts(copy, contract):
     content=json.dumps({'title':contract['title'],'nodes':contract['nodes'],'groups':contract['groups'],'facts':contract['facts']},ensure_ascii=False,indent=2)
     framing=('A high-fidelity screenshot of a complete long-scrolling web page, as captured from a real browser. '
+             f"Compose for the approved browser viewport width of {contract['viewports'][0]['width']} CSS pixels, "
+             'showing the entire scroll. This layout width is separate from the generated raster dimensions '
+             'and must not appear as page text. '
              'Use portrait framing and include every section from beginning to end. All text must be sharp and spelled exactly as supplied. '
              'The intended product and content are specified below. A product name is plain text, never a decorative logo.\n\n')
     laws=('No icons, gradients, stock imagery, device frames, decorative logos, mottos, taglines, or invented text. '
