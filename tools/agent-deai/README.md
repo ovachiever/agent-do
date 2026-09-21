@@ -1,7 +1,8 @@
 # deai
 
-Offline prose lint with explicit register policies. No dependencies beyond
-Python 3.10+, no network calls, and no input rewrites.
+Offline prose lint with explicit register policies. Core lint needs only
+Python 3.10+; the commit-time guard also needs Git. No network calls or prose
+input rewrites.
 
 ```bash
 agent-do deai lint draft.md --register essay
@@ -15,6 +16,36 @@ Exit codes: **0** clean, **1** prose findings, **2** input or rule-data error.
 `--json` emits `deai-result-v1`, including every file and every occurrence's
 original line, column, and text. `success` says whether the command ran;
 `clean` says whether lint passed. Errors never report a clean result.
+
+## Commit-time guard
+
+```bash
+agent-do deai guard check --json
+agent-do deai guard install
+agent-do deai guard install --register essay
+```
+
+The Git pre-commit guard runs for every harness, including Codex, Droid, and
+Cursor. It uses the same deai engine and defaults to the technical-safe
+`default` pack. It checks the complete staged versions of added or modified
+`.md`, `.markdown`, `.rst`, and `.txt` files, including rename destinations.
+Unstaged edits and untracked files do not enter the check. Deleted files,
+symlinks, and binary content are not linted. Names with spaces or newlines are
+supported. No prose or index entries are rewritten.
+
+`guard check` always exits **0**. Findings and unavailable checks print warnings;
+JSON reports `success: false` and `clean: false` on errors. JSON includes all
+findings, source blob IDs, skipped files, and errors. A successful empty or clean
+check is silent without `--json`. Other deai commands retain their exit codes.
+
+`guard install` respects Git's hook directory, including `core.hooksPath` and
+linked worktrees. It inserts one managed block immediately after a shell hook's
+shebang, so hooks ending in `exit` still run the check. Repeated setup is
+idempotent, and choosing another register updates that block. Existing hook
+logic and exit status remain intact. Setup errors exit **2**. Symlinked and
+non-shell hooks are refused without changes; their owner can integrate
+`agent-do deai guard check` as an advisory call. The guard never weakens an
+existing commit gate.
 
 ## Register policies
 

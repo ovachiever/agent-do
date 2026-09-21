@@ -10,10 +10,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "agent-deai"))
 import deai
+import guard
 
 
 class DeaiTests(unittest.TestCase):
@@ -238,6 +240,193 @@ class DeaiTests(unittest.TestCase):
             packs["essay"] = value
             with self.assertRaises(ValueError):
                 deai.validate_data(self.catalog, packs)
+
+
+class GuardTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix="deai-guard-")
+        self.addCleanup(self.folder.cleanup)
+        self.repo = Path(self.folder.name) / "repo with spaces"
+        self.repo.mkdir()
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        self.env.update(AGENT_DO_HOME=str(Path(self.folder.name) / "agent-state"),
+                        GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                        PYTHONDONTWRITEBYTECODE="1")
+        self.git("init", "-q", "--template=")
+        self.git("config", "user.name", "Prose Guard Test")
+        self.git("config", "user.email", "guard@example.invalid")
+        self.git("config", "commit.gpgsign", "false")
+
+    def git(self, *args, check=True):
+        return subprocess.run(["git", *args], cwd=self.repo, env=self.env,
+                              text=True, capture_output=True, check=check)
+
+    def cli(self, *args, cwd=None):
+        return subprocess.run([str(ROOT / "agent-do"), "deai", "guard", *args],
+                              cwd=cwd or self.repo, env=self.env, text=True,
+                              capture_output=True, check=False)
+
+    def check(self, **kwargs):
+        result = self.cli("check", "--json", **kwargs)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        return json.loads(result.stdout)
+
+    def stage(self, name, text):
+        path = self.repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        self.git("add", "--", name)
+        return path
+
+    def install(self, *args, cwd=None):
+        result = self.cli("install", *args, "--json", cwd=cwd)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        return json.loads(result.stdout)
+
+    def test_unborn_index_and_partial_staging_use_blob_not_worktree(self):
+        name = "docs/-a spaced\nprose.MD"
+        path = self.stage(name, "delve\ndelve\n")
+        path.write_text("A plain sentence.\n")
+        self.stage("clean.md", "A plain sentence.\n").write_text("delve\n")
+        (self.repo / "untracked.md").write_text("delve\n")
+        self.stage("script.py", "delve\n")
+        staged_before = self.git("diff", "--cached", "--binary").stdout
+        worktree_before = self.git("diff", "--binary").stdout
+        payload = self.check(cwd=path.parent)
+        self.assertTrue(payload["success"])
+        self.assertFalse(payload["clean"])
+        files = {item["path"]: item for item in payload["files"]}
+        self.assertEqual(set(files), {name, "clean.md"})
+        self.assertTrue(files["clean.md"]["clean"])
+        findings = files[name]["findings"]
+        self.assertEqual([hit["line"] for hit in findings[0]["occurrences"]], [1, 2])
+        self.assertEqual(files[name]["blob"], self.git("rev-parse", ":" + name).stdout.strip())
+        self.assertEqual(self.git("diff", "--cached", "--binary").stdout, staged_before)
+        self.assertEqual(self.git("diff", "--binary").stdout, worktree_before)
+
+    def test_modified_renamed_and_deleted_paths(self):
+        for name in ("rename.md", "deleted.md", "unchanged.md", "edit.txt"):
+            self.stage(name, "delve\n")
+        self.git("commit", "-qm", "fixture baseline")
+        self.git("mv", "rename.md", "renamed.md")
+        self.git("rm", "deleted.md")
+        self.stage("edit.txt", "delve\ndelve\n")
+        payload = self.check()
+        self.assertEqual({item["path"] for item in payload["files"]}, {"renamed.md", "edit.txt"})
+
+    def test_binary_and_symlink_are_skipped_invalid_utf8_is_visible(self):
+        (self.repo / "binary.md").write_bytes(b"delve\0")
+        (self.repo / "invalid.txt").write_bytes(b"\xff")
+        outside = Path(self.folder.name) / "outside.txt"
+        outside.write_text("delve\n")
+        (self.repo / "linked.md").symlink_to(outside)
+        self.git("add", "--", "binary.md", "invalid.txt", "linked.md")
+        payload = self.check()
+        self.assertFalse(payload["success"])
+        self.assertFalse(payload["clean"])
+        self.assertEqual(payload["total_files"], 0)
+        self.assertEqual({item["path"] for item in payload["skipped"]}, {"binary.md", "linked.md"})
+        self.assertEqual(payload["errors"][0]["path"], "invalid.txt")
+
+    def test_missing_repo_and_invalid_rules_warn_without_blocking(self):
+        payload = self.check(cwd=Path(self.folder.name))
+        self.assertFalse(payload["success"])
+        self.assertFalse(payload["clean"])
+        warning = self.cli("check", cwd=Path(self.folder.name))
+        self.assertEqual(warning.returncode, 0)
+        self.assertIn("WARN", warning.stdout)
+        with patch.object(deai, "load", side_effect=deai.re.error("invalid fixture rule")):
+            payload = guard.check("default")
+        self.assertFalse(payload["success"])
+        self.assertIn("invalid fixture rule", payload["errors"][0]["error"])
+
+    def test_default_pack_matches_engine_and_explicit_register(self):
+        self.stage("README.md", "A robust architecture with structural typing.\n")
+        self.assertTrue(self.check()["clean"])
+        result = self.cli("check", "--register", "essay", "--json")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(json.loads(result.stdout)["clean"])
+        self.stage("code.md", "```\ndelve\n```\nA plain sentence.\n")
+        self.assertTrue(self.check()["clean"])
+
+    def test_installed_hook_executes_for_all_harnesses_and_preserves_exit(self):
+        hook = self.repo / ".git/hooks/pre-commit"
+        hook.parent.mkdir(parents=True)
+        original = "#!/bin/sh\nprintf '%s\\n' existing-hook-ran\nexit 0\n"
+        hook.write_text(original)
+        self.install()
+        first = hook.read_bytes()
+        self.assertTrue(self.install()["already_installed"])
+        self.assertEqual(hook.read_bytes(), first)
+        self.assertEqual(first.decode().count(guard.START), 1)
+        self.assertTrue(first.decode().endswith(original.split("\n", 1)[1]))
+        self.assertTrue(os.access(hook, os.X_OK))
+        for harness in ("codex", "droid", "cursor"):
+            with self.subTest(harness=harness):
+                self.env["AGENT_HARNESS"] = harness
+                self.stage("draft.md", f"delve\n{harness}\n")
+                before = (self.repo / "draft.md").read_bytes()
+                result = self.git("commit", "-qm", "fixture " + harness, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertIn("deai guard WARN", result.stderr)
+                self.assertIn("existing-hook-ran", result.stderr)
+                self.assertEqual((self.repo / "draft.md").read_bytes(), before)
+        hook.write_bytes(hook.read_bytes().replace(b"exit 0\n", b"exit 9\n"))
+        self.stage("draft.md", "delve\nblocked by existing gate\n")
+        before = self.git("rev-parse", "HEAD").stdout
+        result = self.git("commit", "-qm", "must stay blocked", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("deai guard WARN", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD").stdout, before)
+
+    def test_custom_hook_path_and_register_update(self):
+        self.git("config", "core.hooksPath", "custom hooks")
+        nested = self.repo / "nested"
+        nested.mkdir()
+        payload = self.install(cwd=nested)
+        hook = Path(payload["hook"])
+        self.assertEqual(hook.resolve(), (self.repo / "custom hooks/pre-commit").resolve())
+        self.assertFalse(self.install("--register", "essay")["already_installed"])
+        self.assertEqual(hook.read_text().count(guard.START), 1)
+        self.stage("draft.md", "The architecture uses structural typing.\n")
+        result = self.git("commit", "-qm", "fixture custom hook")
+        self.assertIn("deai guard WARN", result.stderr)
+
+    def test_linked_worktree_hook_and_alternate_index(self):
+        self.stage("plain.md", "A plain sentence.\n")
+        self.git("commit", "-qm", "fixture baseline")
+        worktree = Path(self.folder.name) / "linked worktree"
+        self.git("worktree", "add", "--detach", str(worktree))
+        result = self.cli("install", "--json", cwd=worktree)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        hook = Path(json.loads(result.stdout)["hook"])
+        self.assertEqual(hook.resolve(), (self.repo / ".git/hooks/pre-commit").resolve())
+        self.env["GIT_INDEX_FILE"] = str(Path(self.folder.name) / "alternate-index")
+        self.git("read-tree", "HEAD")
+        self.stage("alternate.md", "delve\n")
+        self.assertFalse(self.check()["clean"])
+        self.env.pop("GIT_INDEX_FILE")
+        self.assertTrue(self.check()["clean"])
+
+    def test_unsupported_hooks_are_refused_without_changes(self):
+        hook = self.repo / ".git/hooks/pre-commit"
+        hook.parent.mkdir(parents=True)
+        outside = Path(self.folder.name) / "owned-hook"
+        outside.write_text("#!/bin/sh\nexit 0\n")
+        hook.symlink_to(outside)
+        result = self.cli("install", "--json")
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(hook.is_symlink())
+        self.assertEqual(outside.read_text(), "#!/bin/sh\nexit 0\n")
+        hook.unlink()
+        for content in ("#!/usr/bin/env python3\nprint('existing hook')\n",
+                        "#!/bin/sh\n" + guard.START):
+            hook.write_text(content)
+            before = hook.read_bytes()
+            result = self.cli("install", "--json")
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(json.loads(result.stdout)["success"])
+            self.assertEqual(hook.read_bytes(), before)
 
 
 if __name__ == "__main__":

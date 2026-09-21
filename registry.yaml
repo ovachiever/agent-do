@@ -61,6 +61,7 @@ tools:
       packs: 'packs [--register NAME] [--json]; complete rules, ceilings, whitelists, and provenance'
       measure: 'measure <file...> --rule-id ID --pattern REGEX --source CITATION [--json]; exact local corpus measurement'
       validate: 'validate [--json]; reject missing measurements, changed patterns, or unattributed whitelists'
+      guard: 'guard check|install [--register NAME] [--json]; advisory staged-prose check or pre-commit hook setup'
     examples:
     - intent: lint an essay for prose tells
       command: agent-deai lint draft.md --register essay
@@ -76,8 +77,8 @@ tools:
       - agent-do deai lint
       - agent-do deai packs
       default_command: packs
-    dependencies: [python3]
-    concurrency: read-only
+    dependencies: [python3, git]
+    concurrency: mixed
     contracts:
       snapshot:
       - packs
@@ -85,6 +86,9 @@ tools:
       verify:
       - lint
       - validate
+      - guard check
+      interact:
+      - guard install
   brief:
     description: Estate briefing engine — joins GitHub PRs, the manna board, live coord sessions,
       and git into ranked threads, a delta since last look, one-tap suggestions carried as data,

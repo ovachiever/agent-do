@@ -220,7 +220,8 @@ class Parser(argparse.ArgumentParser):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = Parser(prog="agent-deai", description="Offline prose-tell lint with measured register packs.",
-                    epilog="Exit: 0 clean/success; 1 prose findings; 2 input or rule-data error. Never rewrites input.")
+                    epilog="Exit: 0 clean/success; 1 prose findings; 2 input or rule-data error. "
+                           "Guard check always exits 0 (advisory). Never rewrites prose input.")
     sub = parser.add_subparsers(dest="command", required=True)
     lint = sub.add_parser("lint", help="Lint files (or - for stdin); default register permits technical language")
     lint.add_argument("paths", nargs="+")
@@ -233,10 +234,19 @@ def main(argv=None):
     measurement.add_argument("--rule-id", required=True)
     measurement.add_argument("--pattern", required=True)
     measurement.add_argument("--source", required=True)
+    guard_parser = sub.add_parser("guard", help="Warn on staged prose or install the advisory Git pre-commit hook")
+    guard_sub = guard_parser.add_subparsers(dest="guard_command", required=True)
+    for verb in ("check", "install"):
+        child = guard_sub.add_parser(verb, help="Check staged prose" if verb == "check" else "Install the advisory hook")
+        child.add_argument("--register", choices=REGISTERS, default="default")
+        child.add_argument("--json", action="store_true")
     for child in (lint, packs_parser, validation, measurement):
         child.add_argument("--json", action="store_true", help="Emit the complete machine-readable result")
     try:
         args = parser.parse_args(argv)
+        if args.command == "guard":
+            from guard import run
+            return run(args)
         catalog, packs = load()
         code = 0
         payload = {"schema": "deai-result-v1", "tool": "deai", "command": args.command, "success": True}

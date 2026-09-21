@@ -48,7 +48,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [creds](#creds) | Secure credential storage and resolution for agent-do tools | mixed | 8 |
 | [cronitor](#cronitor) | Cronitor scheduled job and uptime monitoring | mixed | 11 |
 | [db](#db) | Control database clients | mixed | 5 |
-| [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | read-only | 4 |
+| [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | mixed | 5 |
 | [debug](#debug) | Control debuggers | read | 5 |
 | [design](#design) | Image-first design workflow with approved copy and measured browser polish | mixed | 6 |
 | [discord](#discord) | Control Discord | mixed | 2 |
@@ -1427,7 +1427,7 @@ agent-do db query 'SELECT * FROM users'
 
 Offline prose-tell linter with measured ceilings and explicit register policies
 
-Concurrency: `read-only`
+Concurrency: `mixed`
 
 **Capabilities**
 
@@ -1442,6 +1442,7 @@ Concurrency: `read-only`
 - `packs`: packs [--register NAME] [--json]; complete rules, ceilings, whitelists, and provenance
 - `measure`: measure \<file...> --rule-id ID --pattern REGEX --source CITATION [--json]; exact local corpus measurement
 - `validate`: validate [--json]; reject missing measurements, changed patterns, or unattributed whitelists
+- `guard`: guard check|install [--register NAME] [--json]; advisory staged-prose check or pre-commit hook setup
 
 **Examples**
 
@@ -1456,7 +1457,8 @@ agent-do deai packs --register email --json
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `lint`, `measure`, `packs`, `validate`
+- Read-only (snapshot/verify; safe to parallelize): `guard check`, `lint`, `measure`, `packs`, `validate`
+- Write (connect/interact/save): `guard install`
 
 ### debug
 
