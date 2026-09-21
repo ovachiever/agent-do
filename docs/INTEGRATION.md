@@ -33,14 +33,18 @@ What the installer actually does, in order:
 1. Symlinks `agent-do` into `~/.local/bin` (warns if that directory is not on `PATH`)
 2. Writes the repo path to `~/.agent-do/install-path` (the breadcrumb wrappers and hooks resolve)
 3. Generates the discovery index from `registry.yaml` via `bin/gen-index`
-4. Writes the Claude hook **wrappers** to `~/.claude/hooks/` (ten today): `agent-do-session-start.sh`, `agent-do-prompt-router.py`, `agent-do-correction-keys.py`, `agent-do-now-stamp.py`, `agent-do-pretooluse-check.py`, `agent-do-zpc-trigger.py`, `agent-do-quantity-check.py`, `agent-do-zpc-position-nudge.sh`, `agent-do-zpc-write-nudge.sh`, `agent-do-coord-stop.sh`
+4. Writes the Claude hook **wrappers** to `~/.claude/hooks/`; `CLAUDE_HOOK_SPECS` in `install.sh` lists the sources, including `agent-do-quantity-check.py` and `agent-do-prose-lint.py`
 5. Optionally writes five Codex wrappers to `~/.codex/hooks/` (the three event hooks plus `stop-quality-gate.sh`/`.py`)
 6. Installs Python dependencies through one Python 3.10+ interpreter and records that exact runtime at `~/.agent-do/python-path`
 7. Interactively offers `npm install` for browse/unbrowse and `cargo build --release` for manna
 8. Runs `agent-do --health`
 9. Prints the Claude `settings.json` snippet, the Codex `hooks.json` template when Codex install ran, and a project CLAUDE.md snippet
 
-The installer never edits `settings.json` or `hooks.json` itself. Registration is manual, and required: **Claude Code does not auto-discover hooks**; a wrapper sitting in `~/.claude/hooks/` does nothing until it is registered.
+Claude registration is required: **Claude Code does not auto-discover hooks**.
+The installer asks before merging `settings.json` in an interactive terminal;
+`--register-hooks` authorizes that merge and `--print-only` leaves settings
+untouched while printing the complete snippet. Both options still install
+wrappers and dependencies. A wrapper does nothing until it is registered.
 
 ## Registering the Claude hooks (settings.json)
 
@@ -85,6 +89,18 @@ Merge into `~/.claude/settings.json` (into the existing arrays if you already ha
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agent-do-prose-lint.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "matcher": "",
@@ -101,9 +117,43 @@ Merge into `~/.claude/settings.json` (into the existing arrays if you already ha
 }
 ```
 
-The snippet install.sh prints covers the first three events; the SessionEnd entry above completes the set (the installer writes the `agent-do-coord-stop.sh` wrapper either way). The timeouts are part of the design, not suggestions: SessionStart's subprocess calls are individually bounded (2-3s each) under a 10s registration, the prompt router works against a 4.2s internal safety line under its 5s registration, and SessionEnd budgets coord retirement (5s) plus the manna reconcile advisory (4s) inside its 10s.
+The example above shows selected registrations; `CLAUDE_SETTINGS_SPECS` in
+`install.sh` generates the complete set. The prose hook allows three seconds
+for the linter inside its five-second registration, leaving time to report a
+failure before the host deadline.
 
 agent-do registers nothing at `Stop`. Claude Code fires `Stop` every turn; session retirement belongs on `SessionEnd`. Auto-commit, formatters, notifications, and other turn-end behavior are personal workflow for your own dotfiles.
+
+## Prose feedback after writing
+
+`agent-do-prose-lint.py` runs after Claude `Write`, `Edit`, and `MultiEdit`
+calls. The installer registers one `PostToolUse` matcher (`Edit|Write|MultiEdit`)
+with a five-second timeout and installs its Python wrapper alongside the
+quantity hook. Existing installations need the new wrapper and registration;
+adding source code alone does not activate a new hook.
+
+The hook calls `agent-do deai lint <saved-file> --register <pack> --json`.
+It checks `.md`, `.markdown`, `.txt`, and `.rst` files, skips source code and
+dependency/build directories, and uses the closest named directory to select
+a pack: `drafts/` or `essays/` selects `essay`, `email/` or `emails/` selects
+`email`, and `product-answers/` or `product_answers/` selects `product-answer`.
+Other prose uses `default`. Relative paths resolve from the tool event's
+working directory, including sessions started inside `drafts/`.
+The entire saved file is checked so rates, frontmatter,
+and code fences retain their context.
+
+Findings arrive as advisory `additionalContext` with rule IDs and file
+locations. The hook reports up to six rules, explicitly counts omitted rules
+and repeated occurrences, and includes the command for the complete report.
+Every edit is checked again; a clean result is silent. A timeout or linter
+failure reports an unchecked file. Nothing rewrites text or blocks the edit.
+`AGENT_DO_PROSE_LINT=0` disables the hook. The hook writes no prose or receipt
+files; the dispatcher retains its normal invocation telemetry.
+
+Focused checks: `python3 tests/test_prose_lint_hook.py`,
+`python3 tests/test_deai.py`, and `python3 tests/test_install_specs.py`.
+These exercise local CLI fixtures and registration coherence without
+installing hooks or opening a host session.
 
 ## The wrapper upgrade model
 
