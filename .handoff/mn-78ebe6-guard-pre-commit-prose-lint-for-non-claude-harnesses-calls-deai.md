@@ -6,7 +6,7 @@ source: null
 base_commit: 0d42ea467b9f57e356e1fb80e0f15ae71e42f9d1
 scope: 'guard: pre-commit prose lint for non-Claude harnesses (calls deai)'
 inputs: []
-binding: sha256:98339a3a2e707bbcb4f46bdb37750d35af32609f17c27ceb926178421f52146e
+binding: sha256:422eac189842226c035288edaa6ccd11aef8da0cddcdadf5b2bcb076e3f9417b
 ---
 
 # Handoff: guard: pre-commit prose lint for non-Claude harnesses (calls deai)
@@ -92,6 +92,12 @@ Lessons logged: 3 (new) | Decisions logged: 0 (new).
 Lesson IDs: `les-afb62b`, `les-718cbe`, `les-8300f2`.
 
 ## Completion
+
+Acceptance is verified. Implementation commit: `b74b5c7` (`feat(deai): add
+advisory staged prose guard`), with the exact `Manna: mn-78ebe6` trailer.
+The guarded commit passed the staged secret scan and existing pre-commit gate.
+No push or pull request was performed. No required acceptance remains for this
+CLI work order; live hook activation remains separate from implementation.
 
 1. Produce the scoped deliverables and verification receipts.
 2. Update this handoff only when continuation context changed.
