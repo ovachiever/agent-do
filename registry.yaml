@@ -4133,6 +4133,7 @@ tools:
     - proactively warn concurrent active building writers to use separate worktrees because compile state and build artifacts remain shared even when source paths are disjoint
     - manage advisory claims and a warn-only pre-commit guard over live claims and territories
     - point peers at files via drops, declare dependencies, publish artifacts with file pointers
+    - ring live named peers with a payload-free pending bit after addressed need/drop writes; consume at supported turn-boundary hooks without changing claims or acceptance
     - compute contention, notice, dependency, and novelty interrupts and expose the event journal as history
     - merge harness hook observations and timestamped external supervisor verdicts into shared six-state pulse telemetry without renewing target liveness, then rank live peers attention-first
     commands:
@@ -4150,10 +4151,11 @@ tools:
       interrupts: 'Show current interrupts: interrupts [--mark-seen] [--limit <n>]'
       focus: 'Manage structured focus and report a warn-only concurrent-builder isolation nudge: focus set <goal> [--path <p>] [--phase <phase>] [--note <t>] [--blocking-on <ref>] [--last-ship <t>] [--branch <name>] | show | clear'
       pulse: 'Shared session telemetry: pulse record --from-hook (stdin JSON, always exit 0) | pulse record --session <harness-session-id> --status <working|needs-user|finished|failed|idle|ended> --updated-at <RFC3339> [--activity <note>|--clear-activity] | pulse show [peer|harness-session-id]'
+      bell: 'Payload-free attention: bell ring --for <agent> | bell check --from-hook (stdin hook JSON; fixed context only, silent on failure)'
       claims: List advisory claims
       claim: 'Claim a file/path: claim <path> [--reason <text>] [--strength soft|strong]'
       release: 'Release a claim you own: release <path>'
-      need: 'Manage dependencies: need add|list|clear'
+      need: 'Manage dependencies: need add <key> --why <text> [--from <agent>|--for <agent>] | need list [--all] | need clear <key>'
       publishes: List published artifacts
       publish: 'Manage published artifacts: publish add [--file <path>]|clear'
       drop: 'Point a peer at a file: drop add <path> --for <agent|role|any> [--note <text>] [--key <need-key>]'
@@ -4245,6 +4247,7 @@ tools:
       - role
       - guard
       - drop
+      - bell
       attributes:
         touch:
         - composite

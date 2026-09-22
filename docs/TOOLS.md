@@ -44,7 +44,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [coderabbit](#coderabbit) | Local AI diff review via CodeRabbit CLI — review uncommitted changes, staged diffs, or branch diffs before opening a PR | mixed | 6 |
 | [colab](#colab) | Google Colab notebook management | mixed | 4 |
 | [context](#context) | Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal). | mixed | 27 |
-| [coord](#coord) | Project-local agent state and interrupt broker | mixed | 23 |
+| [coord](#coord) | Project-local agent state and interrupt broker | mixed | 24 |
 | [creds](#creds) | Secure credential storage and resolution for agent-do tools | mixed | 8 |
 | [cronitor](#cronitor) | Cronitor scheduled job and uptime monitoring | mixed | 11 |
 | [db](#db) | Control database clients | mixed | 5 |
@@ -1211,6 +1211,7 @@ Concurrency: `mixed`
 - proactively warn concurrent active building writers to use separate worktrees because compile state and build artifacts remain shared even when source paths are disjoint
 - manage advisory claims and a warn-only pre-commit guard over live claims and territories
 - point peers at files via drops, declare dependencies, publish artifacts with file pointers
+- ring live named peers with a payload-free pending bit after addressed need/drop writes; consume at supported turn-boundary hooks without changing claims or acceptance
 - compute contention, notice, dependency, and novelty interrupts and expose the event journal as history
 - merge harness hook observations and timestamped external supervisor verdicts into shared six-state pulse telemetry without renewing target liveness, then rank live peers attention-first
 
@@ -1230,10 +1231,11 @@ Concurrency: `mixed`
 - `interrupts`: Show current interrupts: interrupts [--mark-seen] [--limit \<n>]
 - `focus`: Manage structured focus and report a warn-only concurrent-builder isolation nudge: focus set \<goal> [--path \<p>] [--phase \<phase>] [--note \<t>] [--blocking-on \<ref>] [--last-ship \<t>] [--branch \<name>] | show | clear
 - `pulse`: Shared session telemetry: pulse record --from-hook (stdin JSON, always exit 0) | pulse record --session \<harness-session-id> --status \<working|needs-user|finished|failed|idle|ended> --updated-at \<RFC3339> [--activity \<note>|--clear-activity] | pulse show [peer|harness-session-id]
+- `bell`: Payload-free attention: bell ring --for \<agent> | bell check --from-hook (stdin hook JSON; fixed context only, silent on failure)
 - `claims`: List advisory claims
 - `claim`: Claim a file/path: claim \<path> [--reason \<text>] [--strength soft|strong]
 - `release`: Release a claim you own: release \<path>
-- `need`: Manage dependencies: need add|list|clear
+- `need`: Manage dependencies: need add \<key> --why \<text> [--from \<agent>|--for \<agent>] | need list [--all] | need clear \<key>
 - `publishes`: List published artifacts
 - `publish`: Manage published artifacts: publish add [--file \<path>]|clear
 - `drop`: Point a peer at a file: drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>]
@@ -1276,7 +1278,7 @@ agent-do coord stop --note "lane 14 shipped"
 **Safety (from contracts)**
 
 - Read-only (snapshot/verify; safe to parallelize): `aliases`, `claims`, `drops`, `history`, `need list`, `peers`, `publishes`, `status`, `territory`, `whoami`
-- Write (connect/interact/save): `alias`, `bye`, `claim soft`, `claim strong`, `drop`, `focus`, `guard`, `interrupts`, `need add`, `need clear`, `publish add`, `publish clear`, `pulse`, `release`, `role`, `stop`, `touch`
+- Write (connect/interact/save): `alias`, `bell`, `bye`, `claim soft`, `claim strong`, `drop`, `focus`, `guard`, `interrupts`, `need add`, `need clear`, `publish add`, `publish clear`, `pulse`, `release`, `role`, `stop`, `touch`
 - destructive (irreversible data loss; confirm before auto-running): `bye`, `need clear`, `publish clear`
 - polymorphic (beat decided by payload or flag at call time): `guard`, `interrupts`, `pulse`
 - composite (one call performs several beats internally): `touch`

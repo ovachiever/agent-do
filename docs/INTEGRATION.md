@@ -7,6 +7,66 @@ agent-do works with any coding agent that can execute shell commands. Two integr
 
 Everything below is presence-gated: repos without a `.manna/` board or a coord board see none of the board machinery, and the hooks degrade to the plain tooling reminder.
 
+## Coordination doorbell
+
+Coord remains a public ledger, not a mailbox. An addressed dependency
+(`coord need add <key> --why <text> --from <agent>`, also spelled `--for`) or
+file drop (`coord drop add <path> --for <agent>`) sets a pending bit for a live
+named session. Exact IDs and existing aliases route the bell; role/`any` drops
+remain ordinary ledger entries. Repeated rings coalesce. An explicit
+`agent-do coord bell ring --for <agent>` can repeat the nudge after a ledger
+write, but accepts no content, message, note, or file payload.
+
+`bells.json` in the existing project-local coord store contains only recipient
+IDs mapped to `true`. The shared coord lock serializes ledger writes, rings,
+and consumption. Dead, stopped, stale, or unknown targets do not ring. Bell
+I/O failure cannot fail a committed need/drop; a busy or unavailable hook
+degrades silently to ordinary polling. Hook work has a two-second local
+deadline inside the five-second harness timeout. A ring never renews target presence,
+revives a session, changes a Manna claim, or edits a sealed work order.
+
+The shared `hooks/claude/agent-do-coord-doorbell.py` hook is included in both
+Claude and Codex install bundles. Register it on `UserPromptSubmit` and `Stop`:
+
+- `UserPromptSubmit` adds the fixed context: "The ledger has entries concerning you; read coord."
+- `Stop` requests one continuation with that same fixed sentence, only when
+  `stop_hook_active` is explicitly false. Already-continuing turns retain any
+  new ring for the next prompt, preventing a stop-hook loop.
+- Other events produce no output and leave the pending bit untouched.
+
+The hook resolves the payload's exact `session_id` and `cwd`, including legacy
+thread identities, without trusting an inherited foreign session pin. It
+never reads a transcript or forwards the prompt, need, drop, or bell sender.
+Recipients read `agent-do coord interrupts`, `agent-do coord need list --all`,
+and `agent-do coord drops --for-me`; observers can read the same ledger.
+Workers may request contract changes there, but cannot self-amend acceptance.
+A bell exchange never closes an item: `done` still requires executed receipts.
+
+Runtime capability check, 2026-09-22: current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)
+defines `hookSpecificOutput.additionalContext` for prompt submission and
+[one-shot Stop continuation](https://learn.chatgpt.com/docs/hooks#stop) via
+`decision: "block"` and `reason`. [Claude's hook reference](https://code.claude.com/docs/en/hooks#stop)
+documents the same continuation fields and loop guard. This implementation
+uses those lifecycle hooks, not Codex's separate `notify` command, so existing
+notification chains are unchanged. Features/hooks and the registrations must
+be enabled in the host; editing this repo does not install or enable them.
+
+This checkout has no OpenCode hook/plugin installer. OpenCode and other
+unintegrated harnesses therefore retain poll-at-pause behavior; no automatic
+delivery is claimed for them. A notification-only host can surface only the
+same fixed nudge through its supported adapter; no alternative message path
+is part of this implementation. The bell does not launch, resume, or wake an
+idle agent process. A ring after its last hook waits for its next supported
+boundary.
+
+Focused verification is `python3 tests/test_coord_v2.py` (offline ledger,
+hook-protocol, failure, concurrency, and registration fixtures), alongside
+`python3 tests/test_coord.py` and `python3 tests/test_install_specs.py`.
+These are executed CLI/hook tests, not live harness acceptance. Closing this
+lane additionally requires a coordinated worker/coordinator exchange on a
+real mid-claim blocker with a third session able to read all substance on
+Coord, without human relay.
+
 ## Installation (install.sh)
 
 GNU Bash 4.4 or newer is a runtime requirement. On macOS, install it with

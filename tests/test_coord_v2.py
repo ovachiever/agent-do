@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import json
+import fcntl
 import os
+import runpy
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1291,6 +1294,204 @@ def test_liveness_dead_records_prune(tmp_path: Path, env_base: dict[str, str]) -
     )
 
 
+def doorbell_hook(project: Path, env: dict[str, str], session: str, event: str = "UserPromptSubmit", **extra) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "hooks/claude/agent-do-coord-doorbell.py")],
+        cwd=ROOT, env=env,
+        input=json.dumps({"cwd": str(project), "session_id": session, "hook_event_name": event, **extra}),
+        text=True, capture_output=True, timeout=5,
+    )
+
+
+def test_doorbell_ledger(tmp_path: Path, env_base: dict[str, str]) -> None:
+    """Offline worker/coordinator/observer fixtures, NOT live harness acceptance."""
+    project = make_project(tmp_path, "doorbell-ledger")
+    worker, coordinator, observer = (live_env(env_base, f"%bell-{i}") for i in range(3))
+    worker["CODEX_THREAD_ID"] = "bell-worker"
+    coordinator["CLAUDE_SESSION_ID"] = "bell-coordinator"
+    observer["CODEX_THREAD_ID"] = "bell-observer"
+    who = coord_json(["alias", "coordinator"], cwd=project, env=coordinator)["agent"]
+    target = who["agent_id"]
+    coord_root = project / ".git/agent-do/coord"
+    bells = coord_root / "bells.json"
+    substance = "fixture blocker: missing exact-return-type; request approval, no self-amendment"
+
+    # A ring is never permission to amend the work order or close the claim.
+    (project / ".manna").mkdir()
+    (project / ".handoff").mkdir()
+    claim = project / ".manna/issues.jsonl"
+    handoff = project / ".handoff/sealed-fixture.md"
+    claim.write_text('{"id":"mn-fixture","status":"in_progress"}\n')
+    handoff.write_text("Acceptance remains unchanged.\n")
+    protected = {p: p.read_bytes() for p in (claim, handoff)}
+
+    coord_json(["need", "add", "exact-return-type", "--why", substance, "--from", "coordinator"], cwd=project, env=worker)
+    require(json.loads(bells.read_text()) == {target: True}, "bell must contain only a recipient bit")
+    interrupts = coord_json(["interrupts"], cwd=project, env=coordinator)["interrupts"]
+    require(any(substance in item["summary"] for item in interrupts), "recipient cannot read the addressed need")
+    public = coord_json(["need", "list", "--all"], cwd=project, env=observer)["needs"]
+    require(public[0]["why"] == substance, "third session must see the same substance on the ledger")
+
+    # Repeated updates coalesce; the emitted text cannot carry note/key/path/prompt.
+    coord_json(["need", "add", "exact-return-type", "--why", substance, "--for", target], cwd=project, env=worker)
+    crossed = dict(coordinator, AGENT_DO_COORD_SESSION="bell-observer")
+    output = doorbell_hook(project, crossed, "bell-coordinator", prompt="private hook prompt")
+    expected = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "The ledger has entries concerning you; read coord."}}
+    require(output.returncode == 0 and not output.stderr and json.loads(output.stdout) == expected, f"bad prompt nudge: {output}")
+    require(not doorbell_hook(project, crossed, "bell-coordinator").stdout, "a coalesced ring must emit once")
+
+    # The coordinator replies on the shared board; only its pointer rings the worker.
+    worker_id = coord_json(["whoami"], cwd=project, env=worker)["agent_id"]
+    coord_json(["drop", "add", ".handoff/sealed-fixture.md", "--for", worker_id, "--note", "fixture response is public"], cwd=project, env=coordinator)
+    require(json.loads(bells.read_text()) == {worker_id: True}, "drop content leaked into the bell")
+    stop = doorbell_hook(project, worker, "bell-worker", "Stop", stop_hook_active=False)
+    require(json.loads(stop.stdout) == {"decision": "block", "reason": "The ledger has entries concerning you; read coord."}, "Stop must request one fixed continuation")
+    require(not doorbell_hook(project, worker, "bell-worker", "Stop", stop_hook_active=False).stdout, "Stop redelivered a consumed ring")
+    public_drops = coord_json(["drops"], cwd=project, env=observer)["drops"]
+    require(public_drops[0]["note"] == "fixture response is public", "reply missing from public ledger")
+    require(all(p.read_bytes() == before for p, before in protected.items()), "bell changed claim or acceptance")
+
+    # Routing only: refuse arbitrary content without printing it or changing state.
+    before = bells.read_bytes()
+    for suffix in (["--content", "PRIVATE-CONTENT"], ["--message", "PRIVATE-CONTENT"], ["PRIVATE-CONTENT"]):
+        bad = coord(["bell", "ring", "--for", target, *suffix], cwd=project, env=worker)
+        require(bad.returncode == 2 and "PRIVATE-CONTENT" not in bad.stdout + bad.stderr, "content-bearing bell was accepted or echoed")
+        require(bells.read_bytes() == before, "rejected bell mutated state")
+    agents_before = (coord_root / "agents.json").read_bytes()
+    for dead_target in ("no-such-session", "any", "overseer"):
+        result = coord_json(["bell", "ring", "--for", dead_target], cwd=project, env=worker)
+        require(result["queued"] is False, "unknown/broadcast target must degrade to polling")
+    require((coord_root / "agents.json").read_bytes() == agents_before, "bell renewed presence or minted an identity")
+
+    # No continuation loops: pending remains for a later prompt boundary.
+    coord_json(["bell", "ring", "--for", target], cwd=project, env=worker)
+    require(not doorbell_hook(project, coordinator, "bell-coordinator", "Stop", stop_hook_active=True).stdout, "Stop loop guard failed")
+    require(not doorbell_hook(project, coordinator, "bell-coordinator", "Stop").stdout, "missing loop guard must stay silent")
+    require(not doorbell_hook(project, coordinator, "bell-coordinator", "PreToolUse").stdout, "bell fired mid-turn")
+    require(not doorbell_hook(project, coordinator, "bell-coordinator", "session.idle").stdout, "unsupported harness event must stay silent")
+    require(json.loads(bells.read_text()) == {target: True}, "unsupported boundary consumed the bell")
+    require(bool(doorbell_hook(project, coordinator, "bell-coordinator").stdout), "next supported boundary lost the ring")
+
+
+def test_doorbell_degradation(tmp_path: Path, env_base: dict[str, str]) -> None:
+    project = make_project(tmp_path, "doorbell-degradation")
+    env = live_env(env_base, "%bell-degradation")
+    env["AGENT_DO_COORD_SESSION"] = "pinned-bell-session"
+    target = coord_json(["touch"], cwd=project, env=env)["agent_id"]
+    root = project / ".git/agent-do/coord"
+    bells = root / "bells.json"
+    agents_path = root / "agents.json"
+    pristine_agents = agents_path.read_bytes()
+
+    # Payload session wins over a foreign inherited pin, including legacy+pinned duplicates.
+    coord_json(["bell", "ring", "--for", target], cwd=project, env=env)
+    require(not doorbell_hook(project, env, "foreign-session").stdout, "hook consumed another session's bell")
+    require(bool(doorbell_hook(project, dict(env, AGENT_DO_COORD_SESSION="foreign-session"), "pinned-bell-session").stdout), "pinned session lookup failed")
+    require(agents_path.read_bytes() == pristine_agents, "hook changed target liveness")
+
+    for status in ("dead", "stopped", "stale", "pid-reused"):
+        agents = json.loads(pristine_agents)
+        row = agents["agents"][target]
+        if status in {"dead", "stopped"}:
+            row[status] = True
+        elif status == "stale":
+            row["lease_expires_at"] = iso_ago(7 * 24 * 3600)
+            row["last_seen"] = iso_ago(7 * 24 * 3600)
+        else:
+            row["pid_start"] = "different-process-start"
+        agents_path.write_text(json.dumps(agents))
+        require(coord_json(["bell", "ring", "--for", target], cwd=project, env=env)["queued"] is False, f"rang {status} peer")
+        bells.write_text(json.dumps({target: True}))
+        require(not doorbell_hook(project, env, "pinned-bell-session").stdout, f"delivered to {status} peer")
+        require(json.loads(agents_path.read_text()) == agents, f"hook revived {status} peer")
+    agents_path.write_bytes(pristine_agents)
+
+    # Corrupt/content-bearing transport files cannot become hook text.
+    for content in ('{"message":"SECRET"}', '["SECRET"]', '{broken'):
+        bells.write_text(content)
+        output = doorbell_hook(project, env, "pinned-bell-session")
+        require(output.returncode == 0 and not output.stdout and not output.stderr, "corrupt bell must degrade silently")
+
+    # Busy store cannot hold up a hook; leave the ring for the next boundary.
+    bells.write_text(json.dumps({target: True}))
+    with (root / ".lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        output = doorbell_hook(project, env, "pinned-bell-session")
+        require(output.returncode == 0 and not output.stdout and not output.stderr, "busy hook did not degrade silently")
+    require(json.loads(bells.read_text()) == {target: True}, "busy store lost pending ring")
+
+    # Storage failure affects the advisory bit, never the authoritative writes.
+    bells.rename(root / "bells-before-failure.json")
+    bells.mkdir()
+    coord_json(["need", "add", "survives", "--why", "ledger still commits", "--from", target], cwd=project, env=env)
+    coord_json(["drop", "add", "receipt.md", "--for", target], cwd=project, env=env)
+    require(any(n["key"] == "survives" for n in coord_json(["need", "list"], cwd=project, env=env)["needs"]), "bell I/O failure lost need")
+    require(bool(coord_json(["drops"], cwd=project, env=env)["drops"]), "bell I/O failure lost drop")
+    require(not doorbell_hook(project, env, "pinned-bell-session").stdout, "bad store hook was not silent")
+
+    # An absent coord board stays absent; malformed input never escapes as an error.
+    empty = make_project(tmp_path, "no-doorbell-board")
+    require(not doorbell_hook(empty, env, "pinned-bell-session").stdout, "empty project emitted context")
+    require(not (empty / ".git/agent-do").exists(), "hook initialized an unsolicited board")
+    for value in ("not json", "[]", "null", '{"session_id":"x","hook_event_name":"UserPromptSubmit"}'):
+        bad = subprocess.run([sys.executable, str(ROOT / "hooks/claude/agent-do-coord-doorbell.py")], input=value, text=True, capture_output=True, env=env, timeout=5)
+        require(bad.returncode == 0 and not bad.stdout and not bad.stderr, "invalid hook input did not stay silent")
+
+    # A hung local lookup must expire inside the hook, not as a harness error.
+    fake_bin = tmp_path / "doorbell-slow-git"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text("#!/bin/sh\nexec /bin/sleep 10\n")
+    fake_git.chmod(0o755)
+    slow = doorbell_hook(project, dict(env, PATH=str(fake_bin) + os.pathsep + env["PATH"]), "pinned-bell-session")
+    require(slow.returncode == 0 and not slow.stdout and not slow.stderr, "slow lookup escaped the hook budget")
+
+
+def test_doorbell_concurrency_and_wiring(tmp_path: Path, env_base: dict[str, str]) -> None:
+    project = make_project(tmp_path, "doorbell-concurrent")
+    env = live_env(env_base, "%bell-parallel")
+    env["CODEX_THREAD_ID"] = "bell-parallel"
+    target = coord_json(["touch"], cwd=project, env=env)["agent_id"]
+    writers = [subprocess.Popen(
+        [str(AGENT_DO), "coord", "need", "add", f"parallel-{i}", "--why", "public", "--from", target, "--json"],
+        cwd=project, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ) for i in range(6)]
+    for writer in writers:
+        out, err = writer.communicate(timeout=10)
+        require(writer.returncode == 0, f"concurrent ledger writer failed: {out} {err}")
+    require(len(coord_json(["need", "list"], cwd=project, env=env)["needs"]) == 6, "concurrent ledger entries lost")
+    payload = json.dumps({"cwd": str(project), "session_id": "bell-parallel", "hook_event_name": "UserPromptSubmit"})
+    consumers = [subprocess.Popen(
+        [sys.executable, str(ROOT / "hooks/claude/agent-do-coord-doorbell.py")], cwd=ROOT, env=env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ) for _ in range(3)]
+    for consumer in consumers:
+        consumer.stdin.write(payload)
+        consumer.stdin.close()
+        consumer.stdin = None
+    outputs = [consumer.communicate(timeout=5) for consumer in consumers]
+    require(all(c.returncode == 0 for c in consumers), "concurrent hook failed")
+    require(sum(bool(out) for out, _ in outputs) == 1 and not any(err for _, err in outputs), "ring delivered more than once")
+
+    # Deterministic ring-after-consume must survive; no ack may erase a new bit.
+    coord_tool = runpy.run_path(str(ROOT / "tools/agent-coord"))
+    store = coord_tool["CoordStore"](project, identify=False)
+    require(store.ring(target) and store.take_bell("bell-parallel"), "initial consume failed")
+    require(store.ring(target) and store.take_bell("bell-parallel"), "later ring was lost")
+    require(not store.take_bell("bell-parallel"), "later ring repeated")
+
+    # Test production registration sources without installing or launching a harness.
+    install = (ROOT / "install.sh").read_text()
+    for event in ("UserPromptSubmit", "Stop"):
+        require(f'"{event}||agent-do-coord-doorbell.py|5"' in install, f"Claude {event} not registered")
+    template = json.loads((ROOT / "hooks/codex/hooks.json.example").read_text())
+    for event in ("UserPromptSubmit", "Stop"):
+        commands = [h["command"] for group in template["hooks"][event] for h in group["hooks"]]
+        require("python3 ~/.codex/hooks/agent-do-coord-doorbell.py" in commands, f"Codex {event} not registered")
+    require('"agent-do-coord-doorbell.py|hooks/claude/agent-do-coord-doorbell.py|py|required"' in install, "Claude wrapper source absent")
+    require('"agent-do-coord-doorbell.py|hooks/claude/agent-do-coord-doorbell.py|py"' in install, "Codex wrapper source absent")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -1311,6 +1512,9 @@ def main() -> int:
         test_v1_migration(tmp_path, env_base)
         test_agent_process_anchor(tmp_path, env_base)
         test_liveness_dead_records_prune(tmp_path, env_base)
+        test_doorbell_ledger(tmp_path, env_base)
+        test_doorbell_degradation(tmp_path, env_base)
+        test_doorbell_concurrency_and_wiring(tmp_path, env_base)
 
     print("coord v2 tests passed")
     return 0

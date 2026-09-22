@@ -7,6 +7,17 @@ serves both surfaces. Codex supports `hookSpecificOutput.additionalContext` on
 PreToolUse as of the May 2026 hooks release; the same nudges Claude Code sees
 flow through.
 
+The coordination doorbell also uses the shared
+`hooks/claude/agent-do-coord-doorbell.py` implementation, registered on
+`UserPromptSubmit` and `Stop` by `hooks.json.example`. It emits only a fixed
+request to read Coord, never a need/drop payload. Prompt submission adds
+context; Stop can request one continuation and respects `stop_hook_active`.
+Current [Codex prompt hook](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)
+and [Stop hook](https://learn.chatgpt.com/docs/hooks#stop) documentation were
+checked on 2026-09-22. Existing `notify` configuration is not replaced.
+See [coordination doorbell](../../docs/INTEGRATION.md#coordination-doorbell)
+for the delivery limits and live acceptance requirement.
+
 ## Install
 
 ```bash

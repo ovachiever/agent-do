@@ -55,10 +55,14 @@ Commands:
                                          Merge an external supervisor's explicit verdict into the
                                          named harness session without renewing its presence lease
   pulse show [peer]                      Show a session's shared pulse telemetry
+  bell ring --for <agent>                Ring a live named peer (routing only, no content)
+  bell check --from-hook                 Consume a pending ring at UserPromptSubmit or Stop
+                                         (stdin hook JSON); errors/unsupported events stay silent
   claims                                 List advisory claims
   claim <path> [--reason <text>]         Claim a path
   release <path>                         Release a claimed path
-  need add <key> --why <text>            Declare a dependency
+  need add <key> --why <text> [--from <agent>]
+                                         Declare a dependency; --for is an alias for --from
   need list [--all]                      List dependencies
   need clear <key>                       Clear a dependency you own
   publishes                              List published artifacts
@@ -111,6 +115,10 @@ PRUNE_SECONDS = int(os.environ.get("AGENT_DO_COORD_PRUNE_SECONDS", str(7 * 24 * 
 
 RUNTIMES = ("claude", "codex", "human", "other")
 FOCUS_PHASES = ("building", "gating", "watching", "quiet", "blocked", "stopped")
+
+# The bell is a bit, never a letter. All substance lives in needs/drops and
+# is read through coord. A ring confers no authority over a claim or its seal.
+DOORBELL_NUDGE = "The ledger has entries concerning you; read coord."
 
 # Pulse: shared session telemetry (Warp-derived, .dev/warp-recon-2026-08-22).
 # Focus is what an agent SAYS it is doing; pulse is what its harness hooks or
@@ -672,14 +680,15 @@ class CoordStore:
         self.publishes_path = self.coord_root / "publishes.json"
         self.drops_path = self.coord_root / "drops.json"
         self.pulse_path = self.coord_root / "pulse.json"
+        self.bells_path = self.coord_root / "bells.json"
         self.events_path = self.coord_root / "events.jsonl"
         self.lock_path = self.coord_root / ".lock"
 
     @contextmanager
-    def locked(self):
+    def locked(self, *, wait: bool = True):
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         with self.lock_path.open("a+") as fh:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
             try:
                 yield
             finally:
@@ -754,6 +763,61 @@ class CoordStore:
 
     def _save_pulse(self, pulse: dict[str, dict[str, Any]]) -> None:
         self._write_json(self.pulse_path, {"pulse": pulse})
+
+    def _load_bells(self) -> dict[str, bool]:
+        payload = self._read_json(self.bells_path, {})
+        # Reject content-bearing/corrupt state instead of forwarding any of it.
+        if not isinstance(payload, dict) or any(value is not True for value in payload.values()):
+            return {}
+        return payload
+
+    def _ring_locked(self, agent_id: str | None) -> bool:
+        """Best-effort advisory write AFTER the ledger commit, under its lock."""
+        if agent_id is None:
+            return False
+        try:
+            agents = self._load_agents()
+            target = agents.get(agent_id)
+            if not target or classify_presence(target) not in {"active", "idle"}:
+                return False
+            # No per-peer process probes on a ledger write. Remove only records
+            # already pruned by coord; check the addressed session's liveness.
+            bells = {key: True for key in self._load_bells() if key in agents}
+            bells[agent_id] = True
+            self._write_json(self.bells_path, bells)
+            return True
+        except Exception:
+            # Attention may degrade to polling; a ledger write must still succeed.
+            return False
+
+    def ring(self, target: str) -> bool:
+        try:
+            with self.locked(wait=False):
+                agent_id, _ = self._resolve_peer(target)
+                return self._ring_locked(agent_id)
+        except Exception:
+            return False
+
+    def take_bell(self, session: str) -> bool:
+        """Match the hook's exact session, never an inherited process identity.
+
+        Legacy thread IDs and pinned session IDs can name the same harness
+        session. Consume their bits together without creating or reviving peers.
+        The shared lock serializes this read/clear with all ledger writers.
+        """
+        with self.locked(wait=False):
+            agents = self._load_agents()
+            targets = {
+                key for key, record in agents.items()
+                if session in (record.get("session"), record.get("identity_raw"))
+            }
+            bells = self._load_bells()
+            pending = targets & bells.keys()
+            if not pending:
+                return False
+            deliver = any(classify_presence(agents[key]) in {"active", "idle"} for key in pending)
+            self._write_json(self.bells_path, {key: True for key in bells if key not in targets})
+            return deliver
 
     def _load_events(self) -> list[dict[str, Any]]:
         if not self.events_path.exists():
@@ -1370,6 +1434,7 @@ class CoordStore:
                 keys=[key],
                 summary=f"{alias or self.agent_id} needs {key}",
             )
+            self._ring_locked(from_agent_id)
             return payload
 
     def clear_need(self, key: str) -> tuple[bool, dict[str, Any] | None]:
@@ -1652,6 +1717,8 @@ class CoordStore:
                 keys=[key] if key else [],
                 summary=f"{alias or self.agent_id} dropped {normalized} for {target}",
             )
+            # Roles and 'any' remain ordinary ledger entries, not broadcasts.
+            self._ring_locked(resolved if known_agent else None)
             return payload
 
     def drops(self, for_me: bool = False) -> list[dict[str, Any]]:
@@ -2023,6 +2090,33 @@ class CoordStore:
                 }
             )
 
+        # An addressed need must be readable by its recipient, not just its owner.
+        for need in self._load_needs():
+            if need.get("owner") == self.agent_id or need.get("from") != self.agent_id:
+                continue
+            latest_event = next(
+                (
+                    event for event in reversed(self._load_events())
+                    if event.get("kind") == "need_add"
+                    and need.get("key") in event.get("keys", [])
+                    and event.get("agent_id") == need.get("owner")
+                ),
+                None,
+            )
+            seq = int(latest_event.get("seq", 0)) if latest_event else 0
+            label = need.get("owner_alias") or need.get("owner")
+            interrupts.append({
+                "kind": "dependency",
+                "severity": "info",
+                "peer": need.get("owner"),
+                "peer_label": label,
+                "paths": [],
+                "keys": [need["key"]],
+                "summary": f"Dependency requested by {label}: {need['key']}: {need['why']}",
+                "new": seq > last_seen_seq,
+                "event_id": latest_event.get("id") if latest_event else None,
+            })
+
         # Drops addressed to me (or matching a need key) are dependencies made visible.
         for drop in self._load_drops():
             if drop.get("owner") == self.agent_id:
@@ -2236,6 +2330,13 @@ def parser() -> argparse.ArgumentParser:
     pulse_show = pulse_sub.add_parser("show")
     pulse_show.add_argument("peer", nargs="?")
 
+    bell_p = sub.add_parser("bell")
+    bell_sub = bell_p.add_subparsers(dest="bell_command")
+    bell_ring = bell_sub.add_parser("ring")
+    bell_ring.add_argument("--for", required=True, dest="target")
+    bell_check = bell_sub.add_parser("check")
+    bell_check.add_argument("--from-hook", required=True, action="store_true")
+
     sub.add_parser("claims")
     claim_p = sub.add_parser("claim")
     claim_p.add_argument("path")
@@ -2250,7 +2351,7 @@ def parser() -> argparse.ArgumentParser:
     need_add = need_sub.add_parser("add")
     need_add.add_argument("key")
     need_add.add_argument("--why", required=True)
-    need_add.add_argument("--from", dest="from_target")
+    need_add.add_argument("--from", "--for", dest="from_target")
     need_list = need_sub.add_parser("list")
     need_list.add_argument("--all", action="store_true")
     need_clear = need_sub.add_parser("clear")
@@ -2324,6 +2425,41 @@ def format_interrupt(item: dict[str, Any]) -> str:
     return f"{prefix}{item.get('kind')}: {item.get('summary')}"
 
 
+def bell_from_hook() -> int:
+    """Only fixed context leaves this boundary. No harness/session startup."""
+    try:
+        payload = json.load(sys.stdin)
+        if not isinstance(payload, dict):
+            return 0
+        event = payload.get("hook_event_name")
+        if event not in {"UserPromptSubmit", "Stop"}:
+            return 0
+        if event == "Stop" and payload.get("stop_hook_active") is not False:
+            # Never chain stop continuations. Retain the bit for the next turn.
+            return 0
+        session = payload.get("session_id")
+        cwd = payload.get("cwd")
+        if not isinstance(session, str) or not session or not isinstance(cwd, str) or not cwd:
+            return 0
+        base = Path(cwd)
+        if not base.is_absolute() or not base.is_dir():
+            return 0
+        paths = resolve_project_paths(base)
+        if not (Path(paths["coord_root"]) / "bells.json").is_file():
+            return 0
+        if not CoordStore(base, identify=False).take_bell(session):
+            return 0
+        if event == "Stop":
+            # Both Claude and Codex document this one-shot continuation protocol.
+            result = {"decision": "block", "reason": DOORBELL_NUDGE}
+        else:
+            result = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": DOORBELL_NUDGE}}
+        print(json.dumps(result))
+    except Exception:
+        pass
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 1 or argv[1] in {"--help", "-h", "help"}:
         print(HELP)
@@ -2334,6 +2470,21 @@ def main(argv: list[str]) -> int:
     if "--json" in raw_args:
         force_json = True
         raw_args = [arg for arg in raw_args if arg != "--json"]
+
+    if raw_args and raw_args[0] == "bell":
+        # Never echo rejected content in argparse diagnostics or persist it.
+        if raw_args in (["bell"], ["bell", "--help"], ["bell", "ring", "--help"], ["bell", "check", "--help"]):
+            print("bell ring --for <agent> | bell check --from-hook (routing only; no content)")
+            return 0
+        if raw_args == ["bell", "check", "--from-hook"]:
+            return bell_from_hook()
+        if len(raw_args) == 4 and raw_args[:3] == ["bell", "ring", "--for"] and not raw_args[3].startswith("-"):
+            try:
+                queued = CoordStore(Path.cwd(), identify=False).ring(raw_args[3])
+            except Exception:
+                queued = False
+            return print_payload({"success": True, "tool": "coord", "queued": queued}, force_json)
+        return error("bell accepts routing only: bell ring --for <agent> | bell check --from-hook; no content", force_json, code=2)
 
     args = parser().parse_args(raw_args)
     args.json = bool(force_json or getattr(args, "json", False))
