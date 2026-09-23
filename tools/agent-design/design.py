@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from design_browser import Browser, DesignError
+from design_browser import Browser, DesignError, PageNotReady, settle_options
 from design_contract import compile_contract, prompts
 from design_state import Round
 from design_imagine import imagine
@@ -64,6 +64,10 @@ def main(argv=None):
     polish.add_argument('--session')
     polish.add_argument('--viewport', type=viewport, required=True)
     polish.add_argument('--config', type=Path, help='JSON with protected phrases and sourced alignment relationships')
+    ready = polish.add_mutually_exclusive_group()
+    ready.add_argument('--ready-text', help='Literal rendered text that must appear before measurement')
+    ready.add_argument('--ready-js', help='Read-only JavaScript boolean expression that must become true')
+    polish.add_argument('--settle-timeout-ms', type=int, help='Total readiness wait budget in milliseconds (default: 60000)')
     polish.add_argument('--out', type=Path)
     polish.add_argument('--render', type=Path)
     polish.add_argument('--json', action='store_true')
@@ -98,7 +102,18 @@ def main(argv=None):
                 with Round(args.round,create=True) as record:
                     result=record.initialize(copy,facts,str(args.facts.resolve()),raw_facts)
             print(json.dumps(result,ensure_ascii=False,indent=2));return 0
-        browser = Browser(args.session)
+        config = json.loads(args.config.read_text()) if args.config else {}
+        options = settle_options(config)
+        if args.ready_text is not None:
+            options.pop('ready_js', None)
+            options['ready_text'] = args.ready_text
+        if args.ready_js is not None:
+            options.pop('ready_text', None)
+            options['ready_js'] = args.ready_js
+        if args.settle_timeout_ms is not None:
+            options['timeout_ms'] = args.settle_timeout_ms
+        config['settle'] = options
+        options = settle_options(config)
         source = Path(args.url).expanduser()
         url = source.resolve().as_uri() if source.is_file() else args.url
         if args.out and args.out.exists():
@@ -106,20 +121,32 @@ def main(argv=None):
         if args.render and args.render.exists():
             raise DesignError('render exists; choose a new render path')
         if args.dry_run:
-            print(json.dumps({'dry_run':True,'url':url,'viewport':args.viewport,'paid_requests':0,'operation':'browse live polish and optional render'}));return 0
+            print(json.dumps({'dry_run':True,'url':url,'viewport':args.viewport,'settle':options,'paid_requests':0,'operation':'browse live polish and optional render'}));return 0
+        browser = Browser(args.session)
+        result = None
         try:
-            result = browser.polish(url, args.viewport, json.loads(args.config.read_text()) if args.config else {})
+            result = browser.polish(url, args.viewport, config)
             if args.render:
                 args.render.parent.mkdir(parents=True, exist_ok=True)
                 browser.screenshot(args.render)
+        except PageNotReady as error:
+            result = error.audit
         finally:
-            if not args.session:browser.close()
+            if not args.session:
+                try:
+                    browser.close()
+                except (DesignError, OSError, ValueError) as error:
+                    if result is None or result.get('measurement') != 'not_run':
+                        raise
+                    result['cleanup_error'] = str(error)
         output = json.dumps(result, ensure_ascii=False, indent=2) + '\n'
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)
             with args.out.open('x') as f:
                 f.write(output)
-        print(output if args.json else json.dumps({'clean':result['clean'],'complete':result['complete'],'counts':{k:len(v) for k,v in result['findings'].items()},'out':str(args.out) if args.out else None}))
+        print(output if args.json else json.dumps({'clean':result['clean'],'complete':result['complete'],'counts':{k:len(v) for k,v in result['findings'].items()},'settle':result['settle'],'error':result.get('error'),'out':str(args.out) if args.out else None}))
+        if result.get('measurement') == 'not_run':
+            return 2
         return 0 if result['clean'] else 1
     except (DesignError, OSError, ValueError) as exc:
         print(json.dumps({'success':False,'error':str(exc)}), file=sys.stderr)

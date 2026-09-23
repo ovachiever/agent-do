@@ -82,9 +82,15 @@ The self-saving runtime captures its original template at load and publishes onl
 
 ```bash
 agent-do design polish page.html --viewport 1440x1000 --out audit.json --render page.png --json
+agent-do design polish https://example.com/today --viewport 1440x1000 --ready-text 'Today is ready' --settle-timeout-ms 45000 --out today-audit.json --json
+agent-do design polish https://example.com/today --viewport 1440x1000 --ready-js 'window.todayReady === true' --out today-audit.json --json
 ```
 
-Uses `agent-do browse`, explicitly sets the viewport after navigation, checks the actual viewport, and awaits fonts before measuring. Handles inline text, SVG text, orphan tails, protected phrase wraps, duplicate sentences, control alignment, hidden clipping, and horizontal overflow. It reports incomplete coverage for frames, shadow roots, and failed fonts.
+Uses `agent-do browse`, explicitly sets the viewport after navigation, checks the actual viewport, waits for network idle, and awaits fonts before measuring. For client-rendered pages, supply either `--ready-text` (a literal substring of rendered body text) or `--ready-js` (a read-only JavaScript expression returning the boolean `true`). Network idle alone cannot prove that delayed application work is finished. When a ready condition is supplied, polish waits for it, waits for network idle again, and rechecks the condition before measuring. All waits share `--settle-timeout-ms`, an operational budget of 60000 milliseconds by default, starting after navigation and viewport setup.
+
+Every audit records `settle`: the requested condition, total timeout, actual elapsed milliseconds, and each native browser wait and readiness recheck's outcome and duration. Each wait receives the remaining budget; CLI transport overhead is included in elapsed time and can delay failure reporting past that budget. A timeout or predicate error prevents measurement and rendering, exits 2, and saves an unsuccessful receipt to `--out` with `clean: false`, `complete: false`, and `measurement: not_run`. A loading skeleton is never measured after a failed readiness check. The same options can be supplied in `--config` as `{"settle":{"ready_text":"Today is ready","timeout_ms":45000}}` or with `ready_js`; explicit CLI options override their config counterparts. Dry runs validate and report these options without opening a browser.
+
+Handles inline text, SVG text, orphan tails, protected phrase wraps, duplicate sentences, control alignment, hidden clipping, and horizontal overflow. It reports incomplete coverage for frames, shadow roots, and failed fonts.
 
 Threshold provenance:
 
@@ -98,6 +104,8 @@ Optional `--config` JSON has `phrases` (strings or `{text, source}`) and `alignm
 ## Validation
 
 ```bash
+python3 tools/agent-design/test/test_settle.py          # No browser or app launch
+python3 tools/agent-design/test/test_settle_browser.py  # Requires coordinated browser acceptance
 python3 tools/agent-design/test/test_polish.py
 agent-do harness contracts validate
 ./test.sh

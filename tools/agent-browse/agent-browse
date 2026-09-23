@@ -212,9 +212,11 @@ READING:
 WAITING:
   wait <selector|ms>             Wait for element or milliseconds
   wait --text <text>             Wait for text to appear
+  wait --fn <expression>         Wait for a JavaScript predicate
   wait --url <pattern>           Wait for URL to match
-  wait --stable                  Wait for network idle + DOM stable
+  wait --stable                  Wait for network idle
   wait --load                    Wait for load event
+    --timeout-ms <ms>            Bound a condition wait in the browser
 
 SCREENSHOTS & RECORDING:
   screenshot [path]              Take screenshot
@@ -851,17 +853,44 @@ EOF
 }
 
 build_wait_cmd() {
-    local target="$1"
-    # Check if it's a number (milliseconds)
-    if [[ "$target" =~ ^[0-9]+$ ]]; then
-        cat << EOF
-{"id":"$(cmd_id)","action":"wait","timeout":$target}
-EOF
-    else
-        cat << EOF
-{"id":"$(cmd_id)","action":"wait","selector":"$target"}
-EOF
-    fi
+    python3 - "$(cmd_id)" "$@" <<'PYEOF'
+import json
+import sys
+
+args = sys.argv[2:]
+command = {"id": sys.argv[1], "action": "wait"}
+try:
+    target = args.pop(0)
+    if target in ("--text", "--url", "--fn"):
+        value = args.pop(0)
+        if not value:
+            raise ValueError("wait condition must not be empty")
+        if target == "--fn":
+            command.update(action="waitforfunction", expression=value)
+        else:
+            command[target[2:]] = value
+    elif target in ("--stable", "--load"):
+        command["state"] = "networkidle"
+    elif target.isascii() and target.isdigit():
+        if int(target) <= 0:
+            raise ValueError("wait duration must be positive")
+        command["timeout"] = int(target)
+    elif target.startswith("--") or not target:
+        raise ValueError("unknown or empty wait condition")
+    else:
+        command["selector"] = target
+    if args:
+        if len(args) != 2 or args[0] != "--timeout-ms" or "timeout" in command:
+            raise ValueError("expected --timeout-ms <positive integer> after a condition")
+        timeout = int(args[1])
+        if timeout <= 0:
+            raise ValueError("wait timeout must be positive")
+        command["timeout"] = timeout
+except (IndexError, ValueError) as error:
+    print("Usage: agent-browse wait <selector|ms|--text text|--fn expression|--url pattern|--stable> [--timeout-ms ms]: " + str(error), file=sys.stderr)
+    sys.exit(1)
+print(json.dumps(command))
+PYEOF
 }
 
 build_eval_cmd() {
@@ -1216,24 +1245,7 @@ main() {
             
         # Waiting
         wait)
-            if [[ $# -eq 0 ]]; then
-                echo "Usage: agent-browse wait <selector|ms|--text|--url|--stable>" >&2
-                exit 1
-            fi
-            case "$1" in
-                --text)
-                    json='{"id":"'$(cmd_id)'","action":"wait","text":"'"$2"'"}'
-                    ;;
-                --url)
-                    json='{"id":"'$(cmd_id)'","action":"wait","url":"'"$2"'"}'
-                    ;;
-                --stable|--load)
-                    json='{"id":"'$(cmd_id)'","action":"wait","state":"networkidle"}'
-                    ;;
-                *)
-                    json=$(build_wait_cmd "$1")
-                    ;;
-            esac
+            json=$(build_wait_cmd "$@") || return 1
             ;;
             
         # Screenshots
