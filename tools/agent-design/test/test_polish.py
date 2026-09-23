@@ -91,6 +91,162 @@ class PolishBrowserTests(unittest.TestCase):
         self.assertNotIn('Secret', result['text']['rendered'])
         self.assertNotIn('p1', result['text']['copies'])
 
+    def test_closed_details_only_measure_the_first_summary(self):
+        result = self.audit('<details id="closed"><summary><span>Visible summary</span></summary>'
+                            '<p data-copy-id="hidden" style="width:9ch">one two three</p>'
+                            '<div style="height:10px;overflow:hidden">Hidden caption</div>'
+                            '<summary>Hidden second summary</summary>'
+                            '<span data-fact-id="hidden" data-value="42">42</span></details>')
+        self.assertEqual(result['text']['rendered'].strip(), 'Visible summary')
+        self.assertNotIn('hidden', result['text']['copies'])
+        self.assertFalse(result['fact_marks'][0]['visible'])
+        self.assertTrue(result['clean'], result['findings'])
+        self.assertFalse(self.browser.evaluate('document.querySelector("details").open'))
+
+    def test_nested_summary_cannot_escape_a_closed_outer_details(self):
+        result = self.audit('<details><summary>Outer summary</summary>'
+                            '<details open><summary>Hidden inner summary</summary>'
+                            '<p>Hidden inner content.</p></details></details>'
+                            '<details open><summary>Open summary</summary>'
+                            '<details><summary>Visible inner summary</summary>'
+                            '<p>Hidden nested content.</p></details></details>')
+        self.assertNotIn('Hidden', result['text']['rendered'])
+        self.assertIn('Visible inner summary', result['text']['rendered'])
+        self.assertTrue(result['clean'], result['findings'])
+
+    def test_open_details_still_report_real_layout_defects(self):
+        result = self.audit('<details open><summary>Summary</summary>'
+                            '<p style="width:9ch">one two three</p>'
+                            '<div style="width:80px;overflow:hidden;white-space:nowrap">A long hidden caption.</div></details>')
+        self.assertTrue(result['findings']['orphans'])
+        self.assertTrue(result['findings']['clipped_text'])
+
+    def test_scrollable_text_below_the_fold_is_not_clipped_by_the_shell(self):
+        body = '<div id="shell"><main id="scroll"><p>First visible row.</p>' + ''.join(
+            '<p>Reachable row ' + str(i) + '.</p>' for i in range(30)) + '</main></div>'
+        for overflow in ('hidden', 'clip'):
+            with self.subTest(overflow=overflow):
+                result = self.audit(body, '#shell{height:150px;overflow:' + overflow + ';border:5px solid}'
+                                    '#scroll{height:100%;overflow:auto}p{margin:0}')
+                self.assertIn('Reachable row 29.', result['text']['rendered'])
+                self.assertFalse(result['findings']['clipped_text'], result['findings'])
+                self.assertFalse(result['findings']['overflow'], result['findings'])
+                self.assertTrue(result['clean'], result['findings'])
+
+    def test_horizontal_scrolling_is_reachable_through_a_hidden_shell(self):
+        result = self.audit('<div id="shell"><div id="scroll"><p>Reachable horizontal caption.</p></div></div>',
+                            '#shell{width:160px;overflow:hidden}#scroll{width:100%;overflow:auto}'
+                            'p{margin:0;width:1000px;white-space:nowrap}')
+        self.assertFalse(result['findings']['clipped_text'], result['findings'])
+        self.assertFalse(result['findings']['overflow'], result['findings'])
+
+    def test_a_scroll_container_does_not_hide_a_clip_inside_it(self):
+        result = self.audit('<div id="shell"><div id="scroll"><div style="height:300px"></div>'
+                            '<p id="cut">A long hidden caption.</p></div></div>',
+                            '#shell{height:150px;overflow:hidden}#scroll{height:100%;overflow:auto}'
+                            '#cut{width:80px;overflow:hidden;white-space:nowrap}')
+        self.assertIn('#cut', {f['clipped_by'] for f in result['findings']['clipped_text']})
+
+    def test_scroll_reachability_is_per_axis(self):
+        result = self.audit('<div id="shell"><div id="scroll"><p>A long hidden caption.</p>'
+                            '<div style="height:300px"></div></div></div>',
+                            '#shell{width:160px;height:120px;overflow:hidden}'
+                            '#scroll{width:400px;height:100%;overflow-y:auto;overflow-x:hidden}'
+                            'p{white-space:nowrap;margin:0}')
+        self.assertIn('#shell', {f['clipped_by'] for f in result['findings']['clipped_text']})
+
+    def test_content_before_the_scroll_origin_is_still_inaccessible(self):
+        result = self.audit('<div id="shell"><div id="scroll"><p id="unreachable">Unreachable row.</p>'
+                            '<div style="height:600px"></div></div></div>',
+                            '#shell{margin-top:100px;height:150px;overflow:hidden}'
+                            '#scroll{position:relative;height:100%;overflow:auto}'
+                            '#unreachable{position:absolute;top:-60px;margin:0}')
+        self.assertIn('#shell', {f['clipped_by'] for f in result['findings']['clipped_text']})
+
+    def test_rtl_horizontal_scroll_reachability(self):
+        result = self.audit('<div id="shell"><div id="scroll"><p>Reachable horizontal caption.</p></div></div>',
+                            '#shell{margin-left:400px;width:160px;overflow:hidden}'
+                            '#scroll{direction:rtl;width:100%;overflow:auto}'
+                            'p{margin:0;white-space:nowrap}')
+        self.assertFalse(result['findings']['clipped_text'], result['findings'])
+
+    def test_clipped_scrollport_and_unrelated_scroller_remain_findings(self):
+        fixtures = (
+            ('<div id="shell"><div id="scroll"><div style="height:200px"></div><p>Cut off row.</p>'
+             '<div style="height:600px"></div></div></div>', '#scroll{height:300px;overflow:auto}'),
+            ('<div id="shell"><div id="scroll"><div style="height:600px"></div></div>'
+             '<p>Unreachable sibling.</p></div>', '#scroll{height:120px;overflow:auto}')
+        )
+        for body, css in fixtures:
+            with self.subTest(body=body):
+                result = self.audit(body, '#shell{height:100px;overflow:hidden}' + css)
+                self.assertIn('#shell', {f['clipped_by'] for f in result['findings']['clipped_text']})
+
+    def test_declared_clamp_with_related_control_is_accepted_without_clicking(self):
+        result = self.audit('<div id="excerpt" data-polish-clamp>one two<br>three</div>'
+                            '<button id="expand" aria-expanded="false" aria-controls="excerpt" '
+                            'onclick="throw new Error(\'must not click\')">Read more</button>',
+                            '#excerpt{height:30px;overflow:hidden}button{font:inherit}')
+        self.assertTrue(result['clean'], result['findings'])
+        self.assertEqual(result['coverage']['intentional_clamps'][0]['selector'], '#excerpt')
+        self.assertEqual(result['coverage']['intentional_clamps'][0]['control'], '#expand')
+        self.assertEqual(self.browser.evaluate('document.querySelector("button").getAttribute("aria-expanded")'), 'false')
+
+    def test_local_disclosure_control_accepts_an_unambiguous_clamp(self):
+        result = self.audit('<section><div data-polish-clamp>one two<br>three</div>'
+                            '<button aria-expanded="false">Read more</button></section>',
+                            '[data-polish-clamp]{height:30px;overflow:hidden}button{font:inherit}')
+        self.assertTrue(result['clean'], result['findings'])
+        self.assertEqual(len(result['coverage']['intentional_clamps']), 1)
+
+    def test_line_clamp_with_disclosure_does_not_report_a_hidden_orphan(self):
+        result = self.audit('<p id="excerpt" data-polish-clamp>one two<br>three</p>'
+                            '<button aria-expanded="false" aria-controls="excerpt">Read more</button>',
+                            '#excerpt{margin:0;display:-webkit-box;-webkit-box-orient:vertical;'
+                            '-webkit-line-clamp:1;overflow:hidden}button{font:inherit}')
+        self.assertTrue(result['clean'], result['findings'])
+
+    def test_clamp_marker_without_an_available_related_control_is_not_an_exemption(self):
+        controls = (
+            '',
+            '<button aria-expanded="true" aria-controls="excerpt">Read less</button>',
+            '<button aria-expanded="false" aria-controls="unrelated">Read more</button>',
+            '<button disabled aria-expanded="false" aria-controls="excerpt">Read more</button>',
+            '<button hidden aria-expanded="false" aria-controls="excerpt">Read more</button>',
+            '<button aria-disabled="true" aria-expanded="false" aria-controls="excerpt">Read more</button>',
+            '<div inert><button aria-expanded="false" aria-controls="excerpt">Read more</button></div>',
+            '<span aria-expanded="false" aria-controls="excerpt">Read more</span>',
+        )
+        for control in controls:
+            with self.subTest(control=control):
+                result = self.audit('<p id="excerpt" data-polish-clamp>one two<br>three</p>' + control,
+                                    '#excerpt{height:30px;overflow:hidden}')
+                self.assertEqual(result['coverage']['intentional_clamps'], [])
+                self.assertTrue(result['findings']['clipped_text'])
+                self.assertTrue(result['findings']['overflow'])
+
+    def test_control_does_not_exempt_an_unmarked_clip(self):
+        result = self.audit('<p id="excerpt">one two<br>three</p>'
+                            '<button aria-expanded="false" aria-controls="excerpt">Read more</button>',
+                            '#excerpt{height:30px;overflow:hidden}')
+        self.assertTrue(result['findings']['clipped_text'])
+        self.assertTrue(result['findings']['overflow'])
+
+    def test_clamp_exemption_does_not_hide_horizontal_or_inner_clipping(self):
+        result = self.audit('<div id="excerpt" data-polish-clamp>'
+                            '<div id="inner">A long hidden caption.</div><br>one two</div>'
+                            '<button aria-expanded="false" aria-controls="excerpt">Read more</button>',
+                            '#excerpt{width:80px;height:60px;overflow:hidden;white-space:nowrap}'
+                            '#inner{width:40px;overflow:hidden}')
+        self.assertIn('#inner', {f['clipped_by'] for f in result['findings']['clipped_text']})
+        self.assertTrue(any(f['axis'] == 'x' for f in result['findings']['overflow']))
+
+    def test_visible_orphan_inside_a_clamp_is_still_reported(self):
+        result = self.audit('<p id="excerpt" data-polish-clamp>one two<br>three<br>four five</p>'
+                            '<button aria-expanded="false" aria-controls="excerpt">Read more</button>',
+                            '#excerpt{height:60px;overflow:hidden}')
+        self.assertEqual(result['findings']['orphans'][0]['last_word'], 'three')
+
     def test_br_is_a_rendered_word_boundary(self):
         result = self.audit('<p data-copy-id="p1">First line<br>Second line</p>')
         self.assertEqual(result['text']['copies']['p1'], 'First line Second line')

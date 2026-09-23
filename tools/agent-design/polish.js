@@ -25,9 +25,36 @@ async function designPolish(config = {}) {
     for (let p=el; p; p=p.parentElement) {
       const s=getComputedStyle(p);
       if (s.display==='none' || s.visibility==='hidden' || s.visibility==='collapse' || Number(s.opacity)===0 || p.hidden) return false;
+      // Closed details can retain client rects. Only their first summary is exposed,
+      // and a nested summary does not escape a closed outer disclosure.
+      if (p.matches('details:not([open])')) {
+        const summary=[...p.children].find(child=>child.localName==='summary');
+        if (!summary?.contains(el)) return false;
+      }
     }
     return true;
   };
+  const paddingBounds = el => {
+    const b=el.getBoundingClientRect(), s=getComputedStyle(el);
+    return {left:b.left+parseFloat(s.borderLeftWidth),right:b.right-parseFloat(s.borderRightWidth),
+      top:b.top+parseFloat(s.borderTopWidth),bottom:b.bottom-parseFloat(s.borderBottomWidth)};
+  };
+  const clamps=new Map();
+  const controls=[...document.querySelectorAll('[aria-expanded="false"]')].filter(el=>
+    el.matches('button,[role="button"],input[type="button"]') && visible(el) && el.getClientRects().length &&
+    !el.matches(':disabled') && !el.closest('[inert],[aria-disabled="true"]'));
+  for (const el of document.querySelectorAll('[data-polish-clamp]')) {
+    if (!visible(el) || !['hidden','clip'].includes(getComputedStyle(el).overflowY)) continue;
+    const control=controls.find(c=>{
+      // An explicit relationship wins. Without one, accept only an unambiguous
+      // local disclosure, not an unrelated collapsed control elsewhere on the page.
+      if (c.hasAttribute('aria-controls')) return el.id && c.getAttribute('aria-controls').split(/\s+/u).includes(el.id);
+      const container=el.parentElement;
+      return container && container.contains(c) && container.querySelectorAll('[data-polish-clamp]').length===1 &&
+        container.querySelectorAll('[aria-expanded]').length===1;
+    });
+    if (control) clamps.set(el,control);
+  }
   const excluded = el => !!el.closest('script,style,noscript,template,head,svg defs,svg title,svg desc');
   const owner = el => {
     if (el.closest('svg text')) return el.closest('svg text');
@@ -104,7 +131,11 @@ async function designPolish(config = {}) {
   const segmenter=new Intl.Segmenter(document.documentElement.lang || 'en',{granularity:'sentence'});
   for (const g of groups.values()) {
     const words=g.words, lines=[];
-    for (const word of words) {
+    const disclosureBounds=[];
+    for (let p=g.el;p;p=p.parentElement) if (clamps.has(p)) disclosureBounds.push(paddingBounds(p));
+    // A deliberately collapsed tail must not manufacture a last-line orphan.
+    const layoutWords=words.filter(word=>disclosureBounds.every(b=>word.bottom>b.top && word.top<b.bottom));
+    for (const word of layoutWords) {
       let line=lines.find(l=>Math.min(l.bottom,word.bottom)-Math.max(l.top,word.top)>0);
       if (!line) {line={top:word.top,bottom:word.bottom,words:[]};lines.push(line);}
       line.words.push(word);
@@ -137,19 +168,40 @@ async function designPolish(config = {}) {
       sentenceGroups.get(sentence).push(sel);
     }
     for (const word of words) {
+      const reachable={x:[],y:[]};
       for (let p=g.el;p;p=p.parentElement) {
         const style=getComputedStyle(p), b=p.getBoundingClientRect();
         const clipping=clipBounds(p);
         if (clipping && (word.left<clipping.left-pixel || word.right>clipping.right+pixel || word.top<clipping.top-pixel || word.bottom>clipping.bottom+pixel)) {
           if (!findings.clipped_text.some(f=>f.selector===sel && f.clipped_by===selector(p)+' clipPath')) findings.clipped_text.push({selector:sel,text,clipped_by:selector(p)+' clipPath',text_rect:word,clip_rect:clipping,tolerance_px:pixel,threshold_source:'one physical pixel converted through devicePixelRatio'});
         }
-        const clipX=['hidden','clip'].includes(style.overflowX), clipY=['hidden','clip'].includes(style.overflowY);
-        if (!(clipX || clipY)) continue;
-        const left=b.left+parseFloat(style.borderLeftWidth),right=b.right-parseFloat(style.borderRightWidth);
-        const top=b.top+parseFloat(style.borderTopWidth),bottom=b.bottom-parseFloat(style.borderBottomWidth);
-        if ((clipX && (word.left<left-pixel || word.right>right+pixel)) || (clipY && (word.top<top-pixel || word.bottom>bottom+pixel))) {
+        const clipX=['hidden','clip'].includes(style.overflowX), clipY=['hidden','clip'].includes(style.overflowY) && !clamps.has(p);
+        const {left,right,top,bottom}=paddingBounds(p);
+        // Scrolling only protects the axis it can move, and only while its
+        // viewport fits inside this clip. Inner clips and cut-off scrollports
+        // remain findings; a sibling scroller cannot shelter inaccessible text.
+        const reachableX=reachable.x.some(port=>port.left>=left-pixel && port.right<=right+pixel);
+        const reachableY=reachable.y.some(port=>port.top>=top-pixel && port.bottom<=bottom+pixel);
+        if ((clipX && !reachableX && (word.left<left-pixel || word.right>right+pixel)) ||
+            (clipY && !reachableY && (word.top<top-pixel || word.bottom>bottom+pixel))) {
           if (!findings.clipped_text.some(f=>f.selector===sel && f.clipped_by===selector(p))) findings.clipped_text.push({selector:sel,text,clipped_by:selector(p),text_rect:word,clip_rect:rect(b),tolerance_px:pixel,threshold_source:'one physical pixel converted through devicePixelRatio'});
         }
+        const port={left,right,top,bottom};
+        const horizontal=style.writingMode==='horizontal-tb';
+        let reverseX=horizontal ? style.direction==='rtl' : style.writingMode.endsWith('-rl');
+        let reverseY=!horizontal && (style.direction==='rtl') !== (style.writingMode==='sideways-lr');
+        if (['flex','inline-flex'].includes(style.display)) {
+          if (style.flexDirection===(horizontal?'row-reverse':'column-reverse')) reverseX=!reverseX;
+          if (style.flexDirection===(horizontal?'column-reverse':'row-reverse')) reverseY=!reverseY;
+        }
+        const startX=reverseX ? right-p.scrollWidth : left, endX=reverseX ? right : left+p.scrollWidth;
+        const startY=reverseY ? bottom-p.scrollHeight : top, endY=reverseY ? bottom : top+p.scrollHeight;
+        // Content before the scroll origin is unreachable, even with a scrollbar.
+        // Existing inner scrollports may represent words already reachable there.
+        const inScrollX=[word,...reachable.x].some(r=>r.left+p.scrollLeft>=startX-pixel && r.right+p.scrollLeft<=endX+pixel);
+        const inScrollY=[word,...reachable.y].some(r=>r.top+p.scrollTop>=startY-pixel && r.bottom+p.scrollTop<=endY+pixel);
+        if (['auto','scroll'].includes(style.overflowX) && p.scrollWidth>p.clientWidth+pixel && inScrollX) reachable.x.push(port);
+        if ((['auto','scroll'].includes(style.overflowY) && p.scrollHeight>p.clientHeight+pixel && inScrollY) || clamps.has(p)) reachable.y.push(port);
       }
     }
   }
@@ -176,7 +228,7 @@ async function designPolish(config = {}) {
     if (!(el instanceof HTMLElement)) continue;
     const style=getComputedStyle(el);
     if (['hidden','clip'].includes(style.overflowX) && el.scrollWidth>el.clientWidth+pixel) findings.overflow.push({selector:selector(el),axis:'x',scroll:el.scrollWidth,client:el.clientWidth,hidden:true,tolerance_px:pixel,threshold_source:'one physical pixel converted through devicePixelRatio'});
-    if (['hidden','clip'].includes(style.overflowY) && el.scrollHeight>el.clientHeight+pixel) findings.overflow.push({selector:selector(el),axis:'y',scroll:el.scrollHeight,client:el.clientHeight,hidden:true,tolerance_px:pixel,threshold_source:'one physical pixel converted through devicePixelRatio'});
+    if (['hidden','clip'].includes(style.overflowY) && !clamps.has(el) && el.scrollHeight>el.clientHeight+pixel) findings.overflow.push({selector:selector(el),axis:'y',scroll:el.scrollHeight,client:el.clientHeight,hidden:true,tolerance_px:pixel,threshold_source:'one physical pixel converted through devicePixelRatio'});
   }
   let rendered='', lastBlock=null;
   const copies={},copyBlocks={},bindings=[];
@@ -207,6 +259,7 @@ async function designPolish(config = {}) {
     if (hash===proof.sha256) verifiedFrames.push({selector:proof.selector,source_sha256:hash,audit_sha256:proof.audit_sha256,viewport:{width:proof.width,height:proof.height}});
   }
   const coverage={text_runs:runs.length,svg_text_runs:runs.filter(r=>r.selector.includes('text')).length,fonts:document.fonts.status,font_failures:fontFailures,uninspected_frames:frames.length-verifiedFrames.length,independently_verified_frames:verifiedFrames,shadow_roots:all.filter(e=>e.shadowRoot).length,
+    intentional_clamps:[...clamps].map(([el,control])=>({selector:selector(el),control:selector(control),axis:'y',source:'data-polish-clamp with a related enabled aria-expanded=false control'})),
     uninspected_generated_content:generated,uninspected_canvas:all.filter(e=>e.localName==='canvas').length,
     uninspected_clipping:[...unsupportedClips],uninspected_control_values:all.filter(e=>e.matches('input:not([type=hidden]),textarea') && (e.value || e.getAttribute('placeholder'))).map(e=>selector(e))};
   const complete=fontFailures.length===0 && coverage.uninspected_frames===0 && coverage.shadow_roots===0 && generated.length===0 && coverage.uninspected_canvas===0 && coverage.uninspected_control_values.length===0 && unsupportedClips.size===0;
