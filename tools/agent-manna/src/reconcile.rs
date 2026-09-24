@@ -29,6 +29,46 @@ pub enum FindingKind {
     Skipped,
 }
 
+impl FindingKind {
+    /// Every kind, in declaration order (for --only's error text).
+    pub const ALL: [FindingKind; 12] = [
+        FindingKind::LandedOpen,
+        FindingKind::DeadClaim,
+        FindingKind::BlockerDesync,
+        FindingKind::StaleDream,
+        FindingKind::DanglingTrack,
+        FindingKind::FederationIntegrity,
+        FindingKind::DocReference,
+        FindingKind::PromptPairing,
+        FindingKind::HandoffPresentation,
+        FindingKind::WorkflowSprawl,
+        FindingKind::OrphanHandoff,
+        FindingKind::Skipped,
+    ];
+
+    /// The snake_case name the drift contract writes.
+    pub fn name(self) -> &'static str {
+        match self {
+            FindingKind::LandedOpen => "landed_open",
+            FindingKind::DeadClaim => "dead_claim",
+            FindingKind::BlockerDesync => "blocker_desync",
+            FindingKind::StaleDream => "stale_dream",
+            FindingKind::DanglingTrack => "dangling_track",
+            FindingKind::FederationIntegrity => "federation_integrity",
+            FindingKind::DocReference => "doc_reference",
+            FindingKind::PromptPairing => "prompt_pairing",
+            FindingKind::HandoffPresentation => "handoff_presentation",
+            FindingKind::WorkflowSprawl => "workflow_sprawl",
+            FindingKind::OrphanHandoff => "orphan_handoff",
+            FindingKind::Skipped => "skipped",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<FindingKind> {
+        FindingKind::ALL.iter().copied().find(|kind| kind.name() == name)
+    }
+}
+
 /// One reconcile finding, shaped for `.manna/drift.yaml`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Finding {

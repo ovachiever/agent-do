@@ -333,6 +333,12 @@ enum Commands {
         /// Emit JSON instead of YAML
         #[arg(long)]
         json: bool,
+
+        /// With --fix: apply fixes only for these finding kinds
+        /// (comma-separated snake_case names, e.g. dead_claim,blocker_desync).
+        /// Other findings stay advisory. Unknown names are refused.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
     },
 }
 
@@ -3024,6 +3030,43 @@ fn landed_open_close_blocked(
     }
 }
 
+/// Narrow --fix to the finding kinds named by --only. An empty --only keeps
+/// every fix (the historical behavior). A name that matches no kind is a
+/// user error naming the offender, never a silent no-op: an operator asking
+/// to release dead claims must not discover afterwards that a typo also let
+/// the landed_open cure close their in-progress lanes.
+fn select_fix_findings(findings: &[Finding], only: &[String]) -> Result<Vec<Finding>, String> {
+    if only.is_empty() {
+        return Ok(findings.to_vec());
+    }
+    let mut wanted = Vec::new();
+    for name in only {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match FindingKind::from_name(name) {
+            Some(kind) => wanted.push(kind),
+            None => {
+                return Err(format!(
+                    "unknown finding kind for --only: {} (known: {})",
+                    name,
+                    FindingKind::ALL
+                        .iter()
+                        .map(|kind| kind.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }
+        }
+    }
+    Ok(findings
+        .iter()
+        .filter(|finding| wanted.contains(&finding.kind))
+        .cloned()
+        .collect())
+}
+
 fn apply_reconcile_fixes(
     store: &MannaStore,
     issues: &[Issue],
@@ -3158,7 +3201,7 @@ fn apply_reconcile_fixes(
     (fixed, failures)
 }
 
-fn cmd_reconcile(fix: bool, write_drift: bool, dream_age_days: i64, json: bool) -> ! {
+fn cmd_reconcile(fix: bool, write_drift: bool, dream_age_days: i64, json: bool, only: &[String]) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -3255,7 +3298,9 @@ fn cmd_reconcile(fix: bool, write_drift: bool, dream_age_days: i64, json: bool) 
     // Findings describe pre-fix drift; `fixed` lists what --fix addressed.
     let (fixed, fix_failures) = if fix {
         let caller = get_session_identity().ok();
-        apply_reconcile_fixes(&store, &issues, &findings, caller.as_ref())
+        let selected = select_fix_findings(&findings, only)
+            .unwrap_or_else(|error| output_error(&error, EXIT_USER_ERROR));
+        apply_reconcile_fixes(&store, &issues, &selected, caller.as_ref())
     } else {
         (Vec::new(), Vec::new())
     };
@@ -3394,7 +3439,8 @@ fn main() {
             write_drift,
             dream_age_days,
             json,
-        } => cmd_reconcile(fix, write_drift, dream_age_days, json),
+            only,
+        } => cmd_reconcile(fix, write_drift, dream_age_days, json, &only),
     }
 }
 
@@ -4329,6 +4375,45 @@ mod tests {
                     .as_deref()
                     .is_some_and(|path| path.ends_with("notes/work.md"))
         }));
+    }
+
+    #[test]
+    fn only_dead_claim_releases_without_closing_landed_open() {
+        let (_temp, store) = setup_store();
+        let issue = Issue::new("mn-wedge1".to_string(), "Partial lane".to_string()).unwrap();
+        store.append_issue(&issue).unwrap();
+        let dead = session("ses_dead");
+        store.claim_issue(&issue.id, &dead).unwrap();
+        let snapshot = store.load_issues().unwrap();
+        let findings = vec![
+            Finding {
+                kind: FindingKind::LandedOpen,
+                issue_id: Some(issue.id.clone()),
+                detail: "trailer landed but in_progress".to_string(),
+                evidence: Some("abc1234".to_string()),
+                proposed_fix: Some("close".to_string()),
+            },
+            Finding {
+                kind: FindingKind::DeadClaim,
+                issue_id: Some(issue.id.clone()),
+                detail: "owner stopped".to_string(),
+                evidence: Some("ses_dead".to_string()),
+                proposed_fix: Some("release dead claim".to_string()),
+            },
+        ];
+        let selected = select_fix_findings(&findings, &["dead_claim".to_string()]).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].kind, FindingKind::DeadClaim);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &selected, None);
+        assert_eq!(fixed, vec![issue.id.clone()]);
+        assert!(failures.is_empty());
+        let current = store.load_issues().unwrap().pop().unwrap();
+        assert_eq!(current.claimed_by, None);
+        assert_eq!(current.status, IssueStatus::Open);
+        // Empty --only keeps every fix; an unknown name is refused by name.
+        assert_eq!(select_fix_findings(&findings, &[]).unwrap().len(), 2);
+        let error = select_fix_findings(&findings, &["dead_clam".to_string()]).unwrap_err();
+        assert!(error.contains("dead_clam") && error.contains("dead_claim"));
     }
 
     #[test]
