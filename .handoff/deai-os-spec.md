@@ -116,7 +116,7 @@ negation-run (mn-368b25), performed-humility (mn-d06a8f).
 
 | id | work | blocked by |
 |---|---|---|
-| M1 | Vault move from substack-writings/voice, with hash receipts; pointers left behind; lint output on the archived drafts must diff empty before/after | none |
+| M1 | Vault COPY from substack-writings/voice (Erik's ruling 2026-09-25: copy, never move; the substack working set stays untouched and its gate keeps running as-is in the interim). Hash receipts on both sides; a drift check compares the homes; lint output on the archived drafts must diff empty between homes; cutover to a single home is its own later item, Erik-gated | none |
 | M2 | gate verb; substack DRAFT GATE becomes `deai gate --register essay` | M1 |
 | M3 | registers.yaml + `.deai.yaml` resolution | M1 |
 | M4 | terminal pack, measured; Stop reply gate registered | M3 |
@@ -150,3 +150,6 @@ ratification. Pangram integration (separate lane: mn-739746, mn-d4b0fd).
    acceptable home or name a separate private vault path.
 3. Terminal register strictness: full essay tell-set in replies, or a named
    subset.
+4. Vault cutover timing: the interim runs dual-home (substack authoritative
+   for its own gate, this repo canonical for everything new) with the drift
+   check standing; Erik names the cutover moment.
