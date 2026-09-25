@@ -1,155 +1,169 @@
-# DEAI OS: engineering spec (v0, 2026-09-25)
+# DEAI OS: engineering spec (v0.2, 2026-09-25)
 
 SPEC ONLY. No code before Erik's go, per the taxonomy gate.
 
-## 0. Definition
+v0.2 supersedes v0.1's center of gravity per Erik's rulings of 2026-09-25:
+the system is a writer, not a warden. Formation first, receipts second,
+gates last and only where no human is present. In interactive surfaces
+there is no blocking, ever: the muck stays visible, false positives are a
+defect of the highest class, and the voice arrives by influence, not
+enforcement.
 
-One rule source. Deterministic gates. Typed feedback intake. Gates refuse named
-tells after generation; they impose no constraint on what gets written. Every
-verb exits typed, emits JSON under --json, counts exactly, and takes every
-threshold from calibration, never from a literal.
+## 0. Goal
 
-## 1. Components
+AI on this machine writes like Erik, drops its AI tics, and does not make
+things up. Three organs, in priority order:
 
-- Vault (data): corpus, calibration, register packs, lexicon, catch log. One
-  versioned home in this repo.
-- Engines (code): lint (exists), ensemble (ported), fingerprint stats (ported),
-  meters (new columns in stats).
-- Verbs (new): gate, catch, catches, ratify, calibrate, registers. Existing:
-  lint, packs, validate, measure, guard.
-- Hooks: existing PostToolUse prose-lint (unchanged, reads vault packs); new
-  Stop reply gate.
-- Runtime pattern: deployed services vendor agent-do and pipe replies through
-  gate before send.
+1. FORMATION: hand the writer Erik's actual voice at write time; turn every
+   correction into training material; end state is a local model that
+   carries the voice in weights.
+2. RECEIPTS: every specific claim traces to a named source or gets cut.
+   This is the anti-fabrication organ; it is process, not filtering.
+3. NET: deterministic gates only on unattended surfaces (production bots,
+   scheduled pipelines). Advisory visibility elsewhere. Gates refuse, never
+   rewrite, and never run where a human is in the middle.
 
-## 2. Data layout
+## 1. Surface doctrine
 
-```
-voice/
-  corpus/            # certified text; RECEIPTS.jsonl: sha256, source, date per file
-  calibration.json   # zones + provenance (model versions, batch receipts)
-  packs/             # default.json, essay.json, terminal.json, product-answer.json, ...
-  registers.yaml     # surface -> pack
-  catches.jsonl      # append-only intake log
-  VERSION
-  CHANGELOG.md
-```
+| Surface | Mode | Blocking | Rationale |
+|---|---|---|---|
+| Terminal / interactive sessions | Formation + advisory notes | NEVER | Erik sees the muck; muck is teaching signal; one false block is failure mode |
+| Essays (substack pipeline) | Formation + full gate run by the writer pre-review | Gate flags require revision before Erik review, per the standing DRAFT GATE | Pre-publication artifact; Erik arbitrates final |
+| Production / unattended (deployed bots, scheduled pours) | Formation at build + gate at runtime | One bounded regeneration, then ship with logged receipt | Nobody present to catch a tic at 2 AM |
 
-Per-repo override: `.deai.yaml`, one field, `register: <name>`. This file
-replaces CLAUDE.md voice prose everywhere.
+## 2. Components
+
+- Vault (data): corpus, calibration, register packs, exemplar index, pairs
+  log, catches log. COPIED from substack-writings/voice, never moved
+  (Erik's ruling): substack's working set and gate stay untouched in the
+  interim; a drift check compares homes; cutover is a later Erik-gated item.
+- Engines: voice emitter (new), lint (exists), ensemble (copied), stats +
+  meters (copied, extended), claims pass (new).
+- Verbs: voice, gate, catch, catches, pairs, ratify, calibrate, registers.
+- Hooks: existing PostToolUse prose-lint stays advisory (it already is);
+  no Stop-hook blocking exists in this design.
 
 ## 3. Interfaces
 
-### deai gate <path|-> --register R [--json]
+### deai voice --register R [--topic T] [--json]
 
-Runs lint + ensemble + stats against the vault in one pass.
-
-- exit 0: clean
-- exit 2: rule flags
-- exit 3: ensemble or fingerprint outside calibration zone
-- exit 4: unknown register / usage error
-
-JSON: `{register, words, flags[], ensemble: {score, zone}, stats: {metric:
-{value, corpus, zone}}}`. Reads stdin when path is `-`, for pipelines and
-servers.
+The formation organ. Emits, assembled fresh from the vault: the register's
+distilled contract and matched exemplars retrieved from the certified
+corpus (topic-matched when T is given). Injected at write time by whoever
+is about to write: a session, a pipeline, a deployed service's prompt
+assembly. This command is why CLAUDE.md files shrink: voice is fetched
+when writing happens instead of recited in every context.
 
 ### deai catch --text T --fix F --register R --surface S [--why W]
 
-Typed intake for a human correction.
+Typed intake for a human correction. Refuses with exit 2 when T or F is
+missing. On accept, atomic writes: pairs log (the before/after pair, dated,
+hashed), candidate on this repo's board, catches log. The pair is the
+primary product; a lint rule is a byproduct some catches also earn.
 
-- Missing T or F: exit 2, message names the missing field. Nothing written.
-- On accept, three writes, atomic as a unit: corpus append (dated, hashed),
-  candidate item on this repo's manna board, catches.jsonl entry.
+### deai pairs [--since D] [--export dpo|jsonl]
 
-### deai catches [--status candidate|measured|ratified|live]
+The training-data ledger: every catch as a preference pair, exportable for
+local fine-tuning runs on the Studio. This is the pipeline to voice in
+weights; runs happen under Erik's go per run.
 
-Lifecycle listing. Nothing is ever deleted; a rejected candidate keeps its
-measurement attached.
+### deai gate <path|-> --register R [--json]
 
-### deai ratify <candidate-id>
+Unchanged from v0.1 mechanically (lint + ensemble + stats, one pass, typed
+exits: 0 clean, 2 flags, 3 out of zone, 4 usage), but scoped by §1: it is
+invoked by pipelines and unattended surfaces, and by the essay flow as
+writer discipline. Nothing wires it to block interactive output.
 
-Agents get exit 2, always; the enforcement mechanism mirrors manna dream
-conversion (refusal, not convention). On Erik's invocation: pack write,
-VERSION bump, CHANGELOG line. Open question 10.1 covers how Erik's invocation
-is distinguished.
+### deai claims <path> [--json]
 
-### deai calibrate
+The receipts pass. Extracts specific factual assertions (names, numbers,
+titles, origins, quotes) and reports each with its annotation state:
+sourced (a named receipt in the working notes) or naked. Exit 0 all
+sourced, exit 2 naked claims listed. Advisory in interactive use, gating
+in pipelines. It does not judge truth; it enforces that a source is named,
+which is the mechanical part of "don't make shit up."
 
-Re-derives calibration.json from vault corpus plus declared AI batches (batch
-spec lives in config with provenance, never as a CLI literal). Identical
-inputs must reproduce identical output. Writes receipts beside the result.
+### deai catches / deai ratify / deai calibrate
 
-### Stop reply gate (hook)
+As v0.1: lifecycle listing; Erik-only ratification enforced by refusal;
+deterministic recalibration with receipts. Ratified rules reach gates and
+advisories on next invocation.
 
-Reads the turn's final assistant message from the transcript, runs
-`gate - --register terminal`. On exit 2 or 3, blocks the stop and returns the
-findings so the model revises. At most one block per turn, enforced by a
-turn-keyed marker. Ships only after the terminal pack's false-positive rate is
-measured against a recorded transcript sample (sample size and source in the
-receipt).
-
-## 4. Registers (initial set)
+## 4. Registers
 
 default, essay, terminal, product-answer, email, x-post, site-copy,
-commit-message. Terminal permits technical vocabulary; tells stay banned.
-Pack contents come from the measured-rule workflow only.
+commit-message. Terminal register exists for ADVISORY annotation and voice
+emission only; it never blocks. Pack contents come from the measured-rule
+workflow with a false-positive ceiling per register recorded at measure
+time; a rule that cannot demonstrate a near-zero false-positive rate on
+the corpus stays a candidate forever.
 
-## 5. Catch lifecycle
+## 5. The love path (formation detail)
 
-candidate -> measured (`deai measure`, false-positive rate recorded) ->
-ratified (Erik only) -> live (VERSION+1, enforced by every gate and hook on
-the machine on next invocation). Queued first cargo: deictic-time and
-negation-run (mn-368b25), performed-humility (mn-d06a8f).
+1. Write time: `deai voice` exemplars ride in the writing context, quietly.
+   No rule recitation. The model imitates cadence it was just shown.
+2. Catch time: Erik corrects anywhere; the correction becomes a pair.
+3. Distill time: pairs export to DPO/LoRA runs on local models (LM Studio);
+   each run receipted; Pangram and the local ensemble referee per the
+   standing co-evolution rulings (dec-26e51e, dec-12a740).
+4. Arrival: a local writer that drafts in Erik's voice by default; gates go
+   quiet because there is nothing to catch.
 
 ## 6. Determinism requirements
 
-- No network and no vendor-model calls anywhere in the enforcement path;
-  ensemble runs pinned local models, versions recorded in calibration.
-- Same input + same VERSION = same output, every verb.
-- All zones from calibration.json; a bare numeric bound in tool code is a
-  defect and `harness bounds scan` covers the tool.
-- Loop guards: reply gate blocks once per turn; runtime regeneration bounded
-  at one attempt, then ship with a logged receipt.
-- Gates refuse; they never rewrite.
+- No network and no vendor-model calls in gate, claims, voice, or hook
+  paths; ensemble runs pinned local models recorded in calibration.
+- Same input + same VERSION = same output for every verb.
+- Zones and ceilings from calibration.json only; bare numeric bounds in
+  tool code are defects; `harness bounds scan` covers the tool.
+- Advisory surfaces emit notes; they never mutate, delay, or suppress the
+  text they annotate.
 
 ## 7. Migration (each row one manna item)
 
 | id | work | blocked by |
 |---|---|---|
-| M1 | Vault COPY from substack-writings/voice (Erik's ruling 2026-09-25: copy, never move; the substack working set stays untouched and its gate keeps running as-is in the interim). Hash receipts on both sides; a drift check compares the homes; lint output on the archived drafts must diff empty between homes; cutover to a single home is its own later item, Erik-gated | none |
-| M2 | gate verb; substack DRAFT GATE becomes `deai gate --register essay` | M1 |
-| M3 | registers.yaml + `.deai.yaml` resolution | M1 |
-| M4 | terminal pack, measured; Stop reply gate registered | M3 |
-| M5 | catch / catches / ratify; correction-keys hook files catches | M1 |
-| M6 | meters v2: verbless-spine share, appositive run length, catalog-fragment runs, verdict-rhythm, deictic and negation counters, with corpus baselines (absorbs mn-ecdc33) | M1 |
-| M7 | runtime pattern reference in versova-supply-intelligence | M2 |
-| M8 | CLAUDE.md shrink: substack repo now; a proposed diff for the global file, applied by Erik's hand | M3, M9 |
-| M9 | first cargo through measure/ratify end to end | M5 |
+| M1 | Vault COPY with hash receipts both sides; drift check; substack untouched | none |
+| M2 | `deai voice`: contract + exemplar retrieval from the vault | M1 |
+| M3 | registers.yaml + `.deai.yaml`; CLAUDE.md voice prose across repos collapses to the pointer once M2 serves the content | M1, M2 |
+| M4 | `deai catch` / `catches` / `pairs`; correction-keys hook files catches | M1 |
+| M5 | `deai claims`: extraction + annotation states, wired into the essay flow as a gate step and everywhere else as advisory | M1 |
+| M6 | `deai gate` single-command bundle; substack DRAFT GATE delegates; byte-identical flags on archived drafts | M1 |
+| M7 | meters v2 into stats (verbless-spine share, appositive runs, catalog fragments, verdict rhythm, deictic, negation) as advisory columns (absorbs mn-ecdc33) | M1 |
+| M8 | first pairs export + one receipted LoRA/DPO run on a local model, Erik-gated | M4 |
+| M9 | ratify lifecycle end to end with the queued families (mn-368b25, mn-d06a8f), measured against the false-positive ceiling | M4 |
+| M10 | runtime net reference in versova-supply-intelligence (gate at send, one bounded regen) | M6 |
 
 ## 8. Acceptance receipts
 
-- M2: flag set byte-identical to the legacy three-command gate across every
-  archived draft in substack-writings.
-- M4: a seeded tell in a scripted reply blocks exactly once and passes after
-  revision; false-positive rate on the recorded transcript sample logged in
-  the item.
-- M5: refusal matrix executed (each missing field); atomicity verified by an
-  induced mid-write failure.
-- M9: one candidate walked candidate->live; VERSION incremented; the same
-  tell then flags in a fresh repo with no local config.
+- M2: for each register, emitted exemplars verifiably originate in the
+  certified corpus (hash trace); a seeded topic returns topic-matched
+  exemplars.
+- M4: refusal matrix executed; atomicity verified by induced mid-write
+  failure; a catch filed from a second repo lands identically.
+- M5: a draft seeded with three naked claims lists exactly those three;
+  the same draft with receipts added exits 0.
+- M6: flag set byte-identical to the legacy three-command gate across all
+  archived substack drafts.
+- M8: run receipt includes dataset hash, base model, method, and
+  before/after ensemble readings on a held-out sample.
+- M9: candidate walked to live only after its measured false-positive rate
+  on the corpus is recorded; the same tell then flags in a fresh repo.
 
 ## 9. Non-goals
 
-Generative rewriting inside gates. Cloud calls in enforcement. Auto-
-ratification. Pangram integration (separate lane: mn-739746, mn-d4b0fd).
+Blocking any interactive surface. Rewriting inside gates. Auto-
+ratification. Cloud calls in enforcement. Typed refusals in terminal
+replies. Pangram integration (separate lane: mn-739746, mn-d4b0fd).
 
 ## 10. Open questions (Erik rules)
 
 1. ratify authentication: interactive confirm, flag file, or other.
-2. Corpus placement: it contains sent email; confirm this repo is an
-   acceptable home or name a separate private vault path.
-3. Terminal register strictness: full essay tell-set in replies, or a named
-   subset.
-4. Vault cutover timing: the interim runs dual-home (substack authoritative
-   for its own gate, this repo canonical for everything new) with the drift
-   check standing; Erik names the cutover moment.
+2. Corpus placement: contains sent email; confirm this repo as home or
+   name a private vault path.
+3. Advisory visibility in terminal: notes appear inline to Erik, or only
+   accumulate in the catches/receipts logs.
+4. Vault cutover timing: dual-home interim stands until Erik names the
+   moment.
+5. Local base model for M8's first run: Erik picks from the Studio's
+   current stable.
