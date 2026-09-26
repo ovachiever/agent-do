@@ -294,10 +294,14 @@ SESSIONS:
   session load <name>            Restore saved session state
   session delete <name>          Delete a saved session
   session export <name> <file>   Export session to portable file
+                                Refuses a failed or incomplete browser import
+  session verify <name>          Check YouTube sign-in in a fresh headless browser
+    --site youtube               Check /account; exit 2 if signed out or unverified
   session import <file> [name]   Import session from file
   session import-browser <name>  Import cookies and browser storage from a real browser
     --browser comet|atlas|chrome|arc|edge|brave  Browser to import from (default: comet)
     --domain ".google.com"           Filter cookies by domain
+                                Import is not proof of login; run session verify next
   session active                 List active daemon sessions
 
 TABS:
@@ -1362,7 +1366,19 @@ main() {
                     ;;
                 export)
                     [[ $# -lt 3 ]] && { echo "Usage: agent-browse session export <name> <file>" >&2; exit 1; }
-                    json='{"id":"'$(cmd_id)'","action":"session_export","name":"'"$2"'","path":"'"$3"'"}'
+                    node "$DAEMON_DIR/session-cli.js" export "$2" "$3"
+                    exit $?
+                    ;;
+                verify)
+                    [[ $# -lt 2 ]] && { echo "Usage: agent-browse session verify <name> [--site youtube]" >&2; exit 2; }
+                    local verify_name="$2" verify_site="youtube"
+                    shift 2
+                    if [[ $# -gt 0 ]]; then
+                        [[ $# -eq 2 && "$1" == "--site" ]] || { echo "Usage: agent-browse session verify <name> [--site youtube]" >&2; exit 2; }
+                        verify_site="$2"
+                    fi
+                    node "$DAEMON_DIR/session-cli.js" verify "$verify_name" "$verify_site"
+                    exit $?
                     ;;
                 import)
                     [[ $# -lt 2 ]] && { echo "Usage: agent-browse session import <file> [name]" >&2; exit 1; }
@@ -1403,7 +1419,7 @@ main() {
                     ;;
                 *)
                     echo "Unknown session command: $1" >&2
-                    echo "Usage: session list|save|load|delete|export|import|import-browser|active" >&2
+                    echo "Usage: session list|save|load|delete|export|verify|import|import-browser|active" >&2
                     exit 1
                     ;;
             esac
