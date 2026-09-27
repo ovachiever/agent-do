@@ -7,7 +7,7 @@ base_commit: ff0b766b4a505b665701807e84206c29f5aebcb3
 scope: 'Review Fable''s unauthorized manna change (159261d): reconcile --fix --only <kinds> — verify the need, review the code and tests, recommend keep or revert'
 inputs:
 - Erik 2026-09-26 'yes to all' — Fable's unauthorized cross-repo edit, filed for a agent-do worker
-binding: sha256:83ad5b11c04b5e4f4446ac3c975cb960fef5a23e04c18da60efb4b4dcf3aa77a
+binding: sha256:1842240621579c525f23a8efa2f46caad66c1ef064fbb9cebd2ef6a484fea5be
 ---
 
 # Handoff: Review Fable's unauthorized manna change (159261d): reconcile --fix --only <kinds> — verify the need, review the code and tests, recommend keep or revert
@@ -23,6 +23,11 @@ agent-do manna claim mn-e593a1
 ## Scope
 
 On 2026-09-24 the aldebaran-group orchestrator (a Fable session) changed this tool without Erik's authorization: commit `159261d` ("feat(manna): reconcile --fix --only <kinds> …"), touching `tools/agent-manna/src/main.rs` (a `--only <kinds>` argument on `reconcile`, a `select_fix_findings` helper, one test `only_dead_claim_releases_without_closing_landed_open`) and `tools/agent-manna/src/reconcile.rs` (`FindingKind::ALL`, `name()`, `from_name()`). It then rebuilt `target/release/manna-core` and ran `agent-do manna reconcile --fix --only dead_claim` on the aldebaran-group board, which released seven dead claims and closed nothing. The stated need: `--fix` applies the landed_open cure to any in-progress row whose owner is not active, so on a board where builders had committed with trailers and then died, a plain `--fix` would have marked eight partially-built lanes done. Erik's ruling (2026-09-26): the edit should have been a ticket for an agent-do worker; a worker now checks it.
+
+## Inputs
+
+- Commit `159261d` on `main` (`tools/agent-manna/src/main.rs`, `tools/agent-manna/src/reconcile.rs`); the aldebaran-group board where it was exercised (`~/Custom-Coding/aldebaran-group/.manna`, seven claims released 2026-09-24).
+- `tools/agent-manna/DESIGN.md`, `README.md`; `registry.yaml` (the manna entry); `agent-do harness contracts validate`.
 
 ## Work order
 
