@@ -348,9 +348,15 @@ or remains `blocked` when unresolved blocker edges remain.
 agent-do manna abandon mn-abc123
 ```
 
-`done` and `abandon` reject every session except the current owner. `done` also
-provides the explicit unclaimed close transition for a parked dream, because a
-dream cannot be claimed.
+`abandon` rejects every session except the current owner. `done` closes on
+receipts, strongest authority first: `evidence` (a commit carrying
+`Manna: <id>` that touched a path outside `.manna/` and `.handoff/` closes the
+item from any live status over any claimant, and the commits are listed),
+`operator` (the human's terminal identity closes any live item), or `owner`
+(the claim-holder's proof plus `in_progress`). The response names the
+`authority`; paperwork drift is returned as `warnings` and never holds a
+close. `done` also provides the explicit unclaimed close transition for a
+parked dream, because a dream cannot be claimed.
 
 **Output:**
 ```yaml
@@ -605,11 +611,16 @@ Claim ownership uses two pinned environment variables:
 - `MANNA_SESSION_TOKEN`: private bearer token of at least 32 characters; only
   its SHA-256 digest is stored in the board
 
-Lifecycle mutations fail closed when either value is absent. Session hooks pin
-both across shell invocations. Codex and other hosts that expose an opaque
-runtime identity derive the proof under a machine-local key outside the
-repository. Scripted lanes and plain shells must export both explicitly. A
-visible owner label alone cannot complete, abandon, or edit its claim.
+Lifecycle mutations fail closed when either value is absent and no host
+identity applies. Session hooks pin both across shell invocations. Codex and
+other hosts that expose an opaque runtime identity derive the proof under a
+machine-local key outside the repository. A plain interactive shell (stdin is
+a terminal, nothing pinned) derives the operator identity `operator-<login>`
+under the same key; the operator is the estate's root and `require_owner`
+never refuses it. Agent hosts run on pipes and never reach that branch;
+`MANNA_OPERATOR=0` opts a terminal out. Scripted lanes on pipes must export
+both pins explicitly. A visible owner label alone cannot complete, abandon,
+or edit its claim.
 
 ### Exit Codes
 

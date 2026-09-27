@@ -536,8 +536,11 @@ MANNA_SESSION_ID="$RACE_OWNER" "$MANNA" abandon "$RACE_ID" >/dev/null 2>&1
 output=$("$MANNA" create "Missing identity target" 2>&1)
 UNPINNED_ID=$(extract_id "$output")
 unpinned_exit=0
+# MANNA_OPERATOR=0: this script may run from a terminal, and a terminal is
+# now an identity (the operator's). The opt-out keeps this the no-identity path.
 env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
     -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+    MANNA_OPERATOR=0 \
     "$MANNA" claim "$UNPINNED_ID" >/dev/null 2>&1 || unpinned_exit=$?
 check_exit 2 "$unpinned_exit" "claim fails closed without a pinned session identity"
 
@@ -982,6 +985,70 @@ output=$("$MANNA" show "$ADVIS_ID" 2>&1) || true
 check_yaml "$output" "status: open" "unclaimed landed_open stays advisory"
 
 # ----------------------------------------------------------------------------
+# Test G5d: done closes on landed evidence (mn-4061c8)
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test G5d: done closes on landed evidence"
+# A filing-chore trailer (board files only) is not evidence: the advisory
+# item above carries one, and a stranger's done still needs a claim.
+chore_exit=0
+MANNA_SESSION_ID="ses_stranger_$$" MANNA_SESSION_TOKEN="stranger-token-cccccccccccccccccccccccccccccccc" \
+    "$MANNA" done "$ADVIS_ID" >/dev/null 2>&1 || chore_exit=$?
+check_exit 1 "$chore_exit" "a trailer on an empty commit is not evidence"
+
+# The work lands: a commit carrying the trailer touches source. Anyone with an
+# identity may then close; the evidence authorizes, never the requester.
+output=$("$MANNA" create "Evidence work" 2>&1) || true
+EVIDENCE_ID=$(extract_id "$output")
+MANNA_SESSION_ID="ses_builder_$$" MANNA_SESSION_TOKEN="builder-token-dddddddddddddddddddddddddddddddd" \
+    "$MANNA" claim "$EVIDENCE_ID" >/dev/null 2>&1
+printf 'shipped\n' > src.txt
+git add src.txt
+git -c user.email=manna@test -c user.name=manna-test commit -q -m "feat: shipped
+
+Manna: $EVIDENCE_ID"
+EVIDENCE_SHA=$(git rev-parse HEAD)
+output=$(MANNA_SESSION_ID="ses_stranger_$$" MANNA_SESSION_TOKEN="stranger-token-cccccccccccccccccccccccccccccccc" \
+    "$MANNA" done "$EVIDENCE_ID" 2>&1) || true
+check_yaml "$output" "success: true" "a stranger closes a landed item on evidence"
+check_yaml "$output" "authority: evidence" "the close names evidence as its authority"
+check_yaml "$output" "$EVIDENCE_SHA" "the close cites the landed commit"
+check_yaml "$output" "claimed_by: ses_builder_$$" "the builder's claim stays as history"
+output=$("$MANNA" show "$EVIDENCE_ID" 2>&1) || true
+check_yaml "$output" "status: done" "landed item is done"
+
+# The wrong checkout names the right board instead of failing on identity.
+ELSEWHERE_DIR=$(mktemp -d)
+(cd "$ELSEWHERE_DIR" && git init -q && "$MANNA" init >/dev/null 2>&1)
+output=$(cd "$ELSEWHERE_DIR" && env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+    -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+    MANNA_OPERATOR=0 "$MANNA" done "$EVIDENCE_ID" 2>&1) || true
+check_yaml "$output" "not found" "a foreign id is reported as not found before identity is demanded"
+rm -rf "$ELSEWHERE_DIR"
+
+# ----------------------------------------------------------------------------
+# Test G5e: the operator's terminal is an identity
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test G5e: operator identity from a terminal"
+if [[ "$(uname -s)" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
+    output=$("$MANNA" create "Operator work" 2>&1) || true
+    OPERATOR_ID=$(extract_id "$output")
+    MANNA_SESSION_ID="ses_gone_$$" MANNA_SESSION_TOKEN="gone-token-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" \
+        "$MANNA" claim "$OPERATOR_ID" >/dev/null 2>&1
+    # script(1) lends the command a pseudo-terminal, which is what a human's
+    # shell has and an agent's pipe does not.
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" done "$OPERATOR_ID" 2>&1 </dev/null) || true
+    check_yaml "$output" "authority: operator" "the operator closes over a stranded claim from a terminal"
+    output=$("$MANNA" show "$OPERATOR_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "operator-closed item is done"
+else
+    echo "  - skipped: needs macOS script(1) to lend a pseudo-terminal"
+fi
+
+# ----------------------------------------------------------------------------
 # Test G5c: machine-key derived identity survives a process restart
 # ----------------------------------------------------------------------------
 echo ""
@@ -1088,14 +1155,28 @@ check_yaml "$output" "success: true" "handoff seal binds an intentional edit"
 claim_exit=0
 "$MANNA" claim "$PAIR_ID" >/dev/null 2>&1 || claim_exit=$?
 check_exit 0 "$claim_exit" "sealed handoff becomes claimable"
-printf '\nEdited after claim without resealing.\n' >> "$PROMPT_A"
+# An edit after claim without resealing is paperwork drift: the close on the
+# owner's proof still lands, and the response carries the stale seal as a
+# warning (mn-4061c8). A second paired item keeps PAIR_ID live for the
+# metadata trap below.
+output=$("$MANNA" create "Stale seal close" 2>&1) || true
+STALE_ID=$(extract_id "$output")
+"$MANNA" sync >/dev/null 2>&1 || true
+STALE_PROMPT=$("$MANNA" show "$STALE_ID" | awk -F': ' '/^  prompt:/ {print $2; exit}')
+"$MANNA" claim "$STALE_ID" >/dev/null 2>&1
+printf '\nEdited after claim without resealing.\n' >> "$STALE_PROMPT"
 done_exit=0
-output=$("$MANNA" done "$PAIR_ID" 2>&1) || done_exit=$?
-check_exit 1 "$done_exit" "done refuses a handoff edited after claim"
+output=$("$MANNA" done "$STALE_ID" 2>&1) || done_exit=$?
+check_exit 0 "$done_exit" "done closes a handoff edited after claim"
+check_yaml "$output" "warnings:" "done carries the drift as a warning"
 check_yaml "$output" "binding is stale" "done names the stale handoff seal"
-output=$("$MANNA" show "$PAIR_ID" 2>&1) || true
-check_yaml "$output" "status: in_progress" "failed done leaves the live claim in progress"
-"$MANNA" handoff seal "$PAIR_ID" >/dev/null 2>&1
+output=$("$MANNA" show "$STALE_ID" 2>&1) || true
+check_yaml "$output" "status: done" "warned close is done"
+# Seal the late edit and move the completed handoff to its history name so
+# the board below stays presentation-clean for the lint and reconcile gates.
+"$MANNA" handoff seal "$STALE_ID" >/dev/null 2>&1 || true
+"$MANNA" sync >/dev/null 2>&1 || true
+"$MANNA" handoff seal "$PAIR_ID" >/dev/null 2>&1 || true
 "$MANNA" abandon "$PAIR_ID" >/dev/null 2>&1
 
 printf '\nUnsealed metadata trap.\n' >> "$PROMPT_A"
@@ -1193,7 +1274,14 @@ cp "$PROMPT_A" "$LINK_TARGET"
 mkdir -p .dev/linked
 ln -s "$LINK_TARGET" .dev/linked/shadow.md
 output=$("$MANNA" reconcile --json 2>&1) || true
-check_yaml "$output" ".dev/linked/shadow.md" "sprawl scan reads symlinked work-order content"
+# A symlink is never followed: an alias of outside content is not a tracked
+# work-order surface, and an internal alias points at files the walk already
+# sees by their real path (mn-4061c8).
+if [[ "$output" != *".dev/linked/shadow.md"* ]]; then
+    pass "sprawl scan never follows a symlinked file"
+else
+    fail "sprawl scan never follows a symlinked file" "$output"
+fi
 rm -f "$LINK_TARGET"
 
 printf 'agent-do manna claim %s\n' "$PAIR_ID" > neutral-notes.md
@@ -1205,8 +1293,18 @@ NEUTRAL_TARGET=$(mktemp -d)
 printf 'agent-do manna claim %s\n' "$PAIR_ID" > "$NEUTRAL_TARGET/work.md"
 ln -s "$NEUTRAL_TARGET" resources
 output=$("$MANNA" reconcile --json 2>&1) || true
-check_yaml "$output" "resources" "neutral external symlink directories are rejected"
-rm -f resources
+if [[ "$output" != *"resources"* ]]; then
+    pass "neutral external symlink directories are skipped"
+else
+    fail "neutral external symlink directories are skipped" "$output"
+fi
+# A handoff-shaped alias is the one symlink that is reported: board-level,
+# without an item, so it informs and never holds one item's claim.
+ln -s "$NEUTRAL_TARGET" handoff-mirror
+output=$("$MANNA" reconcile --json 2>&1) || true
+check_yaml "$output" "handoff-mirror" "a handoff-shaped symlink root is reported"
+check_yaml "$output" '{"kind":"workflow_sprawl","detail":"symlinked shadow handoff root is forbidden","evidence":"./handoff-mirror"' "the handoff-shaped alias finding carries no item"
+rm -f handoff-mirror resources
 rm -rf "$NEUTRAL_TARGET"
 
 LEGACY_DIR=$(mktemp -d)

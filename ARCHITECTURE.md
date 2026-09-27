@@ -467,7 +467,8 @@ surface verbatim. The page never edits a file.
 
 - `claim` requires status `open` and no claimant; validation and transition are one locked operation, so concurrent claimers have exactly one winner
 - Once claimed, mutations require both the exact `claimed_by` session and its bearer-token proof. The board stores only `claim_token_hash`, so the visible owner string cannot impersonate the claim
-- `done` requires owner plus `in_progress` and revalidates the authoritative handoff seal and absence of shadow work orders under the board lock; the sole exception is closing an unclaimed dream, because dreams are deliberately unclaimable
+- `done` closes on receipts, strongest authority first. `evidence`: a commit in the last 500 carrying `Manna: <id>` that touched a path outside `.manna/` and `.handoff/` closes the item from any live status over any claimant (the claim stays on the row as history; the commits ride in `evidence`). `operator`: the human's terminal identity closes any live item. `owner`: otherwise the claim-holder's proof plus `in_progress`, as before. An unclaimed dream closes through its own transition. Handoff pairing and shadow-workflow drift are observed after the close and returned as `warnings`; they never hold it (mn-4061c8)
+- `claim` resolves the id before demanding an identity, so the wrong checkout answers with the board that holds the id (from the estate registry) instead of an identity error; the item's own handoff pointer is the exact gate, and shadow-workflow findings ride along as `warnings`
 - `abandon` requires the owner plus an active claim (`in_progress` or `blocked`); it returns to `open` when clear or remains `blocked` while dependencies remain
 - `block`/`unblock` maintain `blocked_by` and derive `blocked` status. `done` removes the completed ID from every dependent in the same locked, atomic board write and reports newly unblocked IDs as `released`. A dependent with no blockers returns to `open`, or `in_progress` if already claimed; other blockers keep it `blocked`, and completed dependents stay `done`. `reconcile` retains `blocker_desync` as the backstop for deleted blockers, older binaries, and hand-edited boards; `reconcile --fix` repairs those through the existing state machine
 - `update --status` is rejected. Status moves only through lifecycle verbs
@@ -486,8 +487,8 @@ Board-grammar gate: findings exit 1, clean exits 0. Rules:
   the Git index; a visible but untracked file reports `git-tracked: no`
 - strict workflow rules: the scaffold exists, each active item has a canonical
   `.handoff/` pointer, the canonical document matches its authoritative digest,
-  no symlink escapes the project, no shadow workflow exists, and no canonical
-  handoff is orphaned
+  no handoff-shaped symlink aliases a root, no shadow workflow exists, and no
+  canonical handoff is orphaned
 - ordered presentation rules: board priority is normalized, each filename
   matches its derived priority and launch gate, and the generated index matches
   the board. A live-claim hold is reported until release rather than renamed
@@ -510,7 +511,7 @@ finding with the reason:
 6. `doc_reference`: `mn-` ids mentioned in `.handoff/`, `.dev/`, `.zpc/`, and the per-project Claude memory directory that do not exist on this board (files ≤ 1MB, symlinks skipped, deduplicated per file+id)
 7. `prompt_pairing`, in both directions. Forward: an issue's prompt pointer resolves to a file that never mentions the issue's id. Reverse: every board id that a work-order file *claims* (a line containing `manna claim <id>`, any invocation prefix; bare id mentions are data, not claims) must belong to an issue whose prompt pointer resolves back to that same file. Strict boards scan `.handoff/**/*.md`; legacy boards retain the `.dev/session-prompts/` scan. A missing directory is a successful empty scan, and foreign-board ids are ignored
 8. `handoff_presentation`: priority state, numbered filename, launch-gate marker, or generated README index differs from the board-derived plan. The proposed repair is `agent-do manna sync`; live claimed files remain held until release
-9. `workflow_sprawl` on strict boards: any live claim-bearing Markdown appears outside `.handoff/`; internal directory aliases are scanned, while external or handoff-like symlink roots fail closed
+9. `workflow_sprawl` on strict boards: any live claim-bearing Markdown appears outside `.handoff/`. The walk is what Git would carry (`git ls-files` tracked plus untracked-not-ignored; a plain filesystem walk outside Git), so ignored state such as `.zpc/.state`, `.dev/`, and dependency stores is never a work order. No symlink is followed; a handoff-shaped one (named like a handoff, a legacy root name, or resolving into `.handoff/`) is reported without an item. Advisory in `claim` and `done`
 10. `orphan_handoff`: a structured Manna work order under `.handoff/` has no live actionable row, or does not match that row's pointer. Freeform research and continuation Markdown is not a work order; `.handoff/.archive/` is excluded intentionally
 
 The prompt pointer itself comes from the `prompt` field, or as a blessed interim convention, a description whose first line is `PROMPT: <path>`.

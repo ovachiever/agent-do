@@ -416,6 +416,25 @@ struct DoneData {
     #[serde(flatten)]
     completed: IssueData,
     released: Vec<String>,
+    /// What authorized the close: `owner` (the claim-holder's proof),
+    /// `evidence` (landed trailer commits), or `operator` (the human's word).
+    authority: &'static str,
+    /// Landed commits that carried this item's trailer and touched source.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    evidence: Vec<String>,
+    /// Paperwork drift observed while closing. Advisory: lint and reconcile
+    /// carry the same findings; a close never waits on them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ClaimData {
+    #[serde(flatten)]
+    issue: IssueData,
+    /// Shadow work orders seen at claim time. Advisory, never a refusal.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 /// The two distances a reader of one issue actually asks about: how long ago
@@ -625,10 +644,43 @@ fn get_session_identity() -> Result<SessionIdentity, String> {
         }
     }
 
+    // The human at the keyboard. No agent runtime pinned anything and stdin
+    // is a terminal, so this is the operator's own shell: derive a proof under
+    // the same machine-local key, labelled by login name. Agent hosts run
+    // their shells on pipes and never reach this branch. `MANNA_OPERATOR=0`
+    // opts a terminal out (a script that must act as a pinned lane).
+    if operator_fallback_enabled() {
+        if let Some(user) = operator_user() {
+            return runtime_session_identity("operator", &user).map(SessionIdentity::into_operator);
+        }
+    }
+
     Err(
-        "Manna session identity is not pinned; start through an agent-do session hook or export both MANNA_SESSION_ID and a secret MANNA_SESSION_TOKEN"
+        "Manna session identity is not pinned; start through an agent-do session hook, run from your own terminal (operator identity), or export both MANNA_SESSION_ID and a secret MANNA_SESSION_TOKEN"
             .to_string(),
     )
+}
+
+/// True when the operator derivation may run: stdin is a terminal and the
+/// operator has not opted out with `MANNA_OPERATOR=0`.
+fn operator_fallback_enabled() -> bool {
+    use std::io::IsTerminal;
+    if std::env::var("MANNA_OPERATOR")
+        .ok()
+        .is_some_and(|value| value.trim() == "0")
+    {
+        return false;
+    }
+    std::io::stdin().is_terminal()
+}
+
+/// The login name the operator identity is labelled by.
+fn operator_user() -> Option<String> {
+    ["USER", "LOGNAME"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .map(|value| value.trim().to_string())
+        .find(|value| !value.is_empty())
 }
 
 fn require_session_identity() -> SessionIdentity {
@@ -651,6 +703,13 @@ fn current_session_label() -> Option<String> {
             if let Ok(label) = runtime_session_label(runtime, &opaque_id) {
                 return Some(label);
             }
+        }
+    }
+    if operator_fallback_enabled() {
+        if let Some(label) =
+            operator_user().and_then(|user| runtime_session_label("operator", &user).ok())
+        {
+            return Some(label);
         }
     }
     None
@@ -820,8 +879,71 @@ fn find_issue(issues: &[Issue], id: &str) -> Issue {
         .find(|i| i.id == id)
         .cloned()
         .unwrap_or_else(|| {
-            output_error(&format!("Issue {} not found", id), EXIT_USER_ERROR);
+            output_error(&issue_not_found_message(id), EXIT_USER_ERROR);
         })
+}
+
+/// "Not found" that names where the id actually lives. The wrong checkout is
+/// the common cause, and the estate registry already knows every board.
+fn issue_not_found_message(id: &str) -> String {
+    match locate_issue_on_registered_boards(id) {
+        Some((board, root)) => format!(
+            "Issue {} not found on this board; it lives on {} ({}). Run the command from that checkout.",
+            id, board, root
+        ),
+        None => format!("Issue {} not found", id),
+    }
+}
+
+/// Search every registered board except the current one for an issue id.
+/// Returns the first (board name, root) that holds it. Read-only, and a
+/// missing or unreadable registry is simply no answer.
+fn locate_issue_on_registered_boards(id: &str) -> Option<(String, String)> {
+    let home = std::env::var_os("AGENT_DO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".agent-do")))?;
+    let text = std::fs::read_to_string(home.join("manna/serve/boards.json")).ok()?;
+    let registry: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let here = Path::new(".").canonicalize().ok();
+    let mut boards = registry
+        .get("boards")?
+        .as_object()?
+        .iter()
+        .filter_map(|(name, entry)| {
+            entry
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .map(|root| (name.clone(), root.to_string()))
+        })
+        .collect::<Vec<_>>();
+    boards.sort();
+    for (name, root) in boards {
+        let root_path = Path::new(&root);
+        if here
+            .as_ref()
+            .zip(root_path.canonicalize().ok())
+            .is_some_and(|(here, there)| here == &there)
+        {
+            continue;
+        }
+        let Ok(rows) = std::fs::read_to_string(root_path.join(".manna/issues.jsonl")) else {
+            continue;
+        };
+        let held = rows.lines().any(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|row| {
+                    row.get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .is_some_and(|row_id| row_id == id)
+        });
+        if held {
+            return Some((name, root));
+        }
+    }
+    None
 }
 
 fn load_board_workflow(store: &MannaStore) -> (Vec<Issue>, Option<WorkflowConfig>) {
@@ -1202,11 +1324,10 @@ fn cmd_claim(id: String) -> ! {
         );
     }
 
-    let session = require_session_identity();
+    let (issues, workflow) = load_board_workflow(&store);
 
-    let (issues, _) = load_board_workflow(&store);
-
-    // Find issue
+    // Find the issue before demanding an identity: the wrong checkout is the
+    // common failure, and its answer names the right board.
     let issue = find_issue(&issues, &id);
 
     // Dreams are visible but inert: refuse before the store is ever touched,
@@ -1214,6 +1335,8 @@ fn cmd_claim(id: String) -> ! {
     if issue.issue_type == IssueType::Dream {
         output_error(&dream_claim_refusal(&issue.id), EXIT_NEEDS_AUTHORIZATION);
     }
+
+    let session = require_session_identity();
 
     let claimed = match store.claim_issue_checked(&id, &session, |current, current_board| {
         if current.issue_type == IssueType::Dream {
@@ -1224,16 +1347,10 @@ fn cmd_claim(id: String) -> ! {
             .as_ref()
             .filter(|_| current.issue_type == IssueType::Item)
         {
+            // The exact gate: this item's own work order must resolve inside
+            // the canonical root. Shadow-workflow detection is a text
+            // heuristic and reports below as a warning, never a refusal.
             validate_handoff(Path::new("."), config, current)?;
-            let shadows =
-                check_workflow_sprawl_for_issue(Path::new("."), current_board, config, &current.id);
-            if !shadows.is_empty() {
-                return Err(format!(
-                    "shadow handoff workflow detected for {}: {}",
-                    current.id,
-                    shadows.join(", ")
-                ));
-            }
         }
         Ok(())
     }) {
@@ -1248,9 +1365,18 @@ fn cmd_claim(id: String) -> ! {
         Err(error) => handle_manna_error(error),
     };
 
-    output_success(IssueData {
-        age: (&claimed).into(),
-        issue: claimed,
+    let warnings = workflow
+        .as_ref()
+        .filter(|_| claimed.issue_type == IssueType::Item)
+        .map(|config| check_workflow_sprawl_for_issue(Path::new("."), &issues, config, &claimed.id))
+        .unwrap_or_default();
+
+    output_success(ClaimData {
+        issue: IssueData {
+            age: (&claimed).into(),
+            issue: claimed,
+        },
+        warnings,
     });
 }
 
@@ -1264,30 +1390,49 @@ fn cmd_done(id: String) -> ! {
         );
     }
 
-    let _ = load_board_workflow(&store);
+    let (issues, workflow) = load_board_workflow(&store);
+    let issue = find_issue(&issues, &id);
     let session = require_session_identity();
-    let completed = match store.complete_issue_checked(&id, &session, |current, current_board| {
-        let current_workflow = load_workflow_for_board(Path::new("."), current_board)?;
-        if let Some(config) = current_workflow
-            .as_ref()
-            .filter(|_| current.issue_type == IssueType::Item)
-        {
-            validate_handoff(Path::new("."), config, current)?;
-            let shadows =
-                check_workflow_sprawl_for_issue(Path::new("."), current_board, config, &current.id);
-            if !shadows.is_empty() {
-                return Err(format!(
-                    "shadow handoff workflow detected for {}: {}",
-                    current.id,
-                    shadows.join(", ")
-                ));
-            }
-        }
-        Ok(())
-    }) {
+
+    // Close on receipts. The authority, strongest first: landed commits that
+    // carry this item's trailer and touched source (the evidence authorizes,
+    // never the requester); the operator's word; the claim-holder's proof.
+    // Paperwork drift is observed and reported, and never holds a close.
+    let evidence = if issue.issue_type == IssueType::Dream {
+        Vec::new()
+    } else {
+        landed_evidence_for(&id)
+    };
+    let (authority, result) = if !evidence.is_empty() {
+        ("evidence", store.complete_issue_on_evidence(&id, &evidence))
+    } else if session.is_operator() {
+        ("operator", store.complete_issue_as_operator(&id, &session))
+    } else {
+        (
+            "owner",
+            store.complete_issue_checked(&id, &session, |_, _| Ok(())),
+        )
+    };
+    let completed = match result {
         Ok(issue) => issue,
         Err(error) => handle_manna_error(error),
     };
+
+    let mut warnings = Vec::new();
+    if let Some(config) = workflow
+        .as_ref()
+        .filter(|_| completed.issue.issue_type == IssueType::Item)
+    {
+        if let Err(error) = validate_handoff(Path::new("."), config, &completed.issue) {
+            warnings.push(format!("handoff pairing: {}", error));
+        }
+        warnings.extend(check_workflow_sprawl_for_issue(
+            Path::new("."),
+            &issues,
+            config,
+            &completed.issue.id,
+        ));
+    }
 
     output_success(DoneData {
         completed: IssueData {
@@ -1295,7 +1440,61 @@ fn cmd_done(id: String) -> ! {
             issue: completed.issue,
         },
         released: completed.released,
+        authority,
+        evidence,
+        warnings,
     });
+}
+
+/// Commits that carry `Manna: <id>` and touched a path outside the board's
+/// own files. A filing chore commits `.manna/` and `.handoff/` with a trailer
+/// and proves nothing about the work; a commit that changed anything else is
+/// the receipt the close needs.
+fn landed_evidence_for(id: &str) -> Vec<String> {
+    let Ok(landed) = collect_landed_trailers() else {
+        return Vec::new();
+    };
+    let Some(shas) = landed.get(id) else {
+        return Vec::new();
+    };
+    shas.iter()
+        .filter(|sha| commit_touches_source(sha))
+        .cloned()
+        .collect()
+}
+
+fn commit_touches_source(sha: &str) -> bool {
+    let Ok(out) = std::process::Command::new("git")
+        .args([
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--root",
+            sha,
+        ])
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .any(|path| !board_owned_path(path))
+}
+
+/// Paths the board itself writes: the store and the canonical work orders.
+fn board_owned_path(path: &str) -> bool {
+    let mut components = Path::new(path).components();
+    let Some(std::path::Component::Normal(first)) = components.next() else {
+        return false;
+    };
+    matches!(first.to_str(), Some(".manna") | Some(HANDOFF_DIR))
 }
 
 fn cmd_order(id: String, position: usize) -> ! {
@@ -2760,9 +2959,37 @@ fn path_is_legacy_handoff_root(path: &Path) -> bool {
         .any(|name| matches!(*name, ".handoffs" | "handoff-prompts" | "session-prompts"))
 }
 
+/// Every Markdown file that could be a shadow work order, and every symlink
+/// that aliases a handoff root.
+///
+/// Inside a Git checkout the walk is `git ls-files` (tracked plus untracked,
+/// minus ignored): a shadow root that matters is one Git would carry, and
+/// ignored state (`.zpc/.state`, `.dev/`, dependency stores) is never a work
+/// order. Outside Git the filesystem walk applies with the same pruning.
+/// A symlink is never followed: an internal alias points at files the walk
+/// already sees by their real path, and an external alias cannot be a tracked
+/// work-order surface. Only a handoff-shaped alias is reported, without an
+/// item, so it informs the board and never holds one item's claim.
 fn collect_shadow_handoffs(root: &Path, files: &mut Vec<PathBuf>, unsafe_links: &mut Vec<PathBuf>) {
-    let canonical_project = root.canonicalize().ok();
     let canonical_handoff = root.join(HANDOFF_DIR).canonicalize().ok();
+    if let Some(relative_paths) = git_visible_paths(root) {
+        for relative in relative_paths {
+            if shadow_walk_prunes(&relative) {
+                continue;
+            }
+            let path = root.join(&relative);
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                note_handoff_alias(&path, canonical_handoff.as_deref(), unsafe_links);
+            } else if metadata.is_file() && is_markdown(&path) {
+                files.push(path);
+            }
+        }
+        return;
+    }
+
     let mut pending = vec![root.to_path_buf()];
     let mut visited_directories = HashSet::new();
     while let Some(dir) = pending.pop() {
@@ -2781,61 +3008,101 @@ fn collect_shadow_handoffs(root: &Path, files: &mut Vec<PathBuf>, unsafe_links: 
                 Ok(file_type) => file_type,
                 Err(_) => continue,
             };
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
             if file_type.is_symlink() {
-                let target = path.canonicalize().ok();
-                let targets_canonical_handoff = target
-                    .as_ref()
-                    .zip(canonical_handoff.as_ref())
-                    .is_some_and(|(target, handoff)| target.starts_with(handoff));
-                if path.extension().and_then(|extension| extension.to_str()) == Some("md")
-                    && std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file())
-                {
-                    // Reading the logical path follows exactly one file link;
-                    // structured frontmatter, not the link name, decides
-                    // whether it is a shadow work order.
-                    files.push(path);
-                } else if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
-                    if target
-                        .as_ref()
-                        .zip(canonical_project.as_ref())
-                        .is_none_or(|(target, project)| !target.starts_with(project))
-                    {
-                        // External directory aliases can hide an arbitrarily
-                        // named second prompt tree and cannot be bounded by
-                        // the repository walk. Strict workflow rejects them.
-                        unsafe_links.push(path);
-                    } else if path_is_legacy_handoff_root(&path)
-                        || name.contains("handoff")
-                        || targets_canonical_handoff
-                    {
-                        unsafe_links.push(path);
-                    } else {
-                        // A neutral internal alias is safe to inspect, but it
-                        // is not safe to skip: claim-bearing Markdown behind
-                        // it is still a second work-order surface.
-                        pending.push(path);
-                    }
-                } else if path_is_legacy_handoff_root(&path)
-                    || name.contains("handoff")
-                    || targets_canonical_handoff
-                {
-                    unsafe_links.push(path);
-                }
+                note_handoff_alias(&path, canonical_handoff.as_deref(), unsafe_links);
                 continue;
             }
-            if matches!(name.as_ref(), ".git" | ".manna" | ".handoff")
-                || is_reconcile_generated_dir(&path)
-            {
+            if shadow_walk_prunes(&path) {
                 continue;
             }
             if file_type.is_dir() {
                 pending.push(path);
-            } else if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
+            } else if is_markdown(&path) {
                 files.push(path);
             }
         }
+    }
+}
+
+/// Tracked plus untracked-not-ignored paths, relative to `root`, when `root`
+/// is inside a Git work tree. `None` outside Git or when Git cannot answer.
+fn git_visible_paths(root: &Path) -> Option<Vec<PathBuf>> {
+    let inside = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !inside.status.success() || String::from_utf8_lossy(&inside.stdout).trim() != "true" {
+        return None;
+    }
+    let listing = std::process::Command::new("git")
+        .current_dir(root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !listing.status.success() {
+        return None;
+    }
+    Some(
+        listing
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| PathBuf::from(String::from_utf8_lossy(entry).into_owned()))
+            .collect(),
+    )
+}
+
+/// The board's own roots and generated artifact directories, at any depth.
+fn shadow_walk_prunes(path: &Path) -> bool {
+    let mut prefix = PathBuf::new();
+    for component in path.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        prefix.push(name);
+        if matches!(
+            name.to_str(),
+            Some(".git") | Some(".manna") | Some(HANDOFF_DIR)
+        ) || is_reconcile_generated_dir(&prefix)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some("md")
+}
+
+/// A symlink is reported only when it is shaped like a handoff root: named
+/// like one, a legacy root name, or resolving into the canonical `.handoff/`.
+/// Any other symlink is skipped without a finding.
+fn note_handoff_alias(
+    path: &Path,
+    canonical_handoff: Option<&Path>,
+    unsafe_links: &mut Vec<PathBuf>,
+) {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let targets_canonical_handoff = path
+        .canonicalize()
+        .ok()
+        .zip(canonical_handoff)
+        .is_some_and(|(target, handoff)| target.starts_with(handoff));
+    if path_is_legacy_handoff_root(path) || name.contains("handoff") || targets_canonical_handoff {
+        unsafe_links.push(path.to_path_buf());
     }
 }
 
@@ -2937,13 +3204,21 @@ fn check_workflow_sprawl_for_issue(
 ) -> Vec<String> {
     check_workflow_sprawl(base, issues, config)
         .into_iter()
+        // An id-less finding (a symlinked handoff-like root) belongs to the
+        // board, not to this item: it never attaches to one item's warnings.
         .filter(|finding| {
             finding
                 .issue_id
                 .as_deref()
-                .is_none_or(|candidate| candidate == issue_id)
+                .is_some_and(|candidate| candidate == issue_id)
         })
         .filter_map(|finding| finding.evidence)
+        .map(|evidence| {
+            format!(
+                "shadow work order outside {}/: {}",
+                config.handoff_dir, evidence
+            )
+        })
         .collect()
 }
 
@@ -3201,7 +3476,13 @@ fn apply_reconcile_fixes(
     (fixed, failures)
 }
 
-fn cmd_reconcile(fix: bool, write_drift: bool, dream_age_days: i64, json: bool, only: &[String]) -> ! {
+fn cmd_reconcile(
+    fix: bool,
+    write_drift: bool,
+    dream_age_days: i64,
+    json: bool,
+    only: &[String],
+) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -3551,12 +3832,20 @@ mod tests {
             "CLAUDE_AGENT_ID",
         ];
         let saved = runtime_variables.map(|name| (name, std::env::var(name).ok()));
+        let saved_operator = std::env::var("MANNA_OPERATOR").ok();
         std::env::remove_var("MANNA_SESSION_ID");
         std::env::remove_var("MANNA_SESSION_TOKEN");
         for variable in runtime_variables {
             std::env::remove_var(variable);
         }
+        // The test process may hold a terminal; the opt-out keeps this the
+        // no-identity path rather than the operator's.
+        std::env::set_var("MANNA_OPERATOR", "0");
         assert!(get_session_identity().is_err());
+        match saved_operator {
+            Some(value) => std::env::set_var("MANNA_OPERATOR", value),
+            None => std::env::remove_var("MANNA_OPERATOR"),
+        }
         for (variable, value) in saved {
             if let Some(value) = value {
                 std::env::set_var(variable, value);
@@ -4331,7 +4620,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn neutral_external_symlink_directory_is_detected_as_shadow_root() {
+    fn neutral_external_symlink_directory_is_skipped() {
         use std::os::unix::fs::symlink;
 
         let project = TempDir::new().unwrap();
@@ -4341,40 +4630,150 @@ mod tests {
             "agent-do manna claim mn-abc123\n",
         )
         .unwrap();
+        // A pnpm store, a CocoaPods plugin link, a OneDrive alias: none of
+        // them is a work-order surface, and none may hold a board's claims.
+        symlink(outside.path(), project.path().join("node_modules")).unwrap();
         symlink(outside.path(), project.path().join("notes")).unwrap();
         let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
         let findings = check_workflow_sprawl(project.path(), &[issue], &WorkflowConfig::default());
-        assert!(findings.iter().any(|finding| {
-            finding.kind == FindingKind::WorkflowSprawl
-                && finding
-                    .evidence
-                    .as_deref()
-                    .is_some_and(|path| path.ends_with("notes"))
-        }));
+        assert!(findings.is_empty(), "{:?}", findings);
     }
 
     #[test]
     #[cfg(unix)]
-    fn neutral_internal_symlink_directory_is_scanned_for_claims() {
+    fn neutral_internal_symlink_directory_is_not_followed() {
         use std::os::unix::fs::symlink;
 
         let project = TempDir::new().unwrap();
         std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
-        // The real target sits under a normally skipped build directory, so
-        // the only way to see the claim is to follow the neutral alias.
+        // The real target sits under a pruned build directory. An alias to it
+        // is not followed: the walk sees files by their real path or not at all.
         let hidden = project.path().join("target");
         std::fs::create_dir(&hidden).unwrap();
         std::fs::write(hidden.join("work.md"), "agent-do manna claim mn-abc123\n").unwrap();
         symlink(&hidden, project.path().join("notes")).unwrap();
         let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
         let findings = check_workflow_sprawl(project.path(), &[issue], &WorkflowConfig::default());
+        assert!(findings.is_empty(), "{:?}", findings);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn handoff_shaped_symlink_root_is_reported_without_an_item() {
+        use std::os::unix::fs::symlink;
+
+        let project = TempDir::new().unwrap();
+        std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
+        let outside = TempDir::new().unwrap();
+        symlink(outside.path(), project.path().join("handoff-notes")).unwrap();
+        let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
+        let config = WorkflowConfig::default();
+        let findings = check_workflow_sprawl(project.path(), &[issue], &config);
         assert!(findings.iter().any(|finding| {
-            finding.issue_id.as_deref() == Some("mn-abc123")
+            finding.kind == FindingKind::WorkflowSprawl
+                && finding.issue_id.is_none()
                 && finding
                     .evidence
                     .as_deref()
-                    .is_some_and(|path| path.ends_with("notes/work.md"))
+                    .is_some_and(|path| path.ends_with("handoff-notes"))
         }));
+        // Board-level, not item-level: it never attaches to one item's claim.
+        let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
+        let per_item =
+            check_workflow_sprawl_for_issue(project.path(), &[issue], &config, "mn-abc123");
+        assert!(per_item.is_empty(), "{:?}", per_item);
+    }
+
+    #[test]
+    fn git_ignored_state_is_never_a_shadow_workflow() {
+        let project = TempDir::new().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(project.path())
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {:?}", args);
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
+        std::fs::write(project.path().join(".gitignore"), ".zpc/\n").unwrap();
+        // A zpc counsel brief quotes the board context, claim commands and all.
+        let counsel = project.path().join(".zpc/.state/counsel/relit-1");
+        std::fs::create_dir_all(&counsel).unwrap();
+        std::fs::write(
+            counsel.join("brief-les-1.md"),
+            "-agent-do manna claim mn-abc123\n-agent-do manna claim mn-def456\n",
+        )
+        .unwrap();
+        // An untracked but visible note is still a shadow work order.
+        std::fs::write(
+            project.path().join("innocent-notes.md"),
+            "agent-do manna claim mn-def456\n",
+        )
+        .unwrap();
+        let issues = vec![
+            Issue::new("mn-abc123".to_string(), "Counsel only".to_string()).unwrap(),
+            Issue::new("mn-def456".to_string(), "Noted".to_string()).unwrap(),
+        ];
+        let findings = check_workflow_sprawl(project.path(), &issues, &WorkflowConfig::default());
+        assert!(
+            findings.iter().all(|finding| finding
+                .evidence
+                .as_deref()
+                .is_some_and(|path| !path.contains(".zpc"))),
+            "{:?}",
+            findings
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.issue_id.as_deref() == Some("mn-def456")));
+        assert!(!findings
+            .iter()
+            .any(|finding| finding.issue_id.as_deref() == Some("mn-abc123")));
+    }
+
+    #[test]
+    fn board_owned_paths_are_not_evidence() {
+        assert!(board_owned_path(".manna/issues.jsonl"));
+        assert!(board_owned_path(&format!(
+            "{}/01-mn-abc123-work.md",
+            HANDOFF_DIR
+        )));
+        assert!(!board_owned_path("src/main.rs"));
+        assert!(!board_owned_path("docs/handoff-notes.md"));
+        assert!(!board_owned_path(".mannafest"));
+    }
+
+    #[test]
+    fn operator_fallback_honours_the_opt_out() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let saved = std::env::var("MANNA_OPERATOR").ok();
+        std::env::set_var("MANNA_OPERATOR", "0");
+        assert!(!operator_fallback_enabled());
+        match saved {
+            Some(value) => std::env::set_var("MANNA_OPERATOR", value),
+            None => std::env::remove_var("MANNA_OPERATOR"),
+        }
+    }
+
+    #[test]
+    fn operator_user_reads_the_login_name() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let saved = ["USER", "LOGNAME"].map(|name| (name, std::env::var(name).ok()));
+        std::env::set_var("USER", "  ");
+        std::env::set_var("LOGNAME", "erik");
+        assert_eq!(operator_user().as_deref(), Some("erik"));
+        std::env::set_var("USER", "operator-one");
+        assert_eq!(operator_user().as_deref(), Some("operator-one"));
+        for (name, value) in saved {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
     }
 
     #[test]

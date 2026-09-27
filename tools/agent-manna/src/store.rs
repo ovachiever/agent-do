@@ -470,6 +470,55 @@ impl MannaStore {
     where
         F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
     {
+        self.finish_issue_locked(id, precondition, |issue| {
+            if issue.issue_type == crate::issue::IssueType::Dream {
+                issue.close_dream(session)
+            } else {
+                issue.complete(session)
+            }
+        })
+    }
+
+    /// Close on landed evidence (commits carrying the item's trailer that
+    /// touched real source). The evidence authorizes, so no owner check runs;
+    /// dependents release in the same locked write as any other close.
+    pub fn complete_issue_on_evidence(
+        &self,
+        id: &str,
+        evidence: &[String],
+    ) -> Result<CompletedIssue> {
+        self.finish_issue_locked(
+            id,
+            |_, _| Ok(()),
+            |issue| issue.complete_on_evidence(evidence),
+        )
+    }
+
+    /// Close by the operator: the human at the terminal owns every claim.
+    pub fn complete_issue_as_operator(
+        &self,
+        id: &str,
+        session: &SessionIdentity,
+    ) -> Result<CompletedIssue> {
+        self.finish_issue_locked(
+            id,
+            |_, _| Ok(()),
+            |issue| issue.complete_as_operator(session),
+        )
+    }
+
+    /// One locked close: precondition over the row and board, then the
+    /// transition, then every dependent's blocker edge in the same write.
+    fn finish_issue_locked<F, T>(
+        &self,
+        id: &str,
+        precondition: F,
+        transition: T,
+    ) -> Result<CompletedIssue>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        T: FnOnce(&mut Issue) -> std::result::Result<(), String>,
+    {
         if !self.issues_path().exists() {
             return Err(MannaError::NotInitialized);
         }
@@ -481,13 +530,10 @@ impl MannaStore {
             .position(|issue| issue.id == id)
             .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
         let mut issue = issues[index].clone();
-        if issue.issue_type == crate::issue::IssueType::Dream {
-            issue.close_dream(session)
-        } else {
+        if issue.issue_type != crate::issue::IssueType::Dream {
             precondition(&issue, &issues).map_err(MannaError::MutationRejected)?;
-            issue.complete(session)
         }
-        .map_err(MannaError::MutationRejected)?;
+        transition(&mut issue).map_err(MannaError::MutationRejected)?;
         issue.validate().map_err(MannaError::MutationRejected)?;
         issues[index] = issue.clone();
 
@@ -1473,5 +1519,58 @@ mod tests {
 
         let events = store.load_sessions().unwrap();
         assert_eq!(events.len(), 5);
+    }
+
+    #[test]
+    fn complete_issue_on_evidence_closes_foreign_claim_and_releases_dependents() {
+        let (_temp, store) = setup_store();
+        let landed = Issue::new("mn-ev1001".to_string(), "Landed".to_string()).unwrap();
+        store.append_issue(&landed).unwrap();
+        let mut dependent = Issue::new("mn-ev1002".to_string(), "Waits".to_string()).unwrap();
+        dependent.blocked_by.push(landed.id.clone());
+        dependent.update_blocked_status();
+        store.append_issue(&dependent).unwrap();
+        store
+            .claim_issue(&landed.id, &session("ses_builder"))
+            .unwrap();
+
+        let completed = store
+            .complete_issue_on_evidence(&landed.id, &["abc123def456".to_string()])
+            .unwrap();
+        assert_eq!(completed.issue.status, IssueStatus::Done);
+        assert_eq!(completed.issue.claimed_by.as_deref(), Some("ses_builder"));
+        assert_eq!(completed.released, vec!["mn-ev1002".to_string()]);
+
+        let rows = store.load_issues().unwrap();
+        let dependent = rows.iter().find(|row| row.id == "mn-ev1002").unwrap();
+        assert_eq!(dependent.status, IssueStatus::Open);
+        assert!(dependent.blocked_by.is_empty());
+    }
+
+    #[test]
+    fn complete_issue_on_evidence_needs_a_receipt() {
+        let (_temp, store) = setup_store();
+        let issue = Issue::new("mn-ev1003".to_string(), "Bare".to_string()).unwrap();
+        store.append_issue(&issue).unwrap();
+        assert!(store.complete_issue_on_evidence(&issue.id, &[]).is_err());
+        let rows = store.load_issues().unwrap();
+        assert_eq!(rows[0].status, IssueStatus::Open);
+    }
+
+    #[test]
+    fn complete_issue_as_operator_closes_over_a_stranded_claim() {
+        let (_temp, store) = setup_store();
+        let issue = Issue::new("mn-op1001".to_string(), "Stranded".to_string()).unwrap();
+        store.append_issue(&issue).unwrap();
+        store.claim_issue(&issue.id, &session("ses_gone")).unwrap();
+
+        let agent = session("ses_agent");
+        assert!(store.complete_issue_as_operator(&issue.id, &agent).is_err());
+
+        let operator = session("operator-erik").into_operator();
+        let completed = store
+            .complete_issue_as_operator(&issue.id, &operator)
+            .unwrap();
+        assert_eq!(completed.issue.status, IssueStatus::Done);
     }
 }
