@@ -1656,6 +1656,7 @@ Concurrency: `mixed`
 - send emails
 - query inboxes and mailboxes
 - search messages with account and mailbox scoping
+- search Microsoft Graph live with per-account local freshness receipts
 - wait for matching messages
 - fetch exact messages by id
 - extract verification codes
@@ -1674,7 +1675,7 @@ Concurrency: `mixed`
 - `code`: Extract verification code from matching email
 - `link`: Extract magic link from matching email
 - `mailboxes`: List available mailboxes
-- `status`: Show feature and provider hydration readiness
+- `status`: Show per-account freshness and verified live provider readiness
 
 **Examples**
 
@@ -1697,7 +1698,7 @@ agent-do email link --from login@example.com --domain app.example.com
 
 **Credentials**
 
-- Optional: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `AGENT_EMAIL_PROVIDER`, `AGENT_EMAIL_IMAP_HOST`, `AGENT_EMAIL_IMAP_PORT`, `AGENT_EMAIL_IMAP_USER`, `AGENT_EMAIL_IMAP_PASS`, `AGENT_EMAIL_IMAP_MAILBOX`, `AGENT_EMAIL_IMAP_MAILBOXES`
+- Optional: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `AGENT_EMAIL_PROVIDER`, `AGENT_EMAIL_IMAP_HOST`, `AGENT_EMAIL_IMAP_PORT`, `AGENT_EMAIL_IMAP_USER`, `AGENT_EMAIL_IMAP_PASS`, `AGENT_EMAIL_IMAP_MAILBOX`, `AGENT_EMAIL_IMAP_MAILBOXES`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `GRAPH_TARGET_MAILBOX`, `AGENT_EMAIL_GRAPH_ACCOUNT`
 
 **Safety (from contracts)**
 
