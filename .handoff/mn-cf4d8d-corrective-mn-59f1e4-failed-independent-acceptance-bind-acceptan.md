@@ -7,7 +7,7 @@ base_commit: ed20b7344e7d50fd4d442f1b34489668625c4ba6
 scope: 'Corrective: mn-59f1e4 failed independent acceptance — bind acceptance to the exact submission, verified release only, atomic lifecycle transitions with authority rechecked under the lock, action-vs-info nudge semantics, evidence-based current state'
 inputs:
 - independent review of mn-59f1e4, 2026-10-30; .dev/mn-59f1e4-review/fixture-ybbcr21k/review-results.txt
-binding: sha256:ce81d02f50fc9943446c00f2e9fb2f7ff50d8d8879ce7a78a7e57a1d9060a008
+binding: sha256:0c76142c599afa3e5ad53a7f915bedda8e71272b7381831427af1378f9fb811c
 ---
 
 # Handoff: Corrective: mn-59f1e4 failed independent acceptance — bind acceptance to the exact submission, verified release only, atomic lifecycle transitions with authority rechecked under the lock, action-vs-info nudge semantics, evidence-based current state
@@ -107,3 +107,30 @@ The reviewer's run (`.dev/mn-59f1e4-review/corrective-integration.log`, 13:15:59
 - `agent-do manna managed doctor --probe --json`: `live: true`, probe passed.
 - Root `./test.sh`: see the line appended below.
 - Root `./test.sh` (PATH=.venv/bin first): 128 passed, 1 failed; the failure is `live runtime tests` (`tests/test_live.py`, `macOS frameworks not available`), identical on the untouched tree and unrelated. Every other section, including the Manna integration suite inside it, passed.
+
+## Pass 3: the two remaining transaction findings (2026-10-30, session claude-35dfcfc4870d4899)
+
+Status: SUBMITTED again. The item stays open until the independent review accepts it. That review confirmed the acceptance-binding and assessment fixes; this pass covers the two transaction findings it still reproduced.
+
+### Finding: an incomplete close returned success
+
+`done` on a managed item whose row write landed but whose close audit transaction did not exited 0 with a warning. It now fails with exit 2 (`EXIT_SYSTEM_ERROR`) and prints `success: false`, the error naming the close transaction, the durable row (`status: done`), the dependents it released, `authority`, `transaction`, and `next_action: agent-do manna managed recover <id>` (`main.rs` `IncompleteCloseData` via `output_failure`; `managed_cli::ManagedClose::incomplete`). Integration M6 (extended) is the reviewer's sequence: `.manna/lifecycle.jsonl` unwritable, `done` → exit 2, `success: false`, `status: done` reported, `show` confirms the row is done, `assess` reports one incomplete transaction with action `close` and names recover, recover lands the close audit line exactly once, no intent remains.
+
+### Finding: board-level grant/revoke recovery did not work
+
+`manna managed recover board` resolved `board` as an issue id and answered "Issue board not found", so a grant or revocation whose writes did not both land (`issue_id: board` in `.manna/managed-intent.json`) could never be finished. Now: `managed::BOARD_SCOPE`; `recover board` applies the recorded grants file and audit line idempotently (operator, or the session that started it; a coordinator is refused with exit 2 because its own authority is what the transaction decides). `ManagedStore::incomplete_transaction(id)` also answers for a pending board transaction, so every managed mutation (require, submit, correct, accept, release, abandon, done) and every further `coordinator grant`/`revoke` refuse naming `recover board`; a coordinator-only item `recover` waits on it too (the operator and the starting session do not). `assess` lists board transactions with `scope: board` and `next_action: operator: agent-do manna managed recover board`. New store methods `pending_intents_affecting`, `begin_transaction`, `finish_transaction`; fault seam `MANNA_MANAGED_FAULT=after_board_intent` (a revocation dies after its intent is durable, before the grants file or the audit is written). Integration M7 is the reviewer's sequence and its revoke counterpart: a second grant with an unwritable audit → exit 1 naming `recover board`, intent `board:grant`, grants file holds the grant (state landed, audit not); accept, submit, require, grant and revoke all refuse naming it; assess `1/board/False/operator: … recover board`; coordinator and stranger `recover board` → exit 2; item recover reports nothing pending on the item and the board transaction beside it; operator `recover board` → 1 recovered, the grant's audit line lands once, no intent remains, the acceptance then lands. Then a revocation killed through the seam (exit 70): the grants file still shows the grant live, the coordinator's `managed correct` is refused naming `recover board` (not the stale file), the operator recovers → revocation landed, audit line once, the coordinator holds no authority (exit 2). Unit tests: `a_pending_board_transaction_holds_every_item_and_names_board_recovery`, `recovering_the_board_lands_the_grants_and_the_audit_exactly_once`, `a_pending_revocation_whose_state_did_not_land_is_still_a_pending_revocation`.
+
+### Integration-suite discrepancy: explained, filed separately
+
+The reviewer's evidence (`.dev/mn-59f1e4-review/pass2-init-fixture-evidence.json`) shows the fresh fixture's `.handoff` holding `.README.md.87331.1793384159562101000.tmp` beside `README.md`. That is the temp `workflow::atomic_write` creates (`.{name}.{pid}.{nanos}.tmp`) before its rename or hard-link install, left behind when `init` is killed in that window; `workflow::validate_new_handoff_root` accepts only an empty `.handoff` or a lone `README.md`, so the rerun refuses and init recovery never completes. Filed as mn-bf448b (track mn-b7a0cc) with the fix shape and the regression tests it needs; nothing in this pass touches `init`. On this machine the full suite completed 572/572 once this pass; two earlier runs this pass aborted inside the new M7 test on test-harness mistakes (pty output capture, a serde-omitted field), not on product behaviour, and Test 1b passed in all three.
+
+### Receipts (executed)
+
+- Commit `36a3cb6` (`Manna: mn-cf4d8d`): source, tests, README, SCHEMA, ARCHITECTURE, CLAUDE.md, CHANGELOG, registry, docs/TOOLS.md.
+- `cargo test --release` (tools/agent-manna): 197 passed (lib), 52 passed (bin), 0 failed.
+- `bash tools/agent-manna/test/integration.sh` (PATH=.venv/bin first): 572 passed, 0 failed (M1–M7).
+- `python3 tests/test_coord_v2.py`, `test_coord.py`, `test_v11_routing.py`, `test_session_start_reads.py`, `test_manna_estate.py`, `test_manna_serve.py`, `test_contracts_gate.py`, `test_contracts_drift.py`: passed.
+- `agent-do harness contracts validate`: Gate PASS, Errors 0. `contracts drift`: 0 failing. `bin/gen-tools-doc --check`: clean.
+- `agent-do manna managed doctor --probe --json`: `live: true`.
+- Root `./test.sh` (PATH=.venv/bin first): 128 passed, 1 failed. The failure is `live runtime tests` (`tests/test_live.py:139`, expected the macOS live gate, got `macOS frameworks not available`): the same environment failure as pass 2, identical on the untouched tree. Every product check passed.
+- `manna lint`: presentation drift only (numbered rename held on this live claim; `.handoff/README.md` index drift from another lane's uncommitted sync churn); no refusals.
