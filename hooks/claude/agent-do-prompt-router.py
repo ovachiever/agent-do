@@ -742,7 +742,7 @@ def resolve_coord_invocation() -> list[str] | None:
     return [agent_do, "coord"] if agent_do else None
 
 
-def load_coord_state(cwd: str | None) -> dict:
+def load_coord_state(cwd: str | None, session_id: str | None = None) -> dict:
     state = {"active_peers": [], "peer_counts": {}, "focus_goal": "", "interrupts": []}
     if not cwd:
         return state
@@ -752,6 +752,13 @@ def load_coord_state(cwd: str | None) -> dict:
 
     hook_env = os.environ.copy()
     hook_env["AGENT_DO_TELEMETRY_SUPPRESS"] = "1"
+    # The hook process does not inherit the exports the session-start hook
+    # wrote into CLAUDE_ENV_FILE for the shell, so without this pin coord
+    # would mint a second identity for the same session and the shell's
+    # acknowledgments would never reach it (mn-812cd9). The payload's
+    # session_id is the same anchor the shell's AGENT_DO_COORD_SESSION holds.
+    if isinstance(session_id, str) and session_id and not hook_env.get("AGENT_DO_COORD_SESSION"):
+        hook_env["AGENT_DO_COORD_SESSION"] = session_id
 
     # Hard per-call budget: the hook itself gets 5s from Claude Code, and a
     # slow or wedged agent-do spawn must degrade to "no coord context", not
@@ -793,9 +800,10 @@ def main():
     if not prompt:
         sys.exit(0)
     cwd = input_data.get("cwd")
+    session_id = input_data.get("session_id")
 
     registry = load_registry() if load_registry is not None else {"tools": {}}
-    coord_state = load_coord_state(cwd)
+    coord_state = load_coord_state(cwd, session_id)
     ai_decision = ai_route_prompt(prompt, cwd=cwd, coord_state=coord_state, registry=registry)
     coord_required = coord_required_context(prompt, cwd, coord_state, ai_decision)
     tool_context, tool_tools, tool_commands = ai_tool_suggestion_context(ai_decision, registry)
