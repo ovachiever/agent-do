@@ -1238,7 +1238,7 @@ Concurrency: `mixed`
 - `need`: Manage dependencies: need add \<key> --why \<text> [--from \<agent>|--for \<agent>] | need list [--all] | need clear \<key>
 - `publishes`: List published artifacts
 - `publish`: Manage published artifacts: publish add [--file \<path>]|clear
-- `drop`: Drop lifecycle (stable ids, never deleted): drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>] (re-adding changed content bumps the revision) | drop ack \<id> (recipient acknowledges delivery; leaves only that reader's routine interrupts) | drop resolve \<id> --reason \<text> [--evidence \<ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; kept in history) | drop history \<id>
+- `drop`: Drop lifecycle (stable ids, never deleted): drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>] [--action] (default kind info is a delivery shown as a notice; --action is an obligation shown as a dependency until resolved; re-adding changed content bumps the revision) | drop ack \<id> (recipient acknowledges: read, never done; an info drop leaves that reader's interrupts, an action drop stays listed until resolved) | drop resolve \<id> --reason \<text> [--evidence \<ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; kept in history) | drop history \<id>
 - `drops`: List open drops: drops [--for-me] [--all] (--all includes resolved); a note is a dated report, never a verified present fact
 - `history`: Read the coordination event journal: history [peer] [--limit \<n>]
 
@@ -1267,6 +1267,8 @@ agent-do coord publish add dm-sdk@1.2.2 --status ready --summary "private packag
 agent-do coord drop add .dev/research-drops/report.md --for builder-a --note "ephemeris findings"
 # acknowledge a drop so it stops nudging me
 agent-do coord drop ack drp-1a2b3c4d5e6f
+# hand another agent an obligation that keeps reminding until resolved
+agent-do coord drop add .dev/fix-me.md --for builder-a --note "please fix" --action
 # settle a drop for every reader once its work is done
 agent-do coord drop resolve drp-1a2b3c4d5e6f --reason "folded into the release" --evidence "commit abc123"
 # see whether anything should interrupt me
@@ -2710,9 +2712,9 @@ Concurrency: `write`
 - `done`: Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator: done \<id> [--assessment \<digest>]
 - `identity`: Print this session''s public label and ownership proof (the token never prints)
 - `coordinator`: Scoped coordinator authority, operator-granted and proof-bound: coordinator grant --session \<id> --proof \<sha256> [--item \<id>] [--track \<id>] --reason \<text> | revoke \<grant-id> --reason \<text> | list
-- `managed`: Coordinator-owned closure: managed require \<id> --check \<name>... | correct \<id> --reason \<text> | release \<id> --reason \<text> [--worker-stopped|--isolated-checkout \<path>] | history \<id> | doctor
+- `managed`: Coordinator-owned closure: managed require \<id> --check \<name>... | correct \<id> --reason \<text> | release \<id> --reason \<text> [--isolated-checkout \<path>] (needs coord to have verified the worker dead or stopped, or a validated separate working tree; also completes an interrupted release) | history \<id> | doctor [--probe] (commands, hook registration, and with --probe an end-to-end run through the real binaries and hooks)
 - `submit`: Claim-holder records its result for the current attempt (not acceptance): submit \<id> --report \<file|-> [--revision \<ref>]
-- `accept`: Coordinator records one required check at an explicitly pinned integration target: accept \<id> --check \<name> --target \<ref> --evidence \<text> [--repin]
+- `accept`: Coordinator records one required check for the exact current submission at an explicitly pinned integration target (a resubmission needs a fresh verdict): accept \<id> --check \<name> --target \<ref> --evidence \<text> [--repin]
 - `assess`: Read-only closure assessment: target revision and kind, trailer evidence by relation, outstanding acceptance, authority, exact next action, and an assessment digest for done: assess \<id> [--target \<ref>] [--deployed \<sha>]
 - `order`: Move a paired item to a dense one-based handoff priority and synchronize generated presentation
 - `sync`: Derive numbered handoff filenames, blocker launch gates, and the README index from board state
@@ -2764,7 +2766,7 @@ agent-do manna accept mn-abc123 --check integration --target origin/staging --ev
 # hand in my result for coordinator acceptance
 agent-do manna submit mn-abc123 --report .handoff/report.md
 # check whether the managed lifecycle is live on this machine
-agent-do manna managed doctor
+agent-do manna managed doctor --probe
 # move an item to the top of the handoff plan
 agent-do manna order mn-abc123 1
 # synchronize handoff filenames after a board change

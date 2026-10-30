@@ -367,18 +367,24 @@ agent-do manna accept mn-abc123 --check integration --target origin/staging \
 agent-do manna accept mn-abc123 --check deployed --target origin/staging --evidence "release 42"
 agent-do manna done mn-abc123 --assessment assess:...   # coordinator closes; worker not needed
 agent-do manna managed correct mn-abc123 --reason "tests missing"
-agent-do manna managed release mn-abc123 --reason "worker gone" --isolated-checkout /path
+agent-do manna managed release mn-abc123 --reason "worker gone" --isolated-checkout /path/to/worktree
 agent-do manna managed history mn-abc123
-agent-do manna managed doctor                 # live on this machine, or only in source?
+agent-do manna managed doctor --probe         # commands, hook registration, verified end to end
 ```
 
 Authority never comes from a coord role, a pulse, a claimed label, or a
 worker's shared secret: a grant binds a session label to its ownership proof
-and to explicit items or tracks, and only the operator issues one. Each
-release advances the attempt; submissions and acceptances name their attempt,
-so a superseded worker cannot complete. Release needs coord to report the
-worker gone, or an explicit `--worker-stopped` (refused when coord sees it
-active) or `--isolated-checkout`; unknown liveness alone refuses.
+and to explicit items or tracks, and only the operator issues one. Every
+mutation reloads the row and the grants under the board lock and re-derives
+authority there, so a grant revoked meanwhile refuses. An acceptance names
+the exact submission it reviewed; a resubmission (after `managed correct` or
+otherwise) needs a fresh verdict before anyone can close. Each release
+advances the attempt in the same locked transaction that releases the claim,
+so a superseded worker cannot submit or complete; an interrupted release is
+reported by `assess` and completed by the coordinator's next `managed
+release`. Release needs coord to have verified the worker dead or stopped, or
+`--isolated-checkout` naming a validated separate git working tree; a stale
+or idle lease, an unknown peer, and a bare path all refuse.
 `reconcile --fix` never closes or releases a managed item.
 
 ### `abandon <id>`

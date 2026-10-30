@@ -152,6 +152,11 @@ pub struct Correction {
 /// A worker's submission for one attempt. Submitting is not acceptance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Submission {
+    /// Stable id for this exact submission (`sub-<12 hex>`). An acceptance
+    /// names the id it reviewed; a resubmission mints a new one, so nothing
+    /// accepted for the old result carries over.
+    #[serde(default)]
+    pub id: String,
     pub attempt: u32,
     pub by: String,
     pub at: DateTime<Utc>,
@@ -166,12 +171,17 @@ pub struct Submission {
     pub correction: Option<Correction>,
 }
 
-/// One required check, accepted by an authorized coordinator for one attempt
-/// at one pinned integration target.
+/// One required check, accepted by an authorized coordinator for one exact
+/// submission of one attempt at one pinned integration target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Acceptance {
     pub check: String,
     pub attempt: u32,
+    /// The submission key this verdict was given on. An acceptance written
+    /// before this field existed carries none and never counts: a verdict
+    /// that cannot name what it reviewed is not evidence for anything.
+    #[serde(default)]
+    pub submission: String,
     pub target_sha: String,
     pub by: String,
     pub authority: String,
@@ -190,10 +200,25 @@ pub struct Release {
     pub worker: Option<String>,
     /// What coord reported for the worker at release time.
     pub worker_liveness: String,
-    /// `coord_dead`, `worker_stopped` (attested), or `isolated_checkout`.
+    /// `coord_dead` (coord verified the worker dead or stopped),
+    /// `isolated_checkout` (a validated separate working tree), or
+    /// `abandon` (the worker released its own claim).
     pub basis: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<String>,
+    /// The replacement checkout's git toplevel as resolved at release time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isolation_toplevel: Option<String>,
+    /// Two-phase marker: `pending` once the sidecar has advanced the attempt
+    /// and before the board row's claim is released; `released` after. A
+    /// `pending` entry whose worker still holds the claim is an interrupted
+    /// release, and every mutation refuses until a coordinator resumes it.
+    #[serde(default = "released")]
+    pub claim_release: String,
+}
+
+fn released() -> String {
+    "released".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,14 +245,52 @@ pub struct ManagedRecord {
     pub history: Vec<Submission>,
 }
 
+impl Submission {
+    /// The key an acceptance binds to. Submissions written before ids
+    /// existed key on their attempt and timestamp, which no acceptance of
+    /// that era recorded, so they too need a fresh verdict.
+    pub fn key(&self) -> String {
+        if self.id.is_empty() {
+            format!("legacy:{}:{}", self.attempt, self.at.to_rfc3339())
+        } else {
+            self.id.clone()
+        }
+    }
+}
+
 impl ManagedRecord {
+    /// Acceptances that count right now: same attempt, same pinned target,
+    /// and given on the exact submission currently on the record.
     pub fn accepted_checks(&self) -> Vec<&Acceptance> {
         let target = self.target.as_ref().map(|t| t.sha.as_str());
+        let Some(submission) = self.current_submission().map(Submission::key) else {
+            return Vec::new();
+        };
         self.acceptances
             .iter()
             .filter(|acceptance| acceptance.attempt == self.attempt)
             .filter(|acceptance| target == Some(acceptance.target_sha.as_str()))
+            .filter(|acceptance| acceptance.submission == submission)
             .collect()
+    }
+
+    /// A release that advanced the attempt but never finished releasing the
+    /// board row's claim (the process died between the two writes).
+    pub fn pending_release(&self) -> Option<&Release> {
+        self.releases
+            .iter()
+            .rev()
+            .find(|release| release.claim_release == "pending")
+    }
+
+    /// True when a pending release is still interrupted: its worker still
+    /// holds the claim on the row. A pending marker whose worker no longer
+    /// holds the claim completed its row write and only lacks the marker.
+    pub fn release_interrupted(&self, issue: &Issue) -> bool {
+        match self.pending_release() {
+            Some(release) => release.worker.is_some() && release.worker == issue.claimed_by,
+            None => false,
+        }
     }
 
     pub fn outstanding_checks(&self) -> Vec<String> {
@@ -474,6 +537,13 @@ pub fn closure_blockers(issue: &Issue, record: &ManagedRecord) -> Vec<String> {
         blockers.push(format!("{} is already done", issue.id));
         return blockers;
     }
+    if record.release_interrupted(issue) {
+        blockers.push(format!(
+            "a release of attempt {} was interrupted before the claim came off the row; a coordinator runs `manna managed release {} --reason <text>` to complete it",
+            record.attempt.saturating_sub(1),
+            issue.id
+        ));
+    }
     match record.current_submission() {
         None => blockers.push(format!(
             "no submission for attempt {} (worker runs `manna submit {} --report <file>`)",
@@ -532,7 +602,7 @@ pub fn assessment_digest(issue: &Issue, record: Option<&ManagedRecord>) -> Strin
         hasher.update(
             record
                 .current_submission()
-                .map(|s| s.at.to_rfc3339())
+                .map(|s| format!("{}@{}:{}", s.key(), s.at.to_rfc3339(), s.status))
                 .unwrap_or_default()
                 .as_bytes(),
         );
@@ -548,6 +618,40 @@ pub fn assessment_digest(issue: &Issue, record: Option<&ManagedRecord>) -> Strin
         }
     }
     format!("assess:{:x}", hasher.finalize())
+}
+
+/// A stable, short submission id from its material.
+pub fn submission_id(attempt: u32, by: &str, at: &DateTime<Utc>, report: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(attempt.to_string().as_bytes());
+    hasher.update(b"|");
+    hasher.update(by.as_bytes());
+    hasher.update(b"|");
+    hasher.update(at.to_rfc3339().as_bytes());
+    hasher.update(b"|");
+    hasher.update(report.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    format!("sub-{}", &digest[..12])
+}
+
+/// Authority re-derived inside a locked mutation: the grant must still be
+/// live, still held by this session's proof, and still cover the row as it
+/// is now. The operator needs no grant. Returns the level or a refusal.
+pub fn revalidate_authority(
+    session: &SessionIdentity,
+    issue: &Issue,
+    grants: &GrantFile,
+    verb: &str,
+) -> Result<Authority, String> {
+    let authority = Authority::resolve(session, issue, grants);
+    if authority.coordinates() {
+        Ok(authority)
+    } else {
+        Err(format!(
+            "{} refused under the lock: this session no longer holds coordinator authority over {} (level now: {}); a revoked grant or a changed scope does not carry an earlier look forward",
+            verb, issue.id, authority.level
+        ))
+    }
 }
 
 /// A stable, short grant id from its material.
@@ -684,6 +788,7 @@ mod tests {
         assert_eq!(blockers.len(), 4, "{blockers:?}");
 
         rec.submission = Some(Submission {
+            id: "sub-aaaaaaaaaaaa".to_string(),
             attempt: 1,
             by: "worker".to_string(),
             at: Utc::now(),
@@ -702,6 +807,7 @@ mod tests {
         rec.acceptances.push(Acceptance {
             check: "integration".to_string(),
             attempt: 1,
+            submission: "sub-aaaaaaaaaaaa".to_string(),
             target_sha: "abc".to_string(),
             by: "lead".to_string(),
             authority: "coordinator".to_string(),
@@ -715,6 +821,7 @@ mod tests {
         rec.acceptances.push(Acceptance {
             check: "deployed".to_string(),
             attempt: 1,
+            submission: "sub-aaaaaaaaaaaa".to_string(),
             target_sha: "abc".to_string(),
             by: "lead".to_string(),
             authority: "coordinator".to_string(),
@@ -729,6 +836,7 @@ mod tests {
         let target = issue("mn-aaa111");
         let mut rec = record(2);
         rec.submission = Some(Submission {
+            id: "sub-bbbbbbbbbbbb".to_string(),
             attempt: 2,
             by: "worker-2".to_string(),
             at: Utc::now(),
@@ -748,6 +856,7 @@ mod tests {
         rec.acceptances.push(Acceptance {
             check: "integration".to_string(),
             attempt: 1,
+            submission: "sub-bbbbbbbbbbbb".to_string(),
             target_sha: "def".to_string(),
             by: "lead".to_string(),
             authority: "coordinator".to_string(),
@@ -757,6 +866,7 @@ mod tests {
         rec.acceptances.push(Acceptance {
             check: "integration".to_string(),
             attempt: 2,
+            submission: "sub-bbbbbbbbbbbb".to_string(),
             target_sha: "abc".to_string(),
             by: "lead".to_string(),
             authority: "coordinator".to_string(),
@@ -765,6 +875,122 @@ mod tests {
         });
         let blockers = closure_blockers(&target, &rec);
         assert_eq!(blockers.len(), 1, "{blockers:?}");
+    }
+
+    #[test]
+    fn acceptance_binds_to_the_exact_submission() {
+        let target = issue("mn-aaa111");
+        let mut rec = record(1);
+        rec.required = vec!["integration".to_string()];
+        rec.target = Some(PinnedTarget {
+            reference: "main".to_string(),
+            sha: "abc".to_string(),
+            kind: "local_branch".to_string(),
+            pinned_at: Utc::now(),
+            pinned_by: "lead".to_string(),
+        });
+        let first = Submission {
+            id: "sub-aaaaaaaaaaaa".to_string(),
+            attempt: 1,
+            by: "worker".to_string(),
+            at: Utc::now(),
+            revision: None,
+            report: "A".to_string(),
+            status: "submitted".to_string(),
+            correction: None,
+        };
+        rec.submission = Some(first.clone());
+        rec.acceptances.push(Acceptance {
+            check: "integration".to_string(),
+            attempt: 1,
+            submission: first.key(),
+            target_sha: "abc".to_string(),
+            by: "lead".to_string(),
+            authority: "coordinator".to_string(),
+            at: Utc::now(),
+            evidence: "reviewed A".to_string(),
+        });
+        assert!(closure_blockers(&target, &rec).is_empty(), "A is accepted");
+
+        // Correction requested, then a changed submission B on the same attempt.
+        let mut corrected = first.clone();
+        corrected.status = "correction_requested".to_string();
+        rec.submission = Some(corrected);
+        assert!(!closure_blockers(&target, &rec).is_empty(), "a correction blocks");
+        rec.history.push(rec.submission.take().unwrap());
+        rec.submission = Some(Submission {
+            id: "sub-bbbbbbbbbbbb".to_string(),
+            attempt: 1,
+            by: "worker".to_string(),
+            at: Utc::now(),
+            revision: None,
+            report: "B".to_string(),
+            status: "submitted".to_string(),
+            correction: None,
+        });
+        let blockers = closure_blockers(&target, &rec);
+        assert_eq!(blockers.len(), 1, "{blockers:?}");
+        assert!(blockers[0].contains("integration"), "A's verdict must not carry to B");
+    }
+
+    #[test]
+    fn an_acceptance_that_names_no_submission_never_counts() {
+        let target = issue("mn-aaa111");
+        let mut rec = record(1);
+        rec.required = vec!["integration".to_string()];
+        rec.target = Some(PinnedTarget {
+            reference: "main".to_string(),
+            sha: "abc".to_string(),
+            kind: "local_branch".to_string(),
+            pinned_at: Utc::now(),
+            pinned_by: "lead".to_string(),
+        });
+        rec.submission = Some(Submission {
+            id: String::new(),
+            attempt: 1,
+            by: "worker".to_string(),
+            at: Utc::now(),
+            revision: None,
+            report: "old".to_string(),
+            status: "submitted".to_string(),
+            correction: None,
+        });
+        rec.acceptances.push(Acceptance {
+            check: "integration".to_string(),
+            attempt: 1,
+            submission: String::new(),
+            target_sha: "abc".to_string(),
+            by: "lead".to_string(),
+            authority: "coordinator".to_string(),
+            at: Utc::now(),
+            evidence: "pre-binding record".to_string(),
+        });
+        assert_eq!(closure_blockers(&target, &rec).len(), 1);
+    }
+
+    #[test]
+    fn an_interrupted_release_blocks_until_resumed() {
+        let mut target = issue("mn-aaa111");
+        target.claimed_by = Some("worker".to_string());
+        let mut rec = record(2);
+        rec.releases.push(Release {
+            attempt: 1,
+            by: "lead".to_string(),
+            at: Utc::now(),
+            reason: "gone".to_string(),
+            worker: Some("worker".to_string()),
+            worker_liveness: "dead".to_string(),
+            basis: "coord_dead".to_string(),
+            isolation: None,
+            isolation_toplevel: None,
+            claim_release: "pending".to_string(),
+        });
+        assert!(rec.release_interrupted(&target));
+        assert!(closure_blockers(&target, &rec)
+            .iter()
+            .any(|b| b.contains("interrupted")));
+        target.claimed_by = None;
+        assert!(!rec.release_interrupted(&target), "row released: only the marker is missing");
     }
 
     #[test]

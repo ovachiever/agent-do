@@ -3,30 +3,40 @@
 //! the adoption doctor. Private helpers of the binary (output, identity,
 //! coord liveness, trailer evidence) are reachable here because this is a
 //! child module of `main`.
+//!
+//! Every mutation is one locked transaction over the board row and the
+//! managed sidecar: the row is reloaded under the lock, the grant is
+//! re-resolved against that row (a revoked grant or a changed scope does not
+//! carry an earlier look forward), the expected owner and attempt are
+//! compared, and only then is anything written.
 
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use serde::Serialize;
 
 use manna_core::error::MannaError;
 use manna_core::issue::{Issue, IssueStatus, IssueType, SessionIdentity};
 use manna_core::managed::{
-    assessment_digest, closure_blockers, grant_id, Acceptance, Authority, Correction, Grant,
-    GrantFile, GrantScope, LifecycleEvent, ManagedRecord, ManagedStore,
-    PinnedTarget, Release, Revocation, Submission, CAPABILITY,
+    assessment_digest, closure_blockers, grant_id, revalidate_authority, submission_id,
+    Acceptance, Authority, Correction, Grant, GrantFile, GrantScope, LifecycleEvent,
+    ManagedRecord, ManagedStore, PinnedTarget, Release, Revocation, Submission, CAPABILITY,
 };
 use manna_core::reconcile::manna_trailer_ids;
 use manna_core::state::direct_coord_program;
 use manna_core::store::MannaStore;
 
 use crate::{
-    commit_touches_source, coord_peer_statuses, coord_status_for_owner, find_issue,
-    handle_manna_error, load_board_workflow, output_error, output_error_json, output_success,
-    output_success_json, require_session_identity, IssueData, EXIT_NEEDS_AUTHORIZATION,
-    EXIT_USER_ERROR,
+    commit_touches_source, coord_peer_statuses_all, find_issue, handle_manna_error,
+    load_board_workflow, output_error, output_error_json, output_success, output_success_json,
+    require_session_identity, IssueData, EXIT_NEEDS_AUTHORIZATION, EXIT_USER_ERROR,
 };
+
+/// Test seam: `MANNA_MANAGED_FAULT=after_release_pending` ends the process
+/// right after a release's pending phase is durable and before the row's
+/// claim is released, so the recovery path can be exercised for real.
+const FAULT_ENV: &str = "MANNA_MANAGED_FAULT";
 
 #[derive(Subcommand)]
 pub enum CoordinatorCommands {
@@ -86,15 +96,16 @@ pub enum ManagedCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Release the current attempt so a replacement can claim (coordinator)
+    /// Release the current attempt so a replacement can claim (coordinator).
+    /// Needs coord to have verified the worker dead or stopped, or a
+    /// validated separate working tree for the replacement; also completes
+    /// an interrupted release.
     Release {
         id: String,
         #[arg(long)]
         reason: String,
-        /// Attest that the previous worker has stopped (coord must not see it active)
-        #[arg(long)]
-        worker_stopped: bool,
-        /// The replacement works in this isolated checkout, so the old files are never shared
+        /// A separate git working tree the replacement will work in; validated,
+        /// never taken on its name
         #[arg(long)]
         isolated_checkout: Option<String>,
         #[arg(long)]
@@ -106,8 +117,13 @@ pub enum ManagedCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Report whether the managed lifecycle is live on this machine, not only in source
+    /// Report what is installed, what is registered, and (with --probe) what
+    /// was verified end to end on this machine
     Doctor {
+        /// Run the managed lifecycle and the drop lifecycle through the real
+        /// binaries and hooks in a throwaway fixture
+        #[arg(long)]
+        probe: bool,
         #[arg(long)]
         json: bool,
     },
@@ -137,6 +153,8 @@ struct ManagedData {
     issue: IssueData,
     managed: ManagedRecord,
     authority: Authority,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -165,7 +183,7 @@ fn fail(message: &str, code: i32, json: bool) -> ! {
     }
 }
 
-fn now_label() -> chrono::DateTime<Utc> {
+fn now_label() -> DateTime<Utc> {
     Utc::now()
 }
 
@@ -178,8 +196,7 @@ fn rejected(error: MannaError, json: bool) -> ! {
     }
 }
 
-fn audit(
-    store: &ManagedStore,
+fn lifecycle_event(
     action: &str,
     issue_id: &str,
     session: &SessionIdentity,
@@ -188,8 +205,8 @@ fn audit(
     reason: Option<&str>,
     evidence: Option<&str>,
     detail: Option<serde_json::Value>,
-) {
-    let event = LifecycleEvent {
+) -> LifecycleEvent {
+    LifecycleEvent {
         at: now_label(),
         action: action.to_string(),
         issue_id: issue_id.to_string(),
@@ -199,10 +216,15 @@ fn audit(
         reason: reason.map(str::to_string),
         evidence: evidence.map(str::to_string),
         detail,
-    };
-    if let Err(error) = store.append_event(&event) {
-        eprintln!("Warning: lifecycle audit not written: {}", error);
     }
+}
+
+/// Audit outside a transaction: a failure is reported, never hidden.
+fn audit_warning(store: &ManagedStore, event: &LifecycleEvent) -> Option<String> {
+    store
+        .append_event(event)
+        .err()
+        .map(|error| format!("lifecycle audit not written: {}", error))
 }
 
 fn load_grants_or_fail(store: &ManagedStore, json: bool) -> GrantFile {
@@ -220,6 +242,28 @@ fn open_board() -> MannaStore {
         );
     }
     store
+}
+
+fn fault(point: &str) {
+    if std::env::var(FAULT_ENV).ok().as_deref() == Some(point) {
+        eprintln!("manna-core: injected fault `{}`; exiting before the next write", point);
+        std::process::exit(70);
+    }
+}
+
+/// Test seam: `MANNA_MANAGED_PAUSE_BEFORE_LOCK=<seconds>` holds a coordinator
+/// mutation between its preview and the board lock, so a race with a writer
+/// that changes the grants meanwhile can be reproduced deterministically.
+const PAUSE_ENV: &str = "MANNA_MANAGED_PAUSE_BEFORE_LOCK";
+
+fn pause_before_lock() {
+    if let Some(seconds) = std::env::var(PAUSE_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|seconds| *seconds > 0.0)
+    {
+        std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -302,6 +346,16 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                 revoked: None,
             };
             let written = grant.clone();
+            let event = lifecycle_event(
+                "grant",
+                "board",
+                &session,
+                "operator",
+                None,
+                Some(&grant.reason),
+                None,
+                Some(serde_json::json!({"grant": grant.id, "coordinator": grant.coordinator_id, "scope": grant.scope})),
+            );
             let result = board.with_board_lock(|| {
                 let mut grants = store.load_grants().map_err(MannaError::MutationRejected)?;
                 if grants.grants.iter().any(|existing| existing.id == written.id) {
@@ -312,36 +366,32 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                 }
                 grants.grants.push(written.clone());
                 store.save_grants(&grants).map_err(MannaError::MutationRejected)?;
+                store.append_event(&event).map_err(MannaError::MutationRejected)?;
                 Ok(())
             });
             if let Err(error) = result {
                 rejected(error, json);
             }
-            audit(
-                &store,
-                "grant",
-                "board",
-                &session,
-                "operator",
-                None,
-                Some(&grant.reason),
-                None,
-                Some(serde_json::json!({"grant": grant.id, "coordinator": grant.coordinator_id, "scope": grant.scope})),
-            );
             emit(GrantData { grant }, json)
         }
         CoordinatorCommands::Revoke { grant_id, reason, json } => {
             let session = require_session_identity();
             if !session.is_operator() {
-                fail(
-                    "only the operator revokes a grant",
-                    EXIT_NEEDS_AUTHORIZATION,
-                    json,
-                );
+                fail("only the operator revokes a grant", EXIT_NEEDS_AUTHORIZATION, json);
             }
             let actor = session.id().to_string();
             let reason_text = reason.trim().to_string();
             let revoked_id = grant_id.clone();
+            let event = lifecycle_event(
+                "revoke",
+                "board",
+                &session,
+                "operator",
+                None,
+                Some(&reason_text),
+                None,
+                Some(serde_json::json!({"grant": grant_id})),
+            );
             let result = board.with_board_lock(|| {
                 let mut grants = store.load_grants().map_err(MannaError::MutationRejected)?;
                 let grant = grants
@@ -362,23 +412,13 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                 });
                 let snapshot = grant.clone();
                 store.save_grants(&grants).map_err(MannaError::MutationRejected)?;
+                store.append_event(&event).map_err(MannaError::MutationRejected)?;
                 Ok(snapshot)
             });
             let grant = match result {
                 Ok(grant) => grant,
                 Err(error) => rejected(error, json),
             };
-            audit(
-                &store,
-                "revoke",
-                "board",
-                &session,
-                "operator",
-                None,
-                Some(&reason),
-                None,
-                Some(serde_json::json!({"grant": grant.id})),
-            );
             emit(GrantData { grant }, json)
         }
         CoordinatorCommands::List { json } => {
@@ -392,25 +432,73 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
 // managed records
 // ----------------------------------------------------------------------------
 
-fn require_coordination(
+/// A first look outside the lock, so an unauthorized caller gets a clear
+/// refusal before any lock is taken. Every mutation re-derives this under
+/// the lock against the reloaded row and grants; this is never the gate.
+fn preview_coordination(
     session: &SessionIdentity,
     issue: &Issue,
     grants: &GrantFile,
     verb: &str,
     json: bool,
 ) -> Authority {
-    let authority = Authority::resolve(session, issue, grants);
-    if !authority.coordinates() {
-        fail(
-            &format!(
-                "{} needs coordinator authority over {}: an operator terminal or a live grant covering this item or its track and held by this session's proof (level here: {}). A coord role, a pulse row, or a claim label is not authority",
-                verb, issue.id, authority.level
-            ),
-            EXIT_NEEDS_AUTHORIZATION,
-            json,
-        );
+    match revalidate_authority(session, issue, grants, verb) {
+        Ok(authority) => authority,
+        Err(_) => {
+            let authority = Authority::resolve(session, issue, grants);
+            fail(
+                &format!(
+                    "{} needs coordinator authority over {}: an operator terminal or a live grant covering this item or its track and held by this session's proof (level here: {}). A coord role, a pulse row, or a claim label is not authority",
+                    verb, issue.id, authority.level
+                ),
+                EXIT_NEEDS_AUTHORIZATION,
+                json,
+            )
+        }
     }
-    authority
+}
+
+/// One locked coordinator mutation over the managed record: grants are
+/// reloaded and authority re-derived against the reloaded row, the record is
+/// refused while a release is interrupted, the closure edits it, the sidecar
+/// is saved, and the audit line is appended before the lock drops.
+fn coordinator_mutation<F>(
+    board: &MannaStore,
+    store: &ManagedStore,
+    id: &str,
+    session: &SessionIdentity,
+    verb: &str,
+    edit: F,
+) -> Result<(ManagedRecord, Authority, Vec<String>), MannaError>
+where
+    F: FnOnce(&Issue, &mut ManagedRecord, &Authority) -> Result<LifecycleEvent, String>,
+{
+    pause_before_lock();
+    board.with_locked_issue(id, |current, _| {
+        if current.status == IssueStatus::Done {
+            return Err(format!("{} is already done", id));
+        }
+        let grants = store.load_grants()?;
+        let authority = revalidate_authority(session, current, &grants, verb)?;
+        let mut managed = store.load_managed()?;
+        let record = managed
+            .items
+            .get_mut(id)
+            .ok_or_else(|| format!("{} is not a managed item", id))?;
+        if record.release_interrupted(current) {
+            return Err(format!(
+                "{} has an interrupted release (attempt {} advanced, claim still on the row); a coordinator runs `manna managed release {} --reason <text>` to complete it before anything else",
+                id,
+                record.attempt.saturating_sub(1),
+                id
+            ));
+        }
+        let event = edit(current, record, &authority)?;
+        let snapshot = record.clone();
+        store.save_managed(&managed)?;
+        let warnings = audit_warning(store, &event).into_iter().collect();
+        Ok((snapshot, authority, warnings))
+    })
 }
 
 pub fn cmd_managed(command: ManagedCommands) -> ! {
@@ -425,12 +513,11 @@ pub fn cmd_managed(command: ManagedCommands) -> ! {
         ManagedCommands::Release {
             id,
             reason,
-            worker_stopped,
             isolated_checkout,
             json,
-        } => cmd_release(id, reason, worker_stopped, isolated_checkout, json),
+        } => cmd_release(id, reason, isolated_checkout, json),
         ManagedCommands::History { id, json } => cmd_history(id, json),
-        ManagedCommands::Doctor { json } => cmd_doctor(json),
+        ManagedCommands::Doctor { probe, json } => cmd_doctor(probe, json),
     }
 }
 
@@ -456,16 +543,21 @@ fn cmd_require(id: String, checks: Vec<String>, reason: Option<String>, json: bo
     let store = managed_store();
     let session = require_session_identity();
     let grants = load_grants_or_fail(&store, json);
-    let authority = require_coordination(&session, &issue, &grants, "managed require", json);
-    let grant_label = authority
-        .grant
-        .clone()
-        .unwrap_or_else(|| "operator".to_string());
+    preview_coordination(&session, &issue, &grants, "managed require", json);
     let actor = session.id().to_string();
+    let reason_text = reason.clone();
+    // `require` may create the record, so it cannot use coordinator_mutation
+    // (which demands an existing one); the same locked shape is inlined.
     let result = board.with_locked_issue(&id, |current, _| {
         if current.status == IssueStatus::Done {
             return Err(format!("{} is already done", id));
         }
+        let grants = store.load_grants()?;
+        let authority = revalidate_authority(&session, current, &grants, "managed require")?;
+        let grant_label = authority
+            .grant
+            .clone()
+            .unwrap_or_else(|| "operator".to_string());
         let mut managed = store.load_managed()?;
         let record = managed.items.entry(id.clone()).or_insert_with(|| ManagedRecord {
             id: id.clone(),
@@ -480,6 +572,12 @@ fn cmd_require(id: String, checks: Vec<String>, reason: Option<String>, json: bo
             releases: Vec::new(),
             history: Vec::new(),
         });
+        if record.release_interrupted(current) {
+            return Err(format!(
+                "{} has an interrupted release; complete it with `manna managed release {} --reason <text>` first",
+                id, id
+            ));
+        }
         for check in &checks {
             if !record.required.iter().any(|existing| existing == check) {
                 record.required.push(check.clone());
@@ -487,23 +585,23 @@ fn cmd_require(id: String, checks: Vec<String>, reason: Option<String>, json: bo
         }
         let snapshot = record.clone();
         store.save_managed(&managed)?;
-        Ok(snapshot)
+        let event = lifecycle_event(
+            "require",
+            &id,
+            &session,
+            &authority.level,
+            Some(snapshot.attempt),
+            reason_text.as_deref(),
+            None,
+            Some(serde_json::json!({"required": snapshot.required})),
+        );
+        let warnings = audit_warning(&store, &event).into_iter().collect();
+        Ok((snapshot, authority, warnings))
     });
-    let record = match result {
-        Ok(record) => record,
+    let (record, authority, warnings) = match result {
+        Ok(value) => value,
         Err(error) => rejected(error, json),
     };
-    audit(
-        &store,
-        "require",
-        &id,
-        &session,
-        &authority.level,
-        Some(record.attempt),
-        reason.as_deref(),
-        None,
-        Some(serde_json::json!({"required": record.required})),
-    );
     emit(
         ManagedData {
             issue: IssueData {
@@ -512,6 +610,7 @@ fn cmd_require(id: String, checks: Vec<String>, reason: Option<String>, json: bo
             },
             managed: record,
             authority,
+            warnings,
         },
         json,
     )
@@ -519,7 +618,8 @@ fn cmd_require(id: String, checks: Vec<String>, reason: Option<String>, json: bo
 
 /// `manna submit <id> --report <file|-> [--revision <ref>]`: the claim-holder
 /// records its result for the current attempt. The item stays in_progress;
-/// submission is not acceptance.
+/// submission is not acceptance, and every submission is a new one: an
+/// acceptance given on an earlier report does not carry to this one.
 pub fn cmd_submit(id: String, report: PathBuf, revision: Option<String>, json: bool) -> ! {
     let board = open_board();
     let (issues, _) = load_board_workflow(&board);
@@ -572,38 +672,51 @@ pub fn cmd_submit(id: String, report: PathBuf, revision: Option<String>, json: b
             .items
             .get_mut(&id)
             .ok_or_else(|| format!("{} is not a managed item (coordinator runs `manna managed require {} --check <name>`)", id, id))?;
+        if record.release_interrupted(current) {
+            return Err(format!(
+                "{} has an interrupted release; a coordinator completes it before a submission can land",
+                id
+            ));
+        }
+        let at = now_label();
         let submission = Submission {
+            id: submission_id(record.attempt, &actor, &at, &text),
             attempt: record.attempt,
             by: actor.clone(),
-            at: now_label(),
+            at,
             revision: resolved_revision.clone(),
             report: text.clone(),
             status: "submitted".to_string(),
             correction: None,
         };
-        if let Some(previous) = record.submission.replace(submission) {
+        let superseded = record.submission.replace(submission.clone());
+        if let Some(previous) = superseded.clone() {
             record.history.push(previous);
         }
         let snapshot = record.clone();
         store.save_managed(&managed)?;
-        Ok(snapshot)
+        let authority = if session.is_operator() { "operator" } else { "owner" };
+        let event = lifecycle_event(
+            "submit",
+            &id,
+            &session,
+            authority,
+            Some(snapshot.attempt),
+            None,
+            resolved_revision.as_deref(),
+            Some(serde_json::json!({
+                "submission": submission.id,
+                "supersedes": superseded.map(|s| s.key()),
+                "report_chars": text.chars().count(),
+            })),
+        );
+        let warnings = audit_warning(&store, &event).into_iter().collect::<Vec<_>>();
+        Ok((snapshot, warnings))
     });
-    let record = match result {
-        Ok(record) => record,
+    let (record, warnings) = match result {
+        Ok(value) => value,
         Err(error) => rejected(error, json),
     };
-    let authority = if session.is_operator() { "operator" } else { "owner" };
-    audit(
-        &store,
-        "submit",
-        &id,
-        &session,
-        authority,
-        Some(record.attempt),
-        None,
-        resolved_revision.as_deref(),
-        Some(serde_json::json!({"report_chars": text.chars().count()})),
-    );
     let grants = load_grants_or_fail(&store, json);
     let authority = Authority::resolve(&session, &issue, &grants);
     emit(
@@ -614,6 +727,7 @@ pub fn cmd_submit(id: String, report: PathBuf, revision: Option<String>, json: b
             },
             managed: record,
             authority,
+            warnings,
         },
         json,
     )
@@ -626,48 +740,41 @@ fn cmd_correct(id: String, reason: String, json: bool) -> ! {
     let store = managed_store();
     let session = require_session_identity();
     let grants = load_grants_or_fail(&store, json);
-    let authority = require_coordination(&session, &issue, &grants, "managed correct", json);
+    preview_coordination(&session, &issue, &grants, "managed correct", json);
     if reason.trim().is_empty() {
         fail("--reason must not be empty", EXIT_USER_ERROR, json);
     }
     let actor = session.id().to_string();
-    let result = board.with_locked_issue(&id, |_, _| {
-        let mut managed = store.load_managed()?;
-        let record = managed
-            .items
-            .get_mut(&id)
-            .ok_or_else(|| format!("{} is not a managed item", id))?;
+    let reason_text = reason.trim().to_string();
+    let result = coordinator_mutation(&board, &store, &id, &session, "managed correct", |_, record, authority| {
         let submission = record
             .current_submission()
             .cloned()
             .ok_or_else(|| format!("no submission for attempt {} to correct", record.attempt))?;
+        let key = submission.key();
         let mut updated = submission;
         updated.status = "correction_requested".to_string();
         updated.correction = Some(Correction {
             by: actor.clone(),
             at: now_label(),
-            reason: reason.trim().to_string(),
+            reason: reason_text.clone(),
         });
         record.submission = Some(updated);
-        let snapshot = record.clone();
-        store.save_managed(&managed)?;
-        Ok(snapshot)
+        Ok(lifecycle_event(
+            "correct",
+            &id,
+            &session,
+            &authority.level,
+            Some(record.attempt),
+            Some(&reason_text),
+            None,
+            Some(serde_json::json!({"submission": key})),
+        ))
     });
-    let record = match result {
-        Ok(record) => record,
+    let (record, authority, warnings) = match result {
+        Ok(value) => value,
         Err(error) => rejected(error, json),
     };
-    audit(
-        &store,
-        "correct",
-        &id,
-        &session,
-        &authority.level,
-        Some(record.attempt),
-        Some(reason.trim()),
-        None,
-        None,
-    );
     emit(
         ManagedData {
             issue: IssueData {
@@ -676,6 +783,7 @@ fn cmd_correct(id: String, reason: String, json: bool) -> ! {
             },
             managed: record,
             authority,
+            warnings,
         },
         json,
     )
@@ -683,7 +791,7 @@ fn cmd_correct(id: String, reason: String, json: bool) -> ! {
 
 /// `manna accept <id> --check <name> --target <ref> --evidence <text>`: an
 /// authorized coordinator records one required check as accepted for the
-/// current attempt at an explicitly pinned integration target.
+/// exact current submission at an explicitly pinned integration target.
 pub fn cmd_accept(
     id: String,
     check: String,
@@ -698,7 +806,7 @@ pub fn cmd_accept(
     let store = managed_store();
     let session = require_session_identity();
     let grants = load_grants_or_fail(&store, json);
-    let authority = require_coordination(&session, &issue, &grants, "accept", json);
+    preview_coordination(&session, &issue, &grants, "accept", json);
     if evidence.trim().is_empty() {
         fail("--evidence must name what was verified (a merge, a deploy id, a test run)", EXIT_USER_ERROR, json);
     }
@@ -711,17 +819,9 @@ pub fn cmd_accept(
         ),
     };
     let actor = session.id().to_string();
-    let level = authority.level.clone();
     let check_name = check.trim().to_string();
-    let result = board.with_locked_issue(&id, |current, _| {
-        if current.status == IssueStatus::Done {
-            return Err(format!("{} is already done", id));
-        }
-        let mut managed = store.load_managed()?;
-        let record = managed
-            .items
-            .get_mut(&id)
-            .ok_or_else(|| format!("{} is not a managed item", id))?;
+    let evidence_text = evidence.trim().to_string();
+    let result = coordinator_mutation(&board, &store, &id, &session, "accept", |_, record, authority| {
         if !record.required.iter().any(|required| required == &check_name) {
             return Err(format!(
                 "`{}` is not a required check on {} (required: {})",
@@ -730,12 +830,20 @@ pub fn cmd_accept(
                 record.required.join(", ")
             ));
         }
-        if record.current_submission().is_none() {
-            return Err(format!(
+        let submission = record.current_submission().ok_or_else(|| {
+            format!(
                 "no submission for attempt {}; acceptance records a verdict on a submitted result, not on an empty attempt",
                 record.attempt
+            )
+        })?;
+        if submission.status != "submitted" {
+            return Err(format!(
+                "the current submission {} is {}; a result that was sent back is not accepted until it is resubmitted",
+                submission.key(),
+                submission.status
             ));
         }
+        let submission_key = submission.key();
         match record.target.as_ref() {
             Some(pinned) if pinned.sha != resolved.sha && !repin => {
                 return Err(format!(
@@ -757,31 +865,34 @@ pub fn cmd_accept(
         record.acceptances.push(Acceptance {
             check: check_name.clone(),
             attempt: record.attempt,
+            submission: submission_key.clone(),
             target_sha: resolved.sha.clone(),
             by: actor.clone(),
-            authority: level.clone(),
+            authority: authority.level.clone(),
             at: now_label(),
-            evidence: evidence.trim().to_string(),
+            evidence: evidence_text.clone(),
         });
-        let snapshot = record.clone();
-        store.save_managed(&managed)?;
-        Ok(snapshot)
+        Ok(lifecycle_event(
+            "accept",
+            &id,
+            &session,
+            &authority.level,
+            Some(record.attempt),
+            None,
+            Some(&evidence_text),
+            Some(serde_json::json!({
+                "check": check_name,
+                "submission": submission_key,
+                "target": target,
+                "target_sha": resolved.sha,
+                "target_kind": resolved.kind,
+            })),
+        ))
     });
-    let record = match result {
-        Ok(record) => record,
+    let (record, authority, warnings) = match result {
+        Ok(value) => value,
         Err(error) => rejected(error, json),
     };
-    audit(
-        &store,
-        "accept",
-        &id,
-        &session,
-        &authority.level,
-        Some(record.attempt),
-        None,
-        Some(evidence.trim()),
-        Some(serde_json::json!({"check": check.trim(), "target": target, "target_sha": resolved.sha, "target_kind": resolved.kind})),
-    );
     emit(
         ManagedData {
             issue: IssueData {
@@ -790,143 +901,333 @@ pub fn cmd_accept(
             },
             managed: record,
             authority,
+            warnings,
         },
         json,
     )
 }
 
-fn cmd_release(
-    id: String,
-    reason: String,
-    worker_stopped: bool,
-    isolated_checkout: Option<String>,
-    json: bool,
-) -> ! {
+// ----------------------------------------------------------------------------
+// liveness, from its owning source
+// ----------------------------------------------------------------------------
+
+#[derive(Serialize, Clone)]
+pub struct Liveness {
+    /// coord's classification (`active`, `idle`, `stale`, `dead`, `stopped`,
+    /// `unclaimed`) or `unknown`.
+    pub status: String,
+    pub source: String,
+    pub observed_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_agent: Option<String>,
+    /// True only for `dead` (process verified gone or tombstoned) and
+    /// `stopped` (the session retired itself). `active` is a current lease;
+    /// `idle`/`stale` are an aged lease, which says nothing about death.
+    pub verified_gone: bool,
+    pub note: String,
+}
+
+fn hex_tail(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let tail = lower.rsplit('-').next().unwrap_or(&lower);
+    if !tail.is_empty() && tail.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        tail.to_string()
+    } else {
+        lower
+    }
+}
+
+/// Match a claim label to a coord peer the way `manna state` does: exact id,
+/// the compact `session-` form, or a shared hex tail (coord keeps twelve
+/// hex characters of a session id, manna's label keeps sixteen).
+fn coord_peer_for_owner(statuses: &std::collections::HashMap<String, String>, owner: &str) -> Option<(String, String)> {
+    if let Some(status) = statuses.get(owner) {
+        return Some((owner.to_string(), status.clone()));
+    }
+    let compact = owner
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .take(16)
+        .collect::<String>();
+    if !compact.is_empty() {
+        // coord keeps twelve characters of an explicit session anchor;
+        // manna's compact label keeps sixteen. Try both spellings.
+        for width in [16usize, 12usize] {
+            let label = format!("session-{}", compact.chars().take(width).collect::<String>());
+            if let Some(status) = statuses.get(&label) {
+                return Some((label, status.clone()));
+            }
+        }
+    }
+    let wanted = hex_tail(owner);
+    if wanted.is_empty() {
+        return None;
+    }
+    statuses.iter().find_map(|(agent_id, status)| {
+        let have = hex_tail(agent_id);
+        (!have.is_empty() && (wanted.starts_with(&have) || have.starts_with(&wanted)))
+            .then(|| (agent_id.clone(), status.clone()))
+    })
+}
+
+pub fn liveness_for(owner: Option<&str>) -> Liveness {
+    let observed_at = now_label();
+    let Some(owner) = owner else {
+        return Liveness {
+            status: "unclaimed".to_string(),
+            source: "board row".to_string(),
+            observed_at,
+            matched_agent: None,
+            verified_gone: false,
+            note: "no claim on the row".to_string(),
+        };
+    };
+    match coord_peer_statuses_all() {
+        Ok(statuses) => match coord_peer_for_owner(&statuses, owner) {
+            Some((agent, status)) => {
+                let verified_gone = status == "dead" || status == "stopped";
+                let note = match status.as_str() {
+                    "dead" => "coord verified the process gone or tombstoned the session",
+                    "stopped" => "the session retired itself through coord stop",
+                    "active" => "a current presence lease; the session is live",
+                    "idle" | "stale" => "an aged lease: says nothing about whether the process is alive",
+                    _ => "coord has no verdict",
+                }
+                .to_string();
+                Liveness {
+                    status,
+                    source: "agent-do coord peers --json".to_string(),
+                    observed_at,
+                    matched_agent: Some(agent),
+                    verified_gone,
+                    note,
+                }
+            }
+            None => Liveness {
+                status: "unknown".to_string(),
+                source: "agent-do coord peers --json".to_string(),
+                observed_at,
+                matched_agent: None,
+                verified_gone: false,
+                note: "coord lists no peer for this claim label".to_string(),
+            },
+        },
+        Err(error) => Liveness {
+            status: "unknown".to_string(),
+            source: "agent-do coord peers --json".to_string(),
+            observed_at,
+            matched_agent: None,
+            verified_gone: false,
+            note: format!("coord unavailable: {}", error),
+        },
+    }
+}
+
+/// A replacement checkout is accepted only as a real, separate git working
+/// tree: it exists, git answers inside it, and its toplevel is not this
+/// checkout's. A name alone proves nothing.
+fn validate_isolated_checkout(path: &str) -> Result<String, String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("--isolated-checkout needs a path".to_string());
+    }
+    let candidate = Path::new(path);
+    if !candidate.is_dir() {
+        return Err(format!("{} is not an existing directory", path));
+    }
+    let toplevel = std::process::Command::new("git")
+        .arg("-C")
+        .arg(candidate)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|error| format!("git unavailable: {}", error))?;
+    if !toplevel.status.success() {
+        return Err(format!("{} is not inside a git working tree", path));
+    }
+    let theirs = String::from_utf8_lossy(&toplevel.stdout).trim().to_string();
+    let theirs_canonical = std::fs::canonicalize(&theirs).unwrap_or_else(|_| PathBuf::from(&theirs));
+    let ours = git_output(&["rev-parse", "--show-toplevel"])?;
+    let ours_canonical = std::fs::canonicalize(&ours).unwrap_or_else(|_| PathBuf::from(&ours));
+    if theirs_canonical == ours_canonical {
+        return Err(format!(
+            "{} resolves to this checkout ({}); isolation means a different working tree",
+            path,
+            ours_canonical.display()
+        ));
+    }
+    Ok(theirs_canonical.display().to_string())
+}
+
+fn cmd_release(id: String, reason: String, isolated_checkout: Option<String>, json: bool) -> ! {
     let board = open_board();
     let (issues, _) = load_board_workflow(&board);
     let issue = find_issue(&issues, &id);
     let store = managed_store();
     let session = require_session_identity();
     let grants = load_grants_or_fail(&store, json);
-    let authority = require_coordination(&session, &issue, &grants, "managed release", json);
+    preview_coordination(&session, &issue, &grants, "managed release", json);
     if reason.trim().is_empty() {
         fail("--reason must not be empty", EXIT_USER_ERROR, json);
     }
-    // Liveness of the worker being replaced. A failed probe is unknown, and
-    // unknown is not death: without coord's word or an explicit basis the
-    // release refuses rather than seat a second writer in the same files.
+    let inspected = store
+        .record_for(&id)
+        .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json))
+        .unwrap_or_else(|| fail(&format!("{} is not a managed item", id), EXIT_USER_ERROR, json));
+    let resuming = inspected.release_interrupted(&issue);
+
+    // Liveness from coord, the one source that verifies processes. Only a
+    // verified death or a self-retirement, or a validated separate working
+    // tree, releases a held claim; an aged lease or no verdict never seats a
+    // second writer in the same files.
     let worker = issue.claimed_by.clone();
-    let liveness = match worker.as_deref() {
-        Some(owner) => match coord_peer_statuses() {
-            Ok(statuses) => coord_status_for_owner(&statuses, owner)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string()),
-            Err(error) => format!("unknown ({})", error),
-        },
-        None => "unclaimed".to_string(),
+    let liveness = liveness_for(worker.as_deref());
+    let isolation_toplevel = match isolated_checkout.as_deref() {
+        Some(path) => Some(validate_isolated_checkout(path).unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json))),
+        None => None,
     };
-    let basis = if worker.is_none() {
+    let basis = if resuming {
+        "resume"
+    } else if worker.is_none() {
         "unclaimed"
-    } else if liveness == "dead" || liveness == "stopped" || liveness == "stale" {
+    } else if liveness.verified_gone {
         "coord_dead"
-    } else if let Some(path) = isolated_checkout.as_deref() {
-        if path.trim().is_empty() {
-            fail("--isolated-checkout needs a path", EXIT_USER_ERROR, json);
-        }
+    } else if isolation_toplevel.is_some() {
         "isolated_checkout"
-    } else if worker_stopped {
-        if liveness == "active" {
-            fail(
-                &format!(
-                    "coord reports {} active; --worker-stopped contradicts a live observation. Stop the worker (`agent-do coord stop` in its session) or release with --isolated-checkout <path>",
-                    worker.as_deref().unwrap_or("the worker")
-                ),
-                EXIT_NEEDS_AUTHORIZATION,
-                json,
-            );
-        }
-        "worker_stopped"
     } else {
         fail(
             &format!(
-                "worker {} liveness is {}; unknown is not death. Release needs coord to report it dead/stopped/stale, or --worker-stopped (attested, refused when coord sees it active), or --isolated-checkout <path> for the replacement",
+                "worker {} liveness is `{}` ({}); that is not a verified stop. Release needs coord to report the worker dead or stopped (`agent-do coord stop` in its session, or a verified-gone process), or --isolated-checkout <path> naming a separate git working tree for the replacement",
                 worker.as_deref().unwrap_or("?"),
-                liveness
+                liveness.status,
+                liveness.note
             ),
             EXIT_NEEDS_AUTHORIZATION,
             json,
         );
     };
+
     let actor = session.id().to_string();
     let expected_worker = worker.clone();
-    let liveness_label = liveness.clone();
-    let isolation = isolated_checkout.clone();
+    let expected_attempt = inspected.attempt;
     let reason_text = reason.trim().to_string();
-    let result = board.with_locked_issue(&id, |current, _| {
-        if current.status == IssueStatus::Done {
-            return Err(format!("{} is already done", id));
-        }
-        if current.claimed_by != expected_worker {
-            return Err(format!(
-                "claim changed after inspection (expected {:?}, found {:?}); nothing was released",
-                expected_worker, current.claimed_by
-            ));
-        }
-        let mut managed = store.load_managed()?;
-        let record = managed
-            .items
-            .get_mut(&id)
-            .ok_or_else(|| format!("{} is not a managed item", id))?;
-        let released_attempt = record.attempt;
-        record.releases.push(Release {
-            attempt: released_attempt,
-            by: actor.clone(),
-            at: now_label(),
-            reason: reason_text.clone(),
-            worker: expected_worker.clone(),
-            worker_liveness: liveness_label.clone(),
-            basis: basis.to_string(),
-            isolation: isolation.clone(),
-        });
-        if let Some(previous) = record.submission.take() {
-            record.history.push(previous);
-        }
-        record.attempt = released_attempt + 1;
-        let snapshot = record.clone();
-        store.save_managed(&managed)?;
-        Ok(snapshot)
-    });
-    let record = match result {
-        Ok(record) => record,
+    let liveness_label = liveness.status.clone();
+    let isolation = isolated_checkout.clone();
+    let isolation_top = isolation_toplevel.clone();
+    let before_store = managed_store();
+    let after_store = managed_store();
+    let before_session = session.clone();
+    let before_id = id.clone();
+    let after_id = id.clone();
+    let result = board.release_claim_with(
+        &id,
+        move |current, _| {
+            if current.status == IssueStatus::Done {
+                return Err(format!("{} is already done", before_id));
+            }
+            if current.claimed_by != expected_worker {
+                return Err(format!(
+                    "claim changed after inspection (expected {:?}, found {:?}); nothing was released",
+                    expected_worker, current.claimed_by
+                ));
+            }
+            let grants = before_store.load_grants()?;
+            let authority = revalidate_authority(&before_session, current, &grants, "managed release")?;
+            let mut managed = before_store.load_managed()?;
+            let record = managed
+                .items
+                .get_mut(&before_id)
+                .ok_or_else(|| format!("{} is not a managed item", before_id))?;
+            if resuming {
+                if !record.release_interrupted(current) {
+                    return Err("the interrupted release completed meanwhile; nothing to resume".to_string());
+                }
+                let event = lifecycle_event(
+                    "release_resume",
+                    &before_id,
+                    &before_session,
+                    &authority.level,
+                    Some(record.attempt),
+                    Some(&reason_text),
+                    None,
+                    Some(serde_json::json!({"worker": current.claimed_by})),
+                );
+                return before_store.append_event(&event);
+            }
+            if record.attempt != expected_attempt {
+                return Err(format!(
+                    "attempt moved from {} to {} after inspection; nothing was released",
+                    expected_attempt, record.attempt
+                ));
+            }
+            let released_attempt = record.attempt;
+            record.releases.push(Release {
+                attempt: released_attempt,
+                by: actor.clone(),
+                at: now_label(),
+                reason: reason_text.clone(),
+                worker: expected_worker.clone(),
+                worker_liveness: liveness_label.clone(),
+                basis: basis.to_string(),
+                isolation: isolation.clone(),
+                isolation_toplevel: isolation_top.clone(),
+                claim_release: if expected_worker.is_some() { "pending" } else { "released" }.to_string(),
+            });
+            if let Some(previous) = record.submission.take() {
+                record.history.push(previous);
+            }
+            record.attempt = released_attempt + 1;
+            let next = record.attempt;
+            // Pending phase first: once this is durable, a death anywhere
+            // below leaves a visible, resumable state, never a silent one.
+            before_store.save_managed(&managed)?;
+            let event = lifecycle_event(
+                "release",
+                &before_id,
+                &before_session,
+                &authority.level,
+                Some(next),
+                Some(&reason_text),
+                None,
+                Some(serde_json::json!({
+                    "released_attempt": released_attempt,
+                    "worker": expected_worker,
+                    "worker_liveness": liveness_label,
+                    "basis": basis,
+                    "isolation": isolation,
+                    "isolation_toplevel": isolation_top,
+                })),
+            );
+            before_store.append_event(&event)?;
+            fault("after_release_pending");
+            Ok(())
+        },
+        move |_row| {
+            let mut managed = after_store.load_managed()?;
+            if let Some(record) = managed.items.get_mut(&after_id) {
+                if let Some(release) = record
+                    .releases
+                    .iter_mut()
+                    .rev()
+                    .find(|release| release.claim_release == "pending")
+                {
+                    release.claim_release = "released".to_string();
+                }
+            }
+            after_store.save_managed(&managed)
+        },
+    );
+    let released_issue = match result {
+        Ok(issue) => issue,
         Err(error) => rejected(error, json),
     };
-    // The claim itself: released through the board's own administrative
-    // path, compare-and-swap against the row inspected above.
-    let released_issue = if issue.claimed_by.is_some() {
-        let expected = issue.clone();
-        match board.repair_issue(&id, move |current, _| {
-            if current != &expected {
-                return Err("row changed after inspection; the claim was not released".to_string());
-            }
-            current.release_dead_claim()
-        }) {
-            Ok(updated) => updated,
-            Err(error) => rejected(error, json),
-        }
-    } else {
-        issue.clone()
-    };
-    audit(
-        &store,
-        "release",
-        &id,
-        &session,
-        &authority.level,
-        Some(record.attempt),
-        Some(reason.trim()),
-        None,
-        Some(serde_json::json!({"released_attempt": record.attempt - 1, "worker": worker, "worker_liveness": liveness, "basis": basis, "isolation": isolated_checkout})),
-    );
+    let record = store
+        .record_for(&id)
+        .ok()
+        .flatten()
+        .unwrap_or(inspected);
+    let grants = load_grants_or_fail(&store, json);
+    let authority = Authority::resolve(&session, &released_issue, &grants);
     emit(
         ManagedData {
             issue: IssueData {
@@ -935,6 +1236,7 @@ fn cmd_release(
             },
             managed: record,
             authority,
+            warnings: Vec::new(),
         },
         json,
     )
@@ -1092,8 +1394,14 @@ pub struct TargetReport {
     pub kind: Option<String>,
     pub is_current_head: Option<bool>,
     pub current_head: Option<String>,
+    /// What was pinned at acceptance time: a recorded fact about then.
     pub pinned: Option<PinnedTarget>,
+    /// Whether the pinned commit still exists here, observed now.
     pub pinned_still_resolves: Option<bool>,
+    /// Where the pinned reference name points now, observed now; `moved`
+    /// says it no longer names the pinned commit.
+    pub pinned_reference_now: Option<String>,
+    pub pinned_reference_moved: Option<bool>,
     pub matches_pinned: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -1105,26 +1413,43 @@ pub struct DeployedReport {
     pub asserted_by: String,
 }
 
+/// Where each section of the assessment comes from and when it was read, so
+/// a reader never mistakes a recorded claim for a present observation.
+#[derive(Serialize)]
+pub struct Observations {
+    pub git: serde_json::Value,
+    pub coord: serde_json::Value,
+    pub recorded: serde_json::Value,
+}
+
 #[derive(Serialize)]
 pub struct Assessment {
     pub id: String,
     pub title: String,
     pub status: String,
     pub claimed_by: Option<String>,
-    pub claimant_liveness: String,
+    pub claimant: Liveness,
     pub managed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub record: Option<ManagedRecord>,
     pub attempt: Option<u32>,
+    pub release_interrupted: bool,
     pub required_checks: Vec<String>,
+    /// Acceptances that count now: same attempt, same target, and given on
+    /// the exact current submission. Their `evidence` is what the coordinator
+    /// recorded at the time, not something re-verified here.
     pub accepted_checks: Vec<Acceptance>,
     pub outstanding_checks: Vec<String>,
     pub submission_status: Option<String>,
+    pub submission_key: Option<String>,
+    /// Acceptances on this attempt that no longer count and why.
+    pub superseded_acceptances: Vec<serde_json::Value>,
     pub authority: Authority,
     pub integration_target: TargetReport,
     pub deployed_revision: DeployedReport,
     pub trailer_commits: Vec<TrailerCommit>,
     pub evidence_note: &'static str,
+    pub observations: Observations,
     pub closable: bool,
     pub blockers: Vec<String>,
     pub next_action: String,
@@ -1140,20 +1465,21 @@ pub fn assess(
     deployed: Option<&str>,
 ) -> Assessment {
     let authority = Authority::resolve(session, issue, grants);
-    let claimant_liveness = match issue.claimed_by.as_deref() {
-        Some(owner) => match coord_peer_statuses() {
-            Ok(statuses) => coord_status_for_owner(&statuses, owner)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string()),
-            Err(error) => format!("unknown ({})", error),
-        },
-        None => "unclaimed".to_string(),
-    };
+    let claimant = liveness_for(issue.claimed_by.as_deref());
+    let git_observed_at = now_label();
     let current_head = git_output(&["rev-parse", "--verify", "HEAD^{commit}"]).ok();
     let pinned = record.and_then(|record| record.target.clone());
     let pinned_still_resolves = pinned
         .as_ref()
         .map(|pinned| git_output(&["rev-parse", "--verify", &format!("{}^{{commit}}", pinned.sha)]).is_ok());
+    let pinned_reference_now = pinned
+        .as_ref()
+        .and_then(|pinned| git_resolve(&pinned.reference).ok().map(|r| r.sha));
+    let pinned_reference_moved = match (&pinned, &pinned_reference_now) {
+        (Some(pinned), Some(now)) => Some(&pinned.sha != now),
+        (Some(_), None) => Some(true),
+        _ => None,
+    };
     let (requested_sha, requested_kind, is_head, target_error) = match requested_target {
         Some(reference) => match git_resolve(reference) {
             Ok(resolved) => (Some(resolved.sha), Some(resolved.kind), Some(resolved.is_head), None),
@@ -1171,7 +1497,8 @@ pub fn assess(
     let trailer_commits = trailer_commits_for(&issue.id, classify_against.as_deref()).unwrap_or_default();
 
     let mut blockers = Vec::new();
-    let (attempt, required, accepted, outstanding, submission_status) = match record {
+    let mut superseded = Vec::new();
+    let (attempt, required, accepted, outstanding, submission_status, submission_key, interrupted) = match record {
         Some(record) => {
             blockers.extend(closure_blockers(issue, record));
             if let Some(error) = target_error.as_ref() {
@@ -1196,12 +1523,38 @@ pub fn assess(
                     pinned.as_ref().map(|p| p.sha.as_str()).unwrap_or("?")
                 ));
             }
+            let counted: Vec<Acceptance> = record.accepted_checks().into_iter().cloned().collect();
+            let current_key = record.current_submission().map(Submission::key);
+            for acceptance in record.acceptances.iter().filter(|a| a.attempt == record.attempt) {
+                if counted.iter().any(|c| c == acceptance) {
+                    continue;
+                }
+                let why = if current_key.as_deref() != Some(acceptance.submission.as_str()) {
+                    if acceptance.submission.is_empty() {
+                        "names no submission (recorded before acceptance was bound to one)"
+                    } else {
+                        "given on an earlier submission; the current one has not been accepted"
+                    }
+                } else {
+                    "given at a different integration target than the pinned one"
+                };
+                superseded.push(serde_json::json!({
+                    "check": acceptance.check,
+                    "submission": acceptance.submission,
+                    "target_sha": acceptance.target_sha,
+                    "by": acceptance.by,
+                    "at": acceptance.at,
+                    "why": why,
+                }));
+            }
             (
                 Some(record.attempt),
                 record.required.clone(),
-                record.accepted_checks().into_iter().cloned().collect::<Vec<_>>(),
+                counted,
                 record.outstanding_checks(),
                 record.current_submission().map(|s| s.status.clone()),
+                current_key,
+                record.release_interrupted(issue),
             )
         }
         None => {
@@ -1215,7 +1568,7 @@ pub fn assess(
                     blockers.push("unmanaged item: closing needs the claim-holder's proof, the operator, or a source-touching trailer commit".to_string());
                 }
             }
-            (None, Vec::new(), Vec::new(), Vec::new(), None)
+            (None, Vec::new(), Vec::new(), Vec::new(), None, None, false)
         }
     };
     let closable = blockers.is_empty();
@@ -1230,22 +1583,24 @@ pub fn assess(
             ),
             None => format!("agent-do manna done {}", issue.id),
         }
+    } else if interrupted {
+        format!("coordinator: agent-do manna managed release {} --reason \"complete the interrupted release\"", issue.id)
     } else if let Some(record) = record {
-        if record.current_submission().is_none() {
-            format!("worker: agent-do manna submit {} --report <file>", issue.id)
-        } else if !outstanding.is_empty() && authority.coordinates() {
-            format!(
+        match record.current_submission() {
+            None => format!("worker: agent-do manna submit {} --report <file>", issue.id),
+            Some(submission) if submission.status == "correction_requested" => {
+                format!("worker: address the correction, then agent-do manna submit {} --report <file>", issue.id)
+            }
+            Some(_) if !outstanding.is_empty() && authority.coordinates() => format!(
                 "agent-do manna accept {} --check {} --target <ref> --evidence \"<what was verified>\"",
                 issue.id, outstanding[0]
-            )
-        } else if !outstanding.is_empty() {
-            format!(
+            ),
+            Some(_) if !outstanding.is_empty() => format!(
                 "coordinator ({}) records acceptance for: {}",
                 record.grant,
                 outstanding.join(", ")
-            )
-        } else {
-            "resolve the blockers above, then re-run assess".to_string()
+            ),
+            Some(_) => "resolve the blockers above, then re-run assess".to_string(),
         }
     } else {
         "resolve the blockers above, then re-run assess".to_string()
@@ -1255,23 +1610,28 @@ pub fn assess(
         title: issue.title.clone(),
         status: issue.status.to_string(),
         claimed_by: issue.claimed_by.clone(),
-        claimant_liveness,
+        claimant,
         managed: record.is_some(),
         record: record.cloned(),
         attempt,
+        release_interrupted: interrupted,
         required_checks: required,
         accepted_checks: accepted,
         outstanding_checks: outstanding,
         submission_status,
+        submission_key,
+        superseded_acceptances: superseded,
         authority,
         integration_target: TargetReport {
             requested: requested_target.map(str::to_string),
             sha: requested_sha,
             kind: requested_kind,
             is_current_head: is_head,
-            current_head,
+            current_head: current_head.clone(),
             pinned,
             pinned_still_resolves,
+            pinned_reference_now,
+            pinned_reference_moved,
             matches_pinned,
             error: target_error,
         },
@@ -1285,6 +1645,23 @@ pub fn assess(
         },
         trailer_commits,
         evidence_note: "trailer commits and patch-equivalent matches are receipts that work was committed; they are never acceptance of a managed item",
+        observations: Observations {
+            git: serde_json::json!({
+                "observed_at": git_observed_at,
+                "source": "git in this checkout (rev-parse, log --all, merge-base, cherry); no fetch, no checkout",
+                "covers": ["integration_target.sha", "integration_target.current_head", "integration_target.pinned_still_resolves", "integration_target.pinned_reference_now", "trailer_commits"],
+            }),
+            coord: serde_json::json!({
+                "observed_at": git_observed_at,
+                "source": "agent-do coord peers --json",
+                "covers": ["claimant"],
+            }),
+            recorded: serde_json::json!({
+                "source": ".manna/managed.json and .manna/coordinators.json",
+                "covers": ["record", "accepted_checks[].evidence", "integration_target.pinned", "submission_status"],
+                "note": "recorded claims from the moment they were written; the git and coord sections are what was observed now",
+            }),
+        },
         closable,
         blockers,
         next_action,
@@ -1319,11 +1696,13 @@ pub fn cmd_assess(id: String, target: Option<String>, deployed: Option<String>, 
 
 pub struct ManagedClose {
     pub authority: &'static str,
+    pub warnings: Vec<String>,
 }
 
 /// Refuse or authorize a managed close. Returns `None` for unmanaged items.
-/// The closure itself runs under the board lock with the sidecar re-read,
-/// so an assessment that went stale between look and act is refused.
+/// The decisive checks run under the board lock with the row, the grants and
+/// the sidecar re-read: authority, expected owner, attempt, every blocker,
+/// and the assessment digest when one was handed in.
 pub fn close_managed(
     board: &MannaStore,
     issue: &Issue,
@@ -1365,59 +1744,100 @@ pub fn close_managed(
             ))));
         }
     }
-    let level: &'static str = match authority.level.as_str() {
-        "operator" => "operator",
-        "coordinator" => "coordinator",
-        _ => "owner",
-    };
     let id = issue.id.clone();
     let inner_id = id.clone();
+    let expected_owner = issue.claimed_by.clone();
+    let expected_attempt = record.attempt;
     let expected_digest = expected_assessment.map(str::to_string);
     let precondition_store = managed_store();
-    let result = board.complete_issue_on_acceptance(&id, move |current, _| {
-        let live = precondition_store
-            .record_for(&inner_id)?
-            .ok_or_else(|| format!("{} lost its managed record between assessment and close", inner_id))?;
-        let blockers = closure_blockers(current, &live);
-        if !blockers.is_empty() {
-            return Err(format!(
-                "managed state changed before the close: {}",
-                blockers.join("; ")
-            ));
-        }
-        if let Some(expected) = expected_digest.as_deref() {
-            let now = assessment_digest(current, Some(&live));
-            if expected != now {
+    let precondition_session = session.clone();
+    let level_cell = std::cell::Cell::new("owner");
+    let level_ref = &level_cell;
+    let audit_store = managed_store();
+    let audit_session = session.clone();
+    let audit_id = id.clone();
+    let audit_record = record.clone();
+    let result = board.complete_issue_on_acceptance_with(
+        &id,
+        move |current, _| {
+            let grants = precondition_store.load_grants()?;
+            let authority = Authority::resolve(&precondition_session, current, &grants);
+            let owner_now = current.claimed_by.is_some()
+                && current.require_owner(&precondition_session).is_ok();
+            if !(authority.coordinates() || owner_now) {
                 return Err(format!(
-                    "stale assessment: {} moved to {} under the lock; nothing was closed",
-                    expected, now
+                    "authority changed before the close (level now: {}); nothing was closed",
+                    authority.level
                 ));
             }
-        }
-        Ok(())
-    });
-    match result {
-        Ok(completed) => {
-            audit(
-                &store,
+            level_ref.set(match authority.level.as_str() {
+                "operator" => "operator",
+                "coordinator" => "coordinator",
+                _ => "owner",
+            });
+            if current.claimed_by != expected_owner {
+                return Err(format!(
+                    "claim changed before the close (expected {:?}, found {:?}); nothing was closed",
+                    expected_owner, current.claimed_by
+                ));
+            }
+            let live = precondition_store
+                .record_for(&inner_id)?
+                .ok_or_else(|| format!("{} lost its managed record between assessment and close", inner_id))?;
+            if live.attempt != expected_attempt {
+                return Err(format!(
+                    "attempt moved from {} to {} before the close; nothing was closed",
+                    expected_attempt, live.attempt
+                ));
+            }
+            let blockers = closure_blockers(current, &live);
+            if !blockers.is_empty() {
+                return Err(format!(
+                    "managed state changed before the close: {}",
+                    blockers.join("; ")
+                ));
+            }
+            if let Some(expected) = expected_digest.as_deref() {
+                let now = assessment_digest(current, Some(&live));
+                if expected != now {
+                    return Err(format!(
+                        "stale assessment: {} moved to {} under the lock; nothing was closed",
+                        expected, now
+                    ));
+                }
+            }
+            Ok(())
+        },
+        move |completed| {
+            let event = lifecycle_event(
                 "close",
-                &issue.id,
-                session,
-                level,
-                Some(record.attempt),
+                &audit_id,
+                &audit_session,
+                level_ref.get(),
+                Some(audit_record.attempt),
                 None,
                 None,
                 Some(serde_json::json!({
-                    "accepted": record.accepted_checks().iter().map(|a| a.check.clone()).collect::<Vec<_>>(),
-                    "target": record.target.as_ref().map(|t| t.sha.clone()),
+                    "accepted": audit_record.accepted_checks().iter().map(|a| a.check.clone()).collect::<Vec<_>>(),
+                    "submission": audit_record.current_submission().map(Submission::key),
+                    "target": audit_record.target.as_ref().map(|t| t.sha.clone()),
                     "released": completed.released,
                 })),
             );
-            Some(Ok((
-                completed,
-                ManagedClose { authority: level },
-            )))
-        }
+            audit_store.append_event(&event)
+        },
+    );
+    match result {
+        Ok((completed, audit_error)) => Some(Ok((
+            completed,
+            ManagedClose {
+                authority: level_cell.get(),
+                warnings: audit_error
+                    .map(|error| format!("lifecycle audit not written after the close: {}", error))
+                    .into_iter()
+                    .collect(),
+            },
+        ))),
         Err(error) => Some(Err(error)),
     }
 }
@@ -1435,108 +1855,163 @@ pub fn managed_guard(id: &str) -> Option<String> {
     }
 }
 
-/// Record a lifecycle line for ordinary board verbs on managed items (claim,
-/// abandon) so the audit holds the whole story. Abandon by the worker ends
-/// its attempt: the next claimant is a new attempt.
+/// Record a lifecycle line for a claim on a managed item so the audit holds
+/// the whole story.
 pub fn note_claim(id: &str, session: &SessionIdentity) {
     let store = managed_store();
     if let Ok(Some(record)) = store.record_for(id) {
-        audit(&store, "claim", id, session, "owner", Some(record.attempt), None, None, None);
+        let event = lifecycle_event("claim", id, session, "owner", Some(record.attempt), None, None, None);
+        if let Some(warning) = audit_warning(&store, &event) {
+            eprintln!("Warning: {}", warning);
+        }
     }
 }
 
-pub fn note_abandon(board: &MannaStore, id: &str, session: &SessionIdentity) {
+/// A worker abandoning a managed claim ends its attempt in the same locked
+/// transaction that releases the row: the sidecar's pending phase and the
+/// audit line first, then the claim comes off, then the released marker.
+/// Returns `None` for unmanaged items so the ordinary path runs.
+pub fn abandon_managed(
+    board: &MannaStore,
+    id: &str,
+    session: &SessionIdentity,
+) -> Option<Result<Issue, MannaError>> {
     let store = managed_store();
-    let Ok(Some(_)) = store.record_for(id) else {
-        return;
-    };
-    let actor = session.id().to_string();
-    let result = board.with_board_lock(|| {
-        let mut managed = store.load_managed().map_err(MannaError::MutationRejected)?;
-        let Some(record) = managed.items.get_mut(id) else {
-            return Ok(None);
-        };
-        let ended = record.attempt;
-        record.releases.push(Release {
-            attempt: ended,
-            by: actor.clone(),
-            at: now_label(),
-            reason: "worker abandoned the claim".to_string(),
-            worker: Some(actor.clone()),
-            worker_liveness: "self".to_string(),
-            basis: "abandon".to_string(),
-            isolation: None,
-        });
-        if let Some(previous) = record.submission.take() {
-            record.history.push(previous);
-        }
-        record.attempt = ended + 1;
-        let next = record.attempt;
-        store.save_managed(&managed).map_err(MannaError::MutationRejected)?;
-        Ok(Some(next))
-    });
-    match result {
-        Ok(Some(next)) => audit(
-            &store,
-            "abandon",
-            id,
-            session,
-            "owner",
-            Some(next),
-            Some("worker abandoned the claim"),
-            None,
-            None,
-        ),
-        Ok(None) => {}
-        Err(error) => eprintln!("Warning: managed attempt not advanced on abandon: {}", error),
+    match store.record_for(id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return None,
+        Err(error) => return Some(Err(MannaError::MutationRejected(error))),
     }
+    let actor = session.id().to_string();
+    let before_store = managed_store();
+    let after_store = managed_store();
+    let before_session = session.clone();
+    let before_id = id.to_string();
+    let after_id = id.to_string();
+    Some(board.release_claim_with(
+        id,
+        move |current, _| {
+            if current.claimed_by.is_none() {
+                return Err("Issue is not claimed".to_string());
+            }
+            current.require_owner(&before_session)?;
+            if !matches!(current.status, IssueStatus::InProgress | IssueStatus::Blocked) {
+                return Err(format!(
+                    "Cannot release issue with status '{}', must be 'in_progress' or 'blocked'",
+                    current.status
+                ));
+            }
+            let mut managed = before_store.load_managed()?;
+            let record = managed
+                .items
+                .get_mut(&before_id)
+                .ok_or_else(|| format!("{} is not a managed item", before_id))?;
+            if record.release_interrupted(current) {
+                return Err(format!(
+                    "{} has an interrupted release; a coordinator completes it first",
+                    before_id
+                ));
+            }
+            let ended = record.attempt;
+            record.releases.push(Release {
+                attempt: ended,
+                by: actor.clone(),
+                at: now_label(),
+                reason: "worker abandoned the claim".to_string(),
+                worker: current.claimed_by.clone(),
+                worker_liveness: "self".to_string(),
+                basis: "abandon".to_string(),
+                isolation: None,
+                isolation_toplevel: None,
+                claim_release: "pending".to_string(),
+            });
+            if let Some(previous) = record.submission.take() {
+                record.history.push(previous);
+            }
+            record.attempt = ended + 1;
+            let next = record.attempt;
+            before_store.save_managed(&managed)?;
+            let event = lifecycle_event(
+                "abandon",
+                &before_id,
+                &before_session,
+                "owner",
+                Some(next),
+                Some("worker abandoned the claim"),
+                None,
+                Some(serde_json::json!({"released_attempt": ended})),
+            );
+            before_store.append_event(&event)?;
+            fault("after_abandon_pending");
+            Ok(())
+        },
+        move |_row| {
+            let mut managed = after_store.load_managed()?;
+            if let Some(record) = managed.items.get_mut(&after_id) {
+                if let Some(release) = record
+                    .releases
+                    .iter_mut()
+                    .rev()
+                    .find(|release| release.claim_release == "pending")
+                {
+                    release.claim_release = "released".to_string();
+                }
+            }
+            after_store.save_managed(&managed)
+        },
+    ))
 }
 
 // ----------------------------------------------------------------------------
-// doctor: is this live, or only in source?
+// doctor: installed, registered, verified
 // ----------------------------------------------------------------------------
 
 #[derive(Serialize)]
 struct DoctorData {
-    live: bool,
-    binary: serde_json::Value,
-    coord: serde_json::Value,
+    /// `true` only when a probe verified the lifecycle end to end on this
+    /// machine; `false` when something is missing or the probe failed;
+    /// `null` when nothing was verified (no `--probe`).
+    live: Option<bool>,
+    commands: serde_json::Value,
     hooks: serde_json::Value,
     board: serde_json::Value,
+    verified: serde_json::Value,
     verdict: String,
 }
 
-fn cmd_doctor(json: bool) -> ! {
+fn repo_root_from_exe() -> Option<PathBuf> {
+    // tools/agent-manna/target/release/manna-core -> repo root
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.ancestors().nth(4).map(Path::to_path_buf))
+        .filter(|root| root.join("agent-do").is_file())
+}
+
+fn coord_program() -> Option<PathBuf> {
+    direct_coord_program(Path::new("agent-do")).or_else(|| {
+        repo_root_from_exe()
+            .map(|root| root.join("tools").join("agent-coord"))
+            .filter(|candidate| candidate.is_file())
+    })
+}
+
+fn cmd_doctor(probe: bool, json: bool) -> ! {
     let exe = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    let binary = serde_json::json!({
-        "path": exe,
-        "version": env!("CARGO_PKG_VERSION"),
-        "capabilities": [CAPABILITY],
-        "note": "the wrapper picks target/release first, then target/debug, then PATH; this is the binary that answered",
-    });
 
-    // coord: does the installed agent-coord know drop ack/resolve?
-    let coord_program = direct_coord_program(Path::new("agent-do"))
-        .or_else(|| {
-            std::env::current_exe().ok().and_then(|exe| {
-                // tools/agent-manna/target/release/manna-core -> tools/agent-coord
-                exe.ancestors()
-                    .nth(4)
-                    .map(|root| root.join("tools").join("agent-coord"))
-                    .filter(|candidate| candidate.is_file())
-            })
-        });
-    let (coord_ok, coord_detail) = match coord_program.as_ref() {
+    // Commands: what the installed programs answer.
+    let coord_path = coord_program();
+    let (coord_ok, coord_detail) = match coord_path.as_ref() {
         Some(program) => match std::process::Command::new(program).arg("help").output() {
             Ok(out) => {
                 let text = String::from_utf8_lossy(&out.stdout);
                 let ack = text.contains("drop ack");
                 let resolve = text.contains("drop resolve");
+                let action = text.contains("--action");
                 (
-                    ack && resolve,
-                    serde_json::json!({"program": program.display().to_string(), "drop_ack": ack, "drop_resolve": resolve}),
+                    ack && resolve && action,
+                    serde_json::json!({"program": program.display().to_string(), "drop_ack": ack, "drop_resolve": resolve, "drop_action": action}),
                 )
             }
             Err(error) => (
@@ -1546,9 +2021,19 @@ fn cmd_doctor(json: bool) -> ! {
         },
         None => (false, serde_json::json!({"program": null, "error": "agent-coord not found beside agent-do or this binary"})),
     };
+    let commands = serde_json::json!({
+        "manna": {
+            "path": exe,
+            "version": env!("CARGO_PKG_VERSION"),
+            "capabilities": [CAPABILITY],
+            "note": "the wrapper picks target/release first, then target/debug, then PATH; this is the binary that answered",
+        },
+        "coord": coord_detail,
+        "available": coord_ok,
+    });
 
-    // hooks: the Claude settings must register the two hooks that surface
-    // coord interrupts; an unregistered wrapper never fires.
+    // Hooks: what the Claude settings register. Registration is a fact about
+    // a file, not proof that a hook fires or reads the right identity.
     let settings = std::env::var("HOME")
         .map(|home| PathBuf::from(home).join(".claude").join("settings.json"))
         .ok();
@@ -1558,54 +2043,310 @@ fn cmd_doctor(json: bool) -> ! {
     let registered = |name: &str| settings_text.as_deref().is_some_and(|text| text.contains(name));
     let prompt_router = registered("agent-do-prompt-router.py");
     let session_start = registered("agent-do-session-start.sh");
+    let hooks_registered = prompt_router && session_start;
     let hooks = serde_json::json!({
         "settings": settings.as_ref().map(|p| p.display().to_string()),
         "readable": settings_text.is_some(),
         "prompt_router_registered": prompt_router,
         "session_start_registered": session_start,
+        "registered": hooks_registered,
+        "note": "registration read from the settings file; whether a registered hook fires with the shell's identity is only known from a probe",
     });
 
-    // board
+    // Board: what this board holds.
     let store = managed_store();
-    let board_root = Path::new(".manna");
-    let initialized = board_root.is_dir();
-    let managed = store.load_managed().map(|file| file.items.len()).ok();
-    let grants = store
-        .load_grants()
-        .map(|file| file.grants.iter().filter(|g| g.is_live()).count())
-        .ok();
     let board = serde_json::json!({
-        "initialized": initialized,
-        "managed_items": managed,
-        "live_grants": grants,
+        "initialized": Path::new(".manna").is_dir(),
+        "managed_items": store.load_managed().map(|file| file.items.len()).ok(),
+        "live_grants": store.load_grants().map(|file| file.grants.iter().filter(|g| g.is_live()).count()).ok(),
         "sidecars_present": store.present_files().iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
     });
 
-    let live = coord_ok && prompt_router && session_start;
-    let verdict = if live {
-        "live: this binary, the installed agent-coord, and the registered Claude hooks all carry the managed lifecycle".to_string()
+    // Verified: only a probe produces a verdict about behaviour.
+    let (verified, probe_ok) = if probe {
+        let outcome = run_probe(coord_path.as_deref());
+        let ok = outcome.get("passed").and_then(|v| v.as_bool()).unwrap_or(false);
+        (outcome, Some(ok))
     } else {
-        let mut missing = Vec::new();
-        if !coord_ok {
-            missing.push("agent-coord without drop ack/resolve");
+        (
+            serde_json::json!({
+                "ran": false,
+                "note": "not verified: run `manna managed doctor --probe` to exercise the managed and drop lifecycles through the real binaries and hooks in a throwaway fixture",
+            }),
+            None,
+        )
+    };
+
+    let live = probe_ok.map(|ok| ok && coord_ok && hooks_registered);
+    let verdict = match live {
+        Some(true) => "live: commands available, hooks registered, and the end-to-end probe passed on this machine".to_string(),
+        Some(false) => {
+            let mut missing = Vec::new();
+            if !coord_ok {
+                missing.push("agent-coord lacks drop ack/resolve/--action".to_string());
+            }
+            if !hooks_registered {
+                missing.push("Claude hooks not registered in ~/.claude/settings.json".to_string());
+            }
+            if probe_ok == Some(false) {
+                missing.push(format!(
+                    "probe failed: {}",
+                    verified.get("failed_step").and_then(|v| v.as_str()).unwrap_or("see verified.steps")
+                ));
+            }
+            format!("not live: {}", missing.join("; "))
         }
-        if !prompt_router {
-            missing.push("agent-do-prompt-router.py not registered in ~/.claude/settings.json");
-        }
-        if !session_start {
-            missing.push("agent-do-session-start.sh not registered in ~/.claude/settings.json");
-        }
-        format!("not live: {}", missing.join("; "))
+        None => format!(
+            "not verified: commands {}, hooks {}; end-to-end behaviour is unknown until `--probe` runs",
+            if coord_ok { "available" } else { "incomplete" },
+            if hooks_registered { "registered" } else { "not registered" }
+        ),
     };
     emit(
         DoctorData {
             live,
-            binary,
-            coord: coord_detail,
+            commands,
             hooks,
             board,
+            verified,
             verdict,
         },
         json,
     )
+}
+
+/// Exercise the real binaries in a throwaway fixture: manna-core (this
+/// executable) for the managed lifecycle, the installed agent-coord for the
+/// drop lifecycle, and the Claude prompt-router hook for identity. Every step
+/// is recorded with its command and verdict; the first failure stops it.
+
+const PROBE_STRIP: [&str; 9] = [
+    "CODEX_THREAD_ID",
+    "CLAUDE_THREAD_ID",
+    "CLAUDE_SESSION_ID",
+    "CLAUDE_AGENT_ID",
+    "TMUX_PANE",
+    "AGENT_DO_COORD_PID",
+    "AGENT_DO_COORD_PID_START",
+    "AGENT_DO_COORD_SESSION",
+    "MANNA_OPERATOR",
+];
+
+struct Probe {
+    root: PathBuf,
+    steps: Vec<serde_json::Value>,
+    failed_step: Option<String>,
+}
+
+impl Probe {
+    /// Run one step; after the first failure every later step is skipped and
+    /// returns `None`, so the report names exactly where the probe stopped.
+    fn run(
+        &mut self,
+        label: &str,
+        program: &Path,
+        args: &[&str],
+        env: &[(&str, String)],
+        stdin: Option<&str>,
+    ) -> Option<String> {
+        if self.failed_step.is_some() {
+            return None;
+        }
+        let mut command = std::process::Command::new(program);
+        command.args(args).current_dir(&self.root);
+        for key in PROBE_STRIP {
+            command.env_remove(key);
+        }
+        command.env("MANNA_OPERATOR", "0");
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        command.stdin(std::process::Stdio::piped());
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+        let output = match command.spawn().and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut handle) = child.stdin.take() {
+                let _ = handle.write_all(stdin.unwrap_or("").as_bytes());
+            }
+            child.wait_with_output()
+        }) {
+            Ok(output) => output,
+            Err(error) => {
+                self.failed_step = Some(format!("{}: cannot run {}: {}", label, program.display(), error));
+                self.steps.push(serde_json::json!({"step": label, "ok": false, "error": error.to_string()}));
+                return None;
+            }
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let ok = output.status.success();
+        self.steps.push(serde_json::json!({
+            "step": label,
+            "command": format!("{} {}", program.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), args.join(" ")),
+            "ok": ok,
+            "exit": output.status.code(),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        }));
+        if !ok {
+            self.failed_step = Some(format!("{} (exit {:?})", label, output.status.code()));
+            return None;
+        }
+        Some(stdout)
+    }
+}
+
+fn run_probe(coord: Option<&Path>) -> serde_json::Value {
+
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(error) => {
+            return serde_json::json!({"ran": true, "passed": false, "failed_step": format!("current_exe: {}", error), "steps": []});
+        }
+    };
+    let root = std::env::temp_dir().join(format!("manna-doctor-probe-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    if let Err(error) = std::fs::create_dir_all(&root) {
+        return serde_json::json!({"ran": true, "passed": false, "failed_step": format!("mkdir {}: {}", root.display(), error), "steps": []});
+    }
+    let home = root.join("home");
+    let _ = std::fs::create_dir_all(&home);
+    let worker_env = [
+        ("MANNA_SESSION_ID", "probe-worker".to_string()),
+        ("MANNA_SESSION_TOKEN", "probe-worker-token-00000000000000000000000000".to_string()),
+        ("AGENT_DO_HOME", home.display().to_string()),
+        ("HOME", home.display().to_string()),
+        ("AGENT_DO_COORD_SESSION", "probe-worker".to_string()),
+    ];
+    let lead_env = [
+        ("MANNA_SESSION_ID", "probe-lead".to_string()),
+        ("MANNA_SESSION_TOKEN", "probe-lead-token-0000000000000000000000000000".to_string()),
+        ("AGENT_DO_HOME", home.display().to_string()),
+        ("HOME", home.display().to_string()),
+        ("AGENT_DO_COORD_SESSION", "probe-lead".to_string()),
+    ];
+    let mut probe = Probe { root: root.clone(), steps: Vec::new(), failed_step: None };
+    let git = Path::new("git");
+    probe.run("git init", git, &["init", "-q", "-b", "main"], &worker_env, None);
+    probe.run("git root commit", git, &["-c", "user.email=probe@manna", "-c", "user.name=probe", "commit", "-q", "--allow-empty", "-m", "root"], &worker_env, None);
+    probe.run("manna init", &exe, &["init"], &worker_env, None);
+    let created = probe.run("manna create", &exe, &["create", "Probe item", "doctor probe"], &worker_env, None);
+    let item = created
+        .as_deref()
+        .and_then(|text| text.lines().find_map(|line| line.trim().strip_prefix("id: ").map(str::to_string)))
+        .unwrap_or_default();
+    probe.run("git add board", git, &["add", "-A"], &worker_env, None);
+    probe.run("git commit board", git, &["-c", "user.email=probe@manna", "-c", "user.name=probe", "commit", "-q", "-m", "board"], &worker_env, None);
+
+    // The grant is written directly: the probe has no operator terminal, and
+    // the grant file format is this binary's own.
+    if probe.failed_step.is_none() {
+        let lead_identity = manna_core::issue::SessionIdentity::from_token("probe-lead", "probe-lead-token-0000000000000000000000000000");
+        match lead_identity {
+            Ok(identity) => {
+                let probe_store = ManagedStore::new(&root);
+                let granted_at = now_label();
+                let grant = Grant {
+                    id: grant_id("probe-lead", identity.proof(), &granted_at),
+                    coordinator_id: "probe-lead".to_string(),
+                    coordinator_proof: identity.proof().to_string(),
+                    scope: GrantScope { items: vec![item.clone()], tracks: vec![] },
+                    reason: "doctor probe".to_string(),
+                    granted_at,
+                    granted_by: "doctor-probe".to_string(),
+                    revoked: None,
+                };
+                let written = probe_store
+                    .load_grants()
+                    .and_then(|mut grants| {
+                        grants.grants.push(grant);
+                        probe_store.save_grants(&grants)
+                    });
+                probe.steps.push(serde_json::json!({"step": "write grant", "ok": written.is_ok(), "error": written.as_ref().err()}));
+                if written.is_err() {
+                    probe.failed_step = Some("write grant".to_string());
+                }
+            }
+            Err(error) => {
+                probe.steps.push(serde_json::json!({"step": "lead identity", "ok": false, "error": error}));
+                probe.failed_step = Some("lead identity".to_string());
+            }
+        }
+    }
+    probe.run("managed require", &exe, &["managed", "require", &item, "--check", "integration"], &lead_env, None);
+    probe.run("worker claim", &exe, &["claim", &item], &worker_env, None);
+    probe.run("worker submit", &exe, &["submit", &item, "--report", "-"], &worker_env, Some("probe report\n"));
+    // `done` by the worker before acceptance must fail; invert the verdict.
+    let early = probe.run("worker done before acceptance", &exe, &["done", &item], &worker_env, None);
+    if let Some(step) = probe.steps.last_mut() {
+        let refused = early.is_none() && probe.failed_step.as_deref().is_some_and(|f| f.starts_with("worker done before acceptance"));
+        if refused {
+            probe.failed_step = None;
+            step["ok"] = serde_json::Value::Bool(true);
+            step["note"] = serde_json::Value::String("refused as required".to_string());
+        } else {
+            step["ok"] = serde_json::Value::Bool(false);
+            probe.failed_step = Some("worker closed before acceptance".to_string());
+        }
+    }
+    probe.run("lead accept", &exe, &["accept", &item, "--check", "integration", "--target", "HEAD", "--evidence", "probe"], &lead_env, None);
+    let closed = probe.run("lead done", &exe, &["done", &item], &lead_env, None);
+    if let Some(text) = closed {
+        if !text.contains("authority: coordinator") {
+            probe.failed_step = Some("lead done did not close as coordinator".to_string());
+        }
+    }
+
+    // Drop lifecycle through the installed coord, then the hook identity.
+    if let Some(coord) = coord {
+        let lead_id = probe.run("coord lead whoami", coord, &["whoami", "--json"], &lead_env, None)
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|v| v.get("agent_id").and_then(|a| a.as_str()).map(str::to_string))
+            .unwrap_or_default();
+        let added = probe.run("coord drop add", coord, &["drop", "add", "probe.md", "--for", &lead_id, "--note", "probe", "--json"], &worker_env, None)
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|v| v.get("drop").and_then(|d| d.get("id")).and_then(|i| i.as_str()).map(str::to_string))
+            .unwrap_or_default();
+        let before = probe.run("coord interrupts before ack", coord, &["interrupts", "--json"], &lead_env, None).unwrap_or_default();
+        if probe.failed_step.is_none() && !before.contains(&added) {
+            probe.failed_step = Some("drop did not reach the recipient's interrupts".to_string());
+        }
+        probe.run("coord drop ack", coord, &["drop", "ack", &added, "--json"], &lead_env, None);
+        let after = probe.run("coord interrupts after ack", coord, &["interrupts", "--json"], &lead_env, None).unwrap_or_default();
+        if probe.failed_step.is_none() && after.contains(&added) {
+            probe.failed_step = Some("acknowledged informational drop still interrupts".to_string());
+        }
+        // The hook must read coord as the same identity the shell used.
+        if let Some(repo) = repo_root_from_exe() {
+            let hook = repo.join("hooks").join("claude").join("agent-do-prompt-router.py");
+            if hook.is_file() {
+                let payload = serde_json::json!({"prompt": "build the probe feature now", "cwd": root.display().to_string(), "session_id": "probe-lead"}).to_string();
+                let hook_env = [
+                    ("AGENT_DO_HOME", home.display().to_string()),
+                    ("HOME", home.display().to_string()),
+                    ("AGENT_DO_HOOK_AI", "off".to_string()),
+                ];
+                let hook_path = hook.to_string_lossy().to_string();
+                let output = probe.run("hook reads as the shell identity", Path::new("python3"), &[hook_path.as_str()], &hook_env, Some(&payload)).unwrap_or_default();
+                if probe.failed_step.is_none() && output.contains(&added) {
+                    probe.failed_step = Some("hook still nudged a drop the shell acknowledged (identity split)".to_string());
+                }
+            } else {
+                probe.steps.push(serde_json::json!({"step": "hook identity", "ok": false, "error": format!("{} missing", hook.display())}));
+                probe.failed_step = Some("hook script missing".to_string());
+            }
+        }
+    } else {
+        probe.steps.push(serde_json::json!({"step": "coord", "ok": false, "error": "agent-coord not found"}));
+        probe.failed_step = Some("agent-coord not found".to_string());
+    }
+
+    let passed = probe.failed_step.is_none();
+    let _ = std::fs::remove_dir_all(&root);
+    serde_json::json!({
+        "ran": true,
+        "passed": passed,
+        "failed_step": probe.failed_step,
+        "fixture": root.display().to_string(),
+        "steps": probe.steps,
+    })
 }

@@ -325,10 +325,15 @@ the board unchanged and an unmanaged board never has them.
   is the same `sha256:` token digest claims store; a label alone is nothing.
 - `managed.json`: `{version, items: {<mn-id>: {id, attempt, required, grant,
   managed_at, managed_by, target?: {reference, sha, kind, pinned_at, pinned_by},
-  submission?: {attempt, by, at, revision?, report, status, correction?},
-  acceptances: [{check, attempt, target_sha, by, authority, at, evidence}],
-  releases: [{attempt, by, at, reason, worker?, worker_liveness, basis, isolation?}],
-  history: [superseded submissions]}}}`.
+  submission?: {id, attempt, by, at, revision?, report, status, correction?},
+  acceptances: [{check, attempt, submission, target_sha, by, authority, at, evidence}],
+  releases: [{attempt, by, at, reason, worker?, worker_liveness, basis, isolation?,
+  isolation_toplevel?, claim_release}], history: [superseded submissions]}}}`.
+  `acceptances[].submission` is the id of the submission the verdict was given
+  on; an acceptance counts only while that submission is the current one.
+  `releases[].claim_release` is `pending` between the sidecar write and the
+  row's claim release, `released` after; a `pending` entry whose worker still
+  holds the claim is an interrupted release.
 - `lifecycle.jsonl`: one JSON object per line, append-only: `{at, action,
   issue_id, actor, authority, attempt?, reason?, evidence?, detail?}` with
   actions `grant`, `revoke`, `require`, `claim`, `submit`, `correct`, `accept`,

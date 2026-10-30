@@ -509,6 +509,70 @@ impl MannaStore {
         self.finish_issue_locked(id, precondition, |issue| issue.complete_on_acceptance())
     }
 
+    /// Close a managed item with a post-write step under the same lock: the
+    /// precondition sees the reloaded row, the transition writes it, and
+    /// `after_write` (the lifecycle audit) runs before the lock drops. An
+    /// audit failure after the row is durable is reported, never hidden, and
+    /// never un-closes the row.
+    pub fn complete_issue_on_acceptance_with<F, A>(
+        &self,
+        id: &str,
+        precondition: F,
+        after_write: A,
+    ) -> Result<(CompletedIssue, Option<String>)>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        A: FnOnce(&CompletedIssue) -> std::result::Result<(), String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+        let _board_lock = self.lock_board()?;
+        let completed = self.finish_issue_unlocked(id, precondition, |issue| {
+            issue.complete_on_acceptance()
+        })?;
+        let audit_warning = after_write(&completed).err();
+        Ok((completed, audit_warning))
+    }
+
+    /// Release a claim as one locked transaction with sidecar steps on both
+    /// sides of the row write. `before` runs over the reloaded row (expected
+    /// owner, attempt, authority rechecked; the sidecar's pending phase and
+    /// audit written); the row's claim is then released and written; then
+    /// `after` runs (the sidecar's released phase) before the lock drops.
+    /// An unclaimed row passes through `before`/`after` without a row write.
+    pub fn release_claim_with<B, A>(&self, id: &str, before: B, after: A) -> Result<Issue>
+    where
+        B: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        A: FnOnce(&Issue) -> std::result::Result<(), String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+        let _board_lock = self.lock_board()?;
+        let mut issues = self.load_issues()?;
+        let snapshot = issues.clone();
+        let index = issues
+            .iter()
+            .position(|issue| issue.id == id)
+            .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        before(&issues[index], &snapshot).map_err(MannaError::MutationRejected)?;
+        if issues[index].claimed_by.is_some() {
+            issues[index]
+                .release_dead_claim()
+                .map_err(MannaError::MutationRejected)?;
+            issues[index]
+                .validate()
+                .map_err(MannaError::MutationRejected)?;
+            if self.board_is_strict()? {
+                Self::validate_strict_row_shapes(&issues)?;
+            }
+            self.write_issues_locked(&issues)?;
+        }
+        after(&issues[index]).map_err(MannaError::MutationRejected)?;
+        Ok(issues[index].clone())
+    }
+
     /// Run a managed-sidecar mutation under the board lock with the current
     /// row in hand. The closure receives the live row (reloaded after the
     /// lock) so expected-owner and expected-attempt checks see the truth.
@@ -558,6 +622,20 @@ impl MannaStore {
         }
 
         let _board_lock = self.lock_board()?;
+        self.finish_issue_unlocked(id, precondition, transition)
+    }
+
+    /// The body of `finish_issue_locked`; the caller holds the board lock.
+    fn finish_issue_unlocked<F, T>(
+        &self,
+        id: &str,
+        precondition: F,
+        transition: T,
+    ) -> Result<CompletedIssue>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        T: FnOnce(&mut Issue) -> std::result::Result<(), String>,
+    {
         let mut issues = self.load_issues()?;
         let index = issues
             .iter()

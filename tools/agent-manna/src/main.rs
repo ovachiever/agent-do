@@ -1476,9 +1476,13 @@ fn cmd_done(id: String, assessment: Option<String>) -> ! {
         landed_evidence_for(&id)
     };
     let managed_close = managed_cli::close_managed(&store, &issue, &session, assessment.as_deref());
+    let mut managed_warnings = Vec::new();
     let (authority, result) = if let Some(managed) = managed_close {
         match managed {
-            Ok((completed, close)) => (close.authority, Ok(completed)),
+            Ok((completed, close)) => {
+                managed_warnings = close.warnings;
+                (close.authority, Ok(completed))
+            }
             Err(MannaError::MutationRejected(error)) => {
                 output_error(&error, EXIT_NEEDS_AUTHORIZATION)
             }
@@ -1499,7 +1503,7 @@ fn cmd_done(id: String, assessment: Option<String>) -> ! {
         Err(error) => handle_manna_error(error),
     };
 
-    let mut warnings = Vec::new();
+    let mut warnings = managed_warnings;
     if let Some(config) = workflow
         .as_ref()
         .filter(|_| completed.issue.issue_type == IssueType::Item)
@@ -1636,11 +1640,14 @@ fn cmd_abandon(id: String) -> ! {
 
     let _ = load_board_workflow(&store);
     let session = require_session_identity();
-    let issue = match store.release_issue(&id, &session) {
+    // A managed item's abandon ends its attempt in the same locked write
+    // that releases the claim; unmanaged items keep the ordinary path.
+    let issue = match managed_cli::abandon_managed(&store, &id, &session)
+        .unwrap_or_else(|| store.release_issue(&id, &session))
+    {
         Ok(issue) => issue,
         Err(error) => handle_manna_error(error),
     };
-    managed_cli::note_abandon(&store, &id, &session);
 
     output_success(IssueData {
         age: (&issue).into(),
@@ -2623,13 +2630,30 @@ fn pid_alive(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-/// Read coord peers bounded to ~2s; map agent_id -> status.
+/// Read coord peers bounded to ~2s; map agent_id -> status. Stale peers are
+/// left out, as `coord peers` leaves them out: reconcile's dead-claim check
+/// keeps its historical view.
 fn coord_peer_statuses() -> Result<HashMap<String, String>, String> {
+    coord_peer_statuses_with(&["peers", "--json"])
+}
+
+/// The same read including stale peers (`peers --all`), for callers that
+/// must distinguish an aged lease from no verdict at all: the managed
+/// lifecycle reports `stale` as what it is and never treats it as death.
+fn coord_peer_statuses_all() -> Result<HashMap<String, String>, String> {
+    coord_peer_statuses_with(&["peers", "--all", "--json"])
+}
+
+fn coord_peer_statuses_with(verb: &[&str]) -> Result<HashMap<String, String>, String> {
     use std::io::Read;
 
     let (program, args) = match direct_coord_program(Path::new("agent-do")) {
-        Some(agent_coord) => (agent_coord, vec!["peers", "--json"]),
-        None => (PathBuf::from("agent-do"), vec!["coord", "peers", "--json"]),
+        Some(agent_coord) => (agent_coord, verb.to_vec()),
+        None => {
+            let mut routed = vec!["coord"];
+            routed.extend_from_slice(verb);
+            (PathBuf::from("agent-do"), routed)
+        }
     };
     let mut child = std::process::Command::new(program)
         .args(args)

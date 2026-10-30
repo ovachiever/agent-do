@@ -69,12 +69,16 @@ Commands:
   publish add <key> --status <s> --summary <text> [--ref <ref> ...] [--file <path>]
                                          Publish or update an artifact (optionally point at a file)
   publish clear <key>                    Clear a published artifact you own
-  drop add <path> --for <agent|role|any> [--note <text>] [--key <need-key>]
+  drop add <path> --for <agent|role|any> [--note <text>] [--key <need-key>] [--action]
                                          Point a peer at a file on disk (pointers, never content).
-                                         Re-adding your own path with changed content bumps the
-                                         drop's revision (and reopens a resolved one)
-  drop ack <drop-id>                     Acknowledge delivery of a drop addressed to you: it leaves
-                                         YOUR routine interrupts at this revision; not completion
+                                         Default kind is info (a delivery: reading it is the whole
+                                         obligation, shown as a notice). --action marks an obligation:
+                                         a dependency that stays visible after it is read, until
+                                         resolved. Re-adding your own path with changed content bumps
+                                         the drop's revision (and reopens a resolved one)
+  drop ack <drop-id>                     Acknowledge a drop addressed to you ("read", never "done"):
+                                         an info drop leaves YOUR routine interrupts at this revision;
+                                         an action drop stays listed, no longer new, until resolved
   drop resolve <drop-id> --reason <text> [--evidence <ref>] [--for-everyone]
                                          Settle a drop for every reader (owner or addressed
                                          recipient; a broadcast/role drop needs --for-everyone).
@@ -1734,6 +1738,9 @@ class CoordStore:
             drop["legacy"] = True
         drop.setdefault("revision", 1)
         drop.setdefault("status", "open")
+        # `info`: a delivery; reading it is the whole obligation. `action`:
+        # an obligation that stays visible after it is read, until resolved.
+        drop["kind"] = "action" if drop.get("kind") == "action" else "info"
         drop.setdefault("updated_at", drop.get("created_at"))
         acks = drop.get("acks")
         drop["acks"] = acks if isinstance(acks, dict) else {}
@@ -1778,8 +1785,16 @@ class CoordStore:
         view["reported_age"] = format_age(drop.get("updated_at") or drop.get("created_at"))
         return view
 
-    def add_drop(self, path: str, target: str, note: str | None, key: str | None) -> dict[str, Any]:
+    def add_drop(
+        self,
+        path: str,
+        target: str,
+        note: str | None,
+        key: str | None,
+        kind: str = "info",
+    ) -> dict[str, Any]:
         self.register_self()
+        kind = "action" if kind == "action" else "info"
         normalized = normalize_path(self.project_root, self.cwd, path)
         alias = self.self_record(refresh=False).get("alias")
         resolved, _ = self._resolve_peer(target)
@@ -1796,6 +1811,7 @@ class CoordStore:
                     "id": "drp-" + uuid.uuid4().hex[:12],
                     "revision": 1,
                     "status": "open",
+                    "kind": kind,
                     "path": normalized,
                     "owner": self.agent_id,
                     "owner_label": alias or self.agent_id,
@@ -1817,6 +1833,7 @@ class CoordStore:
                     existing.get("note") != note
                     or existing.get("key") != key
                     or existing.get("for") != target
+                    or existing.get("kind") != kind
                 )
                 reopened = existing.get("status") == "resolved"
                 if content_changed or reopened:
@@ -1849,6 +1866,7 @@ class CoordStore:
                 payload["for_agent_id"] = resolved if known_agent else None
                 payload["note"] = note
                 payload["key"] = key
+                payload["kind"] = kind
                 payload.pop("legacy", None)
             self._save_drops(drops)
             if change != "unchanged":
@@ -2382,10 +2400,13 @@ class CoordStore:
                 "event_id": latest_event.get("id") if latest_event else None,
             })
 
-        # Drops addressed to me (or matching a need key) are dependencies made
-        # visible. A resolved drop has left routine interrupts for everyone; a
-        # drop I acknowledged at its current revision has left mine. Either
-        # stays readable through `drops --all` and `drop history`.
+        # Drops addressed to me (or matching a need key). A resolved drop has
+        # left routine interrupts for everyone. An `info` drop is a delivery:
+        # once I acknowledge its current revision it has left mine. An
+        # `action` drop is an obligation: acknowledging it says "read", not
+        # "finished", so it stays listed (no longer new) until it is
+        # resolved, and the router keeps reminding at work boundaries.
+        # Everything stays readable through `drops --all` and `drop history`.
         for drop in self._load_drops():
             if drop.get("owner") == self.agent_id:
                 continue
@@ -2395,8 +2416,13 @@ class CoordStore:
             key_match = bool(key) and str(key) in my_need_keys
             if not (self._drop_targets_me(drop) or key_match):
                 continue
-            if self._drop_acknowledged_by_me(drop):
+            acknowledged = self._drop_acknowledged_by_me(drop)
+            is_action = drop.get("kind") == "action"
+            if acknowledged and not is_action:
                 continue
+            # A drop that answers one of my declared needs is a dependency
+            # satisfied, whatever its kind; a plain delivery is a notice.
+            dependency_kind = is_action or key_match
             drop_path = str(drop.get("path", ""))
             drop_id = str(drop.get("id"))
             latest_event = next(
@@ -2417,23 +2443,38 @@ class CoordStore:
             reported_at = drop.get("updated_at") or drop.get("created_at")
             # The note describes the state of things when it was written. It
             # is labelled as a dated report, never as a verified present fact.
+            if is_action:
+                state = "acknowledged, unresolved" if acknowledged else "unresolved"
+                remedy = (
+                    f"resolve when done: agent-do coord drop resolve {drop_id} --reason <text>"
+                    if acknowledged
+                    else f"ack when read: agent-do coord drop ack {drop_id}; resolve when done"
+                )
+                label = "Action"
+            else:
+                state = "informational"
+                remedy = f"ack when read: agent-do coord drop ack {drop_id}"
+                label = "Drop"
             interrupts.append(
                 {
-                    "kind": "dependency",
-                    "severity": "info",
+                    # An obligation is a dependency (the router reminds at work
+                    # boundaries); a delivery is a notice (shown, never blocking).
+                    "kind": "dependency" if dependency_kind else "notice",
+                    "severity": "warning" if is_action and not acknowledged else "info",
                     "peer": drop.get("owner"),
                     "peer_label": drop.get("owner_label") or drop.get("owner"),
                     "paths": [drop_path],
                     "keys": [str(key)] if key else [],
                     "drop_id": drop_id,
+                    "drop_kind": "action" if is_action else "info",
                     "revision": drop.get("revision"),
                     "reported_at": reported_at,
+                    "acknowledged": acknowledged,
                     "summary": (
-                        f"Drop {drop_id} from {drop.get('owner_label') or drop.get('owner')}: {drop_path}{note} "
-                        f"[reported {format_age(reported_at)}, not re-verified; "
-                        f"ack: agent-do coord drop ack {drop_id}]"
+                        f"{label} {drop_id} from {drop.get('owner_label') or drop.get('owner')}: {drop_path}{note} "
+                        f"[{state}; reported {format_age(reported_at)}, not re-verified; {remedy}]"
                     ),
-                    "new": seq > last_seen_seq,
+                    "new": seq > last_seen_seq and not acknowledged,
                     "event_id": latest_event.get("id") if latest_event else None,
                 }
             )
@@ -2662,6 +2703,7 @@ def parser() -> argparse.ArgumentParser:
     drop_add.add_argument("--for", dest="target", default="any")
     drop_add.add_argument("--note")
     drop_add.add_argument("--key")
+    drop_add.add_argument("--action", action="store_const", const="action", default="info", dest="kind")
     drop_ack = drop_sub.add_parser("ack")
     drop_ack.add_argument("drop_id")
     drop_resolve = drop_sub.add_parser("resolve")
@@ -3084,7 +3126,7 @@ def main(argv: list[str]) -> int:
 
     if args.command == "drop":
         if args.drop_command == "add":
-            payload = store.add_drop(args.path, args.target, args.note, args.key)
+            payload = store.add_drop(args.path, args.target, args.note, args.key, kind=args.kind)
             return print_payload({"success": True, "tool": "coord", "drop": payload}, args.json)
         if args.drop_command == "ack":
             ok, payload = store.ack_drop(args.drop_id)
@@ -3122,7 +3164,7 @@ def main(argv: list[str]) -> int:
         for item in payload:
             target = item.get("for") or "any"
             note = f' — {item.get("note")}' if item.get("note") else ""
-            marks = [f'r{item.get("revision")}', str(item.get("status"))]
+            marks = [str(item.get("kind") or "info"), f'r{item.get("revision")}', str(item.get("status"))]
             if item.get("acknowledged_by_me"):
                 marks.append("acked")
             print(

@@ -727,14 +727,15 @@ def test_drops_and_history(tmp_path: Path, env_base: dict[str, str]) -> None:
     all_drops = coord_json(["drops"], cwd=project, env=env_bystander)["drops"]
     require(len(all_drops) == 2, f"expected full drop list: {all_drops}")
 
-    # A drop addressed to me raises a dependency interrupt; so does a need-key match.
+    # A drop addressed to me raises a notice (a delivery, never a blocker);
+    # a drop that answers one of my needs is a dependency satisfied.
     builder_interrupts = coord_json(["interrupts"], cwd=project, env=env_builder)
     drop_deps = [
         item
         for item in builder_interrupts["interrupts"]
-        if item["kind"] == "dependency" and ".dev/research-drops/ephemeris.md" in item.get("paths", [])
+        if item["kind"] == "notice" and ".dev/research-drops/ephemeris.md" in item.get("paths", [])
     ]
-    require(bool(drop_deps), f"expected drop dependency interrupt: {builder_interrupts}")
+    require(bool(drop_deps), f"expected drop notice interrupt: {builder_interrupts}")
 
     coord_json(["need", "add", "dm-report", "--why", "waiting on research"], cwd=project, env=env_bystander)
     bystander_interrupts = coord_json(["interrupts"], cwd=project, env=env_bystander)
@@ -887,6 +888,27 @@ def test_drop_lifecycle(tmp_path: Path, env_base: dict[str, str]) -> None:
     require(reopened["id"] == drop_id and reopened["status"] == "open" and reopened["revision"] == 3 and reopened["change"] == "reopened", f"reopen: {reopened}")
     back = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == drop_id]
     require(len(back) == 1 and back[0]["revision"] == 3, f"reopened drop must resurface: {back}")
+
+    # An action drop is an obligation: acknowledging it means "read", not
+    # "finished". It stays listed as a dependency (no longer new) until it is
+    # resolved; an info drop is a notice and leaves on acknowledgment.
+    action = coord_json(["drop", "add", ".dev/fix-me.md", "--for", worker_id, "--note", "please fix", "--action"], cwd=project, env=author)["drop"]
+    require(action["kind"] == "action", f"kind must be recorded: {action}")
+    pending = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == action["id"]]
+    require(pending and pending[0]["kind"] == "dependency" and pending[0]["new"] is True and pending[0]["acknowledged"] is False, f"unread action drop: {pending}")
+    info_items = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == drop_id]
+    require(info_items and info_items[0]["kind"] == "notice", f"info drop must be a notice: {info_items}")
+    coord_json(["drop", "ack", action["id"]], cwd=project, env=worker)
+    for _ in range(2):
+        still = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == action["id"]]
+        require(still and still[0]["kind"] == "dependency" and still[0]["acknowledged"] is True and still[0]["new"] is False, f"acked action drop must stay visible: {still}")
+        require("resolve" in still[0]["summary"], f"the reminder names the way out: {still[0]['summary']}")
+    coord_json(["drop", "resolve", action["id"], "--reason", "fixed in 1234abc"], cwd=project, env=worker)
+    gone = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == action["id"]]
+    require(not gone, f"resolved action drop must stop: {gone}")
+    # Changing kind is a meaningful update: the owner can escalate a notice into an obligation.
+    escalated = coord_json(["drop", "add", ".dev/shared.md", "--for", "any", "--note", "read me", "--action"], cwd=project, env=author)["drop"]
+    require(escalated["id"] == shared["id"] and escalated["revision"] == 2 and escalated["kind"] == "action", f"escalation must bump the revision: {escalated}")
 
     # Contention stays visible regardless of drop state.
     coord_json(["focus", "set", "shared lane", "--path", "src"], cwd=project, env=worker)
