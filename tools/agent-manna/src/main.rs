@@ -166,6 +166,13 @@ enum Commands {
         /// What was verified (a merge, a deploy id, a test run)
         #[arg(long)]
         evidence: String,
+        /// The submission id you reviewed (`manna assess` prints submission_key); a
+        /// submission that moved since your look is refused under the lock
+        #[arg(long)]
+        submission: String,
+        /// The attempt you reviewed; a moved attempt is refused under the lock
+        #[arg(long)]
+        attempt: u32,
         /// Move the pinned target; earlier acceptances at the old target stop counting
         #[arg(long)]
         repin: bool,
@@ -3783,9 +3790,11 @@ fn main() {
             check,
             target,
             evidence,
+            submission,
+            attempt,
             repin,
             json,
-        } => managed_cli::cmd_accept(id, check, target, evidence, repin, json),
+        } => managed_cli::cmd_accept(id, check, target, evidence, submission, attempt, repin, json),
         Commands::Assess {
             id,
             target,

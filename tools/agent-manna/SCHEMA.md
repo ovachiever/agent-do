@@ -334,10 +334,17 @@ the board unchanged and an unmanaged board never has them.
   `releases[].claim_release` is `pending` between the sidecar write and the
   row's claim release, `released` after; a `pending` entry whose worker still
   holds the claim is an interrupted release.
-- `lifecycle.jsonl`: one JSON object per line, append-only: `{at, action,
+- `lifecycle.jsonl`: one JSON object per line, append-only: `{txn, at, action,
   issue_id, actor, authority, attempt?, reason?, evidence?, detail?}` with
   actions `grant`, `revoke`, `require`, `claim`, `submit`, `correct`, `accept`,
-  `release`, `abandon`, `close`.
+  `release`, `release_resume`, `abandon`, `close`. `txn` names the transaction
+  the line belongs to (empty for claim notes, which are not transactions).
+- `managed-intent.json` (transient, ignored by Git, absent at rest):
+  `{version, intents: [{txn, issue_id, action, started_at, actor, actor_proof,
+  record_after?, grants_after?, event}]}`. An intent is written before a
+  transaction's state and audit writes and removed after both landed; one
+  left behind means those writes did not both land, the item refuses every
+  mutation, and `managed recover <id>` applies the recorded outcome.
 
 ## drift.yaml
 

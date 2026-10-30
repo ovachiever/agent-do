@@ -1846,6 +1846,22 @@ json_field() {
     python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"
 }
 
+# reviewed_submission <id>: the current submission key as the lead sees it.
+reviewed_submission() {
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$1" --json 2>/dev/null | json_field 'd["submission_key"] or ""'
+}
+# reviewed_attempt <id>: the current attempt as the lead sees it.
+reviewed_attempt() {
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$1" --json 2>/dev/null | json_field 'd["attempt"]'
+}
+# lead_accept <id> <check> <target> <evidence> [extra args...]: accept what the lead just reviewed.
+lead_accept() {
+    local id="$1" check="$2" target="$3" evidence="$4"
+    shift 4
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$id" --check "$check" --target "$target" --evidence "$evidence" \
+        --submission "$(reviewed_submission "$id")" --attempt "$(reviewed_attempt "$id")" "$@"
+}
+
 if [[ "$(uname -s)" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
     echo ""
     echo "Test M1: worker submits, source lands elsewhere, coordinator accepts and closes without the worker"
@@ -1984,25 +2000,22 @@ Manna: $M_ID"
     # Acceptance: granted coordinator only, at an explicitly pinned target.
     other_accept_exit=0
     MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" \
-        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "merged" >/dev/null 2>&1 || other_accept_exit=$?
+        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "merged" --submission "$(reviewed_submission "$M_ID")" --attempt 1 >/dev/null 2>&1 || other_accept_exit=$?
     check_exit 2 "$other_accept_exit" "an ungranted session cannot record acceptance"
     worker_accept_exit=0
     MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" \
-        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "I say so" >/dev/null 2>&1 || worker_accept_exit=$?
+        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "I say so" --submission "$(reviewed_submission "$M_ID")" --attempt 1 >/dev/null 2>&1 || worker_accept_exit=$?
     check_exit 2 "$worker_accept_exit" "the worker cannot accept its own submission"
-    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
-        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "merge $FEATURE_SHA reachable from staging" 2>&1) || true
+    output=$(lead_accept $M_ID integration staging "merge $FEATURE_SHA reachable from staging" 2>&1) || true
     check_yaml "$output" "check: integration" "the coordinator accepts integration at the pinned target"
     check_yaml "$output" "kind: local_branch" "the pinned target records how the reference resolved"
     wrong_target_exit=0
-    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
-        "$MANNA" accept "$M_ID" --check deployed --target scratch --evidence "deploy 1" >/dev/null 2>&1 || wrong_target_exit=$?
+    lead_accept $M_ID deployed scratch "deploy 1" >/dev/null 2>&1 || wrong_target_exit=$?
     check_exit 1 "$wrong_target_exit" "acceptance at a different target than the pinned one is refused"
     partial_exit=0
     MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" >/dev/null 2>&1 || partial_exit=$?
     check_exit 2 "$partial_exit" "one outstanding check still blocks closure"
-    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
-        "$MANNA" accept "$M_ID" --check deployed --target staging --evidence "release 7 serves $MAIN_WITH_FEATURE" 2>&1) || true
+    output=$(lead_accept $M_ID deployed staging "release 7 serves $MAIN_WITH_FEATURE" 2>&1) || true
     check_yaml "$output" "check: deployed" "the coordinator accepts deployment"
 
     # The assessment digest guards the close against a stale look.
@@ -2146,7 +2159,7 @@ Manna: $M_ID"
     printf 'redone with tests\n' > redone.md
     output=$(MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" submit "$R_ID" --report redone.md 2>&1) || true
     check_yaml "$output" "attempt: 2" "the replacement submits for attempt 2"
-    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$R_ID" --check integration --target HEAD --evidence "reviewed" >/dev/null 2>&1
+    lead_accept $R_ID integration HEAD "reviewed" >/dev/null 2>&1
     # A changed target after acceptance makes the recorded acceptance stop counting.
     printf 'moved\n' > moved.txt
     git add moved.txt
@@ -2179,11 +2192,11 @@ Manna: $M_ID"
     else
         fail "a submission carries a stable id" "got: $SUB_A"
     fi
-    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$B_ID" --check integration --target HEAD --evidence "Reviewed submission A" 2>&1) || true
+    output=$(lead_accept $B_ID integration HEAD "Reviewed submission A" 2>&1) || true
     check_yaml "$output" "submission: $SUB_A" "the acceptance names the submission it reviewed"
     MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$B_ID" --reason "Submission A needs changes" >/dev/null 2>&1
     sent_back_exit=0
-    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$B_ID" --check integration --target HEAD --evidence "again" >/dev/null 2>&1 || sent_back_exit=$?
+    lead_accept $B_ID integration HEAD "again" >/dev/null 2>&1 || sent_back_exit=$?
     check_exit 1 "$sent_back_exit" "a submission that was sent back cannot be accepted until resubmitted"
     printf 'Submission B: changed result, not reviewed.\n' > sub-b.md
     SUB_B=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$B_ID" --report sub-b.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
@@ -2211,9 +2224,178 @@ Manna: $M_ID"
     check_exit 2 "$lead_b_exit" "the coordinator cannot close B on A's acceptance"
     output=$("$MANNA" show "$B_ID" 2>&1) || true
     check_yaml "$output" "status: in_progress" "B is still in progress"
-    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$B_ID" --check integration --target HEAD --evidence "Reviewed submission B" >/dev/null 2>&1
+    lead_accept $B_ID integration HEAD "Reviewed submission B" >/dev/null 2>&1
     output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$B_ID" 2>&1) || true
     check_yaml "$output" "status: done" "B closes once B itself is accepted"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M4b: an acceptance names what it reviewed (review pass 2, finding 1)"
+    output=$("$MANNA" create "Managed accept race" "accept paused, submission changes" 2>&1) || true
+    AR_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file accept-race item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$AR_ID" --reason "lead for accept race" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$AR_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$AR_ID" >/dev/null 2>&1
+    printf 'Submission A reviewed\n' > ar-a.md
+    AR_SUB_A=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AR_ID" --report ar-a.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
+    no_sub_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "x" --attempt 1 >/dev/null 2>&1 || no_sub_exit=$?
+    check_exit 2 "$no_sub_exit" "accept without --submission is refused by the CLI"
+    # The coordinator reviewed A, starts accepting, and holds before the lock;
+    # the worker submits B meanwhile. The acceptance must not land on B.
+    MANNA_MANAGED_PAUSE_BEFORE_LOCK=3 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "I reviewed submission A" --submission "$AR_SUB_A" --attempt 1 > ar-accept.out 2>&1 &
+    AR_ACCEPT_PID=$!
+    sleep 1.2
+    printf 'Submission B NOT reviewed\n' > ar-b.md
+    AR_SUB_B=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AR_ID" --report ar-b.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
+    ar_exit=0
+    wait "$AR_ACCEPT_PID" || ar_exit=$?
+    output=$(cat ar-accept.out)
+    check_exit 1 "$ar_exit" "an acceptance started on A is refused once B is the current submission"
+    check_yaml "$output" "you reviewed submission $AR_SUB_A" "the refusal names the submission the coordinator reviewed"
+    ar_state=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AR_ID" --json 2>/dev/null | json_field 'str(d["closable"]) + "/" + str(len(d["accepted_checks"])) + "/" + str(len(d["record"]["acceptances"]))')
+    if [[ "$ar_state" == "False/0/0" ]]; then
+        pass "nothing was accepted and B is not closable"
+    else
+        fail "nothing was accepted and B is not closable" "got: $ar_state"
+    fi
+    wrong_attempt_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "x" --submission "$AR_SUB_B" --attempt 2 >/dev/null 2>&1 || wrong_attempt_exit=$?
+    check_exit 1 "$wrong_attempt_exit" "an acceptance naming the wrong attempt is refused"
+    stale_sub_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "x" --submission "$AR_SUB_A" --attempt 1 >/dev/null 2>&1 || stale_sub_exit=$?
+    check_exit 1 "$stale_sub_exit" "an acceptance naming the superseded submission is refused"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "I reviewed submission B" --submission "$AR_SUB_B" --attempt 1 2>&1) || true
+    check_yaml "$output" "submission: $AR_SUB_B" "an acceptance naming the current submission lands"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M4c: a blocked assessment never authorizes a close (review pass 2, finding 2)"
+    # The board checkout's own branch is the integration target here, as in
+    # the reviewer's fixture; it advances after acceptance.
+    BA_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    output=$("$MANNA" create "Managed blocked assessment" "target advances after acceptance" 2>&1) || true
+    BA_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file blocked-assessment item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BA_ID" --reason "lead for blocked assessment" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$BA_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$BA_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$BA_ID" --report half.md >/dev/null 2>&1
+    lead_accept $BA_ID integration "$BA_BRANCH" "reviewed at the branch head" >/dev/null 2>&1
+    EARLY_TOKEN=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BA_ID" --json 2>/dev/null | json_field 'd["assessment"]')
+    if [[ "$EARLY_TOKEN" == assess:v2:* ]]; then
+        pass "a closable assessment yields an assess:v2 token"
+    else
+        fail "a closable assessment yields an assess:v2 token" "got: $EARLY_TOKEN"
+    fi
+    # The target branch advances after acceptance.
+    printf 'advance\n' > advance.txt
+    git add advance.txt
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "the branch advances past the pinned target"
+    BLOCKED_TOKEN=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BA_ID" --target "$BA_BRANCH" --json 2>/dev/null | json_field 'd["assessment"] + "|" + str(d["closable"])')
+    if [[ "$BLOCKED_TOKEN" == blocked:v2:*"|False" ]]; then
+        pass "assess --target <branch> is blocked and yields a blocked:v2 token"
+    else
+        fail "assess --target <branch> is blocked and yields a blocked:v2 token" "got: $BLOCKED_TOKEN"
+    fi
+    BLOCKED_TOKEN="${BLOCKED_TOKEN%%|*}"
+    blocked_close_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "$BLOCKED_TOKEN" 2>&1) || blocked_close_exit=$?
+    check_exit 2 "$blocked_close_exit" "done refuses a blocked assessment token"
+    check_yaml "$output" "blocked assessment never authorizes" "the refusal says why"
+    early_close_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "$EARLY_TOKEN" 2>&1) || early_close_exit=$?
+    check_exit 2 "$early_close_exit" "done refuses a closable token taken before the reference moved"
+    check_yaml "$output" "points at" "the refusal names where the reference points now"
+    v1_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "assess:0123456789abcdef" >/dev/null 2>&1 || v1_exit=$?
+    check_exit 2 "$v1_exit" "done refuses an old-format assessment token"
+    output=$("$MANNA" show "$BA_ID" 2>&1) || true
+    check_yaml "$output" "status: in_progress" "the item is still in progress after the refused closes"
+    FRESH_TOKEN=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BA_ID" --json 2>/dev/null | json_field 'd["assessment"]')
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "$FRESH_TOKEN" 2>&1) || true
+    check_yaml "$output" "status: done" "a fresh closable assessment taken under the current conditions closes"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M6: an audit that cannot be written stops the item until recovered (review pass 2, finding 3)"
+    output=$("$MANNA" create "Managed audit failure" "lifecycle destination unwritable" 2>&1) || true
+    AF_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file audit-failure item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$AF_ID" --reason "lead for audit failure" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$AF_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$AF_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AF_ID" --report half.md >/dev/null 2>&1
+    AF_SUB=$(reviewed_submission "$AF_ID")
+    chmod 000 .manna/lifecycle.jsonl
+    af_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AF_ID" --check integration --target HEAD --evidence "Audit-failure fixture acceptance" --submission "$AF_SUB" --attempt 1 2>&1) || af_exit=$?
+    if [[ "$af_exit" -ne 0 ]]; then
+        pass "an acceptance whose audit cannot be written does not succeed"
+    else
+        fail "an acceptance whose audit cannot be written does not succeed" "$output"
+    fi
+    check_yaml "$output" "did not complete" "the failure names the incomplete transaction"
+    pending=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + str(d["closable"]) + "/" + d["next_action"]')
+    if [[ "$pending" == "1/False/agent-do manna managed recover $AF_ID" ]]; then
+        pass "assess reports the incomplete transaction, blocks closure, and names recover"
+    else
+        fail "assess reports the incomplete transaction, blocks closure, and names recover" "got: $pending"
+    fi
+    chmod 644 .manna/lifecycle.jsonl
+    second_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AF_ID" --check integration --target HEAD --evidence "again" --submission "$AF_SUB" --attempt 1 >/dev/null 2>&1 || second_exit=$?
+    check_exit 1 "$second_exit" "no further acceptance lands while the transaction is incomplete"
+    blocked_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AF_ID" --report half.md >/dev/null 2>&1 || blocked_submit_exit=$?
+    check_exit 1 "$blocked_submit_exit" "no submission lands while the transaction is incomplete"
+    blocked_done_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$AF_ID" >/dev/null 2>&1 || blocked_done_exit=$?
+    check_exit 2 "$blocked_done_exit" "no close lands while the transaction is incomplete"
+    stranger_recover_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed recover "$AF_ID" >/dev/null 2>&1 || stranger_recover_exit=$?
+    check_exit 2 "$stranger_recover_exit" "a stranger cannot recover the transaction"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"]))')
+    if [[ "$output" == "1" ]]; then
+        pass "the coordinator recovers the incomplete transaction"
+    else
+        fail "the coordinator recovers the incomplete transaction" "got: $output"
+    fi
+    accept_lines=$(grep -c "\"action\":\"accept\",\"issue_id\":\"$AF_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$accept_lines" "recovery writes the missing audit line exactly once"
+    after=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + str(d["closable"]) + "/" + str(len(d["accepted_checks"]))')
+    if [[ "$after" == "0/True/1" ]]; then
+        pass "after recovery the acceptance stands once and the item is closable"
+    else
+        fail "after recovery the acceptance stands once and the item is closable" "got: $after"
+    fi
+    if [[ ! -e .manna/managed-intent.json ]]; then
+        pass "no intent remains after recovery"
+    else
+        fail "no intent remains after recovery" "$(cat .manna/managed-intent.json)"
+    fi
+    # The close audit is a transaction too: an unwritable destination leaves
+    # the close durable, the audit pending, and recover finishes it.
+    chmod 000 .manna/lifecycle.jsonl
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$AF_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "the close itself is durable"
+    check_yaml "$output" "audit transaction did not complete" "the close reports its pending audit"
+    chmod 644 .manna/lifecycle.jsonl
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$output" "recover finishes the close's audit transaction"
+    close_lines=$(grep -c "\"action\":\"close\",\"issue_id\":\"$AF_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$close_lines" "the close audit line lands exactly once"
 
     # ------------------------------------------------------------------------
     echo ""
@@ -2273,8 +2455,9 @@ Manna: $M_ID"
     # The accept passes its preview (grant live) and then holds before the
     # lock; meanwhile a writer takes the lock, revokes the grant, and lets go.
     # The recheck under the lock must refuse the accept.
+    V_SUB=$(reviewed_submission "$V_ID")
     MANNA_MANAGED_PAUSE_BEFORE_LOCK=3 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
-        "$MANNA" accept "$V_ID" --check integration --target HEAD --evidence "raced" > race-accept.out 2>&1 &
+        "$MANNA" accept "$V_ID" --check integration --target HEAD --evidence "raced" --submission "$V_SUB" --attempt 1 > race-accept.out 2>&1 &
     ACCEPT_PID=$!
     sleep 1.2
     python3 - "$PWD/.manna/board.lock" "$PWD/.manna/coordinators.json" "$V_GRANT" <<'PY'

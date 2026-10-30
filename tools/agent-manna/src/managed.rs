@@ -30,6 +30,11 @@ use crate::issue::{Issue, IssueStatus, SessionIdentity};
 pub const COORDINATORS_FILE: &str = "coordinators.json";
 pub const MANAGED_FILE: &str = "managed.json";
 pub const LIFECYCLE_FILE: &str = "lifecycle.jsonl";
+/// Transaction intents: a mutation's full outcome, written before the
+/// sidecar and the audit line so a death or an unwritable destination
+/// between the two leaves something recoverable, never a half-applied state
+/// that looks whole.
+pub const INTENT_FILE: &str = "managed-intent.json";
 
 /// The capability name an adoption check looks for. A binary that compiles
 /// this module reports it; a binary that does not cannot be asked.
@@ -320,6 +325,10 @@ pub struct ManagedFile {
 /// One append-only audit line.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LifecycleEvent {
+    /// The transaction this line belongs to; recovery uses it to tell an
+    /// audit line that landed from one that did not.
+    #[serde(default)]
+    pub txn: String,
     pub at: DateTime<Utc>,
     pub action: String,
     pub issue_id: String,
@@ -333,6 +342,51 @@ pub struct LifecycleEvent {
     pub evidence: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<serde_json::Value>,
+}
+
+/// A mutation's recorded outcome, durable before any of its writes. While
+/// one is pending for an item, nothing else about that item may move.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Intent {
+    pub txn: String,
+    pub issue_id: String,
+    pub action: String,
+    pub started_at: DateTime<Utc>,
+    pub actor: String,
+    /// The actor's ownership proof, so the actor itself may recover.
+    pub actor_proof: String,
+    /// The managed record as it must read after this transaction, when the
+    /// transaction writes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_after: Option<ManagedRecord>,
+    /// The grants file as it must read after this transaction, when the
+    /// transaction writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grants_after: Option<GrantFile>,
+    /// The audit line this transaction must leave.
+    pub event: LifecycleEvent,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IntentFile {
+    #[serde(default = "one")]
+    pub version: u32,
+    #[serde(default)]
+    pub intents: Vec<Intent>,
+}
+
+/// A stable transaction id from its material.
+pub fn transaction_id(issue_id: &str, action: &str, started_at: &DateTime<Utc>, actor: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(issue_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(action.as_bytes());
+    hasher.update(b"|");
+    hasher.update(started_at.to_rfc3339().as_bytes());
+    hasher.update(b"|");
+    hasher.update(actor.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    format!("txn-{}", &digest[..12])
 }
 
 // ----------------------------------------------------------------------------
@@ -466,10 +520,124 @@ impl ManagedStore {
 
     /// Every managed sidecar that exists on this board, for tracking checks.
     pub fn present_files(&self) -> Vec<PathBuf> {
-        [self.grants_path(), self.managed_path(), self.lifecycle_path()]
+        [self.grants_path(), self.managed_path(), self.lifecycle_path(), self.intents_path()]
             .into_iter()
             .filter(|path| path.is_file())
             .collect()
+    }
+
+    pub fn intents_path(&self) -> PathBuf {
+        self.manna_dir.join(INTENT_FILE)
+    }
+
+    pub fn load_intents(&self) -> Result<IntentFile, String> {
+        Self::read_json(&self.intents_path())
+    }
+
+    pub fn save_intents(&self, intents: &IntentFile) -> Result<(), String> {
+        if intents.intents.is_empty() {
+            let path = self.intents_path();
+            Self::reject_symlink(&path)?;
+            return match fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!("cannot remove {}: {}", path.display(), error)),
+            };
+        }
+        Self::write_json(&self.intents_path(), intents)
+    }
+
+    /// Pending transactions for one item.
+    pub fn pending_intents_for(&self, id: &str) -> Result<Vec<Intent>, String> {
+        Ok(self
+            .load_intents()?
+            .intents
+            .into_iter()
+            .filter(|intent| intent.issue_id == id)
+            .collect())
+    }
+
+    /// The refusal every mutation gives while a transaction on the item is
+    /// incomplete, or `None` when nothing is pending.
+    pub fn incomplete_transaction(&self, id: &str) -> Result<Option<String>, String> {
+        let pending = self.pending_intents_for(id)?;
+        Ok(pending.first().map(|intent| {
+            format!(
+                "{} has an incomplete transaction {} ({} by {} at {}): its state and audit writes did not both land; run `manna managed recover {}` before anything else moves",
+                id,
+                intent.txn,
+                intent.action,
+                intent.actor,
+                intent.started_at.to_rfc3339(),
+                id
+            )
+        }))
+    }
+
+    /// Run one mutation as a recoverable transaction, under the caller's
+    /// board lock: the intent (the complete outcome) is durable first, then
+    /// the state writes, then the audit line, then the intent is retired.
+    /// A failure after the intent is durable leaves it pending; the item
+    /// refuses every other mutation until `recover` finishes the job.
+    pub fn run_transaction(&self, intent: Intent) -> Result<(), String> {
+        let mut intents = self.load_intents()?;
+        intents.intents.push(intent.clone());
+        self.save_intents(&intents)?;
+        self.apply_intent(&intent)?;
+        self.retire_intent(&intent.txn)
+    }
+
+    /// Apply an intent's writes idempotently: the state files take the
+    /// recorded "after" images; the audit line is appended unless a line
+    /// with this transaction id already exists.
+    pub fn apply_intent(&self, intent: &Intent) -> Result<(), String> {
+        if let Some(record) = intent.record_after.as_ref() {
+            let mut managed = self.load_managed()?;
+            managed.items.insert(record.id.clone(), record.clone());
+            self.save_managed(&managed)?;
+        }
+        if let Some(grants) = intent.grants_after.as_ref() {
+            self.save_grants(grants)?;
+        }
+        if !self.event_landed(&intent.txn)? {
+            self.append_event(&intent.event)?;
+        }
+        Ok(())
+    }
+
+    pub fn retire_intent(&self, txn: &str) -> Result<(), String> {
+        let mut intents = self.load_intents()?;
+        intents.intents.retain(|intent| intent.txn != txn);
+        self.save_intents(&intents)
+    }
+
+    /// True when the audit already holds a line for this transaction.
+    pub fn event_landed(&self, txn: &str) -> Result<bool, String> {
+        let path = self.lifecycle_path();
+        Self::reject_symlink(&path)?;
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(format!("failed to read {}: {}", path.display(), error)),
+        };
+        Ok(text.lines().any(|line| {
+            serde_json::from_str::<LifecycleEvent>(line)
+                .map(|event| event.txn == txn)
+                .unwrap_or(false)
+        }))
+    }
+
+    /// Finish every pending transaction for an item. Returns the retired
+    /// transaction ids.
+    pub fn recover(&self, id: &str) -> Result<Vec<String>, String> {
+        let pending = self.pending_intents_for(id)?;
+        let mut recovered = Vec::new();
+        for intent in pending {
+            self.apply_intent(&intent)?;
+            self.retire_intent(&intent.txn)?;
+            recovered.push(intent.txn);
+        }
+        Ok(recovered)
     }
 }
 
@@ -575,8 +743,108 @@ pub fn closure_blockers(issue: &Issue, record: &ManagedRecord) -> Vec<String> {
     blockers
 }
 
-/// A digest of everything closure depends on. `done --assessment` carries it
-/// back so a close refuses when any of it moved between look and act.
+/// The conditions an assessment was computed under. The token carries them
+/// so a close can recompute the same conditions under the lock: a blocked
+/// assessment never authorizes a close, and a closable one authorizes only
+/// while the integration reference, the requested target, and every input
+/// to the verdict still read the same.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssessmentConditions {
+    pub closable: bool,
+    pub blockers: Vec<String>,
+    /// The sha the caller's `--target` resolved to, when one was given.
+    pub requested_sha: Option<String>,
+    /// Where the pinned reference name points now, when a target is pinned.
+    pub pinned_reference_now: Option<String>,
+}
+
+/// Build the assessment token. `assess:v2:<requested|->:<pinned-now|->:<hex>`
+/// for a closable verdict, `blocked:v2:<hex>` otherwise. The hex covers the
+/// board row, the managed record's acceptance state, and the conditions.
+pub fn assessment_token(issue: &Issue, record: Option<&ManagedRecord>, conditions: &AssessmentConditions) -> String {
+    let requested = conditions.requested_sha.clone().unwrap_or_else(|| "-".to_string());
+    let pinned_now = conditions.pinned_reference_now.clone().unwrap_or_else(|| "-".to_string());
+    let hex = assessment_hex(issue, record, conditions, &requested, &pinned_now);
+    if conditions.closable {
+        format!("assess:v2:{}:{}:{}", requested, pinned_now, hex)
+    } else {
+        format!("blocked:v2:{}", hex)
+    }
+}
+
+/// A parsed closable token: the conditions it was computed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosableToken {
+    pub requested_sha: Option<String>,
+    pub pinned_reference_now: Option<String>,
+    pub hex: String,
+}
+
+/// Parse a token handed back to `done`. `Err` names why it can never
+/// authorize a close (blocked, old format, garbage).
+pub fn parse_assessment_token(token: &str) -> Result<ClosableToken, String> {
+    if let Some(rest) = token.strip_prefix("blocked:v2:") {
+        let _ = rest;
+        return Err("the assessment handed in was blocked; a blocked assessment never authorizes a close. Resolve its blockers and re-run `manna assess`".to_string());
+    }
+    let Some(rest) = token.strip_prefix("assess:v2:") else {
+        return Err(format!(
+            "unrecognized assessment token `{}`; re-run `manna assess` and hand in the current one",
+            token
+        ));
+    };
+    let parts: Vec<&str> = rest.splitn(3, ':').collect();
+    if parts.len() != 3 || parts[2].len() != 64 {
+        return Err(format!("malformed assessment token `{}`; re-run `manna assess`", token));
+    }
+    let optional = |value: &str| (value != "-").then(|| value.to_string());
+    Ok(ClosableToken {
+        requested_sha: optional(parts[0]),
+        pinned_reference_now: optional(parts[1]),
+        hex: parts[2].to_string(),
+    })
+}
+
+/// Recompute the hex for a closable verdict under the same inputs the token
+/// names; equality means nothing the verdict depended on moved.
+pub fn closable_hex(issue: &Issue, record: Option<&ManagedRecord>, token: &ClosableToken) -> String {
+    let conditions = AssessmentConditions {
+        closable: true,
+        blockers: Vec::new(),
+        requested_sha: token.requested_sha.clone(),
+        pinned_reference_now: token.pinned_reference_now.clone(),
+    };
+    let requested = token.requested_sha.clone().unwrap_or_else(|| "-".to_string());
+    let pinned_now = token.pinned_reference_now.clone().unwrap_or_else(|| "-".to_string());
+    assessment_hex(issue, record, &conditions, &requested, &pinned_now)
+}
+
+fn assessment_hex(
+    issue: &Issue,
+    record: Option<&ManagedRecord>,
+    conditions: &AssessmentConditions,
+    requested: &str,
+    pinned_now: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(assessment_digest(issue, record).as_bytes());
+    hasher.update(b"|closable=");
+    hasher.update(if conditions.closable { b"1" } else { b"0" });
+    let mut blockers = conditions.blockers.clone();
+    blockers.sort();
+    for blocker in blockers {
+        hasher.update(b"|blocker=");
+        hasher.update(blocker.as_bytes());
+    }
+    hasher.update(b"|requested=");
+    hasher.update(requested.as_bytes());
+    hasher.update(b"|pinned_now=");
+    hasher.update(pinned_now.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// A digest of the board row and the managed record's acceptance state.
+/// The assessment token builds on it; it is not itself an authorization.
 pub fn assessment_digest(issue: &Issue, record: Option<&ManagedRecord>) -> String {
     let mut hasher = Sha256::new();
     hasher.update(issue.id.as_bytes());
@@ -1002,5 +1270,49 @@ mod tests {
         let after = assessment_digest(&target, Some(&rec));
         assert_ne!(before, after);
         assert!(before.starts_with("assess:"));
+    }
+
+    #[test]
+    fn a_blocked_assessment_token_never_parses_as_closable() {
+        let target = issue("mn-aaa111");
+        let rec = record(1);
+        let blocked = assessment_token(
+            &target,
+            Some(&rec),
+            &AssessmentConditions {
+                closable: false,
+                blockers: vec!["requested target moved".to_string()],
+                requested_sha: Some("bc6361".to_string()),
+                pinned_reference_now: Some("bc6361".to_string()),
+            },
+        );
+        assert!(blocked.starts_with("blocked:v2:"));
+        let error = parse_assessment_token(&blocked).unwrap_err();
+        assert!(error.contains("blocked"), "{error}");
+        assert!(parse_assessment_token("assess:deadbeef").is_err(), "v1 tokens are refused");
+        assert!(parse_assessment_token("garbage").is_err());
+    }
+
+    #[test]
+    fn a_closable_token_binds_its_conditions() {
+        let target = issue("mn-aaa111");
+        let rec = record(1);
+        let conditions = AssessmentConditions {
+            closable: true,
+            blockers: Vec::new(),
+            requested_sha: Some("4d5519".to_string()),
+            pinned_reference_now: Some("4d5519".to_string()),
+        };
+        let token = assessment_token(&target, Some(&rec), &conditions);
+        let parsed = parse_assessment_token(&token).unwrap();
+        assert_eq!(parsed.requested_sha.as_deref(), Some("4d5519"));
+        assert_eq!(parsed.pinned_reference_now.as_deref(), Some("4d5519"));
+        assert_eq!(closable_hex(&target, Some(&rec), &parsed), parsed.hex);
+        // The reference moved: the same token no longer reproduces.
+        let moved = ClosableToken {
+            pinned_reference_now: Some("bc6361".to_string()),
+            ..parsed.clone()
+        };
+        assert_ne!(closable_hex(&target, Some(&rec), &moved), parsed.hex);
     }
 }

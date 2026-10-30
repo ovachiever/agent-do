@@ -5006,10 +5006,10 @@ tools:
       done: 'Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator: done <id> [--assessment <digest>]'
       identity: Print this session''s public label and ownership proof (the token never prints)
       coordinator: 'Scoped coordinator authority, operator-granted and proof-bound: coordinator grant --session <id> --proof <sha256> [--item <id>] [--track <id>] --reason <text> | revoke <grant-id> --reason <text> | list'
-      managed: 'Coordinator-owned closure: managed require <id> --check <name>... | correct <id> --reason <text> | release <id> --reason <text> [--isolated-checkout <path>] (needs coord to have verified the worker dead or stopped, or a validated separate working tree; also completes an interrupted release) | history <id> | doctor [--probe] (commands, hook registration, and with --probe an end-to-end run through the real binaries and hooks)'
+      managed: 'Coordinator-owned closure: managed require <id> --check <name>... | correct <id> --reason <text> | release <id> --reason <text> [--isolated-checkout <path>] (needs coord to have verified the worker dead or stopped, or a validated separate working tree; also completes an interrupted release) | history <id> | recover <id> (finish an incomplete state-plus-audit transaction; operator, granted coordinator, or the session that started it) | doctor [--probe] (commands, hook registration, and with --probe an end-to-end run through the real binaries and hooks)'
       submit: 'Claim-holder records its result for the current attempt (not acceptance): submit <id> --report <file|-> [--revision <ref>]'
-      accept: 'Coordinator records one required check for the exact current submission at an explicitly pinned integration target (a resubmission needs a fresh verdict): accept <id> --check <name> --target <ref> --evidence <text> [--repin]'
-      assess: 'Read-only closure assessment: target revision and kind, trailer evidence by relation, outstanding acceptance, authority, exact next action, and an assessment digest for done: assess <id> [--target <ref>] [--deployed <sha>]'
+      accept: 'Coordinator records one required check for the submission it reviewed at an explicitly pinned integration target; a submission or attempt that moved since the look is refused under the lock: accept <id> --check <name> --target <ref> --evidence <text> --submission <sub-id> --attempt <n> [--repin]'
+      assess: 'Read-only closure assessment: target revision and kind, trailer evidence by relation, outstanding acceptance, incomplete transactions, authority, exact next action, and an assessment token (assess:v2 when closable, blocked:v2 otherwise) that done recomputes under the lock: assess <id> [--target <ref>] [--deployed <sha>]'
       order: Move a paired item to a dense one-based handoff priority and synchronize generated presentation
       sync: Derive numbered handoff filenames, blocker launch gates, and the README index from board state
       abandon: Release a claimed issue back to open
@@ -5053,7 +5053,7 @@ tools:
     - intent: see what still blocks closing an item and who may close it
       command: agent-manna assess mn-abc123 --target origin/staging --json
     - intent: record that the work landed on the integration branch
-      command: agent-manna accept mn-abc123 --check integration --target origin/staging --evidence "merge 1a2b3c reachable"
+      command: agent-manna accept mn-abc123 --check integration --target origin/staging --evidence "merge 1a2b3c reachable" --submission sub-1a2b3c4d5e6f --attempt 1
     - intent: hand in my result for coordinator acceptance
       command: agent-manna submit mn-abc123 --report .handoff/report.md
     - intent: check whether the managed lifecycle is live on this machine

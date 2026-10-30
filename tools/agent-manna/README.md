@@ -363,8 +363,10 @@ agent-do manna managed require mn-abc123 --check integration --check deployed
 agent-do manna submit mn-abc123 --report report.md --revision feat/x   # claim-holder
 agent-do manna assess mn-abc123 --target origin/staging --json          # read-only
 agent-do manna accept mn-abc123 --check integration --target origin/staging \
-    --evidence "merge 1a2b3c reachable from staging"
-agent-do manna accept mn-abc123 --check deployed --target origin/staging --evidence "release 42"
+    --evidence "merge 1a2b3c reachable from staging" --submission sub-1a2b3c4d5e6f --attempt 1
+agent-do manna accept mn-abc123 --check deployed --target origin/staging --evidence "release 42" \
+    --submission sub-1a2b3c4d5e6f --attempt 1
+agent-do manna managed recover mn-abc123     # finish a transaction whose audit or state write failed
 agent-do manna done mn-abc123 --assessment assess:...   # coordinator closes; worker not needed
 agent-do manna managed correct mn-abc123 --reason "tests missing"
 agent-do manna managed release mn-abc123 --reason "worker gone" --isolated-checkout /path/to/worktree
@@ -377,8 +379,15 @@ worker's shared secret: a grant binds a session label to its ownership proof
 and to explicit items or tracks, and only the operator issues one. Every
 mutation reloads the row and the grants under the board lock and re-derives
 authority there, so a grant revoked meanwhile refuses. An acceptance names
-the exact submission it reviewed; a resubmission (after `managed correct` or
-otherwise) needs a fresh verdict before anyone can close. Each release
+the exact submission and attempt the coordinator reviewed (`--submission`,
+`--attempt`, both printed by `assess`) and is refused under the lock when
+either moved; a resubmission (after `managed correct` or otherwise) needs a
+fresh verdict before anyone can close. Each mutation's outcome is durable as
+an intent before its state and audit writes, so a failed write leaves the
+item refusing to move until `managed recover` finishes the transaction. The
+`assessment` token is `assess:v2:...` only when closable and `blocked:v2:...`
+otherwise; `done --assessment` refuses a blocked token and recomputes a
+closable one's conditions under the lock. Each release
 advances the attempt in the same locked transaction that releases the claim,
 so a superseded worker cannot submit or complete; an interrupted release is
 reported by `assess` and completed by the coordinator's next `managed
