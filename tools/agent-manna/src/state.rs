@@ -1034,6 +1034,43 @@ fn now_cmp(left: &Value, right: &Value) -> Ordering {
         .then_with(|| order_cmp(left, right))
 }
 
+/// Managed-lifecycle summary per item, from the sidecar beside the board.
+/// Null for an unmanaged item; a human window renders what a coordinator
+/// still owes rather than guessing from status alone.
+fn managed_summaries(root: &Path, issues: &[Issue]) -> HashMap<String, Value> {
+    let store = crate::managed::ManagedStore::new(root);
+    let managed = match store.load_managed() {
+        Ok(file) => file,
+        Err(_) => return HashMap::new(),
+    };
+    let mut out = HashMap::new();
+    for issue in issues {
+        let Some(record) = managed.items.get(&issue.id) else {
+            continue;
+        };
+        let blockers = crate::managed::closure_blockers(issue, record);
+        out.insert(
+            issue.id.clone(),
+            json!({
+                "attempt": record.attempt,
+                "grant": record.grant,
+                "required": record.required,
+                "accepted": record.accepted_checks().iter().map(|a| a.check.clone()).collect::<Vec<_>>(),
+                "outstanding": record.outstanding_checks(),
+                "submission": record.current_submission().map(|s| json!({
+                    "by": s.by, "at": s.at, "status": s.status, "revision": s.revision,
+                })),
+                "target": record.target.as_ref().map(|t| json!({
+                    "reference": t.reference, "sha": t.sha, "kind": t.kind,
+                })),
+                "closable": issue.status != IssueStatus::Done && blockers.is_empty(),
+                "blockers": blockers,
+            }),
+        );
+    }
+    out
+}
+
 fn public_issue(issue: &Issue) -> Result<Map<String, Value>, String> {
     let mut value = serde_json::to_value(issue).map_err(|error| error.to_string())?;
     let row = value
@@ -1097,6 +1134,7 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
         .map(|issue| (issue.id.as_str(), issue.title.as_str()))
         .collect();
 
+    let managed_rows = managed_summaries(root, issues);
     let mut rows = Vec::new();
     for issue in issues {
         let blockers: Vec<Value> = issue
@@ -1137,6 +1175,13 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
             })
         });
         let mut row = public_issue(issue)?;
+        row.insert(
+            "managed".to_string(),
+            managed_rows
+                .get(issue.id.as_str())
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
         row.insert("kind".to_string(), Value::String(kind));
         row.insert(
             "title_plain".to_string(),

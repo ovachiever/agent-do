@@ -494,6 +494,40 @@ impl MannaStore {
         )
     }
 
+    /// Close a managed item whose acceptance is complete. The precondition
+    /// runs under the board lock over the reloaded row and board, so the
+    /// caller re-reads the managed sidecar inside it and refuses when the
+    /// assessment it acted on no longer matches what is on disk.
+    pub fn complete_issue_on_acceptance<F>(
+        &self,
+        id: &str,
+        precondition: F,
+    ) -> Result<CompletedIssue>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+    {
+        self.finish_issue_locked(id, precondition, |issue| issue.complete_on_acceptance())
+    }
+
+    /// Run a managed-sidecar mutation under the board lock with the current
+    /// row in hand. The closure receives the live row (reloaded after the
+    /// lock) so expected-owner and expected-attempt checks see the truth.
+    pub fn with_locked_issue<T, F>(&self, id: &str, operation: F) -> Result<T>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<T, String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+        let _board_lock = self.lock_board()?;
+        let issues = self.load_issues()?;
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == id)
+            .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        operation(issue, &issues).map_err(MannaError::MutationRejected)
+    }
+
     /// Close by the operator: the human at the terminal owns every claim.
     pub fn complete_issue_as_operator(
         &self,

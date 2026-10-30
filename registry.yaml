@@ -4138,7 +4138,7 @@ tools:
     - name the isolation remedy in contention interrupts (split ownership first, worktree second) and flag a declared branch this checkout is not on as mandatory isolation
     - proactively warn concurrent active building writers to use separate worktrees because compile state and build artifacts remain shared even when source paths are disjoint
     - manage advisory claims and a warn-only pre-commit guard over live claims and territories
-    - point peers at files via drops, declare dependencies, publish artifacts with file pointers
+    - point peers at files via drops with a lifecycle (stable id, per-reader acknowledgment, authorized resolution, revisions, audit history, nothing deleted), declare dependencies, publish artifacts with file pointers
     - ring live named peers with a payload-free pending bit after addressed need/drop writes; consume at supported turn-boundary hooks without changing claims or acceptance
     - compute contention, notice, dependency, and novelty interrupts and expose the event journal as history
     - merge harness hook observations and timestamped external supervisor verdicts into shared six-state pulse telemetry without renewing target liveness, then rank live peers attention-first
@@ -4164,8 +4164,8 @@ tools:
       need: 'Manage dependencies: need add <key> --why <text> [--from <agent>|--for <agent>] | need list [--all] | need clear <key>'
       publishes: List published artifacts
       publish: 'Manage published artifacts: publish add [--file <path>]|clear'
-      drop: 'Point a peer at a file: drop add <path> --for <agent|role|any> [--note <text>] [--key <need-key>]'
-      drops: 'List drops: drops [--for-me]'
+      drop: 'Drop lifecycle (stable ids, never deleted): drop add <path> --for <agent|role|any> [--note <text>] [--key <need-key>] (re-adding changed content bumps the revision) | drop ack <id> (recipient acknowledges delivery; leaves only that reader''s routine interrupts) | drop resolve <id> --reason <text> [--evidence <ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; kept in history) | drop history <id>'
+      drops: 'List open drops: drops [--for-me] [--all] (--all includes resolved); a note is a dated report, never a verified present fact'
       history: 'Read the coordination event journal: history [peer] [--limit <n>]'
     examples:
     - intent: see who I am in this project
@@ -4188,6 +4188,10 @@ tools:
       command: agent-coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
     - intent: hand another agent a research file
       command: agent-coord drop add .dev/research-drops/report.md --for builder-a --note "ephemeris findings"
+    - intent: acknowledge a drop so it stops nudging me
+      command: agent-coord drop ack drp-1a2b3c4d5e6f
+    - intent: settle a drop for every reader once its work is done
+      command: agent-coord drop resolve drp-1a2b3c4d5e6f --reason "folded into the release" --evidence "commit abc123"
     - intent: see whether anything should interrupt me
       command: agent-coord interrupts
     - intent: see what a session is observably doing right now
@@ -4984,6 +4988,7 @@ tools:
       - OPENAI_API_KEY
     capabilities:
     - track issues and dependencies
+    - coordinator-owned closure for managed items (submission distinct from acceptance, pinned integration targets, scoped proof-bound grants, attempt-guarded release, append-only lifecycle audit)
     - declare portable typed relations between autonomous repository boards
     - manage session state
     - store context across sessions
@@ -4996,7 +5001,13 @@ tools:
       estate: Emit every registered board as the /api/boards model without starting or contacting the serve daemon
       create: Create an issue; actionable items generate a linked .handoff work order (--type track|item|dream, --track, --source)
       claim: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted)
-      done: Mark a claimed issue as done
+      done: 'Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator: done <id> [--assessment <digest>]'
+      identity: Print this session''s public label and ownership proof (the token never prints)
+      coordinator: 'Scoped coordinator authority, operator-granted and proof-bound: coordinator grant --session <id> --proof <sha256> [--item <id>] [--track <id>] --reason <text> | revoke <grant-id> --reason <text> | list'
+      managed: 'Coordinator-owned closure: managed require <id> --check <name>... | correct <id> --reason <text> | release <id> --reason <text> [--worker-stopped|--isolated-checkout <path>] | history <id> | doctor'
+      submit: 'Claim-holder records its result for the current attempt (not acceptance): submit <id> --report <file|-> [--revision <ref>]'
+      accept: 'Coordinator records one required check at an explicitly pinned integration target: accept <id> --check <name> --target <ref> --evidence <text> [--repin]'
+      assess: 'Read-only closure assessment: target revision and kind, trailer evidence by relation, outstanding acceptance, authority, exact next action, and an assessment digest for done: assess <id> [--target <ref>] [--deployed <sha>]'
       order: Move a paired item to a dense one-based handoff priority and synchronize generated presentation
       sync: Derive numbered handoff filenames, blocker launch gates, and the README index from board state
       abandon: Release a claimed issue back to open
@@ -5037,6 +5048,14 @@ tools:
       command: agent-manna update mn-abc123 --type item
     - intent: check the board for drift
       command: agent-manna reconcile --write-drift
+    - intent: see what still blocks closing an item and who may close it
+      command: agent-manna assess mn-abc123 --target origin/staging --json
+    - intent: record that the work landed on the integration branch
+      command: agent-manna accept mn-abc123 --check integration --target origin/staging --evidence "merge 1a2b3c reachable"
+    - intent: hand in my result for coordinator acceptance
+      command: agent-manna submit mn-abc123 --report .handoff/report.md
+    - intent: check whether the managed lifecycle is live on this machine
+      command: agent-manna managed doctor
     - intent: move an item to the top of the handoff plan
       command: agent-manna order mn-abc123 1
     - intent: synchronize handoff filenames after a board change
@@ -5064,6 +5083,8 @@ tools:
       - estate
       - federation
       - relations
+      - identity
+      - assess
       interact:
       - migrate
       - create
@@ -5082,11 +5103,25 @@ tools:
       - unblock
       - dream
       - reconcile
+      - coordinator
+      - managed
+      - submit
+      - accept
       verify:
       - lint
       - reconcile
       - relations
+      - assess
+      - managed
       attributes:
+        coordinator:
+        - polymorphic
+        - sensitive
+        managed:
+        - polymorphic
+        - composite
+        assess:
+        - composite
         federation:
         - polymorphic
         - composite

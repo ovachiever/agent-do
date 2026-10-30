@@ -10,6 +10,8 @@ use chrono::{SecondsFormat, Utc};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
+mod managed_cli;
+
 use manna_core::age::{age_of, dated};
 use manna_core::error::MannaError;
 use manna_core::federation::{self, MannaUri, Relation, RelationKind};
@@ -115,6 +117,73 @@ enum Commands {
     Done {
         /// Issue ID (e.g., mn-abc123)
         id: String,
+
+        /// The `assessment` digest from `manna assess`; the close refuses
+        /// when the item's acceptance state moved since that look
+        #[arg(long)]
+        assessment: Option<String>,
+    },
+
+    /// Print this session's public label and ownership proof (never the token)
+    Identity {
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Grant, revoke, or list scoped coordinator authority
+    Coordinator {
+        #[command(subcommand)]
+        command: managed_cli::CoordinatorCommands,
+    },
+
+    /// Coordinator-owned closure: require checks, correct, release, history, doctor
+    Managed {
+        #[command(subcommand)]
+        command: managed_cli::ManagedCommands,
+    },
+
+    /// Submit the claim-holder's result for the current attempt (not acceptance)
+    Submit {
+        id: String,
+        /// Report file, or `-` for stdin
+        #[arg(long)]
+        report: std::path::PathBuf,
+        /// The source revision the report describes
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Record one required check as accepted at a pinned integration target
+    Accept {
+        id: String,
+        #[arg(long)]
+        check: String,
+        /// Integration target reference (branch, remote-tracking ref, tag, or sha); pinned on first acceptance
+        #[arg(long)]
+        target: String,
+        /// What was verified (a merge, a deploy id, a test run)
+        #[arg(long)]
+        evidence: String,
+        /// Move the pinned target; earlier acceptances at the old target stop counting
+        #[arg(long)]
+        repin: bool,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Read-only closure assessment: target, evidence, outstanding acceptance, authority, next action
+    Assess {
+        id: String,
+        /// Integration target reference to compare against the pinned one
+        #[arg(long)]
+        target: Option<String>,
+        /// A deployed revision the caller asserts; manna does not observe deployments
+        #[arg(long)]
+        deployed: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 
     /// Move a paired item to a one-based handoff priority and synchronize presentation
@@ -1365,6 +1434,8 @@ fn cmd_claim(id: String) -> ! {
         Err(error) => handle_manna_error(error),
     };
 
+    managed_cli::note_claim(&claimed.id, &session);
+
     let warnings = workflow
         .as_ref()
         .filter(|_| claimed.issue_type == IssueType::Item)
@@ -1380,7 +1451,7 @@ fn cmd_claim(id: String) -> ! {
     });
 }
 
-fn cmd_done(id: String) -> ! {
+fn cmd_done(id: String, assessment: Option<String>) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -1394,16 +1465,26 @@ fn cmd_done(id: String) -> ! {
     let issue = find_issue(&issues, &id);
     let session = require_session_identity();
 
-    // Close on receipts. The authority, strongest first: landed commits that
-    // carry this item's trailer and touched source (the evidence authorizes,
-    // never the requester); the operator's word; the claim-holder's proof.
-    // Paperwork drift is observed and reported, and never holds a close.
+    // A managed item closes only on recorded acceptance by an authorized
+    // coordinator (or the operator, or the claim-holder once acceptance is
+    // complete). Trailer evidence is a receipt, never acceptance, so the
+    // evidence path below never runs for a managed item. Unmanaged items
+    // keep every documented path.
     let evidence = if issue.issue_type == IssueType::Dream {
         Vec::new()
     } else {
         landed_evidence_for(&id)
     };
-    let (authority, result) = if !evidence.is_empty() {
+    let managed_close = managed_cli::close_managed(&store, &issue, &session, assessment.as_deref());
+    let (authority, result) = if let Some(managed) = managed_close {
+        match managed {
+            Ok((completed, close)) => (close.authority, Ok(completed)),
+            Err(MannaError::MutationRejected(error)) => {
+                output_error(&error, EXIT_NEEDS_AUTHORIZATION)
+            }
+            Err(error) => handle_manna_error(error),
+        }
+    } else if !evidence.is_empty() {
         ("evidence", store.complete_issue_on_evidence(&id, &evidence))
     } else if session.is_operator() {
         ("operator", store.complete_issue_as_operator(&id, &session))
@@ -1559,6 +1640,7 @@ fn cmd_abandon(id: String) -> ! {
         Ok(issue) => issue,
         Err(error) => handle_manna_error(error),
     };
+    managed_cli::note_abandon(&store, &id, &session);
 
     output_success(IssueData {
         age: (&issue).into(),
@@ -3361,6 +3443,15 @@ fn apply_reconcile_fixes(
         if !seen.insert((id.clone(), finding.kind)) {
             continue;
         }
+        // Managed items: closure and claim transfer belong to the
+        // coordinator's recorded acceptance and release, never to a repair
+        // that infers completion from a trailer or a dead pid.
+        if matches!(finding.kind, FindingKind::DeadClaim | FindingKind::LandedOpen) {
+            if let Some(reason) = managed_cli::managed_guard(&id) {
+                failures.push(format!("{}: {}", id, reason));
+                continue;
+            }
+        }
         match finding.kind {
             FindingKind::DeadClaim => {
                 let Some(expected) = issues.iter().find(|issue| issue.id == id).cloned() else {
@@ -3653,7 +3744,30 @@ fn main() {
             prompt,
         } => cmd_create(title, description, issue_type, track, source, prompt),
         Commands::Claim { id } => cmd_claim(id),
-        Commands::Done { id } => cmd_done(id),
+        Commands::Done { id, assessment } => cmd_done(id, assessment),
+        Commands::Identity { json } => managed_cli::cmd_identity(json),
+        Commands::Coordinator { command } => managed_cli::cmd_coordinator(command),
+        Commands::Managed { command } => managed_cli::cmd_managed(command),
+        Commands::Submit {
+            id,
+            report,
+            revision,
+            json,
+        } => managed_cli::cmd_submit(id, report, revision, json),
+        Commands::Accept {
+            id,
+            check,
+            target,
+            evidence,
+            repin,
+            json,
+        } => managed_cli::cmd_accept(id, check, target, evidence, repin, json),
+        Commands::Assess {
+            id,
+            target,
+            deployed,
+            json,
+        } => managed_cli::cmd_assess(id, target, deployed, json),
         Commands::Order { id, position } => cmd_order(id, position),
         Commands::Sync => cmd_sync(),
         Commands::Abandon { id } => cmd_abandon(id),

@@ -38,7 +38,11 @@ The hook resolves the payload's exact `session_id` and `cwd`, including legacy
 thread identities, without trusting an inherited foreign session pin. It
 never reads a transcript or forwards the prompt, need, drop, or bell sender.
 Recipients read `agent-do coord interrupts`, `agent-do coord need list --all`,
-and `agent-do coord drops --for-me`; observers can read the same ledger.
+and `agent-do coord drops --for-me`; observers can read the same ledger. A drop
+keeps nudging until its reader acknowledges it (`agent-do coord drop ack <id>`,
+per reader, per revision; the interrupt names the command) or an authorized
+party resolves it for everyone (`agent-do coord drop resolve <id> --reason ...`);
+both leave the record and its history in place, and a changed drop resurfaces.
 Workers may request contract changes there, but cannot self-amend acceptance.
 A bell exchange never closes an item: `done` still requires executed receipts.
 

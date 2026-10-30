@@ -779,6 +779,126 @@ def test_drops_and_history(tmp_path: Path, env_base: dict[str, str]) -> None:
     require("focus_set" in history_text.stdout, f"expected readable history: {history_text.stdout}")
 
 
+def test_drop_lifecycle(tmp_path: Path, env_base: dict[str, str]) -> None:
+    """Stable ids, per-reader acknowledgment, authorized resolution, revisions, legacy records."""
+    project = make_project(tmp_path, "drop-lifecycle")
+    author = clean_env(env_base)
+    author["CODEX_THREAD_ID"] = "lead-1"
+    worker = clean_env(env_base)
+    worker["CODEX_THREAD_ID"] = "worker-1"
+    other = clean_env(env_base)
+    other["CODEX_THREAD_ID"] = "worker-2"
+    fresh = clean_env(env_base)
+    fresh["CODEX_THREAD_ID"] = "worker-1-restarted"
+    worker_id = coord_json(["whoami"], cwd=project, env=worker)["agent_id"]
+    coord_root = project / ".git/agent-do/coord"
+
+    # A legacy drop (no id, no status) written by an older coord stays open and readable.
+    coord_root.mkdir(parents=True, exist_ok=True)
+    (coord_root / "drops.json").write_text(json.dumps({"drops": [{
+        "path": "CHANGELOG.md", "owner": "codex-old", "owner_label": "codex-old",
+        "for": "any", "for_agent_id": None, "note": "main advanced; fetch before committing",
+        "key": None, "created_at": "2026-09-01T00:00:00Z",
+    }]}))
+    legacy = coord_json(["drops"], cwd=project, env=worker)["drops"]
+    require(len(legacy) == 1 and legacy[0]["id"].startswith("drp-") and legacy[0]["status"] == "open", f"legacy drop not normalized: {legacy}")
+    require(legacy[0]["legacy"] is True and legacy[0]["created_at"] == "2026-09-01T00:00:00Z", f"legacy timestamps must survive: {legacy}")
+    require(legacy[0]["owner_presence"] == "unknown", f"a pruned owner is unknown, not resolved: {legacy}")
+    legacy_id = legacy[0]["id"]
+    again = coord_json(["drops"], cwd=project, env=other)["drops"]
+    require(again[0]["id"] == legacy_id, "legacy drop id must be stable across reads")
+    worker_interrupts = coord_json(["interrupts"], cwd=project, env=worker)["interrupts"]
+    legacy_items = [item for item in worker_interrupts if item.get("drop_id") == legacy_id]
+    require(bool(legacy_items), f"legacy drop must still interrupt: {worker_interrupts}")
+    require("not re-verified" in legacy_items[0]["summary"], f"a dated report is labelled as such: {legacy_items[0]}")
+    require(f"drop ack {legacy_id}" in legacy_items[0]["summary"], "the interrupt names the ack command")
+
+    # A new drop gets a stable id and revision 1.
+    drop = coord_json(["drop", "add", ".dev/report.md", "--for", worker_id, "--note", "first findings"], cwd=project, env=author)["drop"]
+    drop_id = drop["id"]
+    require(drop_id.startswith("drp-") and drop["revision"] == 1 and drop["status"] == "open" and drop["change"] == "added", f"unexpected drop: {drop}")
+
+    # Re-adding unchanged content is idempotent; the id and revision hold.
+    same = coord_json(["drop", "add", ".dev/report.md", "--for", worker_id, "--note", "first findings"], cwd=project, env=author)["drop"]
+    require(same["id"] == drop_id and same["revision"] == 1 and same["change"] == "unchanged", f"unchanged re-add moved the record: {same}")
+
+    # The addressed worker sees it in interrupts; a bystander does not.
+    mine = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == drop_id]
+    require(len(mine) == 1 and mine[0]["revision"] == 1, f"worker should see the drop once: {mine}")
+    theirs = [item for item in coord_json(["interrupts"], cwd=project, env=other)["interrupts"] if item.get("drop_id") == drop_id]
+    require(not theirs, f"bystander must not see an addressed drop: {theirs}")
+
+    # Only a recipient acknowledges; the owner cannot ack its own drop.
+    bad = coord(["drop", "ack", drop_id], cwd=project, env=author)
+    require(bad.returncode == 2, "owner ack must be refused")
+    bad = coord(["drop", "ack", drop_id], cwd=project, env=other)
+    require(bad.returncode == 2, "an unaddressed agent cannot ack")
+    acked = coord_json(["drop", "ack", drop_id], cwd=project, env=worker)["drop"]
+    require(acked["acknowledged_by_me"] is True and acked["status"] == "open", f"ack is not completion: {acked}")
+
+    # Acknowledged: gone from the worker's routine interrupts on every later read, still listed.
+    for _ in range(3):
+        after = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == drop_id]
+        require(not after, f"acknowledged drop must stop interrupting: {after}")
+    listed = [item for item in coord_json(["drops", "--for-me"], cwd=project, env=worker)["drops"] if item["id"] == drop_id]
+    require(listed and listed[0]["acknowledged_by_me"] is True, "acknowledged drop must stay listed for its reader")
+
+    # A meaningful update bumps the revision and resurfaces it for the worker.
+    updated = coord_json(["drop", "add", ".dev/report.md", "--for", worker_id, "--note", "second findings"], cwd=project, env=author)["drop"]
+    require(updated["id"] == drop_id and updated["revision"] == 2 and updated["change"] == "updated", f"update must bump revision: {updated}")
+    resurfaced = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == drop_id]
+    require(len(resurfaced) == 1 and resurfaced[0]["revision"] == 2, f"revision 2 must resurface: {resurfaced}")
+
+    # Resolution: a stranger cannot; the addressed worker can, with a reason and evidence.
+    bad = coord(["drop", "resolve", drop_id, "--reason", "not mine"], cwd=project, env=other)
+    require(bad.returncode == 2, "a stranger cannot resolve an addressed drop")
+    bad = coord(["drop", "resolve", drop_id, "--reason", ""], cwd=project, env=worker)
+    require(bad.returncode == 2, "resolve needs a reason")
+    resolved = coord_json(["drop", "resolve", drop_id, "--reason", "findings folded in", "--evidence", "commit abc123"], cwd=project, env=worker)["drop"]
+    require(resolved["status"] == "resolved" and resolved["resolved"]["reason"] == "findings folded in" and resolved["resolved"]["evidence"] == "commit abc123", f"resolution not recorded: {resolved}")
+    require(resolved["created_at"] == drop["created_at"], "resolution must keep the original timestamp")
+
+    # Resolved: silent for everyone, including a fresh session, and kept in history.
+    for env in (worker, fresh, other):
+        gone = [item for item in coord_json(["interrupts"], cwd=project, env=env)["interrupts"] if item.get("drop_id") == drop_id]
+        require(not gone, f"resolved drop must not interrupt: {gone}")
+    require(not [d for d in coord_json(["drops"], cwd=project, env=fresh)["drops"] if d["id"] == drop_id], "resolved drops leave the default listing")
+    kept = [d for d in coord_json(["drops", "--all"], cwd=project, env=fresh)["drops"] if d["id"] == drop_id]
+    require(kept and kept[0]["status"] == "resolved", "resolved drops remain readable with --all")
+    history = coord_json(["drop", "history", drop_id], cwd=project, env=fresh)
+    events = [event["kind"] for event in history["events"]]
+    require(events == ["drop_add", "drop_ack", "drop_add", "drop_resolve"], f"audit trail must be complete: {events}")
+    require(history["events"][-1]["reason"] == "findings folded in", "resolution reason must be in the journal")
+    require([h["event"] for h in history["drop"]["history"]] == ["added", "acknowledged", "updated", "resolved"], f"record history: {history['drop']['history']}")
+
+    # A broadcast acked by one reader stays visible to every other reader; resolving it
+    # for everyone needs the owner or an explicit --for-everyone.
+    shared = coord_json(["drop", "add", ".dev/shared.md", "--for", "any", "--note", "read me"], cwd=project, env=author)["drop"]
+    coord_json(["drop", "ack", shared["id"]], cwd=project, env=worker)
+    still = [item for item in coord_json(["interrupts"], cwd=project, env=other)["interrupts"] if item.get("drop_id") == shared["id"]]
+    require(len(still) == 1, f"one reader's ack must not hide a broadcast: {still}")
+    bad = coord(["drop", "resolve", shared["id"], "--reason", "done reading"], cwd=project, env=other)
+    require(bad.returncode == 2 and "for-everyone" in bad.stdout + bad.stderr, f"broadcast resolve needs an explicit flag: {bad.stdout} {bad.stderr}")
+    done = coord_json(["drop", "resolve", shared["id"], "--reason", "superseded by the release notes", "--for-everyone"], cwd=project, env=other)["drop"]
+    require(done["status"] == "resolved" and done["resolved"]["for_everyone"] is True, f"explicit broadcast resolution: {done}")
+
+    # Reopening: the owner re-adds a resolved drop with new content; it resurfaces at a new revision.
+    reopened = coord_json(["drop", "add", ".dev/report.md", "--for", worker_id, "--note", "third findings"], cwd=project, env=author)["drop"]
+    require(reopened["id"] == drop_id and reopened["status"] == "open" and reopened["revision"] == 3 and reopened["change"] == "reopened", f"reopen: {reopened}")
+    back = [item for item in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if item.get("drop_id") == drop_id]
+    require(len(back) == 1 and back[0]["revision"] == 3, f"reopened drop must resurface: {back}")
+
+    # Contention stays visible regardless of drop state.
+    coord_json(["focus", "set", "shared lane", "--path", "src"], cwd=project, env=worker)
+    coord_json(["focus", "set", "shared lane too", "--path", "src"], cwd=project, env=other)
+    kinds = {item["kind"] for item in coord_json(["interrupts"], cwd=project, env=other)["interrupts"]}
+    require("contention" in kinds, f"contention must remain visible: {kinds}")
+
+    # Nothing here deleted a record: the legacy drop and both lifecycle drops are all still on disk.
+    on_disk = json.loads((coord_root / "drops.json").read_text())["drops"]
+    require({d["id"] for d in on_disk} >= {legacy_id, drop_id, shared["id"]}, f"drops must never be deleted: {on_disk}")
+
+
 def test_v1_migration(tmp_path: Path, env_base: dict[str, str]) -> None:
     """v1 records must be readable by v2 and upgraded lazily on write."""
     project = make_project(tmp_path, "migration")
@@ -1507,6 +1627,7 @@ def main() -> int:
         test_structured_focus(tmp_path, env_base)
         test_isolation_nudge(tmp_path, env_base)
         test_drops_and_history(tmp_path, env_base)
+        test_drop_lifecycle(tmp_path, env_base)
         test_pulse(tmp_path, env_base)
         test_explicit_pulse(tmp_path, env_base)
         test_v1_migration(tmp_path, env_base)

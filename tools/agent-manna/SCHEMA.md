@@ -314,6 +314,26 @@ Each line is a session event (append-only log).
 | `done` | Issue completed | `session_id`, `event`, `timestamp`, `issue_id` |
 | `end` | Session ends | `session_id`, `event`, `timestamp`, `context` |
 
+## coordinators.json, managed.json, lifecycle.jsonl
+
+Sidecars for the managed lifecycle, beside the board and written under the
+board lock. They never change an `issues.jsonl` row, so older binaries read
+the board unchanged and an unmanaged board never has them.
+
+- `coordinators.json`: `{version, grants: [{id, coordinator_id, coordinator_proof,
+  scope: {items, tracks}, reason, granted_at, granted_by, revoked?}]}`. The proof
+  is the same `sha256:` token digest claims store; a label alone is nothing.
+- `managed.json`: `{version, items: {<mn-id>: {id, attempt, required, grant,
+  managed_at, managed_by, target?: {reference, sha, kind, pinned_at, pinned_by},
+  submission?: {attempt, by, at, revision?, report, status, correction?},
+  acceptances: [{check, attempt, target_sha, by, authority, at, evidence}],
+  releases: [{attempt, by, at, reason, worker?, worker_liveness, basis, isolation?}],
+  history: [superseded submissions]}}}`.
+- `lifecycle.jsonl`: one JSON object per line, append-only: `{at, action,
+  issue_id, actor, authority, attempt?, reason?, evidence?, detail?}` with
+  actions `grant`, `revoke`, `require`, `claim`, `submit`, `correct`, `accept`,
+  `release`, `abandon`, `close`.
+
 ## drift.yaml
 
 Written atomically (temp + rename) by `reconcile --write-drift`. Shape:

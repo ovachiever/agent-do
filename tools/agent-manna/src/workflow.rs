@@ -682,7 +682,12 @@ fn git_path_tracked(base: &Path, relative: &Path) -> Result<bool, String> {
 pub fn untracked_durable_paths(base: &Path) -> Result<Vec<PathBuf>, String> {
     durable_paths()
         .into_iter()
-        .chain([".manna/drift.yaml"])
+        .chain([
+            ".manna/drift.yaml",
+            ".manna/coordinators.json",
+            ".manna/managed.json",
+            ".manna/lifecycle.jsonl",
+        ])
         .filter(|relative| base.join(relative).is_file())
         .filter_map(
             |relative| match git_path_tracked(base, Path::new(relative)) {
@@ -711,7 +716,7 @@ fn workflow_gitignore_content(existing: &str) -> String {
     }
     if !existing.contains(marker) {
         updated.push_str(&format!(
-            "\n{}\n!.manna/\n.manna/*\n!.manna/issues.jsonl\n!.manna/sessions.jsonl\n!.manna/board.yaml\n!.manna/workflow.yaml\n!.manna/handoff-order.yaml\n!.manna/federation.yaml\n!.manna/drift.yaml\n.manna/board.lock\n.manna/transactions/\n!.handoff/\n!.handoff/**\n",
+            "\n{}\n!.manna/\n.manna/*\n!.manna/issues.jsonl\n!.manna/sessions.jsonl\n!.manna/board.yaml\n!.manna/workflow.yaml\n!.manna/handoff-order.yaml\n!.manna/federation.yaml\n!.manna/drift.yaml\n!.manna/coordinators.json\n!.manna/managed.json\n!.manna/lifecycle.jsonl\n.manna/board.lock\n.manna/transactions/\n!.handoff/\n!.handoff/**\n",
             marker
         ));
     } else {
@@ -719,6 +724,9 @@ fn workflow_gitignore_content(existing: &str) -> String {
             "!.manna/board.yaml",
             "!.manna/handoff-order.yaml",
             "!.manna/federation.yaml",
+            "!.manna/coordinators.json",
+            "!.manna/managed.json",
+            "!.manna/lifecycle.jsonl",
             ".manna/transactions/",
         ] {
             if !updated.lines().any(|line| line == rule) {

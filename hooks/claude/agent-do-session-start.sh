@@ -346,6 +346,8 @@ Use:
 \`agent-do coord status\`
 \`agent-do coord interrupts\`
 \`agent-do coord focus show\`
+A drop keeps returning until you acknowledge it (\`agent-do coord drop ack <drp-id>\`, you only)
+or its owner/recipient resolves it (\`agent-do coord drop resolve <drp-id> --reason ...\`, everyone).
 "
         return 0
     fi

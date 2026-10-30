@@ -339,6 +339,48 @@ released:
 missing blockers and stale boards from older binaries remain the responsibility
 of `reconcile --fix`.
 
+For a **managed** item (one a coordinator put under `managed require`), `done`
+takes none of the paths above. It needs a current submission, a pinned
+integration target, every required check accepted for the current attempt at
+that target, and an identity that is the operator, a granted coordinator, or
+the claim-holder; trailer commits are receipts, never acceptance. Pass
+`--assessment <digest>` from `assess` and the close refuses when the item's
+acceptance state moved since that look. See "Managed lifecycle" below.
+
+### Managed lifecycle
+
+Coordinator-owned closure: a worker submits, its session may vanish, and an
+authorized coordinator accepts and closes (or releases) without resuming or
+impersonating it. Records live in `.manna/coordinators.json`,
+`.manna/managed.json`, and the append-only `.manna/lifecycle.jsonl`, written
+under the board lock and never inside `issues.jsonl` rows.
+
+```bash
+agent-do manna identity                       # this session's label + proof (never the token)
+agent-do manna coordinator grant --session ses_lead --proof sha256:... \
+    --item mn-abc123 --reason "lead for this item"      # operator terminal only
+agent-do manna managed require mn-abc123 --check integration --check deployed
+agent-do manna submit mn-abc123 --report report.md --revision feat/x   # claim-holder
+agent-do manna assess mn-abc123 --target origin/staging --json          # read-only
+agent-do manna accept mn-abc123 --check integration --target origin/staging \
+    --evidence "merge 1a2b3c reachable from staging"
+agent-do manna accept mn-abc123 --check deployed --target origin/staging --evidence "release 42"
+agent-do manna done mn-abc123 --assessment assess:...   # coordinator closes; worker not needed
+agent-do manna managed correct mn-abc123 --reason "tests missing"
+agent-do manna managed release mn-abc123 --reason "worker gone" --isolated-checkout /path
+agent-do manna managed history mn-abc123
+agent-do manna managed doctor                 # live on this machine, or only in source?
+```
+
+Authority never comes from a coord role, a pulse, a claimed label, or a
+worker's shared secret: a grant binds a session label to its ownership proof
+and to explicit items or tracks, and only the operator issues one. Each
+release advances the attempt; submissions and acceptances name their attempt,
+so a superseded worker cannot complete. Release needs coord to report the
+worker gone, or an explicit `--worker-stopped` (refused when coord sees it
+active) or `--isolated-checkout`; unknown liveness alone refuses.
+`reconcile --fix` never closes or releases a managed item.
+
 ### `abandon <id>`
 
 Release a claimed issue without completing it. It returns to `open` when clear

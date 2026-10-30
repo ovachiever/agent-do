@@ -70,8 +70,19 @@ Commands:
                                          Publish or update an artifact (optionally point at a file)
   publish clear <key>                    Clear a published artifact you own
   drop add <path> --for <agent|role|any> [--note <text>] [--key <need-key>]
-                                         Point a peer at a file on disk (pointers, never content)
-  drops [--for-me]                       List drops (or just the ones addressed to you)
+                                         Point a peer at a file on disk (pointers, never content).
+                                         Re-adding your own path with changed content bumps the
+                                         drop's revision (and reopens a resolved one)
+  drop ack <drop-id>                     Acknowledge delivery of a drop addressed to you: it leaves
+                                         YOUR routine interrupts at this revision; not completion
+  drop resolve <drop-id> --reason <text> [--evidence <ref>] [--for-everyone]
+                                         Settle a drop for every reader (owner or addressed
+                                         recipient; a broadcast/role drop needs --for-everyone).
+                                         The record and its audit trail are kept, never deleted
+  drop history <drop-id>                 Read one drop's lifecycle (added/updated/acked/resolved)
+  drops [--for-me] [--all]               List open drops (or just the ones addressed to you);
+                                         --all includes resolved ones. A note is a dated report
+                                         of the state when written, never a verified present fact
   history [peer] [--limit N]             Read the coordination event journal, newest first
 
 Options:
@@ -748,11 +759,6 @@ class CoordStore:
     def _save_publishes(self, publishes: list[dict[str, Any]]) -> None:
         self._write_json(self.publishes_path, {"publishes": publishes})
 
-    def _load_drops(self) -> list[dict[str, Any]]:
-        payload = self._read_json(self.drops_path, {"drops": []})
-        drops = payload.get("drops", [])
-        return drops if isinstance(drops, list) else []
-
     def _save_drops(self, drops: list[dict[str, Any]]) -> None:
         self._write_json(self.drops_path, {"drops": drops})
 
@@ -842,6 +848,7 @@ class CoordStore:
         paths: list[str] | None = None,
         keys: list[str] | None = None,
         summary: str,
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         events = self._load_events()
         seq = (max((int(item.get("seq", 0)) for item in events), default=0) + 1)
@@ -857,6 +864,10 @@ class CoordStore:
             "summary": summary,
             "created_at": now_iso(),
         }
+        if extra:
+            # Structured facts ride beside the summary (drop ids, reasons,
+            # evidence) so history can filter without parsing prose.
+            event.update({key: value for key, value in extra.items() if key not in event})
         with self.events_path.open("a") as fh:
             fh.write(json.dumps(event, sort_keys=True) + "\n")
         return event
@@ -1690,6 +1701,83 @@ class CoordStore:
         role = record.get("role")
         return isinstance(role, str) and bool(role) and target == role
 
+    # ------------------------------------------------------------------
+    # Drops: a pointer handed to a peer, with a lifecycle.
+    #
+    # A drop is born `open` with a stable id and revision 1. Recipients
+    # acknowledge delivery (`ack`), per agent and per revision, which only
+    # quiets that reader's routine interrupts; the drop itself stays open.
+    # An authorized party resolves the work (`resolve`), which quiets it
+    # for everyone and keeps the record, its original timestamps and its
+    # audit trail. A re-add by the owner with changed content bumps the
+    # revision, so acknowledgments of the old revision no longer suppress
+    # it and a resolved drop reopens. Nothing here deletes a drop.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _drop_identity(record: dict[str, Any]) -> str:
+        material = f"{record.get('owner')}|{record.get('path')}|{record.get('created_at')}"
+        return "drp-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+
+    @classmethod
+    def _normalize_drop(cls, record: dict[str, Any]) -> dict[str, Any]:
+        """Read a drop written by any coord version as a lifecycle record.
+
+        A legacy drop (no id) is treated as open at revision 1 with no
+        acknowledgments: age, a missing owner record, or a missing file are
+        observations, never completion. The normalization is read-only; the
+        record is rewritten only when a write path touches the ledger.
+        """
+        drop = dict(record)
+        if not drop.get("id"):
+            drop["id"] = cls._drop_identity(drop)
+            drop["legacy"] = True
+        drop.setdefault("revision", 1)
+        drop.setdefault("status", "open")
+        drop.setdefault("updated_at", drop.get("created_at"))
+        acks = drop.get("acks")
+        drop["acks"] = acks if isinstance(acks, dict) else {}
+        drop.setdefault("resolved", None)
+        history = drop.get("history")
+        drop["history"] = history if isinstance(history, list) else []
+        return drop
+
+    def _load_drops(self) -> list[dict[str, Any]]:
+        payload = self._read_json(self.drops_path, {"drops": []})
+        drops = payload.get("drops", [])
+        if not isinstance(drops, list):
+            return []
+        return [self._normalize_drop(item) for item in drops if isinstance(item, dict)]
+
+    def _find_drop(self, drops: list[dict[str, Any]], drop_id: str) -> dict[str, Any] | None:
+        for item in drops:
+            if item.get("id") == drop_id:
+                return item
+        return None
+
+    def _drop_acknowledged_by_me(self, drop: dict[str, Any]) -> bool:
+        ack = (drop.get("acks") or {}).get(self.agent_id)
+        if not isinstance(ack, dict):
+            return False
+        try:
+            return int(ack.get("revision", 0)) >= int(drop.get("revision", 1))
+        except (TypeError, ValueError):
+            return False
+
+    def _drop_owner_presence(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> str:
+        record = agents.get(str(drop.get("owner")))
+        if not record:
+            return "unknown"
+        return classify_presence(record)
+
+    def _drop_view(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        view = dict(drop)
+        view["acknowledged_by_me"] = self._drop_acknowledged_by_me(drop)
+        view["addressed_to_me"] = drop.get("owner") != self.agent_id and self._drop_targets_me(drop)
+        view["owner_presence"] = self._drop_owner_presence(drop, agents)
+        view["reported_age"] = format_age(drop.get("updated_at") or drop.get("created_at"))
+        return view
+
     def add_drop(self, path: str, target: str, note: str | None, key: str | None) -> dict[str, Any]:
         self.register_self()
         normalized = normalize_path(self.project_root, self.cwd, path)
@@ -1698,36 +1786,213 @@ class CoordStore:
         known_agent = resolved in self._load_agents()
         with self.locked():
             drops = self._load_drops()
-            payload = {
-                "path": normalized,
-                "owner": self.agent_id,
-                "owner_label": alias or self.agent_id,
-                "for": target,
-                "for_agent_id": resolved if known_agent else None,
-                "note": note,
-                "key": key,
-                "created_at": now_iso(),
+            stamp = now_iso()
+            existing = next(
+                (item for item in drops if item.get("owner") == self.agent_id and item.get("path") == normalized),
+                None,
+            )
+            if existing is None:
+                payload = {
+                    "id": "drp-" + uuid.uuid4().hex[:12],
+                    "revision": 1,
+                    "status": "open",
+                    "path": normalized,
+                    "owner": self.agent_id,
+                    "owner_label": alias or self.agent_id,
+                    "for": target,
+                    "for_agent_id": resolved if known_agent else None,
+                    "note": note,
+                    "key": key,
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                    "acks": {},
+                    "resolved": None,
+                    "history": [{"event": "added", "at": stamp, "by": self.agent_id, "revision": 1}],
+                }
+                drops.append(payload)
+                change = "added"
+            else:
+                payload = existing
+                content_changed = (
+                    existing.get("note") != note
+                    or existing.get("key") != key
+                    or existing.get("for") != target
+                )
+                reopened = existing.get("status") == "resolved"
+                if content_changed or reopened:
+                    # A meaningful update: a new revision, so earlier
+                    # acknowledgments stop suppressing it and a resolved drop
+                    # resurfaces. created_at stays the original report time.
+                    payload["revision"] = int(payload.get("revision", 1)) + 1
+                    payload["status"] = "open"
+                    if reopened:
+                        payload["history"].append(
+                            {
+                                "event": "reopened",
+                                "at": stamp,
+                                "by": self.agent_id,
+                                "revision": payload["revision"],
+                                "superseded_resolution": payload.get("resolved"),
+                            }
+                        )
+                        payload["resolved"] = None
+                    else:
+                        payload["history"].append(
+                            {"event": "updated", "at": stamp, "by": self.agent_id, "revision": payload["revision"]}
+                        )
+                    payload["updated_at"] = stamp
+                    change = "reopened" if reopened else "updated"
+                else:
+                    change = "unchanged"
+                payload["owner_label"] = alias or self.agent_id
+                payload["for"] = target
+                payload["for_agent_id"] = resolved if known_agent else None
+                payload["note"] = note
+                payload["key"] = key
+                payload.pop("legacy", None)
+            self._save_drops(drops)
+            if change != "unchanged":
+                self._append_event(
+                    kind="drop_add",
+                    paths=[normalized],
+                    keys=[key] if key else [],
+                    summary=f"{alias or self.agent_id} dropped {normalized} for {target} ({payload['id']} r{payload['revision']})",
+                    extra={"drop_id": payload["id"], "revision": payload["revision"], "change": change},
+                )
+                # Roles and 'any' remain ordinary ledger entries, not broadcasts.
+                self._ring_locked(resolved if known_agent else None)
+            result = dict(payload)
+            result["change"] = change
+            return result
+
+    def ack_drop(self, drop_id: str) -> tuple[bool, dict[str, Any]]:
+        """Acknowledge delivery of a drop addressed to me, at its current revision.
+
+        Acknowledgment is per reader: a broadcast (`any` or a role) acked by
+        one agent stays visible to every other recipient. It is not
+        completion; the drop remains open until someone resolves it.
+        """
+        self.register_self()
+        with self.locked():
+            drops = self._load_drops()
+            drop = self._find_drop(drops, drop_id)
+            if drop is None:
+                return False, {"error": f"No drop {drop_id}"}
+            if drop.get("owner") == self.agent_id:
+                return False, {"error": f"{drop_id} is your own drop; owners resolve, recipients acknowledge"}
+            if not self._drop_targets_me(drop):
+                return False, {"error": f"{drop_id} is addressed to {drop.get('for')}, not to this agent"}
+            stamp = now_iso()
+            drop["acks"][self.agent_id] = {"revision": int(drop.get("revision", 1)), "at": stamp}
+            drop["history"].append(
+                {"event": "acknowledged", "at": stamp, "by": self.agent_id, "revision": drop["revision"]}
+            )
+            self._save_drops(drops)
+            label = self.self_record(refresh=False).get("alias") or self.agent_id
+            self._append_event(
+                kind="drop_ack",
+                paths=[str(drop.get("path"))],
+                summary=f"{label} acknowledged {drop_id} r{drop['revision']} ({drop.get('path')})",
+                extra={"drop_id": drop_id, "revision": drop["revision"]},
+            )
+            return True, self._drop_view(drop, self._load_agents())
+
+    def _may_resolve_drop(self, drop: dict[str, Any], for_everyone: bool) -> str | None:
+        """Return a refusal reason, or None when this agent may resolve the drop."""
+        if drop.get("owner") == self.agent_id:
+            return None
+        target = str(drop.get("for") or "any")
+        record = self.self_record(refresh=False)
+        if drop.get("for_agent_id") == self.agent_id or target == self.agent_id or target == record.get("alias"):
+            return None
+        if target == "any":
+            if for_everyone:
+                return None
+            return (
+                f"{drop['id']} is addressed to everyone; resolving it hides it for every reader. "
+                "Acknowledge it for yourself with `drop ack`, or pass --for-everyone with the reason"
+            )
+        if target == record.get("role"):
+            if for_everyone:
+                return None
+            return (
+                f"{drop['id']} is addressed to the role {target}; resolving it hides it for every {target}. "
+                "Acknowledge it for yourself with `drop ack`, or pass --for-everyone with the reason"
+            )
+        return f"{drop['id']} is addressed to {target}; only its owner or its recipient may resolve it"
+
+    def resolve_drop(
+        self,
+        drop_id: str,
+        reason: str,
+        evidence: str | None,
+        for_everyone: bool = False,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Resolve a drop: it leaves routine interrupts for every reader and stays in history."""
+        self.register_self()
+        if not reason or not reason.strip():
+            return False, {"error": "resolve requires --reason: an audit line names why the drop is settled"}
+        with self.locked():
+            drops = self._load_drops()
+            drop = self._find_drop(drops, drop_id)
+            if drop is None:
+                return False, {"error": f"No drop {drop_id}"}
+            refusal = self._may_resolve_drop(drop, for_everyone)
+            if refusal:
+                return False, {"error": refusal}
+            if drop.get("status") == "resolved":
+                return False, {"error": f"{drop_id} is already resolved", "drop": drop}
+            stamp = now_iso()
+            label = self.self_record(refresh=False).get("alias") or self.agent_id
+            drop["status"] = "resolved"
+            drop["resolved"] = {
+                "by": self.agent_id,
+                "by_label": label,
+                "at": stamp,
+                "reason": reason.strip(),
+                "evidence": evidence,
+                "revision": int(drop.get("revision", 1)),
+                "for_everyone": bool(for_everyone and drop.get("owner") != self.agent_id),
             }
-            drops = [item for item in drops if not (item.get("owner") == self.agent_id and item.get("path") == normalized)]
-            drops.append(payload)
+            drop["history"].append(
+                {
+                    "event": "resolved",
+                    "at": stamp,
+                    "by": self.agent_id,
+                    "revision": drop["revision"],
+                    "reason": reason.strip(),
+                    "evidence": evidence,
+                }
+            )
             self._save_drops(drops)
             self._append_event(
-                kind="drop_add",
-                paths=[normalized],
-                keys=[key] if key else [],
-                summary=f"{alias or self.agent_id} dropped {normalized} for {target}",
+                kind="drop_resolve",
+                paths=[str(drop.get("path"))],
+                summary=f"{label} resolved {drop_id} ({drop.get('path')}): {reason.strip()}",
+                extra={"drop_id": drop_id, "revision": drop["revision"], "reason": reason.strip(), "evidence": evidence},
             )
-            # Roles and 'any' remain ordinary ledger entries, not broadcasts.
-            self._ring_locked(resolved if known_agent else None)
-            return payload
+            return True, self._drop_view(drop, self._load_agents())
 
-    def drops(self, for_me: bool = False) -> list[dict[str, Any]]:
+    def drop_history(self, drop_id: str) -> tuple[bool, dict[str, Any]]:
         self.register_self()
+        drops = self._load_drops()
+        drop = self._find_drop(drops, drop_id)
+        if drop is None:
+            return False, {"error": f"No drop {drop_id}"}
+        events = [event for event in self._load_events() if event.get("drop_id") == drop_id]
+        events.sort(key=lambda item: int(item.get("seq", 0)))
+        return True, {"drop": self._drop_view(drop, self._load_agents()), "events": events}
+
+    def drops(self, for_me: bool = False, include_resolved: bool = False) -> list[dict[str, Any]]:
+        self.register_self()
+        agents = self._load_agents()
         drops = self._load_drops()
         if for_me:
             drops = [item for item in drops if item.get("owner") != self.agent_id and self._drop_targets_me(item)]
-        drops.sort(key=lambda item: item.get("created_at", ""), reverse=True)
-        return drops
+        if not include_resolved:
+            drops = [item for item in drops if item.get("status") != "resolved"]
+        drops.sort(key=lambda item: item.get("updated_at") or item.get("created_at", ""), reverse=True)
+        return [self._drop_view(item, agents) for item in drops]
 
     def history(self, peer: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         self.register_self()
@@ -2117,27 +2382,41 @@ class CoordStore:
                 "event_id": latest_event.get("id") if latest_event else None,
             })
 
-        # Drops addressed to me (or matching a need key) are dependencies made visible.
+        # Drops addressed to me (or matching a need key) are dependencies made
+        # visible. A resolved drop has left routine interrupts for everyone; a
+        # drop I acknowledged at its current revision has left mine. Either
+        # stays readable through `drops --all` and `drop history`.
         for drop in self._load_drops():
             if drop.get("owner") == self.agent_id:
+                continue
+            if drop.get("status") == "resolved":
                 continue
             key = drop.get("key")
             key_match = bool(key) and str(key) in my_need_keys
             if not (self._drop_targets_me(drop) or key_match):
                 continue
+            if self._drop_acknowledged_by_me(drop):
+                continue
             drop_path = str(drop.get("path", ""))
+            drop_id = str(drop.get("id"))
             latest_event = next(
                 (
                     event
                     for event in reversed(self._load_events())
                     if event.get("kind") == "drop_add"
-                    and drop_path in event.get("paths", [])
+                    and (
+                        event.get("drop_id") == drop_id
+                        or (event.get("drop_id") is None and drop_path in event.get("paths", []))
+                    )
                     and event.get("agent_id") == drop.get("owner")
                 ),
                 None,
             )
             seq = int(latest_event.get("seq", 0)) if latest_event else 0
             note = f" — {drop.get('note')}" if drop.get("note") else ""
+            reported_at = drop.get("updated_at") or drop.get("created_at")
+            # The note describes the state of things when it was written. It
+            # is labelled as a dated report, never as a verified present fact.
             interrupts.append(
                 {
                     "kind": "dependency",
@@ -2146,7 +2425,14 @@ class CoordStore:
                     "peer_label": drop.get("owner_label") or drop.get("owner"),
                     "paths": [drop_path],
                     "keys": [str(key)] if key else [],
-                    "summary": f"Drop available from {drop.get('owner_label') or drop.get('owner')}: {drop_path}{note}",
+                    "drop_id": drop_id,
+                    "revision": drop.get("revision"),
+                    "reported_at": reported_at,
+                    "summary": (
+                        f"Drop {drop_id} from {drop.get('owner_label') or drop.get('owner')}: {drop_path}{note} "
+                        f"[reported {format_age(reported_at)}, not re-verified; "
+                        f"ack: agent-do coord drop ack {drop_id}]"
+                    ),
                     "new": seq > last_seen_seq,
                     "event_id": latest_event.get("id") if latest_event else None,
                 }
@@ -2376,9 +2662,19 @@ def parser() -> argparse.ArgumentParser:
     drop_add.add_argument("--for", dest="target", default="any")
     drop_add.add_argument("--note")
     drop_add.add_argument("--key")
+    drop_ack = drop_sub.add_parser("ack")
+    drop_ack.add_argument("drop_id")
+    drop_resolve = drop_sub.add_parser("resolve")
+    drop_resolve.add_argument("drop_id")
+    drop_resolve.add_argument("--reason", required=True)
+    drop_resolve.add_argument("--evidence")
+    drop_resolve.add_argument("--for-everyone", action="store_true", dest="for_everyone")
+    drop_history = drop_sub.add_parser("history")
+    drop_history.add_argument("drop_id")
 
     drops_p = sub.add_parser("drops")
     drops_p.add_argument("--for-me", action="store_true", dest="for_me")
+    drops_p.add_argument("--all", action="store_true", dest="include_resolved")
 
     history_p = sub.add_parser("history")
     history_p.add_argument("peer", nargs="?")
@@ -2790,19 +3086,49 @@ def main(argv: list[str]) -> int:
         if args.drop_command == "add":
             payload = store.add_drop(args.path, args.target, args.note, args.key)
             return print_payload({"success": True, "tool": "coord", "drop": payload}, args.json)
-        return error("drop requires add", args.json, code=2)
+        if args.drop_command == "ack":
+            ok, payload = store.ack_drop(args.drop_id)
+            if not ok:
+                return error(str(payload.get("error")), args.json, code=2)
+            return print_payload({"success": True, "tool": "coord", "drop": payload}, args.json)
+        if args.drop_command == "resolve":
+            ok, payload = store.resolve_drop(
+                args.drop_id, args.reason, args.evidence, for_everyone=args.for_everyone
+            )
+            if not ok:
+                return error(str(payload.get("error")), args.json, code=2)
+            return print_payload({"success": True, "tool": "coord", "drop": payload}, args.json)
+        if args.drop_command == "history":
+            ok, payload = store.drop_history(args.drop_id)
+            if not ok:
+                return error(str(payload.get("error")), args.json, code=2)
+            if args.json:
+                return print_payload({"success": True, "tool": "coord", **payload}, True)
+            drop = payload["drop"]
+            print(f'{drop["id"]} r{drop["revision"]} {drop["status"]}: {drop["path"]} (from {drop["owner_label"]}, for {drop["for"]})')
+            for entry in drop.get("history", []):
+                detail = entry.get("reason") or entry.get("note") or ""
+                print(f'  {entry.get("at")} {entry.get("event")} by {entry.get("by")} r{entry.get("revision")}{": " + detail if detail else ""}')
+            return 0
+        return error("drop requires add|ack|resolve|history", args.json, code=2)
 
     if args.command == "drops":
-        payload = store.drops(for_me=args.for_me)
+        payload = store.drops(for_me=args.for_me, include_resolved=args.include_resolved)
         if args.json:
             return print_payload({"success": True, "tool": "coord", "drops": payload}, True)
         if not payload:
-            print("No drops.")
+            print("No drops." if args.include_resolved else "No open drops (--all includes resolved).")
             return 0
         for item in payload:
             target = item.get("for") or "any"
             note = f' — {item.get("note")}' if item.get("note") else ""
-            print(f'{item.get("path")} (from {item.get("owner_label")}, for {target}){note}')
+            marks = [f'r{item.get("revision")}', str(item.get("status"))]
+            if item.get("acknowledged_by_me"):
+                marks.append("acked")
+            print(
+                f'{item.get("id")} {item.get("path")} (from {item.get("owner_label")}, for {target}; '
+                f'{", ".join(marks)}; reported {item.get("reported_age")}){note}'
+            )
         return 0
 
     if args.command == "history":

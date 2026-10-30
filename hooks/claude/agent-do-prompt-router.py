@@ -572,6 +572,8 @@ def format_coord_requirement(
         f"Reason: {reason}\n\n"
         f"Run before editing/testing/reviewing:\n`{command}`\n\n"
         f"Active peers:\n{peers}\n\n"
+        "A drop interrupt names its id: `agent-do coord drop ack <drp-id>` quiets it for you alone; "
+        "`agent-do coord drop resolve <drp-id> --reason ...` (owner or recipient) settles it for everyone.\n\n"
         "After focus is set, continue with the user request."
     )
 

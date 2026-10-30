@@ -77,7 +77,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [linear](#linear) | Control Linear | mixed | 3 |
 | [logs](#logs) | Control log aggregation | read | 3 |
 | [macos](#macos) | Control native macOS desktop applications via accessibility APIs | mixed | 6 |
-| [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 27 |
+| [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 33 |
 | [meet](#meet) | Google Meet control | mixed | 4 |
 | [meetings](#meetings) | Unified enterprise meeting orchestration across Zoom, Google Meet, and Microsoft Teams | mixed | 14 |
 | [memory](#memory) | Persistent memory and context | mixed | 4 |
@@ -1210,7 +1210,7 @@ Concurrency: `mixed`
 - name the isolation remedy in contention interrupts (split ownership first, worktree second) and flag a declared branch this checkout is not on as mandatory isolation
 - proactively warn concurrent active building writers to use separate worktrees because compile state and build artifacts remain shared even when source paths are disjoint
 - manage advisory claims and a warn-only pre-commit guard over live claims and territories
-- point peers at files via drops, declare dependencies, publish artifacts with file pointers
+- point peers at files via drops with a lifecycle (stable id, per-reader acknowledgment, authorized resolution, revisions, audit history, nothing deleted), declare dependencies, publish artifacts with file pointers
 - ring live named peers with a payload-free pending bit after addressed need/drop writes; consume at supported turn-boundary hooks without changing claims or acceptance
 - compute contention, notice, dependency, and novelty interrupts and expose the event journal as history
 - merge harness hook observations and timestamped external supervisor verdicts into shared six-state pulse telemetry without renewing target liveness, then rank live peers attention-first
@@ -1238,8 +1238,8 @@ Concurrency: `mixed`
 - `need`: Manage dependencies: need add \<key> --why \<text> [--from \<agent>|--for \<agent>] | need list [--all] | need clear \<key>
 - `publishes`: List published artifacts
 - `publish`: Manage published artifacts: publish add [--file \<path>]|clear
-- `drop`: Point a peer at a file: drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>]
-- `drops`: List drops: drops [--for-me]
+- `drop`: Drop lifecycle (stable ids, never deleted): drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>] (re-adding changed content bumps the revision) | drop ack \<id> (recipient acknowledges delivery; leaves only that reader's routine interrupts) | drop resolve \<id> --reason \<text> [--evidence \<ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; kept in history) | drop history \<id>
+- `drops`: List open drops: drops [--for-me] [--all] (--all includes resolved); a note is a dated report, never a verified present fact
 - `history`: Read the coordination event journal: history [peer] [--limit \<n>]
 
 **Examples**
@@ -1265,6 +1265,10 @@ agent-do coord need add dm-sdk@1.2.2 --why "switch off tarball dependency"
 agent-do coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
 # hand another agent a research file
 agent-do coord drop add .dev/research-drops/report.md --for builder-a --note "ephemeris findings"
+# acknowledge a drop so it stops nudging me
+agent-do coord drop ack drp-1a2b3c4d5e6f
+# settle a drop for every reader once its work is done
+agent-do coord drop resolve drp-1a2b3c4d5e6f --reason "folded into the release" --evidence "commit abc123"
 # see whether anything should interrupt me
 agent-do coord interrupts
 # see what a session is observably doing right now
@@ -2688,6 +2692,7 @@ Concurrency: `write`
 **Capabilities**
 
 - track issues and dependencies
+- coordinator-owned closure for managed items (submission distinct from acceptance, pinned integration targets, scoped proof-bound grants, attempt-guarded release, append-only lifecycle audit)
 - declare portable typed relations between autonomous repository boards
 - manage session state
 - store context across sessions
@@ -2702,7 +2707,13 @@ Concurrency: `write`
 - `estate`: Emit every registered board as the /api/boards model without starting or contacting the serve daemon
 - `create`: Create an issue; actionable items generate a linked .handoff work order (--type track|item|dream, --track, --source)
 - `claim`: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted)
-- `done`: Mark a claimed issue as done
+- `done`: Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator: done \<id> [--assessment \<digest>]
+- `identity`: Print this session''s public label and ownership proof (the token never prints)
+- `coordinator`: Scoped coordinator authority, operator-granted and proof-bound: coordinator grant --session \<id> --proof \<sha256> [--item \<id>] [--track \<id>] --reason \<text> | revoke \<grant-id> --reason \<text> | list
+- `managed`: Coordinator-owned closure: managed require \<id> --check \<name>... | correct \<id> --reason \<text> | release \<id> --reason \<text> [--worker-stopped|--isolated-checkout \<path>] | history \<id> | doctor
+- `submit`: Claim-holder records its result for the current attempt (not acceptance): submit \<id> --report \<file|-> [--revision \<ref>]
+- `accept`: Coordinator records one required check at an explicitly pinned integration target: accept \<id> --check \<name> --target \<ref> --evidence \<text> [--repin]
+- `assess`: Read-only closure assessment: target revision and kind, trailer evidence by relation, outstanding acceptance, authority, exact next action, and an assessment digest for done: assess \<id> [--target \<ref>] [--deployed \<sha>]
 - `order`: Move a paired item to a dense one-based handoff priority and synchronize generated presentation
 - `sync`: Derive numbered handoff filenames, blocker launch gates, and the README index from board state
 - `abandon`: Release a claimed issue back to open
@@ -2746,6 +2757,14 @@ agent-do manna dream 'Unify the auth flows'
 agent-do manna update mn-abc123 --type item
 # check the board for drift
 agent-do manna reconcile --write-drift
+# see what still blocks closing an item and who may close it
+agent-do manna assess mn-abc123 --target origin/staging --json
+# record that the work landed on the integration branch
+agent-do manna accept mn-abc123 --check integration --target origin/staging --evidence "merge 1a2b3c reachable"
+# hand in my result for coordinator acceptance
+agent-do manna submit mn-abc123 --report .handoff/report.md
+# check whether the managed lifecycle is live on this machine
+agent-do manna managed doctor
 # move an item to the top of the handoff plan
 agent-do manna order mn-abc123 1
 # synchronize handoff filenames after a board change
@@ -2768,12 +2787,13 @@ agent-do manna relations --resolve --check
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `context`, `estate`, `lint`, `list`, `relations`, `show`, `state`, `status`
-- Write (connect/interact/save): `abandon`, `block`, `claim`, `create`, `delete`, `done`, `dream`, `federation`, `handoff`, `init`, `migrate`, `order`, `reconcile`, `relate`, `sync`, `unblock`, `unrelate`, `update`
+- Read-only (snapshot/verify; safe to parallelize): `assess`, `context`, `estate`, `identity`, `lint`, `list`, `relations`, `show`, `state`, `status`
+- Write (connect/interact/save): `abandon`, `accept`, `block`, `claim`, `coordinator`, `create`, `delete`, `done`, `dream`, `federation`, `handoff`, `init`, `managed`, `migrate`, `order`, `reconcile`, `relate`, `submit`, `sync`, `unblock`, `unrelate`, `update`
 - destructive (irreversible data loss; confirm before auto-running): `delete`, `federation`, `migrate`, `unrelate`
+- sensitive (emits or persists secret material; guard output): `coordinator`
 - long_running (daemon/stream/session; may never return): `serve`
-- polymorphic (beat decided by payload or flag at call time): `federation`, `reconcile`, `relations`
-- composite (one call performs several beats internally): `federation`, `migrate`, `order`, `sync`
+- polymorphic (beat decided by payload or flag at call time): `coordinator`, `federation`, `managed`, `reconcile`, `relations`
+- composite (one call performs several beats internally): `assess`, `federation`, `managed`, `migrate`, `order`, `sync`
 
 ### meet
 

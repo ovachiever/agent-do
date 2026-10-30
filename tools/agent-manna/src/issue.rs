@@ -55,6 +55,13 @@ impl SessionIdentity {
     fn token_hash(&self) -> &str {
         &self.token_hash
     }
+
+    /// The persistable ownership proof: the SHA-256 digest of the bearer
+    /// token, never the token. Grants bind to it the way claims do, so a
+    /// coordinator session can print it for the operator to grant against.
+    pub fn proof(&self) -> &str {
+        &self.token_hash
+    }
 }
 
 fn constant_time_eq(left: &str, right: &str) -> bool {
@@ -367,6 +374,23 @@ impl Issue {
         }
         if evidence.is_empty() {
             return Err("landed evidence is empty; nothing authorizes this close".to_string());
+        }
+        if self.status == IssueStatus::Done {
+            return Err(format!("Issue {} is already done", self.id));
+        }
+        self.status = IssueStatus::Done;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Close a managed item on recorded acceptance. The acceptance record is
+    /// the authority (checked by the caller under the board lock), so the
+    /// transition is open from any live status and over any claimant: the
+    /// worker who built it may be gone, and the close must not need it back.
+    /// The claim stays on the row as history of who built it.
+    pub fn complete_on_acceptance(&mut self) -> Result<(), String> {
+        if self.issue_type == IssueType::Dream {
+            return Err(format!("{} is a dream; acceptance closes items", self.id));
         }
         if self.status == IssueStatus::Done {
             return Err(format!("Issue {} is already done", self.id));
