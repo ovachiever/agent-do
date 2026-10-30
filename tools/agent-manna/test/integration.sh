@@ -2386,16 +2386,155 @@ Manna: $M_ID"
         fail "no intent remains after recovery" "$(cat .manna/managed-intent.json)"
     fi
     # The close audit is a transaction too: an unwritable destination leaves
-    # the close durable, the audit pending, and recover finishes it.
+    # the row done, the audit pending, and the command FAILED (nonzero), so
+    # no caller reads a clean close; recover finishes it.
     chmod 000 .manna/lifecycle.jsonl
-    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$AF_ID" 2>&1) || true
-    check_yaml "$output" "status: done" "the close itself is durable"
-    check_yaml "$output" "audit transaction did not complete" "the close reports its pending audit"
+    close_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$AF_ID" 2>&1) || close_exit=$?
+    check_exit 2 "$close_exit" "a close whose audit transaction did not complete exits nonzero (review pass 3, finding 1)"
+    check_yaml "$output" "success: false" "the incomplete close is a failure, not a warning"
+    check_yaml "$output" "status: done" "the failure still reports the durable row"
+    check_yaml "$output" "did not complete" "the failure names the incomplete close transaction"
+    check_yaml "$output" "next_action: agent-do manna managed recover $AF_ID" "the failure names recover"
+    output=$("$MANNA" show "$AF_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "the row is done on the board"
+    pending=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + d["incomplete_transactions"][0]["action"] + "/" + d["next_action"]')
+    if [[ "$pending" == "1/close/agent-do manna managed recover $AF_ID" ]]; then
+        pass "assess reports the incomplete close transaction and names recover"
+    else
+        fail "assess reports the incomplete close transaction and names recover" "got: $pending"
+    fi
     chmod 644 .manna/lifecycle.jsonl
     output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"]))')
     check_exit 1 "$output" "recover finishes the close's audit transaction"
     close_lines=$(grep -c "\"action\":\"close\",\"issue_id\":\"$AF_ID\"" .manna/lifecycle.jsonl || true)
     check_exit 1 "$close_lines" "the close audit line lands exactly once"
+    if [[ ! -e .manna/managed-intent.json ]]; then
+        pass "no intent remains after the close is recovered"
+    else
+        fail "no intent remains after the close is recovered" "$(cat .manna/managed-intent.json)"
+    fi
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M7: a grant or revocation whose writes did not both land stops the board until the operator recovers it (review pass 3, finding 2)"
+    output=$("$MANNA" create "Managed board recovery" "grant audit unwritable" 2>&1) || true
+    BR_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file board-recovery item"
+    # The operator: a terminal, no pinned agent identity.
+    op() {
+        script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+            -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+            "$@" </dev/null
+    }
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BR_ID" --reason "lead for board recovery" --json 2>/dev/null)
+    # pty output carries a ^D echo before the payload: take the id by shape.
+    BR_GRANT1=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$BR_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$BR_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$BR_ID" --report half.md >/dev/null 2>&1
+    BR_SUB=$(reviewed_submission "$BR_ID")
+    # A second grant whose audit cannot be written (the reviewer's sequence):
+    # the grants file takes it, the audit does not, the intent stays pending.
+    chmod 000 .manna/lifecycle.jsonl
+    grant_exit=0
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BR_ID" --reason "board recovery fixture" 2>&1) || grant_exit=$?
+    output=$(printf '%s' "$output" | tr -d '\r')
+    chmod 644 .manna/lifecycle.jsonl
+    check_exit 1 "$grant_exit" "a grant whose audit cannot be written does not succeed"
+    check_yaml "$output" "managed recover board" "the failure names board recovery"
+    intent_scope=$(python3 -c 'import json; d=json.load(open(".manna/managed-intent.json")); print(",".join(i["issue_id"]+":"+i["action"] for i in d["intents"]))' 2>/dev/null)
+    if [[ "$intent_scope" == "board:grant" ]]; then
+        pass "the pending intent is board-scoped"
+    else
+        fail "the pending intent is board-scoped" "got: $intent_scope"
+    fi
+    grants_for_item=$("$MANNA" coordinator list --json 2>/dev/null | json_field 'str(len([g for g in d["grants"] if g["scope"]["items"] == ["'"$BR_ID"'"]]))')
+    check_exit 2 "$grants_for_item" "the grants file took the grant before the audit failed (state landed, audit did not)"
+    # Nothing managed moves and no grant changes while the board transaction is pending.
+    accept_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$BR_ID" --check integration --target HEAD --evidence "Board recovery fixture" --submission "$BR_SUB" --attempt 1 2>&1) || accept_exit=$?
+    check_exit 1 "$accept_exit" "accept refuses while a board transaction is incomplete"
+    check_yaml "$output" "recover board" "the acceptance refusal names board recovery"
+    submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$BR_ID" --report half.md >/dev/null 2>&1 || submit_exit=$?
+    check_exit 1 "$submit_exit" "submit refuses while a board transaction is incomplete"
+    require_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$BR_ID" --check extra >/dev/null 2>&1 || require_exit=$?
+    check_exit 1 "$require_exit" "managed require refuses while a board transaction is incomplete"
+    grant_again_exit=0
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BR_ID" --reason "third" 2>&1) || grant_again_exit=$?
+    check_exit 1 "$grant_again_exit" "no further grant lands while a board transaction is incomplete"
+    check_yaml "$(printf '%s' "$output" | tr -d '\r')" "recover board" "the grant refusal names board recovery"
+    revoke_blocked_exit=0
+    op "$MANNA" coordinator revoke "$BR_GRANT1" --reason "blocked" >/dev/null 2>&1 || revoke_blocked_exit=$?
+    check_exit 1 "$revoke_blocked_exit" "no revocation lands while a board transaction is incomplete"
+    pending=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BR_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + d["incomplete_transactions"][0]["scope"] + "/" + str(d["closable"]) + "/" + d["next_action"]')
+    if [[ "$pending" == "1/board/False/operator: agent-do manna managed recover board" ]]; then
+        pass "assess reports the board transaction, blocks closure, and names the operator's recovery"
+    else
+        fail "assess reports the board transaction, blocks closure, and names the operator's recovery" "got: $pending"
+    fi
+    # Only the operator finishes a board transaction: a coordinator cannot decide its own authority.
+    lead_recover_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover board >/dev/null 2>&1 || lead_recover_exit=$?
+    check_exit 2 "$lead_recover_exit" "a coordinator cannot recover a board transaction"
+    other_recover_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed recover board >/dev/null 2>&1 || other_recover_exit=$?
+    check_exit 2 "$other_recover_exit" "a stranger cannot recover a board transaction"
+    note=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$BR_ID" --json 2>/dev/null | json_field 'd["note"] + "|" + ("board" if d.get("board") else "-")')
+    if [[ "$note" == "no incomplete transaction|board" ]]; then
+        pass "item recovery reports nothing pending on the item and the board transaction beside it"
+    else
+        fail "item recovery reports nothing pending on the item and the board transaction beside it" "got: $note"
+    fi
+    output=$(op "$MANNA" managed recover board --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$recovered" "the operator recovers the board transaction"
+    grant_lines=$(grep -c "\"action\":\"grant\".*\"reason\":\"board recovery fixture\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$grant_lines" "recovery writes the grant's audit line exactly once"
+    if [[ ! -e .manna/managed-intent.json ]]; then
+        pass "no intent remains after board recovery"
+    else
+        fail "no intent remains after board recovery" "$(cat .manna/managed-intent.json)"
+    fi
+    accept_after_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$BR_ID" --check integration --target HEAD --evidence "Board recovery fixture" --submission "$BR_SUB" --attempt 1 >/dev/null 2>&1 || accept_after_exit=$?
+    check_exit 0 "$accept_after_exit" "after board recovery the acceptance lands"
+    # A revocation that dies after its intent is durable and before the grants
+    # file or the audit is written: the file still says the grant is live, and
+    # the file is not the truth until the operator recovers the board.
+    BR_GRANT2=$("$MANNA" coordinator list --json 2>/dev/null | json_field '[g["id"] for g in d["grants"] if g["reason"] == "board recovery fixture"][0]')
+    op "$MANNA" coordinator revoke "$BR_GRANT2" --reason "fixture done" >/dev/null 2>&1
+    fault_exit=0
+    MANNA_MANAGED_FAULT=after_board_intent op "$MANNA" coordinator revoke "$BR_GRANT1" --reason "rotate" >/dev/null 2>&1 || fault_exit=$?
+    check_exit 70 "$fault_exit" "the revocation died after its intent was durable"
+    live_in_file=$("$MANNA" coordinator list --json 2>/dev/null | json_field 'str([g for g in d["grants"] if g["id"] == "'"$BR_GRANT1"'"][0].get("revoked") is None)')
+    if [[ "$live_in_file" == "True" ]]; then
+        pass "the grants file still shows the grant live (its write never ran)"
+    else
+        fail "the grants file still shows the grant live (its write never ran)" "got: $live_in_file"
+    fi
+    correct_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$BR_ID" --reason "pending revocation" 2>&1) || correct_exit=$?
+    check_exit 1 "$correct_exit" "a coordinator cannot act on a grant whose revocation is pending"
+    check_yaml "$output" "recover board" "the refusal names board recovery, not the stale grants file"
+    output=$(op "$MANNA" managed recover board --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$recovered" "the operator recovers the revocation"
+    revoked_now=$("$MANNA" coordinator list --json 2>/dev/null | json_field 'str([g for g in d["grants"] if g["id"] == "'"$BR_GRANT1"'"][0].get("revoked") is not None)')
+    if [[ "$revoked_now" == "True" ]]; then
+        pass "recovery lands the revocation in the grants file"
+    else
+        fail "recovery lands the revocation in the grants file" "got: $revoked_now"
+    fi
+    revoke_lines=$(grep -c "\"action\":\"revoke\".*\"grant\":\"$BR_GRANT1\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$revoke_lines" "the revocation's audit line lands exactly once"
+    after_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$BR_ID" --reason "after recovery" >/dev/null 2>&1 || after_exit=$?
+    check_exit 2 "$after_exit" "after recovery the revocation stands: the coordinator holds no authority"
+    unset -f op
 
     # ------------------------------------------------------------------------
     echo ""

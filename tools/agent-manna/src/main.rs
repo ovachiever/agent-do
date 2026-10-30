@@ -487,6 +487,22 @@ struct IssueData {
     age: IssueAge,
 }
 
+/// A managed close whose row write landed but whose audit transaction did
+/// not: the row is done and its dependents released, yet the command fails
+/// (nonzero) so no caller reads a clean close. `manna managed recover <id>`
+/// finishes the transaction.
+#[derive(Serialize)]
+struct IncompleteCloseData {
+    success: bool,
+    error: String,
+    #[serde(flatten)]
+    closed: IssueData,
+    released: Vec<String>,
+    authority: &'static str,
+    transaction: String,
+    next_action: String,
+}
+
 #[derive(Serialize)]
 struct DoneData {
     #[serde(flatten)]
@@ -863,6 +879,18 @@ fn output_error(error: &str, exit_code: i32) -> ! {
     println!(
         "{}",
         serde_yaml::to_string(&response).unwrap_or_else(|e| {
+            format!("success: false\nerror: \"YAML serialization error: {}\"", e)
+        })
+    );
+    std::process::exit(exit_code);
+}
+
+/// A failed command whose partial outcome the caller must still see: the
+/// payload carries `success: false` and the error beside what did land.
+fn output_failure<T: Serialize>(data: T, exit_code: i32) -> ! {
+    println!(
+        "{}",
+        serde_yaml::to_string(&data).unwrap_or_else(|e| {
             format!("success: false\nerror: \"YAML serialization error: {}\"", e)
         })
     );
@@ -1484,10 +1512,12 @@ fn cmd_done(id: String, assessment: Option<String>) -> ! {
     };
     let managed_close = managed_cli::close_managed(&store, &issue, &session, assessment.as_deref());
     let mut managed_warnings = Vec::new();
+    let mut managed_incomplete = None;
     let (authority, result) = if let Some(managed) = managed_close {
         match managed {
             Ok((completed, close)) => {
                 managed_warnings = close.warnings;
+                managed_incomplete = close.incomplete;
                 (close.authority, Ok(completed))
             }
             Err(MannaError::MutationRejected(error)) => {
@@ -1509,6 +1539,25 @@ fn cmd_done(id: String, assessment: Option<String>) -> ! {
         Ok(issue) => issue,
         Err(error) => handle_manna_error(error),
     };
+    if let Some(incomplete) = managed_incomplete {
+        // The row is done; the command is not. A caller that reads exit 0
+        // as "closed cleanly" must not, and the output says what did land.
+        output_failure(
+            IncompleteCloseData {
+                success: false,
+                error: incomplete.error,
+                closed: IssueData {
+                    age: (&completed.issue).into(),
+                    issue: completed.issue,
+                },
+                released: completed.released,
+                authority,
+                transaction: incomplete.transaction,
+                next_action: format!("agent-do manna managed recover {}", id),
+            },
+            EXIT_SYSTEM_ERROR,
+        );
+    }
 
     let mut warnings = managed_warnings;
     if let Some(config) = workflow

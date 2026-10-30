@@ -22,7 +22,7 @@ use manna_core::managed::{
     assessment_token, closable_hex, closure_blockers, grant_id, parse_assessment_token,
     revalidate_authority, submission_id, transaction_id, Acceptance, AssessmentConditions,
     Authority, Correction, Grant, GrantFile, GrantScope, Intent, LifecycleEvent, ManagedRecord,
-    ManagedStore, PinnedTarget, Release, Revocation, Submission, CAPABILITY,
+    ManagedStore, PinnedTarget, Release, Revocation, Submission, BOARD_SCOPE, CAPABILITY,
 };
 use manna_core::reconcile::manna_trailer_ids;
 use manna_core::state::direct_coord_program;
@@ -37,6 +37,8 @@ use crate::{
 /// Test seam: `MANNA_MANAGED_FAULT=after_release_pending` ends the process
 /// right after a release's pending phase is durable and before the row's
 /// claim is released, so the recovery path can be exercised for real.
+/// `after_board_intent` ends a grant or revocation right after its intent
+/// is durable and before the grants file or the audit is written.
 const FAULT_ENV: &str = "MANNA_MANAGED_FAULT";
 
 #[derive(Subcommand)]
@@ -119,9 +121,11 @@ pub enum ManagedCommands {
         json: bool,
     },
     /// Finish an incomplete transaction (state written but audit not, or the
-    /// reverse) so the item can move again; operator, a granted coordinator,
-    /// or the session that started it
+    /// reverse) so the item can move again: operator, a granted coordinator,
+    /// or the session that started it. `recover board` finishes a grant or
+    /// revocation transaction (operator, or the session that started it)
     Recover {
+        /// An item id, or `board` for a coordinator grant/revoke transaction
         id: String,
         #[arg(long)]
         json: bool,
@@ -266,6 +270,12 @@ fn intent_for(
 /// The error a transaction leaves behind: the intent is durable, so the
 /// outcome is recoverable, and the item refuses to move until it is.
 fn transaction_failed(intent: &Intent, error: String) -> String {
+    if intent.issue_id == BOARD_SCOPE {
+        return format!(
+            "transaction {} ({}) did not complete: {}. Its outcome is recorded; nothing managed moves and no grant changes until the operator runs `manna managed recover board`",
+            intent.txn, intent.action, error
+        );
+    }
     format!(
         "transaction {} ({}) did not complete: {}. Its outcome is recorded; nothing else on {} moves until `manna managed recover {}` finishes it",
         intent.txn, intent.action, error, intent.issue_id, intent.issue_id
@@ -393,7 +403,7 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
             let written = grant.clone();
             let event = lifecycle_event(
                 "grant",
-                "board",
+                BOARD_SCOPE,
                 &session,
                 "operator",
                 None,
@@ -402,6 +412,12 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                 Some(serde_json::json!({"grant": grant.id, "coordinator": grant.coordinator_id, "scope": grant.scope})),
             );
             let result = board.with_board_lock(|| {
+                if let Some(refusal) = store
+                    .incomplete_transaction(BOARD_SCOPE)
+                    .map_err(MannaError::MutationRejected)?
+                {
+                    return Err(MannaError::MutationRejected(refusal));
+                }
                 let mut grants = store.load_grants().map_err(MannaError::MutationRejected)?;
                 if grants.grants.iter().any(|existing| existing.id == written.id) {
                     return Err(MannaError::MutationRejected(format!(
@@ -410,7 +426,7 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                     )));
                 }
                 grants.grants.push(written.clone());
-                let intent = intent_for(&session, "board", event.clone(), None, Some(grants));
+                let intent = intent_for(&session, BOARD_SCOPE, event.clone(), None, Some(grants));
                 store
                     .run_transaction(intent.clone())
                     .map_err(|error| MannaError::MutationRejected(transaction_failed(&intent, error)))?;
@@ -431,7 +447,7 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
             let revoked_id = grant_id.clone();
             let event = lifecycle_event(
                 "revoke",
-                "board",
+                BOARD_SCOPE,
                 &session,
                 "operator",
                 None,
@@ -440,6 +456,12 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                 Some(serde_json::json!({"grant": grant_id})),
             );
             let result = board.with_board_lock(|| {
+                if let Some(refusal) = store
+                    .incomplete_transaction(BOARD_SCOPE)
+                    .map_err(MannaError::MutationRejected)?
+                {
+                    return Err(MannaError::MutationRejected(refusal));
+                }
                 let mut grants = store.load_grants().map_err(MannaError::MutationRejected)?;
                 let grant = grants
                     .grants
@@ -458,9 +480,13 @@ pub fn cmd_coordinator(command: CoordinatorCommands) -> ! {
                     reason: reason_text.clone(),
                 });
                 let snapshot = grant.clone();
-                let intent = intent_for(&session, "board", event.clone(), None, Some(grants));
+                let intent = intent_for(&session, BOARD_SCOPE, event.clone(), None, Some(grants));
                 store
-                    .run_transaction(intent.clone())
+                    .begin_transaction(&intent)
+                    .map_err(MannaError::MutationRejected)?;
+                fault("after_board_intent");
+                store
+                    .finish_transaction(&intent)
                     .map_err(|error| MannaError::MutationRejected(transaction_failed(&intent, error)))?;
                 Ok(snapshot)
             });
@@ -1572,7 +1598,7 @@ pub fn assess(
     let authority = Authority::resolve(session, issue, grants);
     let claimant = liveness_for(issue.claimed_by.as_deref());
     let store = managed_store();
-    let pending = store.pending_intents_for(&issue.id).unwrap_or_default();
+    let pending = store.pending_intents_affecting(&issue.id).unwrap_or_default();
     let git_observed_at = now_label();
     let current_head = git_output(&["rev-parse", "--verify", "HEAD^{commit}"]).ok();
     let pinned = record.and_then(|record| record.target.clone());
@@ -1606,14 +1632,24 @@ pub fn assess(
     let mut blockers = Vec::new();
     let mut superseded = Vec::new();
     for intent in &pending {
-        blockers.push(format!(
-            "incomplete transaction {} ({} by {} at {}); run `manna managed recover {}`",
-            intent.txn,
-            intent.action,
-            intent.actor,
-            intent.started_at.to_rfc3339(),
-            issue.id
-        ));
+        if intent.issue_id == BOARD_SCOPE {
+            blockers.push(format!(
+                "incomplete board transaction {} ({} by {} at {}): the grants are not the truth until the operator runs `manna managed recover board`",
+                intent.txn,
+                intent.action,
+                intent.actor,
+                intent.started_at.to_rfc3339()
+            ));
+        } else {
+            blockers.push(format!(
+                "incomplete transaction {} ({} by {} at {}); run `manna managed recover {}`",
+                intent.txn,
+                intent.action,
+                intent.actor,
+                intent.started_at.to_rfc3339(),
+                issue.id
+            ));
+        }
     }
     let (attempt, required, accepted, outstanding, submission_status, submission_key, interrupted) = match record {
         Some(record) => {
@@ -1706,6 +1742,8 @@ pub fn assess(
             ),
             None => format!("agent-do manna done {}", issue.id),
         }
+    } else if pending.iter().any(|intent| intent.issue_id == BOARD_SCOPE) {
+        "operator: agent-do manna managed recover board".to_string()
     } else if !pending.is_empty() {
         format!("agent-do manna managed recover {}", issue.id)
     } else if interrupted {
@@ -1789,7 +1827,7 @@ pub fn assess(
         },
         incomplete_transactions: pending
             .iter()
-            .map(|intent| serde_json::json!({"txn": intent.txn, "action": intent.action, "actor": intent.actor, "started_at": intent.started_at}))
+            .map(|intent| serde_json::json!({"txn": intent.txn, "scope": intent.issue_id, "action": intent.action, "actor": intent.actor, "started_at": intent.started_at}))
             .collect(),
         closable,
         blockers,
@@ -1826,6 +1864,15 @@ pub fn cmd_assess(id: String, target: Option<String>, deployed: Option<String>, 
 pub struct ManagedClose {
     pub authority: &'static str,
     pub warnings: Vec<String>,
+    /// The row is done and its dependents released, but the close's audit
+    /// transaction did not complete. The command fails (nonzero) naming the
+    /// transaction; `manna managed recover <id>` finishes it.
+    pub incomplete: Option<IncompleteClose>,
+}
+
+pub struct IncompleteClose {
+    pub transaction: String,
+    pub error: String,
 }
 
 /// Refuse or authorize a managed close. Returns `None` for unmanaged items.
@@ -2005,19 +2052,23 @@ pub fn close_managed(
     match result {
         Ok((completed, audit_error)) => {
             let closed_id = completed.issue.id.clone();
+            let transaction = intent_cell
+                .borrow()
+                .as_ref()
+                .map(|intent| intent.txn.clone())
+                .unwrap_or_default();
             Some(Ok((
                 completed,
                 ManagedClose {
                     authority: level_cell.get(),
-                    warnings: audit_error
-                        .map(|error| {
-                            format!(
-                                "the close is durable but its audit transaction did not complete ({}); run `manna managed recover {}` to finish it",
-                                error, closed_id
-                            )
-                        })
-                        .into_iter()
-                        .collect(),
+                    warnings: Vec::new(),
+                    incomplete: audit_error.map(|error| IncompleteClose {
+                        error: format!(
+                            "{} is done on the board, but close transaction {} did not complete: {}. The close is not clean until `manna managed recover {}` finishes it",
+                            closed_id, transaction, error, closed_id
+                        ),
+                        transaction,
+                    }),
                 },
             )))
         }
@@ -2031,15 +2082,24 @@ pub fn close_managed(
 /// proof). Idempotent: an audit line already present is not duplicated.
 fn cmd_recover(id: String, json: bool) -> ! {
     let board = open_board();
-    let (issues, _) = load_board_workflow(&board);
-    let issue = find_issue(&issues, &id);
     let store = managed_store();
     let session = require_session_identity();
+    if id == BOARD_SCOPE {
+        recover_board(&board, &store, &session, json);
+    }
+    let (issues, _) = load_board_workflow(&board);
+    let issue = find_issue(&issues, &id);
     let pending = store
         .pending_intents_for(&id)
         .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json));
+    let board_pending = store
+        .incomplete_transaction(BOARD_SCOPE)
+        .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json));
     if pending.is_empty() {
-        emit(serde_json::json!({"id": id, "recovered": [], "note": "no incomplete transaction"}), json);
+        emit(
+            serde_json::json!({"id": id, "recovered": [], "note": "no incomplete transaction", "board": board_pending}),
+            json,
+        );
     }
     let grants = load_grants_or_fail(&store, json);
     let authority = Authority::resolve(&session, &issue, &grants);
@@ -2056,6 +2116,12 @@ fn cmd_recover(id: String, json: bool) -> ! {
             json,
         );
     }
+    // A coordinator's authority is read from the grants file, and while a
+    // board transaction is pending that file is not the truth: only the
+    // operator or the session that started this transaction may proceed.
+    if let Some(refusal) = board_pending.filter(|_| !(session.is_operator() || started_it)) {
+        fail(&refusal, EXIT_NEEDS_AUTHORIZATION, json);
+    }
     let recovered = board.with_board_lock(|| store.recover(&id).map_err(MannaError::MutationRejected));
     let recovered = match recovered {
         Ok(recovered) => recovered,
@@ -2068,6 +2134,46 @@ fn cmd_recover(id: String, json: bool) -> ! {
             "recovered": recovered,
             "managed": record,
             "authority": authority,
+        }),
+        json,
+    )
+}
+
+/// `manna managed recover board`: finish an incomplete grant or revocation.
+/// Only the operator, or the session that started it (the operator by
+/// construction), may: a coordinator's own authority is what the pending
+/// transaction decides, so it cannot be the one to decide it.
+fn recover_board(board: &MannaStore, store: &ManagedStore, session: &SessionIdentity, json: bool) -> ! {
+    let pending = store
+        .pending_intents_for(BOARD_SCOPE)
+        .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json));
+    if pending.is_empty() {
+        emit(
+            serde_json::json!({"id": BOARD_SCOPE, "recovered": [], "note": "no incomplete board transaction"}),
+            json,
+        );
+    }
+    let started_it = pending
+        .iter()
+        .all(|intent| intent.actor == session.id() && intent.actor_proof == session.proof());
+    if !(session.is_operator() || started_it) {
+        fail(
+            "recovering a board transaction (a coordinator grant or revocation) needs the operator or the session that started it; a coordinator cannot finish the transaction that decides its own authority",
+            EXIT_NEEDS_AUTHORIZATION,
+            json,
+        );
+    }
+    let recovered = board.with_board_lock(|| store.recover(BOARD_SCOPE).map_err(MannaError::MutationRejected));
+    let recovered = match recovered {
+        Ok(recovered) => recovered,
+        Err(error) => rejected(error, json),
+    };
+    let grants = load_grants_or_fail(store, json);
+    emit(
+        serde_json::json!({
+            "id": BOARD_SCOPE,
+            "recovered": recovered,
+            "grants": grants.grants,
         }),
         json,
     )

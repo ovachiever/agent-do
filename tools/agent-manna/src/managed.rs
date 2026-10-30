@@ -35,6 +35,10 @@ pub const LIFECYCLE_FILE: &str = "lifecycle.jsonl";
 /// between the two leaves something recoverable, never a half-applied state
 /// that looks whole.
 pub const INTENT_FILE: &str = "managed-intent.json";
+/// The issue id a board-level transaction (a coordinator grant or
+/// revocation) carries. While one is incomplete, nothing managed moves and
+/// no grant changes until `managed recover board` finishes it.
+pub const BOARD_SCOPE: &str = "board";
 
 /// The capability name an adoption check looks for. A binary that compiles
 /// this module reports it; a binary that does not cannot be asked.
@@ -557,21 +561,48 @@ impl ManagedStore {
             .collect())
     }
 
-    /// The refusal every mutation gives while a transaction on the item is
-    /// incomplete, or `None` when nothing is pending.
+    /// Pending transactions that hold an item still: its own, and any
+    /// board-level one (a grant or revocation whose writes did not both land
+    /// leaves every coordinator's authority in doubt).
+    pub fn pending_intents_affecting(&self, id: &str) -> Result<Vec<Intent>, String> {
+        Ok(self
+            .load_intents()?
+            .intents
+            .into_iter()
+            .filter(|intent| intent.issue_id == id || intent.issue_id == BOARD_SCOPE)
+            .collect())
+    }
+
+    /// The refusal every mutation gives while a transaction on the item, or
+    /// on the board, is incomplete; `None` when nothing is pending. Asked
+    /// with `BOARD_SCOPE`, it answers for the board alone.
     pub fn incomplete_transaction(&self, id: &str) -> Result<Option<String>, String> {
-        let pending = self.pending_intents_for(id)?;
-        Ok(pending.first().map(|intent| {
-            format!(
-                "{} has an incomplete transaction {} ({} by {} at {}): its state and audit writes did not both land; run `manna managed recover {}` before anything else moves",
-                id,
-                intent.txn,
-                intent.action,
-                intent.actor,
-                intent.started_at.to_rfc3339(),
-                id
-            )
-        }))
+        let intents = self.load_intents()?.intents;
+        if id != BOARD_SCOPE {
+            if let Some(intent) = intents.iter().find(|intent| intent.issue_id == id) {
+                return Ok(Some(format!(
+                    "{} has an incomplete transaction {} ({} by {} at {}): its state and audit writes did not both land; run `manna managed recover {}` before anything else moves",
+                    id,
+                    intent.txn,
+                    intent.action,
+                    intent.actor,
+                    intent.started_at.to_rfc3339(),
+                    id
+                )));
+            }
+        }
+        Ok(intents
+            .iter()
+            .find(|intent| intent.issue_id == BOARD_SCOPE)
+            .map(|intent| {
+                format!(
+                    "the board has an incomplete coordinator transaction {} ({} by {} at {}): its grants and audit writes did not both land; the operator runs `manna managed recover board` before anything managed moves",
+                    intent.txn,
+                    intent.action,
+                    intent.actor,
+                    intent.started_at.to_rfc3339()
+                )
+            }))
     }
 
     /// Run one mutation as a recoverable transaction, under the caller's
@@ -580,10 +611,20 @@ impl ManagedStore {
     /// A failure after the intent is durable leaves it pending; the item
     /// refuses every other mutation until `recover` finishes the job.
     pub fn run_transaction(&self, intent: Intent) -> Result<(), String> {
+        self.begin_transaction(&intent)?;
+        self.finish_transaction(&intent)
+    }
+
+    /// Make the intent durable: from here the outcome is recoverable.
+    pub fn begin_transaction(&self, intent: &Intent) -> Result<(), String> {
         let mut intents = self.load_intents()?;
         intents.intents.push(intent.clone());
-        self.save_intents(&intents)?;
-        self.apply_intent(&intent)?;
+        self.save_intents(&intents)
+    }
+
+    /// The writes the intent names, then its retirement.
+    pub fn finish_transaction(&self, intent: &Intent) -> Result<(), String> {
+        self.apply_intent(intent)?;
         self.retire_intent(&intent.txn)
     }
 
@@ -1314,5 +1355,109 @@ mod tests {
             ..parsed.clone()
         };
         assert_ne!(closable_hex(&target, Some(&rec), &moved), parsed.hex);
+    }
+    fn store_in(dir: &Path) -> ManagedStore {
+        fs::create_dir_all(dir.join(".manna")).unwrap();
+        ManagedStore::new(dir)
+    }
+
+    fn board_intent(action: &str, grants_after: GrantFile) -> Intent {
+        let started_at = Utc.with_ymd_and_hms(2026, 10, 30, 22, 29, 42).unwrap();
+        let txn = transaction_id(BOARD_SCOPE, action, &started_at, "operator-erik");
+        Intent {
+            txn: txn.clone(),
+            issue_id: BOARD_SCOPE.to_string(),
+            action: action.to_string(),
+            started_at,
+            actor: "operator-erik".to_string(),
+            actor_proof: "sha256:operator".to_string(),
+            record_after: None,
+            grants_after: Some(grants_after),
+            event: LifecycleEvent {
+                txn,
+                at: started_at,
+                action: action.to_string(),
+                issue_id: BOARD_SCOPE.to_string(),
+                actor: "operator-erik".to_string(),
+                authority: "operator".to_string(),
+                attempt: None,
+                reason: Some("fixture".to_string()),
+                evidence: None,
+                detail: None,
+            },
+        }
+    }
+
+    #[test]
+    fn a_pending_board_transaction_holds_every_item_and_names_board_recovery() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = store_in(dir.path());
+        let lead = identity("lead", "lead-token-0123456789abcdefghijklmnop");
+        let grants = GrantFile {
+            version: 1,
+            grants: vec![grant_for(&lead, GrantScope { items: vec!["mn-x".to_string()], tracks: vec![] })],
+        };
+        assert_eq!(store.incomplete_transaction("mn-x").unwrap(), None);
+        store.begin_transaction(&board_intent("grant", grants)).unwrap();
+        // Nothing wrote the grants or the audit: the board alone is pending.
+        let refusal = store.incomplete_transaction("mn-x").unwrap().expect("an item refuses");
+        assert!(refusal.contains("board has an incomplete coordinator transaction"), "{}", refusal);
+        assert!(refusal.contains("manna managed recover board"), "{}", refusal);
+        let board = store.incomplete_transaction(BOARD_SCOPE).unwrap().expect("the board refuses");
+        assert!(board.contains("recover board"), "{}", board);
+        // The item's own pending set is empty; the affecting set holds the board's.
+        assert!(store.pending_intents_for("mn-x").unwrap().is_empty());
+        assert_eq!(store.pending_intents_affecting("mn-x").unwrap().len(), 1);
+        assert_eq!(store.pending_intents_affecting("mn-x").unwrap()[0].issue_id, BOARD_SCOPE);
+    }
+
+    #[test]
+    fn recovering_the_board_lands_the_grants_and_the_audit_exactly_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = store_in(dir.path());
+        let lead = identity("lead", "lead-token-0123456789abcdefghijklmnop");
+        let grants = GrantFile {
+            version: 1,
+            grants: vec![grant_for(&lead, GrantScope { items: vec!["mn-x".to_string()], tracks: vec![] })],
+        };
+        let intent = board_intent("grant", grants);
+        store.begin_transaction(&intent).unwrap();
+        assert!(store.load_grants().unwrap().grants.is_empty(), "the grant did not land before recovery");
+        let recovered = store.recover(BOARD_SCOPE).unwrap();
+        assert_eq!(recovered, vec![intent.txn.clone()]);
+        assert_eq!(store.load_grants().unwrap().grants.len(), 1, "recovery wrote the recorded grants");
+        assert_eq!(store.events_for(BOARD_SCOPE).unwrap().len(), 1, "recovery wrote the audit line");
+        assert!(store.event_landed(&intent.txn).unwrap());
+        assert_eq!(store.incomplete_transaction("mn-x").unwrap(), None, "the item moves again");
+        assert!(!store.intents_path().exists(), "no intent remains");
+        // Recovering again is a no-op: nothing doubles.
+        assert!(store.recover(BOARD_SCOPE).unwrap().is_empty());
+        assert_eq!(store.events_for(BOARD_SCOPE).unwrap().len(), 1);
+        assert_eq!(store.load_grants().unwrap().grants.len(), 1);
+    }
+
+    #[test]
+    fn a_pending_revocation_whose_state_did_not_land_is_still_a_pending_revocation() {
+        // The grants file still shows the grant live; the intent says it is
+        // revoked. Until recovery, the file is not the truth: everything
+        // managed refuses, and recovery writes the revocation.
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = store_in(dir.path());
+        let lead = identity("lead", "lead-token-0123456789abcdefghijklmnop");
+        let live = grant_for(&lead, GrantScope { items: vec!["mn-x".to_string()], tracks: vec![] });
+        store.save_grants(&GrantFile { version: 1, grants: vec![live.clone()] }).unwrap();
+        let mut revoked = live.clone();
+        revoked.revoked = Some(Revocation {
+            at: Utc.with_ymd_and_hms(2026, 10, 30, 22, 30, 0).unwrap(),
+            by: "operator-erik".to_string(),
+            reason: "rotate".to_string(),
+        });
+        let intent = board_intent("revoke", GrantFile { version: 1, grants: vec![revoked] });
+        store.begin_transaction(&intent).unwrap();
+        assert!(store.load_grants().unwrap().grants[0].is_live(), "the file still says live");
+        assert!(store.incomplete_transaction("mn-x").unwrap().is_some(), "but nothing moves");
+        store.recover(BOARD_SCOPE).unwrap();
+        assert!(!store.load_grants().unwrap().grants[0].is_live(), "recovery lands the revocation");
+        assert_eq!(store.events_for(BOARD_SCOPE).unwrap().len(), 1);
     }
 }

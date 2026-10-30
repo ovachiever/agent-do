@@ -367,6 +367,7 @@ agent-do manna accept mn-abc123 --check integration --target origin/staging \
 agent-do manna accept mn-abc123 --check deployed --target origin/staging --evidence "release 42" \
     --submission sub-1a2b3c4d5e6f --attempt 1
 agent-do manna managed recover mn-abc123     # finish a transaction whose audit or state write failed
+agent-do manna managed recover board         # finish a grant or revocation that did not fully land (operator)
 agent-do manna done mn-abc123 --assessment assess:...   # coordinator closes; worker not needed
 agent-do manna managed correct mn-abc123 --reason "tests missing"
 agent-do manna managed release mn-abc123 --reason "worker gone" --isolated-checkout /path/to/worktree
@@ -384,7 +385,12 @@ the exact submission and attempt the coordinator reviewed (`--submission`,
 either moved; a resubmission (after `managed correct` or otherwise) needs a
 fresh verdict before anyone can close. Each mutation's outcome is durable as
 an intent before its state and audit writes, so a failed write leaves the
-item refusing to move until `managed recover` finishes the transaction. The
+item refusing to move until `managed recover` finishes the transaction. A
+grant or revocation is a board-level transaction: while one is incomplete
+the grants file is not the truth, so nothing managed moves and no grant
+changes until the operator runs `managed recover board`. A close whose row
+landed but whose audit did not exits nonzero, reports the row as done, and
+names the transaction: it is not a clean close until recovered. The
 `assessment` token is `assess:v2:...` only when closable and `blocked:v2:...`
 otherwise; `done --assessment` refuses a blocked token and recomputes a
 closable one's conditions under the lock. Each release
