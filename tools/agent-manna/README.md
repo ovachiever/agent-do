@@ -385,7 +385,12 @@ the exact submission and attempt the coordinator reviewed (`--submission`,
 either moved; a resubmission (after `managed correct` or otherwise) needs a
 fresh verdict before anyone can close. Each mutation's outcome is durable as
 an intent before its state and audit writes, so a failed write leaves the
-item refusing to move until `managed recover` finishes the transaction. A
+item refusing to move until `managed recover` finishes the transaction.
+Recovery decides who may finish it under the board lock, against the grants
+and the pending transactions as they are then: a grant that was live when
+recovery started and is revoked by the time it holds the lock refuses, with
+nothing written, and only the transactions that look authorized are
+replayed. A
 grant or revocation is a board-level transaction: while one is incomplete
 the grants file is not the truth, so nothing managed moves and no grant
 changes until the operator runs `managed recover board`. A close whose row

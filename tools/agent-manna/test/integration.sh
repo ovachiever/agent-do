@@ -2538,6 +2538,200 @@ Manna: $M_ID"
 
     # ------------------------------------------------------------------------
     echo ""
+    echo "Test M8: recovery is authorized under the board lock; a grant revoked while recovery waited never carries forward (review pass 3, recovery race)"
+    output=$("$MANNA" create "Managed recovery race" "grant revoked before the recovery lock" 2>&1) || true
+    RR_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file recovery-race item"
+    op() {
+        script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+            -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+            "$@" </dev/null
+    }
+    # pending_txns <id>: the transaction ids pending on an item, comma-joined.
+    pending_txns() {
+        python3 -c 'import json, os, sys; p = ".manna/managed-intent.json"; d = json.load(open(p)) if os.path.exists(p) else {"intents": []}; print(",".join(i["txn"] for i in d["intents"] if i["issue_id"] == sys.argv[1]))' "$1"
+    }
+    # state_digest: one digest over the sidecar, the audit, and the intents.
+    state_digest() {
+        { cat .manna/managed.json .manna/lifecycle.jsonl .manna/managed-intent.json 2>/dev/null || true; } | shasum | awk '{print $1}'
+    }
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$RR_ID" --reason "lead for recovery race" --json 2>/dev/null)
+    RR_GRANT=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$RR_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$RR_ID" >/dev/null 2>&1
+    # The reviewer's fixture: the worker's submission is the transaction left
+    # pending (its audit cannot be written), and the coordinator recovers it.
+    chmod 000 .manna/lifecycle.jsonl
+    rr_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$RR_ID" --report half.md >/dev/null 2>&1 || rr_submit_exit=$?
+    chmod 644 .manna/lifecycle.jsonl
+    if [[ "$rr_submit_exit" -ne 0 ]]; then
+        pass "the submission whose audit cannot be written does not succeed"
+    else
+        fail "the submission whose audit cannot be written does not succeed" "exit 0"
+    fi
+    RR_TXN=$(pending_txns "$RR_ID")
+    if [[ "$RR_TXN" == txn-* ]]; then
+        pass "the submission's transaction is pending"
+    else
+        fail "the submission's transaction is pending" "got: $RR_TXN"
+    fi
+    before_state=$(state_digest)
+    # Deterministic race, synchronized on the grant read itself (the reviewer's
+    # fixture): the grants file is a FIFO, so the fixture knows the moment
+    # recovery reads it, whatever recovery did first. A recovery that reads
+    # before its lock (the pass-3 defect) finds the lock free: the fixture
+    # takes it, serves the live grant, puts the revoked grant on disk under the
+    # lock, and lets go; that recovery would then recover on obsolete
+    # permission. A recovery that reads under its lock leaves the fixture
+    # refused the lock, and is served the revoked grant: the grants as they
+    # are at lock time. Either way the revocation precedes the recovery's
+    # lock, and nothing here depends on scheduling.
+    mv .manna/coordinators.json rr-grants.real
+    mkfifo .manna/coordinators.json
+    python3 - "$PWD/.manna/board.lock" "$PWD/.manna/coordinators.json" "$PWD/rr-grants.real" "$RR_GRANT" > rr-fixture.out <<'PY' &
+import fcntl, json, os, sys
+lock_path, fifo, real, grant_id = sys.argv[1:5]
+live = json.load(open(real))
+revoked = json.loads(json.dumps(live))
+for grant in revoked["grants"]:
+    if grant["id"] == grant_id:
+        grant["revoked"] = {"at": "2026-10-31T00:30:00Z", "by": "operator-fixture", "reason": "revoked after read, before recovery lock"}
+fd = os.open(fifo, os.O_WRONLY)  # returns the moment recovery opens the grants
+lock = open(lock_path, "a+")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    held = True
+except BlockingIOError:
+    held = False
+os.write(fd, json.dumps(live if held else revoked).encode())
+os.close(fd)
+os.unlink(fifo)
+with open(real, "w") as handle:
+    json.dump(revoked, handle)
+os.rename(real, fifo)
+if held:
+    fcntl.flock(lock, fcntl.LOCK_UN)
+print("read-before-lock" if held else "read-under-lock")
+PY
+    RR_FIXTURE_PID=$!
+    rr_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$RR_ID" > rr-recover.out 2>&1 || rr_exit=$?
+    if kill -0 "$RR_FIXTURE_PID" 2>/dev/null; then
+        # Recovery ended without ever reading the grants: free the fixture
+        # and put the grants file back so the rest of the suite can go on.
+        sleep 0.2
+        if kill -0 "$RR_FIXTURE_PID" 2>/dev/null; then
+            kill "$RR_FIXTURE_PID" 2>/dev/null || true
+            rm -f .manna/coordinators.json
+            mv rr-grants.real .manna/coordinators.json
+            fail "recovery read the grants" "recovery exited $rr_exit without reading the grants file: $(cat rr-recover.out)"
+        fi
+    fi
+    wait "$RR_FIXTURE_PID" 2>/dev/null || true
+    output=$(cat rr-recover.out)
+    sync_mode=$(cat rr-fixture.out)
+    if [[ "$sync_mode" == "read-under-lock" ]]; then
+        pass "recovery read the grants under its own lock, not before it"
+    else
+        fail "recovery read the grants under its own lock, not before it" "the fixture reports: $sync_mode (the grants were read with the lock free, then revoked under the lock)"
+    fi
+    check_exit 2 "$rr_exit" "a grant revoked before recovery holds the lock does not recover (review pass 3, recovery race)"
+    check_yaml "$output" "level under the lock: none" "the refusal reports the authority as it stands under the lock"
+    after_state=$(state_digest)
+    if [[ "$after_state" == "$before_state" ]]; then
+        pass "the refused recovery changed no state and no audit"
+    else
+        fail "the refused recovery changed no state and no audit" "sidecar/audit/intent digest moved: $before_state -> $after_state"
+    fi
+    if [[ "$(pending_txns "$RR_ID")" == "$RR_TXN" ]]; then
+        pass "the transaction is still pending after the refusal"
+    else
+        fail "the transaction is still pending after the refusal" "got: $(pending_txns "$RR_ID")"
+    fi
+    submit_lines=$(grep -c "\"action\":\"submit\",\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 0 "$submit_lines" "no audit line was written by the refused recovery"
+    again_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$RR_ID" >/dev/null 2>&1 || again_exit=$?
+    check_exit 2 "$again_exit" "the revoked coordinator stays refused once the lock is free"
+    # Preserved: the operator finishes it.
+    output=$(op "$MANNA" managed recover "$RR_ID" --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"])) + "/" + (d["recovered"] or ["-"])[0] + "/" + d.get("authority", {}).get("level", "-")')
+    if [[ "$recovered" == "1/$RR_TXN/operator" ]]; then
+        pass "the operator recovers the transaction the revoked coordinator could not"
+    else
+        fail "the operator recovers the transaction the revoked coordinator could not" "got: $recovered"
+    fi
+    submit_lines=$(grep -c "\"action\":\"submit\",\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$submit_lines" "the submission's audit line lands exactly once"
+    if [[ -z "$(pending_txns "$RR_ID")" ]]; then
+        pass "no intent remains after the operator's recovery"
+    else
+        fail "no intent remains after the operator's recovery" "$(cat .manna/managed-intent.json)"
+    fi
+    # Preserved: the session that started a transaction finishes it, grant or
+    # no grant. The worker's next submission is left pending the same way.
+    chmod 000 .manna/lifecycle.jsonl
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$RR_ID" --report half.md >/dev/null 2>&1 || true
+    chmod 644 .manna/lifecycle.jsonl
+    RR_TXN2=$(pending_txns "$RR_ID")
+    stranger_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed recover "$RR_ID" >/dev/null 2>&1 || stranger_exit=$?
+    check_exit 2 "$stranger_exit" "a stranger cannot recover the worker's transaction"
+    recovered=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" managed recover "$RR_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"])) + "/" + (d["recovered"] or ["-"])[0] + "/" + d.get("authority", {}).get("level", "-")')
+    if [[ "$recovered" == "1/$RR_TXN2/owner" ]]; then
+        pass "the session that started the transaction recovers it without a grant"
+    else
+        fail "the session that started the transaction recovers it without a grant" "got: $recovered"
+    fi
+    # The board's own pending transaction is read under the lock too: a
+    # coordinator recovery that holds before the lock, while a revocation of
+    # its grant dies with its intent durable, finds the board pending when it
+    # holds the lock and is refused naming board recovery (the grants file
+    # still shows the grant live; the file is not the truth).
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$RR_ID" --reason "lead again for the board race" --json 2>/dev/null)
+    RR_GRANT_B=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    chmod 000 .manna/lifecycle.jsonl
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$RR_ID" --report half.md >/dev/null 2>&1 || true
+    chmod 644 .manna/lifecycle.jsonl
+    RR_TXN3=$(pending_txns "$RR_ID")
+    item_audit_before=$(grep -c "\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    MANNA_MANAGED_PAUSE_BEFORE_LOCK=3 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" managed recover "$RR_ID" > rr-board-recover.out 2>&1 &
+    RR_BOARD_PID=$!
+    sleep 1.2
+    board_fault_exit=0
+    MANNA_MANAGED_FAULT=after_board_intent op "$MANNA" coordinator revoke "$RR_GRANT_B" --reason "rotate during recovery" >/dev/null 2>&1 || board_fault_exit=$?
+    check_exit 70 "$board_fault_exit" "the revocation died after its intent was durable, while recovery waited"
+    rr_board_exit=0
+    wait "$RR_BOARD_PID" || rr_board_exit=$?
+    output=$(cat rr-board-recover.out)
+    check_exit 2 "$rr_board_exit" "a coordinator recovery that finds the board pending under the lock is refused"
+    check_yaml "$output" "recover board" "the refusal names board recovery, not the stale grants file"
+    if [[ "$(pending_txns "$RR_ID")" == "$RR_TXN3" ]]; then
+        pass "the item's transaction is still pending after the board refusal"
+    else
+        fail "the item's transaction is still pending after the board refusal" "got: $(pending_txns "$RR_ID")"
+    fi
+    item_audit_after=$(grep -c "\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit "$item_audit_before" "$item_audit_after" "the refused recovery wrote no audit line for the item"
+    output=$(op "$MANNA" managed recover board --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$recovered" "the operator finishes the revocation"
+    lead_after_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$RR_ID" >/dev/null 2>&1 || lead_after_exit=$?
+    check_exit 2 "$lead_after_exit" "once the revocation lands the coordinator holds nothing and stays refused"
+    recovered=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" managed recover "$RR_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"])) + "/" + (d["recovered"] or ["-"])[0]')
+    if [[ "$recovered" == "1/$RR_TXN3" ]]; then
+        pass "the session that started the transaction finishes it after the board recovered"
+    else
+        fail "the session that started the transaction finishes it after the board recovered" "got: $recovered"
+    fi
+    unset -f op pending_txns state_digest
+
+    # ------------------------------------------------------------------------
+    echo ""
     echo "Test M5: atomic transitions, authority under the lock, interrupted writes, races"
     # (a) An interrupted release: the process dies after the pending phase.
     output=$("$MANNA" create "Managed interrupted" "release dies mid-way" 2>&1) || true

@@ -122,7 +122,8 @@ pub enum ManagedCommands {
     },
     /// Finish an incomplete transaction (state written but audit not, or the
     /// reverse) so the item can move again: operator, a granted coordinator,
-    /// or the session that started it. `recover board` finishes a grant or
+    /// or the session that started it, decided under the board lock against
+    /// the grants as they are then. `recover board` finishes a grant or
     /// revocation transaction (operator, or the session that started it)
     Recover {
         /// An item id, or `board` for a coordinator grant/revoke transaction
@@ -2076,10 +2077,21 @@ pub fn close_managed(
     }
 }
 
+/// What `managed recover` found under the board lock: nothing pending, a
+/// refusal that is the caller's (needs authorization), or the transactions
+/// it finished. Every check that decides it is made under the lock against
+/// freshly loaded state; a look taken before the lock is never the gate.
+enum Recovery<T> {
+    Nothing { board: Option<String> },
+    Refused(String),
+    Finished(T),
+}
+
 /// `manna managed recover <id>`: finish every incomplete transaction for the
 /// item. Allowed for the operator, a coordinator whose grant covers the
 /// item, or the session that started the transaction (same label and
-/// proof). Idempotent: an audit line already present is not duplicated.
+/// proof), decided under the board lock. Idempotent: an audit line already
+/// present is not duplicated.
 fn cmd_recover(id: String, json: bool) -> ! {
     let board = open_board();
     let store = managed_store();
@@ -2087,44 +2099,48 @@ fn cmd_recover(id: String, json: bool) -> ! {
     if id == BOARD_SCOPE {
         recover_board(&board, &store, &session, json);
     }
+    // A missing id is answered before any lock is taken: a read, never a gate.
     let (issues, _) = load_board_workflow(&board);
-    let issue = find_issue(&issues, &id);
-    let pending = store
-        .pending_intents_for(&id)
-        .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json));
-    let board_pending = store
-        .incomplete_transaction(BOARD_SCOPE)
-        .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json));
-    if pending.is_empty() {
-        emit(
+    find_issue(&issues, &id);
+    pause_before_lock();
+    // Authorization, the board's own pending transaction, and transaction
+    // ownership are all decided under the lock against what is on disk now:
+    // the pending intents, the grants, the row. A grant read earlier and
+    // revoked while recovery waited for the lock never carries forward, and
+    // only the transactions this look authorized are replayed.
+    let outcome = board.with_locked_issue(&id, |current, _| {
+        let pending = store.pending_intents_for(&id)?;
+        let board_pending = store.incomplete_transaction(BOARD_SCOPE)?;
+        if pending.is_empty() {
+            return Ok(Recovery::Nothing { board: board_pending });
+        }
+        let grants = store.load_grants()?;
+        let authority = Authority::resolve(&session, current, &grants);
+        let started_it = pending
+            .iter()
+            .all(|intent| intent.actor == session.id() && intent.actor_proof == session.proof());
+        if !(authority.coordinates() || started_it) {
+            return Ok(Recovery::Refused(format!(
+                "recovering {} needs the operator, a coordinator whose grant covers it, or the session that started the transaction (level under the lock: {}); a grant that was live before the lock and is revoked now does not carry forward",
+                id, authority.level
+            )));
+        }
+        // A coordinator's authority is read from the grants file, and while a
+        // board transaction is pending that file is not the truth: only the
+        // operator or the session that started this transaction may proceed.
+        if let Some(refusal) = board_pending.filter(|_| !(session.is_operator() || started_it)) {
+            return Ok(Recovery::Refused(refusal));
+        }
+        let recovered = store.recover_intents(&pending)?;
+        Ok(Recovery::Finished((recovered, authority)))
+    });
+    let (recovered, authority) = match outcome {
+        Ok(Recovery::Finished(finished)) => finished,
+        Ok(Recovery::Nothing { board: board_pending }) => emit(
             serde_json::json!({"id": id, "recovered": [], "note": "no incomplete transaction", "board": board_pending}),
             json,
-        );
-    }
-    let grants = load_grants_or_fail(&store, json);
-    let authority = Authority::resolve(&session, &issue, &grants);
-    let started_it = pending
-        .iter()
-        .all(|intent| intent.actor == session.id() && intent.actor_proof == session.proof());
-    if !(authority.coordinates() || started_it) {
-        fail(
-            &format!(
-                "recovering {} needs the operator, a coordinator whose grant covers it, or the session that started the transaction (level here: {})",
-                id, authority.level
-            ),
-            EXIT_NEEDS_AUTHORIZATION,
-            json,
-        );
-    }
-    // A coordinator's authority is read from the grants file, and while a
-    // board transaction is pending that file is not the truth: only the
-    // operator or the session that started this transaction may proceed.
-    if let Some(refusal) = board_pending.filter(|_| !(session.is_operator() || started_it)) {
-        fail(&refusal, EXIT_NEEDS_AUTHORIZATION, json);
-    }
-    let recovered = board.with_board_lock(|| store.recover(&id).map_err(MannaError::MutationRejected));
-    let recovered = match recovered {
-        Ok(recovered) => recovered,
+        ),
+        Ok(Recovery::Refused(message)) => fail(&message, EXIT_NEEDS_AUTHORIZATION, json),
         Err(error) => rejected(error, json),
     };
     let record = store.record_for(&id).ok().flatten();
@@ -2142,33 +2158,41 @@ fn cmd_recover(id: String, json: bool) -> ! {
 /// `manna managed recover board`: finish an incomplete grant or revocation.
 /// Only the operator, or the session that started it (the operator by
 /// construction), may: a coordinator's own authority is what the pending
-/// transaction decides, so it cannot be the one to decide it.
+/// transaction decides, so it cannot be the one to decide it. The pending
+/// list and the ownership check sit under the board lock, and only the
+/// transactions that look authorized are replayed.
 fn recover_board(board: &MannaStore, store: &ManagedStore, session: &SessionIdentity, json: bool) -> ! {
-    let pending = store
-        .pending_intents_for(BOARD_SCOPE)
-        .unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json));
-    if pending.is_empty() {
-        emit(
+    pause_before_lock();
+    let outcome = board.with_board_lock(|| {
+        let pending = store
+            .pending_intents_for(BOARD_SCOPE)
+            .map_err(MannaError::MutationRejected)?;
+        if pending.is_empty() {
+            return Ok(Recovery::Nothing { board: None });
+        }
+        let started_it = pending
+            .iter()
+            .all(|intent| intent.actor == session.id() && intent.actor_proof == session.proof());
+        if !(session.is_operator() || started_it) {
+            return Ok(Recovery::Refused(
+                "recovering a board transaction (a coordinator grant or revocation) needs the operator or the session that started it; a coordinator cannot finish the transaction that decides its own authority".to_string(),
+            ));
+        }
+        let recovered = store
+            .recover_intents(&pending)
+            .map_err(MannaError::MutationRejected)?;
+        let grants = store.load_grants().map_err(MannaError::MutationRejected)?;
+        Ok(Recovery::Finished((recovered, grants)))
+    });
+    let (recovered, grants) = match outcome {
+        Ok(Recovery::Finished(finished)) => finished,
+        Ok(Recovery::Nothing { .. }) => emit(
             serde_json::json!({"id": BOARD_SCOPE, "recovered": [], "note": "no incomplete board transaction"}),
             json,
-        );
-    }
-    let started_it = pending
-        .iter()
-        .all(|intent| intent.actor == session.id() && intent.actor_proof == session.proof());
-    if !(session.is_operator() || started_it) {
-        fail(
-            "recovering a board transaction (a coordinator grant or revocation) needs the operator or the session that started it; a coordinator cannot finish the transaction that decides its own authority",
-            EXIT_NEEDS_AUTHORIZATION,
-            json,
-        );
-    }
-    let recovered = board.with_board_lock(|| store.recover(BOARD_SCOPE).map_err(MannaError::MutationRejected));
-    let recovered = match recovered {
-        Ok(recovered) => recovered,
+        ),
+        Ok(Recovery::Refused(message)) => fail(&message, EXIT_NEEDS_AUTHORIZATION, json),
         Err(error) => rejected(error, json),
     };
-    let grants = load_grants_or_fail(store, json);
     emit(
         serde_json::json!({
             "id": BOARD_SCOPE,

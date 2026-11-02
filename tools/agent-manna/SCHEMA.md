@@ -344,7 +344,9 @@ the board unchanged and an unmanaged board never has them.
   record_after?, grants_after?, event}]}`. An intent is written before a
   transaction's state and audit writes and removed after both landed; one
   left behind means those writes did not both land, the item refuses every
-  mutation, and `managed recover <id>` applies the recorded outcome. An
+  mutation, and `managed recover <id>` applies the recorded outcome, having
+  decided under the board lock, against the grants and intents on disk at
+  that moment, that the caller may finish exactly those transactions. An
   intent with `issue_id: board` (a grant or revocation) holds every managed
   item and every grant change until the operator runs `managed recover
   board`.

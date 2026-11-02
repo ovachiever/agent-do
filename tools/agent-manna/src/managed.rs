@@ -672,11 +672,30 @@ impl ManagedStore {
     /// transaction ids.
     pub fn recover(&self, id: &str) -> Result<Vec<String>, String> {
         let pending = self.pending_intents_for(id)?;
+        self.recover_intents(&pending)
+    }
+
+    /// Finish exactly these transactions, in order, and nothing else: the
+    /// caller read and authorized this list under the board lock, so a
+    /// transaction that is no longer pending (or never was) is refused
+    /// rather than replayed from the caller's copy. Returns the retired
+    /// transaction ids.
+    pub fn recover_intents(&self, intents: &[Intent]) -> Result<Vec<String>, String> {
+        let pending = self.load_intents()?.intents;
         let mut recovered = Vec::new();
-        for intent in pending {
-            self.apply_intent(&intent)?;
-            self.retire_intent(&intent.txn)?;
-            recovered.push(intent.txn);
+        for intent in intents {
+            let current = pending
+                .iter()
+                .find(|candidate| candidate.txn == intent.txn)
+                .ok_or_else(|| {
+                    format!(
+                        "transaction {} is not pending; recovery replays only the transactions it authorized under the lock",
+                        intent.txn
+                    )
+                })?;
+            self.apply_intent(current)?;
+            self.retire_intent(&current.txn)?;
+            recovered.push(current.txn.clone());
         }
         Ok(recovered)
     }
@@ -1459,5 +1478,55 @@ mod tests {
         store.recover(BOARD_SCOPE).unwrap();
         assert!(!store.load_grants().unwrap().grants[0].is_live(), "recovery lands the revocation");
         assert_eq!(store.events_for(BOARD_SCOPE).unwrap().len(), 1);
+    }
+
+    fn item_intent(action: &str, second: u32) -> Intent {
+        let started_at = Utc.with_ymd_and_hms(2026, 10, 31, 0, 30, second).unwrap();
+        let txn = transaction_id("mn-aaa111", action, &started_at, "review-worker");
+        Intent {
+            txn: txn.clone(),
+            issue_id: "mn-aaa111".to_string(),
+            action: action.to_string(),
+            started_at,
+            actor: "review-worker".to_string(),
+            actor_proof: "sha256:worker".to_string(),
+            record_after: Some(record(1)),
+            grants_after: None,
+            event: LifecycleEvent {
+                txn,
+                at: started_at,
+                action: action.to_string(),
+                issue_id: "mn-aaa111".to_string(),
+                actor: "review-worker".to_string(),
+                authority: "owner".to_string(),
+                attempt: Some(1),
+                reason: None,
+                evidence: None,
+                detail: None,
+            },
+        }
+    }
+
+    #[test]
+    fn recovery_replays_only_the_transactions_it_authorized() {
+        // The caller authorizes a list it read under the lock; recovery
+        // finishes that list and nothing else, and a copy of a transaction
+        // that is no longer pending is refused rather than replayed.
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = store_in(dir.path());
+        let first = item_intent("submit", 9);
+        let second = item_intent("accept", 10);
+        store.begin_transaction(&first).unwrap();
+        store.begin_transaction(&second).unwrap();
+        let recovered = store.recover_intents(std::slice::from_ref(&first)).unwrap();
+        assert_eq!(recovered, vec![first.txn.clone()]);
+        assert!(store.event_landed(&first.txn).unwrap());
+        assert!(!store.event_landed(&second.txn).unwrap(), "the transaction nobody authorized was not replayed");
+        assert_eq!(store.pending_intents_for("mn-aaa111").unwrap().len(), 1);
+        let refused = store.recover_intents(std::slice::from_ref(&first)).unwrap_err();
+        assert!(refused.contains("is not pending"), "{}", refused);
+        assert_eq!(store.events_for("mn-aaa111").unwrap().len(), 1, "nothing doubled");
+        assert_eq!(store.recover("mn-aaa111").unwrap(), vec![second.txn.clone()]);
+        assert!(!store.intents_path().exists(), "no intent remains");
     }
 }
