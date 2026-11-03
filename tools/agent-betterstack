@@ -315,6 +315,39 @@ import sys, json
 d = json.load(sys.stdin)
 a = d.get('data', {}).get('attributes', {})
 monitor = d.get('data', {}).get('relationships', {}).get('monitor', {}).get('data', {})
+
+# What the checker actually received. response_options is a JSON string of
+# curl timings plus the raw response header block; without it a Cloudflare
+# challenge (cf-mitigated) is indistinguishable from the app answering 403.
+# Only diagnostic headers are kept (never cookies or auth headers).
+KEEP = ('server', 'cf-mitigated', 'cf-ray', 'content-type', 'location',
+        'retry-after', 'x-render-origin-server', 'rndr-id', 'via')
+response = None
+try:
+    ro = json.loads(a.get('response_options') or 'null')
+except (TypeError, ValueError):
+    ro = None
+if isinstance(ro, dict):
+    headers = {}
+    raw = ro.get('response_headers') or ''
+    if isinstance(raw, str):
+        lines = raw.replace('\r\n', '\n').split('\n')
+        starts = [i for i, l in enumerate(lines) if l.startswith('HTTP/')]
+        for line in lines[starts[-1] + 1 if starts else 0:]:
+            name, sep, value = line.partition(':')
+            if sep and name.strip().lower() in KEEP:
+                headers[name.strip().lower()] = value.strip()
+    response = {
+        'code': ro.get('response_code'),
+        'primary_ip': ro.get('primary_ip'),
+        'effective_url': ro.get('effective_url'),
+        'total_time_s': ro.get('total_time'),
+        'headers': headers,
+    }
+    if headers.get('cf-mitigated'):
+        response['note'] = ('Cloudflare answered with a ' + headers['cf-mitigated']
+                            + ' (cf-mitigated) - the origin app may be up')
+
 print(json.dumps({
     'id': d.get('data', {}).get('id', ''),
     'name': a.get('name', ''),
@@ -329,6 +362,7 @@ print(json.dumps({
     'monitor_id': monitor.get('id') if monitor else None,
     'regions': a.get('regions', []),
     'screenshot_url': a.get('screenshot_url'),
+    'response': response,
 }, indent=2))
 "
 }
