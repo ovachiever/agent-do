@@ -2048,6 +2048,349 @@ def test_assignment_turnover(tmp_path: Path, env_base: dict[str, str]) -> None:
         require(not [i for i in coord_json(["interrupts"], cwd=project, env=env)["interrupts"] if i.get("drop_id") == old["id"]], "retired: the stale drop leaves both sides")
 
 
+def wake_fixture(tmp_path: Path, env_base: dict[str, str], name: str):
+    """A throwaway board with a claimed item and a bound worker; hosts anchor to the live test runner."""
+    project = make_project(tmp_path, name)
+    subprocess.run(["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "init"], cwd=project, check=True)
+    base = clean_env(env_base)
+    base.update(AGENT_DO_HOOK_AI="off", AGENT_DO_TELEMETRY_SUPPRESS="1")
+
+    def session(sid: str) -> dict[str, str]:
+        return dict(base, CLAUDE_SESSION_ID=sid, AGENT_DO_COORD_SESSION=sid)
+
+    def host(hid: str, pid: int | None = None) -> dict[str, str]:
+        anchor = pid if pid is not None else os.getpid()
+        return dict(base, AGENT_DO_COORD_SESSION=hid, AGENT_DO_COORD_PID=str(anchor), AGENT_DO_COORD_PID_START=lstart(anchor))
+
+    lead = session("wake-lead-0001")
+    worker = session("wake-worker-0001")
+    require(manna(["init"], cwd=project, env=lead).returncode == 0, "init fixture")
+
+    def create_item(title: str) -> str:
+        created = manna(["create", title, "fixture"], cwd=project, env=lead)
+        require(created.returncode == 0, f"manna create failed: {created.stderr or created.stdout}")
+        return re.search(r"^  id: (mn-[0-9a-f]{6})$", created.stdout, re.MULTILINE).group(1)
+
+    item = create_item("Wake lane")
+    require(manna(["claim", item], cwd=project, env=worker).returncode == 0, "claim fixture")
+    worker_id = coord_json(["touch"], cwd=project, env=worker)["agent_id"]
+    (project / ".dev").mkdir(exist_ok=True)
+    return project, base, lead, worker, worker_id, item, session, host, create_item
+
+
+def wake_of(payload: dict, drop_id: str) -> dict | None:
+    for bucket in ("demands", "held"):
+        for entry in payload[bucket]:
+            if entry["drop"]["id"] == drop_id:
+                return dict(entry, bucket=bucket)
+    return None
+
+
+def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
+    """The host-driven wake contract (coord-wake/1) through the real CLI and hooks, in a throwaway board.
+
+    Standalone use with no host, two competing consumers, duplicate and replayed
+    receipts, crash and restart, an unknown transport outcome, reassignment
+    after enqueue, a changed revision, unavailable and ambiguous recipients,
+    acknowledged-action suppression, a fresh demand on a new revision, and the
+    invariant that a recorded or submitted notification is never an
+    acknowledgment. No live harness session is launched.
+    """
+    project, base, lead, worker, worker_id, item, session, host, create_item = wake_fixture(tmp_path, env_base, "wake-contract")
+    row = manna_json(["show", item], cwd=project, env=lead)["issue"]
+    approval_args = [
+        "drop", "add", ".dev/approval.md", "--for-item", item,
+        "--allows", "write the migration file", "--excludes", "deploying it", "--authorized-by", "Erik, in session",
+        "--note", "migration approval",
+    ]
+
+    # --- A. Standalone, no host anywhere: the ledger, the bell and the hooks are unchanged. ---
+    approval = coord_json(approval_args, cwd=project, env=lead)["drop"]
+    info = coord_json(["drop", "add", ".dev/fyi.md", "--for-item", item, "--note", "fyi"], cwd=project, env=lead)["drop"]
+    broadcast = coord_json(["drop", "add", ".dev/all.md", "--for", "any", "--action", "--note", "everyone"], cwd=project, env=lead)["drop"]
+    require(approval["delivery"]["stage"] == "bell queued" and approval["delivery"]["notification"]["state"] == "wanted", f"a fresh action drop: {approval['delivery']}")
+    listing = coord_json(["drops", "--wake"], cwd=project, env=lead)
+    require(listing["contract"] == "coord-wake/1" and "agent-do coord interrupts" in listing["instruction"], f"contract header: {listing}")
+    require([d["drop"]["id"] for d in listing["demands"]] == [approval["id"]], f"only the action drop with an exact live recipient is a demand: {listing['demands']}")
+    demand = listing["demands"][0]
+    require(demand["actionable"] and demand["wake_wanted"] and demand["notification"]["state"] == "wanted", f"wanted: {demand}")
+    require(demand["addressing"] == "item" and demand["demand_id"].startswith(f"{approval['id']}:r1:"), f"demand identity: {demand['demand_id']}")
+    require(demand["assignment"]["claim_proof"] == row["claim_token_hash"] and demand["assignment"]["claimed_at"] == row["claimed_at"], f"assignment pinned: {demand['assignment']}")
+    require(demand["assignment"]["work_order"]["digest"] == row["handoff_digest"] and demand["assignment"]["board"] == str((project / ".manna").resolve()), f"work order and board: {demand['assignment']}")
+    require(demand["recipient"]["agent_id"] == worker_id and demand["recipient"]["session"]["harness"]["session"] == "wake-worker-0001", f"recipient harness facts: {demand['recipient']}")
+    require(demand["recipient"]["session"]["bound"]["proof"] == row["claim_token_hash"], "the recipient's binding is shown")
+    require(demand["stage"] == "bell queued" and demand["acknowledged"] is None and demand["stale"] is None, f"stage rides along: {demand}")
+    held = wake_of(listing, broadcast["id"])
+    require(held and held["bucket"] == "held" and held["reason"].startswith("broadcast"), f"a broadcast action is held, never a wake: {held}")
+    require(wake_of(listing, info["id"]) is None, "an informational drop is never listed as a demand")
+    require(listing["counts"] == {"demands": 1, "wanted": 1, "held": 1}, f"counts: {listing['counts']}")
+    # Ordinary hooks still work for the worker; nothing waits on a host.
+    hook = router_hook(project, base, "wake-worker-0001")
+    require(approval["id"] in hook and "drop ack" in hook, f"the worker's hook carries the approval without any host: {hook}")
+    bell = doorbell_hook(project, worker, "wake-worker-0001")
+    require(json.loads(bell.stdout)["hookSpecificOutput"]["additionalContext"] == "The ledger has entries concerning you; read coord.", f"doorbell: {bell}")
+    mine = [d for d in coord_json(["drops", "--for-me"], cwd=project, env=worker)["drops"] if d["id"] == approval["id"]]
+    require(mine and mine[0]["delivery"]["notification"]["state"] == "wanted", "the recipient's own view carries the notification state")
+    text = coord(["drops", "--wake"], cwd=project, env=lead)
+    require(text.returncode == 0 and "wake demands: 1 (wanted 1)" in text.stdout and approval["id"] in text.stdout and "held:" in text.stdout, f"text listing: {text.stdout}")
+
+    # --- B. The recipient cannot wake itself. ---
+    bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=worker)
+    require(bad.returncode == 2 and "recipient" in json.loads(bad.stdout)["error"] and "drop ack" in json.loads(bad.stdout)["error"], f"recipient refused: {bad.stdout}")
+
+    # --- C. Two competing consumers: one live holder per demand; a repeat is the same request. ---
+    host_a = host("holy-host-a")
+    host_b = host("holy-host-b")
+    coord_json(["role", "set", "overseer", "--territory", "."], cwd=project, env=host_a)
+    coord_json(["role", "set", "overseer", "--territory", "."], cwd=project, env=host_b)
+    a_id = coord_json(["whoami"], cwd=project, env=host_a)["agent_id"]
+    b_id = coord_json(["whoami"], cwd=project, env=host_b)["agent_id"]
+    requested = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)
+    request = requested["request"]
+    require(requested["contract"] == "coord-wake/1" and requested["change"] == "requested" and requested["duplicate"] is False, f"request receipt: {requested}")
+    require(request["id"].startswith("wrq-") and request["consumer"] == a_id and request["recipient"] == worker_id and request["revision"] == 1, f"request: {request}")
+    require(request["demand_id"] == demand["demand_id"] and request["outcome"] is None and request["waiting"] is None, f"request binds the demand: {request}")
+    require(requested["demand"]["notification"]["state"] == "requested" and requested["demand"]["notification"]["request"]["id"] == request["id"], f"state after request: {requested['demand']['notification']}")
+    require(requested["instruction"] == listing["instruction"], "the fixed instruction travels with the request")
+    require(requested["demand"]["recipient"]["session"]["harness"]["pid"] is not None, "the recipient's harness facts come with the request")
+    contended = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_b)
+    require(contended.returncode == 2, "a second live consumer is refused")
+    payload = json.loads(contended.stdout)
+    require("held by" in payload["error"] and a_id in payload["error"] and payload["held_by"]["id"] == request["id"], f"refusal names the holder: {payload}")
+    again = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)
+    require(again["duplicate"] is True and again["change"] == "unchanged" and again["request"]["id"] == request["id"], f"same consumer, same request: {again}")
+    seen_by_b = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_b), approval["id"])
+    require(seen_by_b["bucket"] == "demands" and seen_by_b["wake_wanted"] is False and seen_by_b["notification"]["request"]["consumer"] == a_id, f"B sees who holds it: {seen_by_b['notification']}")
+    awaiting = [i for i in coord_json(["interrupts"], cwd=project, env=lead)["interrupts"] if i.get("awaiting") and i.get("drop_id") == approval["id"]]
+    require(awaiting and "wake requested" in awaiting[0]["summary"] and "not an ack" in awaiting[0]["summary"], f"the owner sees the transport state beside the stage: {awaiting}")
+    require(json.loads((project / ".git/agent-do/coord/drops.json").read_text())["drops"][0]["acks"] == {}, "a request writes no acknowledgment")
+
+    # --- D. Pending readiness: the holder says why it waits; a replay changes nothing. ---
+    waiting = coord_json(["drop", "wake", approval["id"], "--request", request["id"], "--waiting", "session busy: tool call in flight"], cwd=project, env=host_a)
+    require(waiting["change"] == "recorded" and waiting["demand"]["notification"]["state"] == "pending readiness", f"waiting: {waiting['demand']['notification']}")
+    require(waiting["request"]["waiting"]["reason"].startswith("session busy") and waiting["request"]["history"][-1]["event"] == "waiting", f"waiting recorded: {waiting['request']}")
+    replay = coord_json(["drop", "wake", approval["id"], "--request", request["id"], "--waiting", "session busy: tool call in flight"], cwd=project, env=host_a)
+    require(replay["duplicate"] is True and replay["change"] == "unchanged" and len(replay["request"]["history"]) == len(waiting["request"]["history"]), f"replayed waiting is unchanged: {replay}")
+    bad = coord(["drop", "wake", approval["id"], "--request", request["id"], "--waiting", "x", "--outcome", "submitted", "--evidence", "y", "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "exactly one" in json.loads(bad.stdout)["error"], "waiting and outcome are exclusive")
+    bad = coord(["drop", "wake", approval["id"], "--request", request["id"], "--outcome", "submitted", "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "--evidence" in json.loads(bad.stdout)["error"], "an outcome needs its evidence")
+    bad = coord(["drop", "wake", approval["id"], "--outcome", "submitted", "--evidence", "y", "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "--request" in json.loads(bad.stdout)["error"], "an outcome names its request")
+    bad = coord(["drop", "wake", approval["id"], "--request", request["id"], "--outcome", "submitted", "--evidence", "y", "--json"], cwd=project, env=host_b)
+    require(bad.returncode == 2 and "held by" in json.loads(bad.stdout)["error"], "another live consumer cannot record the holder's outcome")
+
+    # --- E. Submitted is a transport fact and never an acknowledgment. ---
+    submitted = coord_json(["drop", "wake", approval["id"], "--request", request["id"], "--outcome", "submitted", "--evidence", "tmux pane %1, server epoch 3, composer empty"], cwd=project, env=host_a)
+    require(submitted["change"] == "recorded" and submitted["request"]["outcome"]["state"] == "submitted", f"submitted: {submitted['request']}")
+    require(submitted["delivery_stage"] == "bell queued" and submitted["demand"]["acknowledged"] is None, f"submission never moves the delivery stage: {submitted['delivery_stage']} {submitted['demand']['acknowledged']}")
+    require(submitted["demand"]["notification"]["state"] == "submitted" and submitted["demand"]["actionable"] is True, f"state: {submitted['demand']['notification']}")
+    owner_view = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == approval["id"])
+    require(owner_view["delivery"]["stage"] == "bell queued" and owner_view["delivery"]["acknowledged"] is None and owner_view["delivery"]["notification"]["state"] == "submitted", f"owner's view: {owner_view['delivery']}")
+    require(owner_view["acks"] == {}, "no ack was written by the host")
+    hook = router_hook(project, base, "wake-worker-0001")
+    require(approval["id"] in hook and "drop ack" in hook, f"the worker still owes the acknowledgment: {hook}")
+    lookup = coord_json(["worker", item], cwd=project, env=lead)["obligations"]
+    require(lookup[0]["stage"] == "bell queued" and lookup[0]["delivery"]["notification"]["state"] == "submitted", f"worker lookup shows both facts: {lookup}")
+    replay = coord_json(["drop", "wake", approval["id"], "--request", request["id"], "--outcome", "submitted", "--evidence", "replayed after reconnect"], cwd=project, env=host_a)
+    require(replay["duplicate"] is True and replay["change"] == "unchanged" and replay["request"]["outcome"]["evidence"].startswith("tmux pane"), f"a replayed receipt changes nothing: {replay['request']['outcome']}")
+    require(len(replay["request"]["history"]) == len(submitted["request"]["history"]), "no history grows on a replay")
+    blocked = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_b)
+    require(blocked.returncode == 2 and "--after" in json.loads(blocked.stdout)["error"] and json.loads(blocked.stdout)["submitted"]["id"] == request["id"], f"after a submission a new request needs --after with evidence: {blocked.stdout}")
+    bad = coord(["drop", "wake", approval["id"], "--after", request["id"], "--json"], cwd=project, env=host_b)
+    require(bad.returncode == 2, "--after without evidence is refused")
+    second = coord_json(["drop", "wake", approval["id"], "--after", request["id"], "--evidence", "no ack after the session went idle again"], cwd=project, env=host_b)
+    require(second["change"] == "requested" and second["request"]["after"] == request["id"] and second["request"]["consumer"] == b_id, f"an explicit further wake: {second['request']}")
+    frozen = coord(["drop", "wake", approval["id"], "--request", request["id"], "--outcome", "failed", "--evidence", "late", "--json"], cwd=project, env=host_a)
+    require(frozen.returncode == 2 and "superseded" in json.loads(frozen.stdout)["error"], "an earlier request is frozen once a later one exists")
+
+    # --- F. Acknowledged action suppression: the recipient's ack ends the demand, not any receipt. ---
+    acked = coord_json(["drop", "ack", approval["id"]], cwd=project, env=worker)["drop"]
+    require(acked["delivery"]["stage"] == "acknowledged" and acked["delivery"]["acknowledged"]["by"] == worker_id, "only the recipient's ack reaches the acknowledged stage")
+    listing = coord_json(["drops", "--wake"], cwd=project, env=host_b)
+    entry = wake_of(listing, approval["id"])
+    require(entry["bucket"] == "held" and entry["reason"].startswith("acknowledged by") and entry["actionable"] is False, f"acknowledged work is held: {entry['reason']}")
+    late = coord_json(["drop", "wake", approval["id"], "--request", second["request"]["id"], "--outcome", "submitted", "--evidence", "pane %1 epoch 3"], cwd=project, env=host_b)
+    require(late["change"] == "recorded" and late["demand_actionable"] is False and "acknowledged" in late["demand"]["reason"], f"a late receipt is kept as a fact and says the demand is over: {late['demand_actionable']} {late['demand']['reason']}")
+    bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "acknowledged" in json.loads(bad.stdout)["error"], "no wake for an acknowledged obligation")
+    require(acked["status"] == "open", "acknowledged is not resolved; the obligation stands")
+
+    # --- G. A new revision is a new demand: fresh attention, history kept. ---
+    revised = coord_json([*approval_args[:-1], "migration approval, scope clarified"], cwd=project, env=lead)["drop"]
+    require(revised["revision"] == 2 and revised["delivery"]["notification"]["state"] == "wanted", f"revision 2 wants attention again: {revised['delivery']['notification']}")
+    listing = coord_json(["drops", "--wake"], cwd=project, env=host_a)
+    entry = wake_of(listing, approval["id"])
+    require(entry["bucket"] == "demands" and entry["wake_wanted"] and ":r2:" in entry["demand_id"], f"r2 is a fresh demand: {entry['demand_id']}")
+    record = next(d for d in coord_json(["drops", "--all"], cwd=project, env=lead)["drops"] if d["id"] == approval["id"])
+    require(len(record["wake"]) == 1 and len(next(iter(record["wake"].values()))["requests"]) == 2, f"r1 receipts are retained: {list(record['wake'])}")
+    history = coord_json(["drop", "history", approval["id"]], cwd=project, env=lead)
+    kinds = [e["kind"] for e in history["events"]]
+    require("wake_request" in kinds and "wake_outcome" in kinds and "wake_waiting" in kinds, f"the journal carries the receipts: {kinds}")
+
+    # --- H. Unknown outcome: no blind resubmission by anyone until it is established. ---
+    r2 = coord_json(["drop", "wake", approval["id"], "--revision", "2"], cwd=project, env=host_a)["request"]
+    unknown = coord_json(["drop", "wake", approval["id"], "--request", r2["id"], "--outcome", "unknown", "--evidence", "reconnect lost the reply"], cwd=project, env=host_a)
+    require(unknown["demand"]["notification"]["state"] == "unknown" and unknown["request"]["outcome"]["state"] == "unknown", f"unknown is explicit: {unknown['request']['outcome']}")
+    for env in (host_b, host_a):
+        bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=env)
+        payload = json.loads(bad.stdout)
+        require(bad.returncode == 2 and "unknown" in payload["error"] and payload["outstanding"]["id"] == r2["id"], f"unknown blocks every new request: {payload}")
+    bad = coord(["drop", "wake", approval["id"], "--revision", "1", "--json"], cwd=project, env=host_b)
+    require(bad.returncode == 2, "a stale --revision is refused")
+    established = coord_json(["drop", "wake", approval["id"], "--request", r2["id"], "--outcome", "failed", "--evidence", "pane scrollback shows nothing was submitted"], cwd=project, env=host_a)
+    require(established["change"] == "corrected" and established["request"]["outcome"]["corrects"]["state"] == "unknown", f"a correction keeps the earlier outcome: {established['request']['outcome']}")
+    require(established["demand"]["notification"]["state"] == "wanted" and established["demand"]["notification"]["attempts"] == 1, f"failed reopens the demand: {established['demand']['notification']}")
+    b_holds = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_b)["request"]
+    require(b_holds["consumer"] == b_id, "once established, another consumer may proceed")
+    released = coord_json(["drop", "wake", approval["id"], "--request", b_holds["id"], "--outcome", "released", "--evidence", "this host does not own that pane"], cwd=project, env=host_b)
+    require(released["demand"]["notification"]["state"] == "wanted" and released["demand"]["notification"]["attempts"] == 1, "released steps back without counting an attempt")
+
+    # --- I. Crash and restart: presence is the lease. A dead holder with no outcome lapses and is superseded;
+    # a dead holder's unknown outcome still blocks until a live consumer establishes it; a restart is the same consumer. ---
+    proc = subprocess.Popen(["sleep", "300"])
+    try:
+        host_c = host("holy-host-c", pid=proc.pid)
+        c_id = coord_json(["whoami"], cwd=project, env=host_c)["agent_id"]
+        c_request = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_c)["request"]
+        bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_a)
+        require(bad.returncode == 2 and c_id in json.loads(bad.stdout)["error"], "a live holder is honored")
+    finally:
+        proc.kill()
+        proc.wait()
+    lapsed_view = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), approval["id"])
+    require(lapsed_view["notification"]["state"] == "wanted" and lapsed_view["notification"]["lapsed"]["request"] == c_request["id"], f"a dead holder lapses: {lapsed_view['notification']}")
+    require(lapsed_view["notification"]["lapsed"]["consumer_presence"] == "dead", f"the lapse names the verified presence: {lapsed_view['notification']['lapsed']}")
+    superseding = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)
+    require(superseding["change"] == "superseded" and superseding["supersedes"]["request"] == c_request["id"] and superseding["supersedes"]["consumer"] == c_id, f"supersession is explicit: {superseding['supersedes']}")
+    restarted_c = host("holy-host-c")
+    bad = coord(["drop", "wake", approval["id"], "--request", c_request["id"], "--outcome", "submitted", "--evidence", "late", "--json"], cwd=project, env=restarted_c)
+    require(bad.returncode == 2 and "superseded" in json.loads(bad.stdout)["error"], "the lapsed request is frozen for the restarted consumer")
+    bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=restarted_c)
+    require(bad.returncode == 2 and a_id in json.loads(bad.stdout)["error"], "the restarted consumer sees the current holder")
+    record = next(d for d in coord_json(["drops", "--all"], cwd=project, env=lead)["drops"] if d["id"] == approval["id"])
+    r2_requests = next(bucket for key, bucket in record["wake"].items() if ":r2:" in key)["requests"]
+    lapsed_record = next(r for r in r2_requests if r["id"] == c_request["id"])
+    require(lapsed_record["lapsed"]["superseded_by"] == superseding["request"]["id"] and lapsed_record["history"][-1]["event"] == "lapsed", f"the lapse is journaled on the record: {lapsed_record}")
+    coord_json(["drop", "wake", approval["id"], "--request", superseding["request"]["id"], "--outcome", "released", "--evidence", "handing the pane to another host"], cwd=project, env=host_a)
+    proc = subprocess.Popen(["sleep", "300"])
+    try:
+        host_d = host("holy-host-d", pid=proc.pid)
+        d_request = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_d)["request"]
+        coord_json(["drop", "wake", approval["id"], "--request", d_request["id"], "--outcome", "unknown", "--evidence", "host link dropped mid-submit"], cwd=project, env=host_d)
+    finally:
+        proc.kill()
+        proc.wait()
+    view = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), approval["id"])
+    require(view["notification"]["state"] == "unknown" and view["notification"]["request"]["consumer_presence"] == "dead", f"a holder's death does not release its unknown outcome: {view['notification']}")
+    bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and json.loads(bad.stdout)["outstanding"]["id"] == d_request["id"], "an unknown outcome blocks even when its holder is gone")
+    settled = coord_json(["drop", "wake", approval["id"], "--request", d_request["id"], "--outcome", "failed", "--evidence", "pane shows no submission; the host died before sending"], cwd=project, env=host_a)
+    require(settled["change"] == "corrected" and settled["holder_presence"] == "dead" and settled["request"]["outcome"]["by"] == a_id, f"a live consumer establishes a dead holder's unknown: {settled['request']['outcome']}")
+    require(settled["demand"]["notification"]["state"] == "wanted", "established as failed, the demand is open again")
+    taken = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)
+    require(taken["change"] == "requested" and taken["request"]["consumer"] == a_id, f"the live consumer proceeds: {taken['change']}")
+
+    # --- J. A changed revision while a request is held: the receipt stays against the old demand; the new one wants fresh attention. ---
+    third = coord_json([*approval_args[:-1], "migration approval, third wording"], cwd=project, env=lead)["drop"]
+    require(third["revision"] == 3 and third["delivery"]["notification"]["state"] == "wanted", f"r3 is a fresh demand: {third['delivery']['notification']}")
+    moved = coord_json(["drop", "wake", approval["id"], "--request", taken["request"]["id"], "--outcome", "submitted", "--evidence", "pane %1 epoch 4"], cwd=project, env=host_a)
+    require(moved["change"] == "recorded" and moved["demand_moved"] is not None, f"a receipt on a superseded revision is kept and reported moved: {moved['demand_moved']}")
+    require(moved["demand_moved"]["from"] == taken["request"]["demand_id"] and ":r3:" in moved["demand_moved"]["to"], f"moved from r2 to r3: {moved['demand_moved']}")
+    require(moved["demand"]["notification"]["state"] == "wanted" and moved["demand"]["actionable"] is True, f"r3 is untouched by the r2 receipt: {moved['demand']['notification']}")
+    r3_request = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)["request"]
+    require(":r3:" in r3_request["demand_id"] and r3_request["revision"] == 3, f"the new request binds r3: {r3_request}")
+
+    # --- K. Reassignment after enqueue: the pin is unchanged, so the demand is the same one, now stale; nothing is forwarded. ---
+    require(manna(["abandon", item], cwd=project, env=worker).returncode == 0, "worker abandons")
+    replacement = session("wake-replacement-0001")
+    require(manna(["claim", item], cwd=project, env=replacement).returncode == 0, "replacement claims")
+    replacement_id = coord_json(["touch"], cwd=project, env=replacement)["agent_id"]
+    listing = coord_json(["drops", "--wake"], cwd=project, env=host_a)
+    entry = wake_of(listing, approval["id"])
+    require(entry["bucket"] == "held" and entry["reason"].startswith("stale: reassigned"), f"reassignment holds the demand: {entry['reason']}")
+    require(entry["notification"]["state"] == "requested" and entry["notification"]["request"]["id"] == r3_request["id"], f"the held request is still visible on the stale demand: {entry['notification']}")
+    outcome = coord_json(["drop", "wake", approval["id"], "--request", r3_request["id"], "--outcome", "submitted", "--evidence", "pane %1 epoch 5"], cwd=project, env=host_a)
+    require(outcome["change"] == "recorded" and outcome["demand_actionable"] is False and outcome["demand_moved"] is None, f"the receipt is kept against the same, now stale, demand: {outcome['demand_moved']} {outcome['demand_actionable']}")
+    require(outcome["demand"]["reason"].startswith("stale: reassigned") and "not forwarded" in outcome["demand"]["reason"], f"the receipt says why the demand is over: {outcome['demand']['reason']}")
+    require(approval["id"] not in {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=replacement)["drops"]}, "the replacement never sees the old worker's approval")
+    bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_b)
+    require(bad.returncode == 2 and "stale" in json.loads(bad.stdout)["error"], "a stale demand refuses a request")
+    fresh = coord_json(["drop", "add", ".dev/fresh.md", "--for-item", item, "--action", "--note", "for the replacement"], cwd=project, env=lead)["drop"]
+    listing = coord_json(["drops", "--wake"], cwd=project, env=host_a)
+    entry = wake_of(listing, fresh["id"])
+    require(entry["bucket"] == "demands" and entry["recipient"]["agent_id"] == replacement_id and entry["wake_wanted"], f"a fresh drop addresses the current claimant: {entry['recipient']['agent_id']}")
+
+    # --- L. Unavailable and ambiguous recipients are held, never requested. ---
+    item2 = create_item("Quiet lane")
+    require(manna(["claim", item2], cwd=project, env=session("wake-quiet-0002")).returncode == 0, "quiet worker claims without touching coord")
+    pending = coord_json(["drop", "add", ".dev/quiet.md", "--for-item", item2, "--action"], cwd=project, env=lead)["drop"]
+    entry = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), pending["id"])
+    require(entry["bucket"] == "held" and entry["reason"].startswith("recipient pending"), f"an unregistered worker is pending: {entry['reason']}")
+    bad = coord(["drop", "wake", pending["id"], "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "pending" in json.loads(bad.stdout)["error"], "pending refuses a request")
+    item3 = create_item("Twin lane")
+    twin_a = dict(base, AGENT_DO_COORD_SESSION="twin-pin-a", CLAUDE_SESSION_ID="twin-session-0003")
+    twin_b = dict(base, AGENT_DO_COORD_SESSION="twin-pin-b", CLAUDE_SESSION_ID="twin-session-0003")
+    require(manna(["claim", item3], cwd=project, env=twin_a).returncode == 0, "twin claims")
+    coord_json(["touch"], cwd=project, env=twin_a)
+    coord_json(["touch"], cwd=project, env=twin_b)
+    ambiguous = coord_json(["drop", "add", ".dev/twin.md", "--for-item", item3, "--action"], cwd=project, env=lead)["drop"]
+    entry = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), ambiguous["id"])
+    require(entry["bucket"] == "held" and entry["reason"].startswith("recipient ambiguous"), f"ambiguity is held: {entry['reason']}")
+    bad = coord(["drop", "wake", ambiguous["id"], "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "ambiguous" in json.loads(bad.stdout)["error"], "ambiguity refuses a request")
+
+    # --- M. Direct action drops are demands too; informational ones never are. ---
+    direct = coord_json(["drop", "add", ".dev/direct.md", "--for", replacement_id, "--action", "--note", "please"], cwd=project, env=lead)["drop"]
+    direct_info = coord_json(["drop", "add", ".dev/direct-info.md", "--for", replacement_id, "--note", "fyi"], cwd=project, env=lead)["drop"]
+    listing = coord_json(["drops", "--wake"], cwd=project, env=host_a)
+    entry = wake_of(listing, direct["id"])
+    require(entry and entry["bucket"] == "demands" and entry["addressing"] == "direct" and entry["demand_id"].endswith(f":{replacement_id}") and entry["assignment"] is None, f"direct demand: {entry}")
+    require(wake_of(listing, direct_info["id"]) is None, "a direct informational drop is not a demand")
+    text = coord(["drop", "wake", direct["id"]], cwd=project, env=host_a)
+    require(text.returncode == 0 and "wrq-" in text.stdout and "[requested]" in text.stdout and "instruction:" in text.stdout, f"request text: {text.stdout}")
+
+    # Nothing here deleted a record or acknowledged anything on the recipients' behalf.
+    on_disk = json.loads((project / ".git/agent-do/coord/drops.json").read_text())["drops"]
+    require({d["id"] for d in on_disk} >= {approval["id"], info["id"], broadcast["id"], pending["id"], ambiguous["id"], direct["id"]}, "drops are never deleted")
+    require(all(not d["acks"] for d in on_disk if d["id"] != approval["id"]), "the only acknowledgment on disk is the worker's own")
+
+
+def test_wake_fixtures() -> None:
+    """The committed wire fixtures a host implementation replays carry the contract's shape."""
+    fixtures = ROOT / "tests" / "fixtures" / "coord-wake"
+    files = sorted(fixtures.glob("*.json"))
+    require(len(files) > 0, f"no fixtures under {fixtures}")
+    required_demand_keys = {"demand_id", "actionable", "reason", "wake_wanted", "drop", "addressing", "assignment", "recipient", "stage", "acknowledged", "stale", "bell", "notification", "next"}
+    seen: set[str] = set()
+    for path in files:
+        payload = json.loads(path.read_text())
+        name = path.stem
+        if name.startswith("demands"):
+            require(payload["success"] is True and payload["contract"] == "coord-wake/1", f"{name}: contract header")
+            require(set(payload) >= {"instruction", "observed_at", "consumer", "demands", "held", "counts", "note"}, f"{name}: listing keys")
+            for entry in [*payload["demands"], *payload["held"]]:
+                require(set(entry) >= required_demand_keys, f"{name}: demand keys missing {required_demand_keys - set(entry)}")
+                require(set(entry["notification"]) >= {"state", "demand_id", "request", "lapsed", "attempts", "requests"}, f"{name}: notification keys")
+            require(all(e["actionable"] for e in payload["demands"]) and all(not e["actionable"] for e in payload["held"]), f"{name}: buckets agree with actionable")
+            seen.add("demands")
+        elif name.startswith("request") or name.startswith("outcome") or name.startswith("waiting"):
+            require(payload["success"] is True and payload["contract"] == "coord-wake/1", f"{name}: contract header")
+            require(payload["request"]["id"].startswith("wrq-") and payload["request"]["demand_id"], f"{name}: request identity")
+            require(set(payload["demand"]) >= required_demand_keys, f"{name}: demand keys")
+            if name.startswith("outcome"):
+                require(payload["request"]["outcome"]["state"] in {"submitted", "unknown", "failed", "released"} and payload["request"]["outcome"]["evidence"], f"{name}: outcome with evidence")
+                require("delivery_stage" in payload and payload["delivery_stage"] != "acknowledged", f"{name}: a receipt never reads acknowledged")
+            seen.add(name.split("-")[0])
+        elif name.startswith("refusal"):
+            require(payload["success"] is False and payload["code"] == 2 and payload["error"], f"{name}: refusal shape")
+            seen.add("refusal")
+        else:
+            raise AssertionError(f"unexpected fixture {path.name}")
+    require(seen >= {"demands", "request", "outcome", "refusal"}, f"fixture set incomplete: {seen}")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -2067,6 +2410,8 @@ def main() -> int:
         test_assignment_targeting(tmp_path, env_base)
         test_assignment_ambiguity(tmp_path, env_base)
         test_assignment_turnover(tmp_path, env_base)
+        test_wake_contract(tmp_path, env_base)
+        test_wake_fixtures()
         test_pulse(tmp_path, env_base)
         test_explicit_pulse(tmp_path, env_base)
         test_v1_migration(tmp_path, env_base)

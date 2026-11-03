@@ -83,6 +83,24 @@ lane additionally requires a coordinated worker/coordinator exchange on a
 real mid-claim blocker with a third session able to read all substance on
 Coord, without human relay.
 
+## Host-driven wakeups
+
+The bell reaches a worker only at its next hook boundary, so an idle worker
+sitting at an empty composer never hears it. A host that owns the worker's
+terminal (Holy, or any other) can close that gap through the `coord-wake/1`
+contract in [COORD-WAKE.md](COORD-WAKE.md): `agent-do coord drops --wake`
+lists the wake demands open action drops raise, `agent-do coord drop wake
+<drop-id>` claims one under the host's own coord identity (its presence is
+the lease, so two hosts never duplicate one demand and a crashed host lapses),
+and `drop wake <drop-id> --request <id> --waiting|--outcome … --evidence …`
+records what the transport did. The host submits only the fixed content-free
+instruction the contract hands it; the substance stays on the ledger. A
+request or a submission is a transport fact: the delivery stage, the
+acknowledgment and the resolution still move only on the recipient's own
+`drop ack` and `drop resolve`, an unknown outcome blocks resubmission until
+the host establishes what happened, and a new revision or a changed
+assignment is a fresh demand. With no host present nothing changes.
+
 ## Installation (install.sh)
 
 GNU Bash 4.4 or newer is a runtime requirement. On macOS, install it with
