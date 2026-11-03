@@ -61,7 +61,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [gcp](#gcp) | Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials | mixed | 19 |
 | [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 32 |
 | [ghidra](#ghidra) | Ghidra reverse engineering automation | read | 4 |
-| [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 19 |
+| [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 28 |
 | [handbrake](#handbrake) | Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs | mixed | 7 |
 | [hardware](#hardware) | Unified hardware device control across serial, bluetooth, USB, printers, and MIDI | mixed | 6 |
 | [harness](#harness) | Observable agent-do harness inventory, evidence, and change-manifest front door | mixed | 8 |
@@ -2064,6 +2064,11 @@ Concurrency: `mixed`
 - bind a new worktree's zpc memory to the primary store and warn that the manna board does not follow it
 - inspect and recover files from refs/auto shadow snapshots
 - preview safe branch cleanup before explicit apply
+- opt a repository into Managed Integration through its private git config, never a branch
+- register one worktree and branch per assignment attempt, bound to the claimant by claim proof
+- queue a submission that pins the commit, the submission id, the attempt and the evidence
+- land queued submissions through one integrator per repository, validated against the unchanged tested base
+- recover an interrupted landing idempotently and report building, queued, integrating, landed or blocked with receipts
 
 **Commands**
 
@@ -2086,12 +2091,27 @@ Concurrency: `mixed`
 - `conflicts`: List unmerged files with conflict-marker counts
 - `recover`: Read-only reflog and unreachable-commit report
 - `sweep`: Preview safe local branch deletion; mutate only with --apply
+- `integration enable`: Opt this repository into Managed Integration (target, checks, authority) in the common git dir's config
+- `integration disable`: Stop new dispatch and automatic landing; keep status, recovery, pending submissions and worktrees
+- `integration config`: Show the integration policy and whether it is off, enabled, disabled or invalid
+- `integration workspace add`: Register one worktree and branch for the current assignment attempt, bound to the claimant
+- `integration workspace list`: List registered assignment workspaces with their latest submission state
+- `integration submit`: Queue the workspace branch tip for integration, pinning commit, submission id, attempt and evidence
+- `integration run`: Build, validate and land queued submissions against the unchanged tested base; one integrator per repository
+- `integration recover`: Finish or void a landing interrupted before or after the ref update, never landing twice
+- `integration status`: Report building, queued, integrating, landed or blocked per item with reason, receipts and next action
 
 **Examples**
 
 ```bash
 # commit the changes I already staged
 agent-do git commit 'fix: describe the staged change'
+# start work on an assigned item in its own managed workspace
+agent-do git integration workspace add mn-abc123
+# request integration of the work I committed in my workspace
+agent-do git integration submit mn-abc123 --evidence 'python3 tests/test_x.py passed'
+# land every queued submission that passes the repository's checks
+agent-do git integration run
 # show recent commits
 agent-do git log
 # create an isolated worktree and carry local env files into it
@@ -2104,10 +2124,13 @@ agent-do git sweep
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `conflicts`, `diff`, `log`, `recover`, `snap diff`, `snap list`, `snapshot`, `status`, `worktree list`
-- Write (connect/interact/save): `branch`, `commit`, `pull`, `push`, `snap restore`, `stash`, `sweep`, `sync`, `worktree add`, `worktree remove`
+- Read-only (snapshot/verify; safe to parallelize): `conflicts`, `diff`, `integration config`, `integration status`, `integration workspace list`, `log`, `recover`, `snap diff`, `snap list`, `snapshot`, `status`, `worktree list`
+- Write (connect/interact/save): `branch`, `commit`, `integration disable`, `integration enable`, `integration recover`, `integration run`, `integration submit`, `integration workspace add`, `pull`, `push`, `snap restore`, `stash`, `sweep`, `sync`, `worktree add`, `worktree remove`
 - destructive (irreversible data loss; confirm before auto-running): `snap restore`, `sweep`, `worktree remove`
+- sensitive (emits or persists secret material; guard output): `integration disable`, `integration enable`
+- long_running (daemon/stream/session; may never return): `integration run`
 - polymorphic (beat decided by payload or flag at call time): `branch`, `sweep`
+- composite (one call performs several beats internally): `integration recover`, `integration run`
 
 ### handbrake
 

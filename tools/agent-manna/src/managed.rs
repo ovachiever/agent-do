@@ -121,7 +121,7 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
         == 0
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrantFile {
     #[serde(default = "one")]
     pub version: u32,
@@ -129,8 +129,20 @@ pub struct GrantFile {
     pub grants: Vec<Grant>,
 }
 
+/// The sidecar schema version every file on disk carries. A derived `Default`
+/// wrote `0` for a fresh file while the read default was `1`, so a board whose
+/// first `managed require` created `managed.json` carried a version no reader
+/// of the contract (coord's assignment targeting) would accept (mn-54fe40).
+pub const SIDECAR_VERSION: u32 = 1;
+
 fn one() -> u32 {
-    1
+    SIDECAR_VERSION
+}
+
+impl Default for GrantFile {
+    fn default() -> Self {
+        GrantFile { version: SIDECAR_VERSION, grants: Vec::new() }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -318,12 +330,18 @@ impl ManagedRecord {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedFile {
     #[serde(default = "one")]
     pub version: u32,
     #[serde(default)]
     pub items: BTreeMap<String, ManagedRecord>,
+}
+
+impl Default for ManagedFile {
+    fn default() -> Self {
+        ManagedFile { version: SIDECAR_VERSION, items: BTreeMap::new() }
+    }
 }
 
 /// One append-only audit line.
@@ -371,12 +389,18 @@ pub struct Intent {
     pub event: LifecycleEvent,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntentFile {
     #[serde(default = "one")]
     pub version: u32,
     #[serde(default)]
     pub intents: Vec<Intent>,
+}
+
+impl Default for IntentFile {
+    fn default() -> Self {
+        IntentFile { version: SIDECAR_VERSION, intents: Vec::new() }
+    }
 }
 
 /// A stable transaction id from its material.
@@ -465,7 +489,13 @@ impl ManagedStore {
     }
 
     pub fn load_grants(&self) -> Result<GrantFile, String> {
-        Self::read_json(&self.grants_path())
+        let mut grants: GrantFile = Self::read_json(&self.grants_path())?;
+        if grants.version == 0 {
+            // Written by a binary whose derived Default said 0; the next
+            // save publishes the version the contract always meant.
+            grants.version = SIDECAR_VERSION;
+        }
+        Ok(grants)
     }
 
     pub fn save_grants(&self, grants: &GrantFile) -> Result<(), String> {
@@ -473,7 +503,11 @@ impl ManagedStore {
     }
 
     pub fn load_managed(&self) -> Result<ManagedFile, String> {
-        Self::read_json(&self.managed_path())
+        let mut managed: ManagedFile = Self::read_json(&self.managed_path())?;
+        if managed.version == 0 {
+            managed.version = SIDECAR_VERSION;
+        }
+        Ok(managed)
     }
 
     pub fn save_managed(&self, managed: &ManagedFile) -> Result<(), String> {
@@ -535,7 +569,11 @@ impl ManagedStore {
     }
 
     pub fn load_intents(&self) -> Result<IntentFile, String> {
-        Self::read_json(&self.intents_path())
+        let mut intents: IntentFile = Self::read_json(&self.intents_path())?;
+        if intents.version == 0 {
+            intents.version = SIDECAR_VERSION;
+        }
+        Ok(intents)
     }
 
     pub fn save_intents(&self, intents: &IntentFile) -> Result<(), String> {
@@ -1375,6 +1413,27 @@ mod tests {
         };
         assert_ne!(closable_hex(&target, Some(&rec), &moved), parsed.hex);
     }
+    #[test]
+    fn a_fresh_sidecar_carries_version_one_and_a_zero_on_disk_reads_as_one() {
+        // mn-54fe40: the derived Default wrote `"version": 0` for the first
+        // `managed require` on a board, and coord's assignment targeting
+        // refused every item-addressed drop on it ("invalid managed metadata").
+        assert_eq!(ManagedFile::default().version, SIDECAR_VERSION);
+        assert_eq!(GrantFile::default().version, SIDECAR_VERSION);
+        assert_eq!(IntentFile::default().version, SIDECAR_VERSION);
+        let temp = tempfile::tempdir().unwrap();
+        let store = store_in(temp.path());
+        store.save_managed(&ManagedFile::default()).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&fs::read_to_string(store.managed_path()).unwrap()).unwrap();
+        assert_eq!(written["version"], serde_json::json!(SIDECAR_VERSION));
+        fs::write(store.managed_path(), "{\"version\": 0, \"items\": {}}\n").unwrap();
+        assert_eq!(store.load_managed().unwrap().version, SIDECAR_VERSION);
+        fs::write(store.grants_path(), "{\"version\": 0, \"grants\": []}\n").unwrap();
+        assert_eq!(store.load_grants().unwrap().version, SIDECAR_VERSION);
+        fs::write(store.intents_path(), "{\"version\": 0, \"intents\": []}\n").unwrap();
+        assert_eq!(store.load_intents().unwrap().version, SIDECAR_VERSION);
+    }
+
     fn store_in(dir: &Path) -> ManagedStore {
         fs::create_dir_all(dir.join(".manna")).unwrap();
         ManagedStore::new(dir)

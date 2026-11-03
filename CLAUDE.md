@@ -195,6 +195,8 @@ Registries merge in reverse priority order (higher-priority wins):
 
 Other tools are standalone bash scripts.
 
+**Managed Integration (`agent-do git integration`)** lands board work without branch shepherding once a repository opts in (`integration enable`, policy in the common git dir's config, never a branch): the claimant runs `integration workspace add <mn-id>` (one worktree + `integration/<mn-id>-a<N>` branch per attempt, bound by claim proof), commits with the `Manna:` trailer, and `integration submit`s; one integrator per repository (`integration run`) builds and checks the candidate in its own detached tree and advances the target only against the unchanged tested base, posting conflicts and failed checks as `--for-item` action drops; `integration status` names the next action. Board commands still run at the canonical checkout. Full design: docs/MANAGED-INTEGRATION.md. Not enabled anywhere until Erik authorizes a pilot repository.
+
 Concurrent build lanes default to separate worktrees. Path ownership prevents
 two writers from editing the same source, but it cannot isolate a compiler from
 another lane's dirty files or shared build artifacts. A lone builder can use the

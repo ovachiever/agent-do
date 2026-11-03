@@ -1629,6 +1629,11 @@ tools:
     - bind a new worktree's zpc memory to the primary store and warn that the manna board does not follow it
     - inspect and recover files from refs/auto shadow snapshots
     - preview safe branch cleanup before explicit apply
+    - opt a repository into Managed Integration through its private git config, never a branch
+    - register one worktree and branch per assignment attempt, bound to the claimant by claim proof
+    - queue a submission that pins the commit, the submission id, the attempt and the evidence
+    - land queued submissions through one integrator per repository, validated against the unchanged tested base
+    - recover an interrupted landing idempotently and report building, queued, integrating, landed or blocked with receipts
     commands:
       status: Show compact working-tree status
       diff: Show staged diff, or unstaged diff when the index is empty
@@ -1649,9 +1654,24 @@ tools:
       conflicts: List unmerged files with conflict-marker counts
       recover: Read-only reflog and unreachable-commit report
       sweep: Preview safe local branch deletion; mutate only with --apply
+      integration enable: Opt this repository into Managed Integration (target, checks, authority) in the common git dir's config
+      integration disable: Stop new dispatch and automatic landing; keep status, recovery, pending submissions and worktrees
+      integration config: Show the integration policy and whether it is off, enabled, disabled or invalid
+      integration workspace add: Register one worktree and branch for the current assignment attempt, bound to the claimant
+      integration workspace list: List registered assignment workspaces with their latest submission state
+      integration submit: Queue the workspace branch tip for integration, pinning commit, submission id, attempt and evidence
+      integration run: Build, validate and land queued submissions against the unchanged tested base; one integrator per repository
+      integration recover: Finish or void a landing interrupted before or after the ref update, never landing twice
+      integration status: Report building, queued, integrating, landed or blocked per item with reason, receipts and next action
     examples:
     - intent: commit the changes I already staged
       command: "agent-git commit 'fix: describe the staged change'"
+    - intent: start work on an assigned item in its own managed workspace
+      command: agent-git integration workspace add mn-abc123
+    - intent: request integration of the work I committed in my workspace
+      command: agent-git integration submit mn-abc123 --evidence 'python3 tests/test_x.py passed'
+    - intent: land every queued submission that passes the repository's checks
+      command: agent-git integration run
     - intent: show recent commits
       command: agent-git log
     - intent: create an isolated worktree and carry local env files into it
@@ -1673,6 +1693,9 @@ tools:
       - conflicts
       - recover
       - sweep
+      - integration config
+      - integration workspace list
+      - integration status
       interact:
       - commit
       - branch
@@ -1684,6 +1707,14 @@ tools:
       - worktree remove
       - snap restore
       - sweep
+      - integration enable
+      - integration disable
+      - integration workspace add
+      - integration submit
+      - integration run
+      - integration recover
+      verify:
+      - integration run
       attributes:
         branch:
         - polymorphic
@@ -1694,6 +1725,15 @@ tools:
         - destructive
         worktree remove:
         - destructive
+        integration enable:
+        - sensitive
+        integration disable:
+        - sensitive
+        integration run:
+        - composite
+        - long_running
+        integration recover:
+        - composite
     concurrency: mixed
   debug:
     description: Control debuggers
