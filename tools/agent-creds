@@ -186,8 +186,12 @@ cmd_get() {
     fi
 
     if [[ "$reveal" == "true" ]]; then
-        creds_get "$key"
-        printf '\n'
+        # Exactly the value and one newline, whatever the backend appends:
+        # macOS `security -w` already ends with a newline, so a bare printf
+        # after it produced a second, blank line and `$(… | tail -1)` captured
+        # an empty string (silent 401s downstream).
+        value="$(creds_get "$key")"
+        printf '%s\n' "$value"
         return 0
     fi
 
