@@ -7,7 +7,7 @@ base_commit: 4227aed0a551631cf4acecb03b1b839565777862
 scope: 'Git: Managed Integration with per-repository opt-in workspaces and durable automatic landing'
 inputs:
 - 'Erik conversation 2026-11-03: Managed Integration, reusable agent-do capability with one-repository pilot'
-binding: sha256:200e347c57b2b592c512c0b741b87cd97bf9e3a367576dc04033f006cf28d5ae
+binding: sha256:de47caf42efa015c76d67366f6e38da5a7d089ad53d40bef6f78163900ced0ed
 ---
 
 # Handoff: Git: Managed Integration with per-repository opt-in workspaces and durable automatic landing
@@ -99,3 +99,32 @@ Code commit: `90f49ca4db952c30d67265e35e5c38af8db4834f` (`Manna: mn-54fe40`).
 - Independent review of this submission (the reviewer closes; this worker does not self-certify).
 - Pilot authorization: repository and local integration authority named by Erik; then `enable`, two real assignments, one demonstrated recovery, per docs/MANAGED-INTEGRATION.md "Enabling a pilot".
 - `.manna/issues.jsonl` carries this claim and the seal digest in the working tree beside other lanes' uncommitted rows; it is left for the operator's board commit rather than swept into this lane's commits.
+
+## Delivery receipts, round two (2026-11-03, worker claude-ccc4d8f0e9ed4447, SUBMITTED for independent review)
+
+Independent review (`.dev/independent-integration-review/review.md`, probes in `probe.py`/`probe.log`) reproduced three acceptance blockers against 90f49ca and named three source concerns. All are fixed in `ba76f34f4bf88c81e676d3e6d78cd599aae3a0da` (`Manna: mn-54fe40`). Status unchanged: implementation and fixtures delivered; independent acceptance pending the reviewer; live pilot (checkpoint C) not activated and not authorized.
+
+### Dispositions
+
+1. Policy changed while the checks ran (reproduced): fixed. The integrator compares the full policy digest after the checks (`lib/git_integration.py`, `Integrator.integrate`): a changed policy is adopted once and the candidate rebuilt and revalidated under it (both passes' check logs kept, `revalidations` recorded with both digests); a policy that moves again during that revalidation blocks `config_changed` (retryable). The reviewer's probe (check rewrites the check list to `false`) now revalidates under `false`, fails, blocks `checks_failed`, and the target does not move. Fixture `test_policy_changes_during_checks` (three sub-cases: rewritten to `false`; edited once, adopted and landed with equal tested and landing digests; moving twice, blocked then landed once settled).
+2. Recovery bypassed the new policy (reproduced): fixed. The intent now records the tested policy digest, the worker binding, attempt, submission id, check results and tree verification (`Integrator.land`); `Integrator.recover` voids and requeues on a changed digest (or an intent that predates digests), voids and blocks on a moved assignment, and finishes the record (never a second landing) when the ref already moved, stating a policy change since the test in that record. Fixture `test_recovery_revalidates_policy_and_assignment` (four sub-cases: policy changed before the ref update; claim moved before the ref update; policy changed after the ref update; legacy intent).
+3. Tested tree differed from the landed commit (reproduced): fixed. `Integrator.verify_candidate` runs after the checks: HEAD at the candidate and detached, index and tracked files identical by content (`git diff --cached --quiet`, `git diff --quiet`); a changed tree blocks `candidate_changed` (worker obligation) with `candidate-drift.patch`; the original candidate stays pinned; untracked build output is reported and allowed. Fixture `test_candidate_tree_integrity` (repaired, committed, staged, untracked).
+4. Assignment freshness (source concern): fixed. `staleness` is re-read immediately before the ref update and in recovery before a re-landing. Fixture `test_assignment_rechecked_before_landing` (the check itself moves the claim; blocked `reassigned`, nothing landed). The remaining window is the instant between that read and the ref write; for managed items manna's `accept --submission --attempt` is the closing gate (documented).
+5. Intent removed before queue, receipt, audit (source concern): fixed. `Integrator.complete` writes the queue row, then the receipt, the routing record, the audit line, and retires the intent last; a crash in the tail is finished by `recover` with one info drop and one audit line (`landed_tail_recovered`). Seam `AGENT_GIT_INTEGRATION_FAULT=after_landed_row`. Fixture `test_landing_tail_recovery`.
+6. Candidate worktree adopted without ownership (source concern): fixed. The integrator writes `agent-do-integration-candidate` into the worktree's private git dir when it creates the tree (recorded in `candidate.json`); a detached worktree at the candidate path without the marker is refused (exit 1, `candidate_path` named) and left untouched. Fixture `test_candidate_ownership`.
+7. Beyond the review's list, from the security note routed to this item (`.dev/mn-88d1ac/security-note-git-integration.md`, drop drp-d480dce9fbb4, stale for this revision): checks run the candidate's own scripts, so the integrator's identity (`MANNA_SESSION_*`, `MANNA_OPERATOR`, `CLAUDE_*`/`CODEX_*` ids, coord anchors) and every credential-shaped variable are withheld, `MANNA_OPERATOR=0` set, withheld names logged and values never. Fixture `test_check_environment`. Withholding, not sandboxing; the doc says so.
+8. Found by the new fixtures and fixed with them: the candidate reset ran `checkout --detach` before `reset --hard`, so a tree a check had dirtied refused every later build; the reset now discards first.
+
+### Executed validation (all exit 0 unless stated)
+
+- `python3 tests/test_git_integration.py` (the registered command, one run): 18/18 scenarios, 98 s; the eleven round-one scenarios unchanged.
+- The seven round-two scenarios against an archived copy of 47929e1 (`git archive`, same manna binary): every one exits 1. Six fail on the behavior the review reproduced (the reviewed engine lands: policy rewritten during checks; policy changed in recovery, `recovered: true`; repaired tree; foreign candidate tree; claim moved during checks; and the check sees the integrator's secrets, so the environment probe fails its checks). `test_landing_tail_recovery` fails there because the reviewed `complete` has no point where the row is durable while the intent exists (it removed the intent first), which is the defect.
+- `agent-do harness contracts validate`: Gate PASS, 0 errors, 0 warnings. `agent-do harness contracts drift`: 0 failing. `bin/gen-tools-doc --check`: exit 0. `tests/test_git_guardrails.py`, `tests/test_contracts_gate.py`, `tests/test_bounds_gate.py` (41 tests): passed.
+- Not run this round: the manna Rust suites and the coord suites (no change to `tools/agent-manna` or `tools/agent-coord` in this commit); the full `./test.sh`; no app launches, installs, pushes or PRs. The registry is unchanged (no new verbs).
+
+### Remaining acceptance and open dispositions
+
+- Independent review of this round (the reviewer closes; this worker does not self-certify). The reviewer's fixtures under `.dev/independent-integration-review/fixtures/` are untouched.
+- Pilot authorization unchanged: repository and local integration authority named by Erik, then `enable`, two real assignments, one demonstrated recovery.
+- `.manna/issues.jsonl` carries this claim and the new seal digest beside other lanes' uncommitted rows; left for the operator's board commit, as in round one.
+- The wake-contract branch (mn-88d1ac, be27371) is not merged or rebased by this lane; main advanced by two more commits.
