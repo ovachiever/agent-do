@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import fcntl
 import os
+import re
 import runpy
 import subprocess
 import sys
@@ -18,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENT_DO = ROOT / "agent-do"
 
 THREAD_ENV_KEYS = [
+    "MANNA_SESSION_ID",
+    "MANNA_SESSION_TOKEN",
     "CODEX_THREAD_ID",
     "CLAUDE_THREAD_ID",
     "CLAUDE_SESSION_ID",
@@ -699,6 +702,9 @@ def test_drops_and_history(tmp_path: Path, env_base: dict[str, str]) -> None:
     env_builder["CODEX_THREAD_ID"] = "builder-9"
     env_bystander = clean_env(env_base)
     env_bystander["CODEX_THREAD_ID"] = "bystander-1"
+
+    # A direct destination must exist on the board: the builder registers first.
+    coord_json(["touch"], cwd=project, env=env_builder)
 
     # Drops are file pointers on the board, addressed to an agent, a role, or anyone.
     drop = coord_json(
@@ -1634,6 +1640,288 @@ def test_doorbell_concurrency_and_wiring(tmp_path: Path, env_base: dict[str, str
     require('"agent-do-coord-doorbell.py|hooks/claude/agent-do-coord-doorbell.py|py"' in install, "Codex wrapper source absent")
 
 
+def manna(args: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run manna on a pipe: a pinned harness id is the identity, never the operator's terminal."""
+    return subprocess.run(
+        [str(AGENT_DO), "manna", *args],
+        cwd=cwd, env=env, text=True, capture_output=True, check=False, stdin=subprocess.DEVNULL,
+    )
+
+
+def manna_json(args: list[str], *, cwd: Path, env: dict[str, str]) -> dict:
+    result = manna([*args, "--json"], cwd=cwd, env=env)
+    require(result.returncode == 0, f"manna {' '.join(args)} failed: {result.stderr or result.stdout}")
+    return json.loads(result.stdout)
+
+
+def router_hook(project: Path, env: dict[str, str], session: str, prompt: str = "fix the build in this repo now") -> str:
+    """The worker's real prompt-router hook: what Claude Code would inject at this prompt boundary."""
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "hooks/claude/agent-do-prompt-router.py")],
+        cwd=ROOT, env=env,
+        input=json.dumps({"prompt": prompt, "cwd": str(project), "session_id": session}),
+        text=True, capture_output=True, timeout=30,
+    )
+    require(proc.returncode == 0, f"prompt-router failed: {proc.stderr}")
+    if not proc.stdout.strip():
+        return ""
+    return json.loads(proc.stdout).get("hookSpecificOutput", {}).get("additionalContext", "")
+
+
+def test_assignment_targeting(tmp_path: Path, env_base: dict[str, str]) -> None:
+    """The mn-261c29 incident through the real CLI and hook paths, in a throwaway board.
+
+    A coordinator records a scoped approval for "the worker on <item>" without
+    copying, shortening, or translating any session id; the exact worker's own
+    hook shows it; the worker acknowledges; the coordinator observes that
+    acknowledgment. Wrong ids, ambiguous bindings, unavailable workers,
+    reassignment, a revised work order, and explicit role/broadcast targets are
+    each exercised. Offline fixtures: no live harness session is launched.
+    """
+    project = make_project(tmp_path, "assignment")
+    subprocess.run(["git", "-c", "user.email=fixture@example.invalid", "-c", "user.name=fixture", "commit", "-q", "--allow-empty", "-m", "init"], cwd=project, check=True)
+    base = clean_env(env_base)
+    base["AGENT_DO_HOOK_AI"] = "off"
+    base["AGENT_DO_TELEMETRY_SUPPRESS"] = "1"
+
+    def session_env(session: str) -> dict[str, str]:
+        # What the SessionStart hook leaves in a Claude shell: the coord anchor
+        # and the harness session id, both the same value.
+        return dict(base, AGENT_DO_COORD_SESSION=session, CLAUDE_SESSION_ID=session)
+
+    lead = session_env("lead-session-0001")
+    worker = session_env("worker-session-0001")
+    replacement = session_env("replacement-session-0001")
+    stranger = dict(base, CODEX_THREAD_ID="stranger-thread-0001")
+    coord_root = project / ".git/agent-do/coord"
+    bells = coord_root / "bells.json"
+
+    init = manna(["init"], cwd=project, env=lead)
+    require(init.returncode == 0, f"manna init failed: {init.stderr or init.stdout}")
+
+    def create_item(title: str) -> str:
+        created = manna(["create", title, "fixture"], cwd=project, env=lead)
+        require(created.returncode == 0, f"manna create failed: {created.stderr or created.stdout}")
+        match = re.search(r"^  id: (mn-[0-9a-f]{6})$", created.stdout, re.MULTILINE)
+        require(match is not None, f"no item id in: {created.stdout}")
+        return match.group(1)
+
+    def row(item: str) -> dict:
+        return manna_json(["show", item], cwd=project, env=lead)["issue"]
+
+    item = create_item("Overview loader: one SQL aggregation per card")
+    claim = manna(["claim", item], cwd=project, env=worker)
+    require(claim.returncode == 0, f"worker claim failed: {claim.stderr or claim.stdout}")
+    claimant = row(item)
+    require(claimant["claimed_by"] and claimant["claim_token_hash"].startswith("sha256:"), f"claim row: {claimant}")
+
+    # The binding: the worker's coord record carries the proof manna derived in
+    # the worker's own process, and it equals the board's claim proof exactly.
+    touched = coord_json(["touch"], cwd=project, env=worker)
+    worker_id = touched["agent_id"]
+    require(touched["manna"]["proof"] == claimant["claim_token_hash"], f"touch must bind the claim proof: {touched['manna']} vs {claimant}")
+    require(touched["manna"]["session"] == claimant["claimed_by"], f"bound label must be the claimant label: {touched['manna']}")
+    require(touched["manna"]["source"].startswith("manna identity"), "binding provenance names the manna binary")
+    lead_id = coord_json(["touch"], cwd=project, env=lead)["agent_id"]
+    stranger_id = coord_json(["touch"], cwd=project, env=stranger)["agent_id"]
+    require(worker_id != claimant["claimed_by"], "the coord label and the Manna label differ; neither is derived from the other here")
+
+    # 1. The incident's guessed destinations are refused, and nothing is written.
+    drops_before = (coord_root / "drops.json").read_bytes() if (coord_root / "drops.json").exists() else b""
+    for guessed in ("session-01a18d6ac8fd", "codex-01a18d6ac8fd7653", claimant["claimed_by"][:12]):
+        bad = coord(["drop", "add", ".dev/approval.md", "--for", guessed, "--note", "approval", "--json"], cwd=project, env=lead)
+        require(bad.returncode == 2, f"a guessed destination must be refused: {guessed}: {bad.stdout}")
+        payload = json.loads(bad.stdout)
+        require("unknown destination" in payload["error"] and "--for-item" in payload["error"], f"refusal must name the remedy: {payload}")
+        require(worker_id in payload["live_sessions"], f"refusal lists the live sessions: {payload}")
+    after = (coord_root / "drops.json").read_bytes() if (coord_root / "drops.json").exists() else b""
+    require(after == drops_before, "a refused drop must not touch the ledger")
+
+    # Explicit role and broadcast targeting survive unchanged.
+    coord_json(["role", "set", "builder", "--territory", "src"], cwd=project, env=stranger)
+    role_drop = coord_json(["drop", "add", ".dev/for-builders.md", "--for", "builder", "--note", "builders read this"], cwd=project, env=lead)["drop"]
+    any_drop = coord_json(["drop", "add", ".dev/for-all.md", "--for", "any", "--note", "everyone reads this"], cwd=project, env=lead)["drop"]
+    require(role_drop["delivery"]["recipient"]["state"] == "broadcast" and any_drop["delivery"]["recipient"]["state"] == "broadcast", "roles and any are broadcasts")
+    stranger_drops = {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=stranger)["drops"]}
+    require(role_drop["id"] in stranger_drops and any_drop["id"] in stranger_drops, f"role and broadcast drops reach the builder: {stranger_drops}")
+    worker_drops = {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=worker)["drops"]}
+    require(role_drop["id"] not in worker_drops and any_drop["id"] in worker_drops, f"a role drop is only for that role: {worker_drops}")
+
+    # 2. The coordinator records the approval against the item. No id is copied:
+    # every argument below is the item id, the file, and the human scope.
+    (project / ".dev").mkdir()
+    approval_file = project / ".dev/approval-2026-10-30.md"
+    approval_file.write_text("Erik approved writing the migration file for local build and test only.\n")
+    lead_args = [
+        "drop", "add", ".dev/approval-2026-10-30.md", "--for-item", item,
+        "--allows", "write the migration file", "--allows", "local build and test",
+        "--excludes", "applying it to staging or production",
+        "--authorized-by", "Erik, 2026-10-30 16:20 CDT, via Claude",
+        "--note", "migration approval",
+    ]
+    require(worker_id not in " ".join(lead_args) and claimant["claimed_by"] not in " ".join(lead_args), "the coordinator never types a session id")
+    approval = coord_json(lead_args, cwd=project, env=lead)["drop"]
+    require(approval["for"] == f"item:{item}" and approval["kind"] == "action", f"an approval is an action addressed to the item: {approval}")
+    require(approval["for_agent_id"] == worker_id, f"resolved to the exact worker session: {approval}")
+    destination = approval["destination"]
+    require(destination["state"] == "resolved" and destination["session"] == worker_id, f"destination: {destination}")
+    require(destination["claimant"] == claimant["claimed_by"] and destination["claim_proof"] == claimant["claim_token_hash"], f"destination pins the claimant and proof: {destination}")
+    require(destination["work_order"]["digest"] == claimant["handoff_digest"] and destination["work_order"]["prompt"] == claimant["prompt"], f"destination pins the work order: {destination}")
+    require(destination["board"] == str((project / ".manna").resolve()) and destination["via_worktree"] is False, f"destination names the canonical board: {destination}")
+    require(any("manna show --json" in line for line in destination["provenance"]) and any("claim_token_hash" in line for line in destination["provenance"]), f"provenance: {destination['provenance']}")
+    require(approval["approval"]["allows"] == ["write the migration file", "local build and test"], f"allowed actions recorded: {approval['approval']}")
+    require(approval["approval"]["excludes"] == ["applying it to staging or production"], f"exclusions recorded: {approval['approval']}")
+    require(approval["approval"]["authorized_by"].startswith("Erik") and approval["approval"]["item"] == item and approval["approval"]["work_order"]["digest"] == claimant["handoff_digest"], f"approval names the human source, the item and the work order: {approval['approval']}")
+    require("confers no authority" in approval["approval"]["note"], "the record states that routing confers nothing")
+    delivery = approval["delivery"]
+    require(delivery["stage"] == "bell queued" and delivery["bell"]["state"] == "queued" and delivery["recipient"]["state"] == "resolved", f"stages after add: {delivery}")
+    require(delivery["acknowledged"] is None and delivery["completed"] is None and delivery["stale"] is None, f"a write and a bell are not acknowledgment: {delivery}")
+    require(json.loads(bells.read_text()) == {worker_id: True}, "the bell is a bit on the exact worker")
+
+    # An approval without its scope, a double destination, and an unknown item are refused.
+    bad = coord(["drop", "add", ".dev/other.md", "--for-item", item, "--allows", "something", "--json"], cwd=project, env=lead)
+    require(bad.returncode == 2 and "--excludes" in bad.stdout and "--authorized-by" in bad.stdout, f"approval scope is required: {bad.stdout}")
+    bad = coord(["drop", "add", ".dev/other.md", "--for-item", item, "--for", worker_id, "--json"], cwd=project, env=lead)
+    require(bad.returncode == 2 and "one destination" in bad.stdout, f"two destinations refused: {bad.stdout}")
+    bad = coord(["drop", "add", ".dev/other.md", "--for-item", "mn-000000", "--json"], cwd=project, env=lead)
+    require(bad.returncode == 2 and "not found" in bad.stdout, f"an unknown item is refused with manna's answer: {bad.stdout}")
+    bad = coord(["drop", "add", ".dev/other.md", "--for-item", item, "--json"], cwd=project, env=worker)
+    require(bad.returncode == 2 and "this session" in bad.stdout, f"the worker cannot address itself: {bad.stdout}")
+
+    # 3. The worker's own hook path shows the approval as a work-boundary reminder
+    # with its scope and the ack command; a stranger's hook shows nothing of it.
+    worker_hook = router_hook(project, base, "worker-session-0001")
+    require(approval["id"] in worker_hook and "drop ack" in worker_hook, f"the worker's prompt-router must carry the approval: {worker_hook}")
+    require("allows write the migration file" in worker_hook and "excludes applying it to staging or production" in worker_hook, f"scope travels with the reminder: {worker_hook}")
+    require(f"worker on {item}" in worker_hook, f"the reminder says whom it is for: {worker_hook}")
+    stranger_hook = router_hook(project, base, "stranger-thread-0001")
+    require(approval["id"] not in stranger_hook, f"a stranger's hook must not carry it: {stranger_hook}")
+    bell = doorbell_hook(project, worker, "worker-session-0001")
+    require(json.loads(bell.stdout)["hookSpecificOutput"]["additionalContext"] == "The ledger has entries concerning you; read coord.", f"doorbell: {bell}")
+    require(not doorbell_hook(project, worker, "worker-session-0001").stdout, "the bell rings once")
+
+    # The coordinator sees the undelivered obligation until the worker acknowledges.
+    awaiting = [i for i in coord_json(["interrupts"], cwd=project, env=lead)["interrupts"] if i.get("awaiting") and i.get("drop_id") == approval["id"]]
+    require(len(awaiting) == 1 and awaiting[0]["kind"] == "notice" and "not acknowledged" in awaiting[0]["summary"], f"owner must see the unacknowledged approval: {awaiting}")
+    lookup = coord_json(["worker", item], cwd=project, env=lead)
+    require(lookup["session"]["agent_id"] == worker_id and lookup["recipient_state"] == "resolved", f"worker lookup: {lookup}")
+    require(lookup["session"]["binding"]["proof"] == claimant["claim_token_hash"] and "exact" in lookup["session"]["binding"]["how"], f"lookup shows the binding: {lookup['session']}")
+    require(lookup["liveness"]["presence"] == "active" and lookup["liveness"]["process"]["verified"] in {"alive", "unverifiable"}, f"liveness evidence: {lookup['liveness']}")
+    require(lookup["assignment"]["board_assignment"]["item"] == item and lookup["assignment"]["declared_focus"] is None, f"assignment: {lookup['assignment']}")
+    require([o["id"] for o in lookup["obligations"]] == [approval["id"]] and lookup["obligations"][0]["stage"] == "bell queued", f"obligations: {lookup['obligations']}")
+
+    # An old session title is distinguished from the current assignment.
+    coord_json(["focus", "set", "old lane title from last week", "--path", "src"], cwd=project, env=worker)
+    lookup = coord_json(["worker", item], cwd=project, env=lead)
+    require(lookup["assignment"]["declared_focus"]["goal"] == "old lane title from last week" and lookup["assignment"]["focus_predates_claim"] is False, f"focus after claim: {lookup['assignment']}")
+
+    # 4. A stranger cannot acknowledge; the exact worker can; the coordinator observes it.
+    bad = coord(["drop", "ack", approval["id"]], cwd=project, env=stranger)
+    require(bad.returncode == 2, "a stranger cannot acknowledge an item-addressed drop")
+    acked = coord_json(["drop", "ack", approval["id"]], cwd=project, env=worker)["drop"]
+    require(acked["delivery"]["stage"] == "acknowledged" and acked["delivery"]["acknowledged"]["by"] == worker_id, f"ack stage: {acked['delivery']}")
+    require(acked["status"] == "open", "acknowledgment is not completion")
+    observed = coord_json(["worker", item], cwd=project, env=lead)["obligations"][0]
+    require(observed["stage"] == "acknowledged" and observed["delivery"]["acknowledged"]["by"] == worker_id, f"coordinator observes the ack: {observed}")
+    awaiting = [i for i in coord_json(["interrupts"], cwd=project, env=lead)["interrupts"] if i.get("awaiting")]
+    require(not awaiting, f"acknowledged: the owner's awaiting notice leaves: {awaiting}")
+    after_ack = router_hook(project, base, "worker-session-0001")
+    require(approval["id"] in after_ack and "unresolved" in after_ack, f"an acknowledged action keeps reminding until resolved: {after_ack}")
+    done = coord_json(["drop", "resolve", approval["id"], "--reason", "migration file written and tested locally", "--evidence", "commit abc123"], cwd=project, env=worker)["drop"]
+    require(done["delivery"]["stage"] == "completed" and done["delivery"]["completed"]["by"] == worker_id, f"completion stage: {done['delivery']}")
+    require(not coord_json(["worker", item], cwd=project, env=lead)["obligations"], "a resolved obligation leaves the worker's list")
+
+    # An informational drop to the item is a notice that leaves on acknowledgment (kind semantics preserved).
+    info = coord_json(["drop", "add", ".dev/fyi.md", "--for-item", item, "--note", "fyi"], cwd=project, env=lead)["drop"]
+    require(info["kind"] == "info" and info["for_agent_id"] == worker_id, f"info drop to the item: {info}")
+    notice = [i for i in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if i.get("drop_id") == info["id"]]
+    require(notice and notice[0]["kind"] == "notice" and notice[0]["item"] == item, f"info drop is a notice: {notice}")
+    coord_json(["drop", "ack", info["id"]], cwd=project, env=worker)
+    require(not [i for i in coord_json(["interrupts"], cwd=project, env=worker)["interrupts"] if i.get("drop_id") == info["id"]], "acknowledged info drop leaves")
+
+    # 5. Unavailable worker: the claimant has never registered in coord. The drop
+    # stays visibly pending; the worker's next touch discovers it, exactly.
+    item2 = create_item("Second lane")
+    quiet_worker = session_env("quiet-session-0002")
+    require(manna(["claim", item2], cwd=project, env=quiet_worker).returncode == 0, "quiet worker claims")
+    pending = coord_json(["drop", "add", ".dev/second.md", "--for-item", item2, "--action", "--note", "please"], cwd=project, env=lead)["drop"]
+    require(pending["for_agent_id"] is None and pending["destination"]["state"] == "pending", f"no bound session: pending, never guessed: {pending['destination']}")
+    require("coord touch" in pending["destination"]["reason"] and pending["delivery"]["stage"] == "recorded" and pending["delivery"]["bell"]["state"] == "not queued", f"pending delivery: {pending['delivery']}")
+    awaiting = [i for i in coord_json(["interrupts"], cwd=project, env=lead)["interrupts"] if i.get("awaiting") and i.get("drop_id") == pending["id"]]
+    require(awaiting and "pending" in awaiting[0]["summary"], f"owner sees the pending delivery: {awaiting}")
+    require(coord_json(["worker", item2], cwd=project, env=lead)["recipient_state"] == "pending", "lookup reports pending")
+    require(pending["id"] not in {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=stranger)["drops"]}, "a pending item drop reaches nobody else")
+    arrived = coord_json(["touch"], cwd=project, env=quiet_worker)
+    quiet_id = arrived["agent_id"]
+    require([d["id"] for d in arrived["delivered"]] == [pending["id"]], f"the worker's touch resolves the pending drop: {arrived['delivered']}")
+    delivered = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == pending["id"])
+    require(delivered["for_agent_id"] == quiet_id and delivered["delivery"]["stage"] == "bell queued", f"resolved on touch: {delivered['delivery']}")
+    require(any(h["event"] == "recipient_resolved" for h in delivered["history"]), "resolution is journaled on the record")
+    require(pending["id"] in {i.get("drop_id") for i in coord_json(["interrupts"], cwd=project, env=quiet_worker)["interrupts"]}, "the discovered worker sees it")
+
+    # 6. Ambiguous mapping: two live coord sessions carry one proof from different
+    # harness anchors. Nothing picks one; the drop waits with both named.
+    item3 = create_item("Third lane")
+    twin_a = dict(base, AGENT_DO_COORD_SESSION="twin-pin-a", CLAUDE_SESSION_ID="twin-session-0003")
+    twin_b = dict(base, AGENT_DO_COORD_SESSION="twin-pin-b", CLAUDE_SESSION_ID="twin-session-0003")
+    require(manna(["claim", item3], cwd=project, env=twin_a).returncode == 0, "twin claims")
+    twin_ids = {coord_json(["touch"], cwd=project, env=twin_a)["agent_id"], coord_json(["touch"], cwd=project, env=twin_b)["agent_id"]}
+    ambiguous = coord_json(["drop", "add", ".dev/third.md", "--for-item", item3, "--action"], cwd=project, env=lead)["drop"]
+    require(ambiguous["for_agent_id"] is None and ambiguous["destination"]["state"] == "ambiguous", f"ambiguity refuses to pick: {ambiguous['destination']}")
+    require(set(ambiguous["destination"]["candidates"]) == twin_ids, f"both candidates named: {ambiguous['destination']}")
+    require(coord_json(["worker", item3], cwd=project, env=lead)["recipient_state"] == "ambiguous", "lookup reports the ambiguity")
+
+    # 7. Reassignment: the drop is never forwarded to the replacement.
+    require(manna(["abandon", item], cwd=project, env=worker).returncode == 0, "worker abandons")
+    require(manna(["claim", item], cwd=project, env=replacement).returncode == 0, "replacement claims")
+    replacement_id = coord_json(["touch"], cwd=project, env=replacement)["agent_id"]
+    require(coord_json(["touch"], cwd=project, env=replacement)["delivered"] == [], "nothing pending is delivered to a replacement")
+    stale = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == info["id"])
+    require(stale["delivery"]["stale"]["reason"] == "reassigned" and "not forwarded" in stale["delivery"]["stale"]["detail"], f"reassignment is visible: {stale['delivery']}")
+    require(info["id"] not in {i.get("drop_id") for i in coord_json(["interrupts"], cwd=project, env=replacement)["interrupts"]}, "the replacement never sees the old worker's drop")
+    require(info["id"] not in {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=replacement)["drops"]}, "nor in its list")
+    lookup = coord_json(["worker", item], cwd=project, env=lead)
+    require(lookup["session"]["agent_id"] == replacement_id and lookup["item"]["claimant"] != claimant["claimed_by"], f"lookup follows the board: {lookup['item']}")
+    fresh = coord_json(["drop", "add", ".dev/fresh.md", "--for-item", item, "--action", "--note", "for the replacement"], cwd=project, env=lead)["drop"]
+    require(fresh["for_agent_id"] == replacement_id, "a new drop addresses the current claimant")
+
+    # 8. A revised work order: the approval was recorded against the earlier digest.
+    item4 = create_item("Fourth lane")
+    worker4 = session_env("fourth-session-0004")
+    require(manna(["claim", item4], cwd=project, env=worker4).returncode == 0, "fourth claims")
+    worker4_id = coord_json(["touch"], cwd=project, env=worker4)["agent_id"]
+    scoped = coord_json(["drop", "add", ".dev/fourth.md", "--for-item", item4, "--allows", "local build", "--excludes", "deploying", "--authorized-by", "Erik, in session"], cwd=project, env=lead)["drop"]
+    before_digest = row(item4)["handoff_digest"]
+    handoff = project / row(item4)["prompt"]
+    handoff.write_text(handoff.read_text() + "\n## Revision\n\nAcceptance widened after the approval.\n")
+    sealed = manna(["handoff", "seal", item4], cwd=project, env=worker4)
+    require(sealed.returncode == 0, f"reseal failed: {sealed.stderr or sealed.stdout}")
+    require(row(item4)["handoff_digest"] != before_digest, "the digest moved")
+    revised = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == scoped["id"])
+    require(revised["delivery"]["stale"]["reason"] == "work-order revised" and "does not extend" in revised["delivery"]["stale"]["detail"], f"revision is visible: {revised['delivery']}")
+    reminder = [i for i in coord_json(["interrupts"], cwd=project, env=worker4)["interrupts"] if i.get("drop_id") == scoped["id"]]
+    require(reminder and "STALE: work-order revised" in reminder[0]["summary"], f"the worker is told the approval predates the revision: {reminder}")
+    require(reminder[0]["stale"]["reason"] == "work-order revised", "structured staleness on the interrupt")
+    readdressed = coord_json(["drop", "add", ".dev/fourth.md", "--for-item", item4, "--allows", "local build", "--excludes", "deploying", "--authorized-by", "Erik, in session"], cwd=project, env=lead)["drop"]
+    require(readdressed["revision"] == scoped["revision"] + 1 and any(h["event"] == "readdressed" for h in readdressed["history"]), f"an explicit re-add re-pins and journals it: {readdressed['history']}")
+    require(readdressed["delivery"]["stale"] is None and readdressed["for_agent_id"] == worker4_id, "re-pinned against the current work order")
+
+    # 9. A closed or unclaimed item has no worker to address.
+    require(manna(["done", item4], cwd=project, env=worker4).returncode == 0, "owner closes")
+    bad = coord(["drop", "add", ".dev/late.md", "--for-item", item4, "--json"], cwd=project, env=lead)
+    require(bad.returncode == 2 and "is done" in bad.stdout, f"a done item refuses: {bad.stdout}")
+    item5 = create_item("Unclaimed lane")
+    bad = coord(["drop", "add", ".dev/nobody.md", "--for-item", item5, "--json"], cwd=project, env=lead)
+    require(bad.returncode == 2 and "no claimant" in bad.stdout, f"an unclaimed item refuses: {bad.stdout}")
+    require(coord_json(["worker", item5], cwd=project, env=lead)["recipient_state"] == "unassigned", "lookup says unassigned")
+
+    # Readable text paths.
+    text = coord(["worker", item], cwd=project, env=lead)
+    require(text.returncode == 0 and replacement_id in text.stdout and "obligations:" in text.stdout, f"worker text: {text.stdout}")
+    listing = coord(["drops"], cwd=project, env=lead)
+    require(f"item:{item} -> {replacement_id}" in listing.stdout and "stage" in listing.stdout, f"drops text names the resolved session: {listing.stdout}")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -1650,6 +1938,7 @@ def main() -> int:
         test_isolation_nudge(tmp_path, env_base)
         test_drops_and_history(tmp_path, env_base)
         test_drop_lifecycle(tmp_path, env_base)
+        test_assignment_targeting(tmp_path, env_base)
         test_pulse(tmp_path, env_base)
         test_explicit_pulse(tmp_path, env_base)
         test_v1_migration(tmp_path, env_base)

@@ -13,7 +13,14 @@ Coord remains a public ledger, not a mailbox. An addressed dependency
 (`coord need add <key> --why <text> --from <agent>`, also spelled `--for`) or
 file drop (`coord drop add <path> --for <agent>`) sets a pending bit for a live
 named session. Exact IDs and existing aliases route the bell; role/`any` drops
-remain ordinary ledger entries. Repeated rings coalesce. An explicit
+remain ordinary ledger entries, and a direct `--for` that names no registered
+session, alias, or role is refused rather than written to nobody. A drop for
+the worker on an item (`coord drop add <path> --for-item <mn-id>`) rings the
+session whose bound Manna proof equals the board's claim proof, exactly; with
+no such live session the drop is recorded as pending, no bell is set, and the
+worker's next `coord touch` resolves and rings it. The drop's `delivery` view
+says which of these happened; a queued bell is never an acknowledgment.
+Repeated rings coalesce. An explicit
 `agent-do coord bell ring --for <agent>` can repeat the nudge after a ledger
 write, but accepts no content, message, note, or file payload.
 

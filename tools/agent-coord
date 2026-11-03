@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -23,8 +24,10 @@ from typing import Any
 HELP = """agent-coord - Project-local state and interrupt broker
 
 Commands:
-  touch                                  Renew local presence lease
-  whoami                                 Show current coordination identity (session, pid, runtime)
+  touch                                  Renew local presence lease; bind this session's Manna proof
+                                         (from `manna identity`) and receive drops addressed to its item
+  whoami                                 Show current coordination identity (session, pid, runtime,
+                                         bound Manna session and proof)
   alias <name>                           Assign a friendly alias to this agent
   aliases                                List known aliases
   peers [--all] [--active-only] [--writers]
@@ -75,7 +78,20 @@ Commands:
                                          obligation, shown as a notice). --action marks an obligation:
                                          a dependency that stays visible after it is read, until
                                          resolved. Re-adding your own path with changed content bumps
-                                         the drop's revision (and reopens a resolved one)
+                                         the drop's revision (and reopens a resolved one). A direct
+                                         --for must name a registered session or alias, a role, or
+                                         any; anything else is refused, never written to nobody
+  drop add <path> --for-item <mn-id> [--action] [--allows <text> ... --excludes <text> ... --authorized-by <who>]
+                                         Address the worker on an item without copying a session id:
+                                         pins the board's claimant, claim proof, attempt and work-order
+                                         digest, resolves the exact coord session by proof (equality,
+                                         never a label or prefix), and shows the destination with its
+                                         provenance. No live bound session: the drop stays visibly
+                                         pending until the worker's next touch; a replacement claimant
+                                         or a revised work order marks it STALE, never forwards it.
+                                         --allows/--excludes/--authorized-by record an approval's scope
+                                         (all three required; the drop is an action); routing confers
+                                         no authority beyond what the record says
   drop ack <drop-id>                     Acknowledge a drop addressed to you ("read", never "done"):
                                          an info drop leaves YOUR routine interrupts at this revision;
                                          an action drop stays listed, no longer new, until resolved
@@ -85,8 +101,13 @@ Commands:
                                          The record and its audit trail are kept, never deleted
   drop history <drop-id>                 Read one drop's lifecycle (added/updated/acked/resolved)
   drops [--for-me] [--all]               List open drops (or just the ones addressed to you);
-                                         --all includes resolved ones. A note is a dated report
-                                         of the state when written, never a verified present fact
+                                         --all includes resolved ones, each with its delivery stage
+                                         (recorded, recipient resolved, bell queued, acknowledged,
+                                         completed). A note is a dated report of the state when
+                                         written, never a verified present fact
+  worker <mn-id>                         The worker on an item: exact coord session (bound by claim
+                                         proof), board assignment beside the session's declared focus
+                                         title, liveness evidence, and its open obligations
   history [peer] [--limit N]             Read the coordination event journal, newest first
 
 Options:
@@ -110,6 +131,8 @@ Examples:
   agent-coord need add dm-sdk@1.2.2 --why "switch off tarball dependency"
   agent-coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
   agent-coord drop add .dev/research-drops/report.md --for builder-a --note "ephemeris findings"
+  agent-coord drop add .dev/mn-261c29/approval.md --for-item mn-261c29 --allows "write the migration file; local build and test" --excludes "applying it to staging or production" --authorized-by "Erik, 2026-10-30 16:20 CDT, via Claude"
+  agent-coord worker mn-261c29
   agent-coord guard install
   agent-coord stop --note "lane 14 shipped"
   agent-coord interrupts --mark-seen
@@ -658,6 +681,137 @@ def format_age(value: str | None) -> str:
     return f"{seconds // 86400}d ago"
 
 
+ITEM_TARGET_PREFIX = "item:"
+
+# One manna read gets the same per-call bound the prompt-router gives coord
+# itself inside Claude Code's five-second hook budget
+# (hooks/claude/agent-do-prompt-router.py, run_bounded timeout=2.0).
+MANNA_READ_BUDGET_SECONDS = float(os.environ.get("AGENT_DO_COORD_MANNA_BUDGET_SECONDS", "2"))
+
+
+def manna_program() -> list[str] | None:
+    """The manna CLI: beside this tool, else under the recorded install path, else on PATH."""
+    candidates = [Path(__file__).resolve().parent / "agent-manna" / "agent-manna"]
+    breadcrumb = Path.home() / ".agent-do" / "install-path"
+    if breadcrumb.is_file():
+        try:
+            candidates.append(Path(breadcrumb.read_text().strip()) / "tools" / "agent-manna" / "agent-manna")
+        except OSError:
+            pass
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return [str(candidate)]
+    agent_do = shutil.which("agent-do")
+    return [agent_do, "manna"] if agent_do else None
+
+
+def run_manna(args: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> tuple[int | None, str, str]:
+    program = manna_program()
+    if program is None:
+        return None, "", "manna not found beside agent-coord, under the install path, or on PATH"
+    try:
+        completed = subprocess.run(
+            [*program, *args],
+            cwd=str(cwd),
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=MANNA_READ_BUDGET_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "", f"manna {' '.join(args)} did not answer within {MANNA_READ_BUDGET_SECONDS:g}s"
+    except OSError as exc:
+        return None, "", f"manna {' '.join(args)} could not start: {exc}"
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def manna_json(args: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> tuple[dict[str, Any] | None, str | None]:
+    """A successful manna JSON payload, or the refusal manna printed (never a guess)."""
+    code, out, err = run_manna(args, cwd=cwd, env=env)
+    if code is None:
+        return None, err
+    payload: Any = None
+    try:
+        payload = json.loads(out) if out.strip() else None
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("success"):
+        return payload, None
+    message = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(message, str) or not message:
+        text = out.strip() or err.strip()
+        # A refusal older binaries print as YAML: keep its error line.
+        message = next(
+            (line.split(":", 1)[1].strip() for line in text.splitlines() if line.startswith("error:")),
+            text,
+        ) or f"manna {' '.join(args)} exited {code}"
+    return None, message
+
+
+def manna_identity(env: dict[str, str] | None = None) -> dict[str, Any] | None:
+    """This process's Manna session label and ownership proof, from the manna binary itself.
+
+    The proof is the digest Manna derives under its machine-local key from the
+    same opaque harness id the board stores as `claim_token_hash` on a claim.
+    Coord never derives it; a label is never a proof.
+    """
+    payload, _ = manna_json(["identity", "--json"], cwd=Path.cwd(), env=env)
+    if not payload:
+        return None
+    session = payload.get("session")
+    proof = payload.get("proof")
+    if not isinstance(session, str) or not session or not isinstance(proof, str) or not proof:
+        return None
+    return {
+        "session": session,
+        "proof": proof,
+        "operator": bool(payload.get("operator")),
+        "source": "manna identity --json in this process environment",
+        "bound_at": now_iso(),
+    }
+
+
+def canonical_board_root(project_root: Path) -> tuple[Path, bool]:
+    """The checkout whose `.manna/` is the board. A worktree carries a copy; the board lives with the common git dir."""
+
+    def absolute(text: str | None) -> Path | None:
+        if not text:
+            return None
+        path = Path(text)
+        return (path if path.is_absolute() else project_root / path).resolve()
+
+    git_dir = absolute(git_output(project_root, "rev-parse", "--git-dir"))
+    common = absolute(git_output(project_root, "rev-parse", "--git-common-dir"))
+    if git_dir and common and git_dir != common:
+        return common.parent, True
+    return project_root, False
+
+
+# A digest is shown at the hex width a drop id carries (drp-<12 hex>), so the
+# two read beside each other; the full value stays on the record.
+DIGEST_PREFIX_HEX = len("drp-1a2b3c4d5e6f") - len("drp-")
+
+
+def short_digest(value: Any) -> str:
+    text = str(value or "")
+    if text.startswith("sha256:"):
+        return text[: len("sha256:") + DIGEST_PREFIX_HEX]
+    return text[:DIGEST_PREFIX_HEX] if text else "none"
+
+
+def approval_text(approval: dict[str, Any] | None) -> str:
+    if not approval:
+        return ""
+    allows = "; ".join(str(item) for item in approval.get("allows", []))
+    excludes = "; ".join(str(item) for item in approval.get("excludes", []))
+    return (
+        f" | approval scope as recorded: allows {allows}; excludes {excludes}; "
+        f"authorized by {approval.get('authorized_by')}; work order {short_digest((approval.get('work_order') or {}).get('digest'))}; "
+        f"routing confers nothing beyond it"
+    )
+
+
 class CoordStore:
     def __init__(self, cwd: Path, *, identify: bool = True) -> None:
         paths = resolve_project_paths(cwd)
@@ -698,6 +852,8 @@ class CoordStore:
         self.bells_path = self.coord_root / "bells.json"
         self.events_path = self.coord_root / "events.jsonl"
         self.lock_path = self.coord_root / ".lock"
+        # One board read per item per command; a view never re-reads the board.
+        self._board_cache: dict[str, tuple[dict[str, Any] | None, dict[str, Any]]] = {}
 
     @contextmanager
     def locked(self, *, wait: bool = True):
@@ -946,7 +1102,27 @@ class CoordStore:
         if len(remaining_pulse) != len(pulse):
             self._save_pulse(remaining_pulse)
 
-    def register_self(self) -> dict[str, Any]:
+    def _bind_manna_identity(self, existing: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Ask the manna binary who this process is; keep an earlier binding when it cannot say."""
+        binding = manna_identity()
+        if binding:
+            return binding
+        previous = (existing or {}).get("manna")
+        return previous if isinstance(previous, dict) and previous.get("proof") else None
+
+    def register_self(self, *, bind: bool = False) -> dict[str, Any]:
+        # The manna read happens outside the lock (manna takes its own board
+        # lock and the hooks bound every coord call). First contact binds;
+        # `touch` and `whoami` refresh.
+        existing = self._load_agents().get(self.agent_id)
+        binding: dict[str, Any] | None = None
+        has_proof = isinstance(existing, dict) and isinstance(existing.get("manna"), dict) and bool(existing["manna"].get("proof"))
+        # Until a proof is bound every call retries: a hook process without the
+        # session's env fails fast and leaves nothing, so the shell's first
+        # coord call (focus, claim, touch) is the one that binds.
+        bind_now = bind or not has_proof
+        if bind_now:
+            binding = self._bind_manna_identity(existing)
         with self.locked():
             agents = self._load_agents()
             current = agents.get(self.agent_id, {})
@@ -973,6 +1149,11 @@ class CoordStore:
                 current["model"] = self.model
             if self.identity_raw:
                 current["identity_raw"] = self.identity_raw
+            if bind_now:
+                # A binding is written only when manna produced one in this
+                # process; a hook process without the session's env keeps the
+                # shell's binding rather than erasing it.
+                current["manna"] = binding
             for revived_key in ("dead", "superseded_by", "tombstoned_at", "stopped", "stopped_at", "stop_note"):
                 current.pop(revived_key, None)
             agents[self.agent_id] = current
@@ -1692,7 +1873,42 @@ class CoordStore:
                     )
         return {"territories": territories, "overlaps": overlaps}
 
-    def _drop_targets_me(self, drop: dict[str, Any]) -> bool:
+    def _identity_group(self, agents: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
+        """My record and every record anchored to the same harness session.
+
+        A session can carry two coord labels (a hook pinned to the session id
+        beside a shell deriving from the thread id); they share `identity_raw`
+        or `session`, never a prefix of each other's label.
+        """
+        agents = agents if agents is not None else self._load_agents()
+        mine = agents.get(self.agent_id) or {}
+        anchors = {value for value in (self.identity_raw, self.session, mine.get("identity_raw"), mine.get("session")) if value}
+        group = {self.agent_id: mine}
+        for agent_id, record in agents.items():
+            if agent_id == self.agent_id:
+                continue
+            if anchors & {value for value in (record.get("identity_raw"), record.get("session")) if value}:
+                group[agent_id] = record
+        return group
+
+    def _my_proofs(self, agents: dict[str, dict[str, Any]] | None = None) -> set[str]:
+        proofs: set[str] = set()
+        for record in self._identity_group(agents).values():
+            manna = record.get("manna")
+            if isinstance(manna, dict) and isinstance(manna.get("proof"), str) and manna["proof"]:
+                proofs.add(manna["proof"])
+        return proofs
+
+    def _drop_targets_me(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]] | None = None) -> bool:
+        for_item = drop.get("for_item")
+        if isinstance(for_item, dict):
+            # Addressed by assignment: delivered to the exact session resolved
+            # under the pinned claim proof, or to any session of mine that
+            # carries that proof. A label or prefix never matches.
+            if drop.get("for_agent_id") and drop.get("for_agent_id") in self._identity_group(agents):
+                return True
+            proof = for_item.get("claim_proof")
+            return bool(proof) and proof in self._my_proofs(agents)
         target = str(drop.get("for") or "any")
         if target == "any":
             return True
@@ -1780,25 +1996,567 @@ class CoordStore:
     def _drop_view(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
         view = dict(drop)
         view["acknowledged_by_me"] = self._drop_acknowledged_by_me(drop)
-        view["addressed_to_me"] = drop.get("owner") != self.agent_id and self._drop_targets_me(drop)
+        view["addressed_to_me"] = drop.get("owner") != self.agent_id and self._drop_targets_me(drop, agents)
         view["owner_presence"] = self._drop_owner_presence(drop, agents)
         view["reported_age"] = format_age(drop.get("updated_at") or drop.get("created_at"))
+        view["delivery"] = self._delivery_view(drop, agents)
         return view
+
+    # ------------------------------------------------------------------
+    # Assignment addressing: a drop for "the worker on mn-x".
+    #
+    # The board row names the claimant and its claim proof; the worker's
+    # coord record carries the proof manna derived in the worker's own
+    # process (bound at touch). The recipient is the live record whose
+    # proof equals the row's, exactly. Nothing here shortens, translates,
+    # or prefix-matches a label, and no routing step confers authority.
+    # ------------------------------------------------------------------
+
+    def _board_item(self, item_id: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        """The canonical board's row for an item (`manna show --json`), or the refusal manna gave."""
+        if item_id in self._board_cache:
+            return self._board_cache[item_id]
+        root, via_worktree = canonical_board_root(self.project_root)
+        board: dict[str, Any] = {
+            "root": str(root),
+            "path": str(root / ".manna"),
+            "via_worktree": via_worktree,
+            "source": "manna show --json",
+            "observed_at": now_iso(),
+        }
+        row: dict[str, Any] | None = None
+        if not (root / ".manna").is_dir():
+            board["error"] = f"no Manna board at {root / '.manna'}"
+        else:
+            payload, message = manna_json(["show", item_id, "--json"], cwd=root)
+            issue = payload.get("issue") if payload else None
+            if isinstance(issue, dict) and issue.get("id"):
+                row = issue
+            else:
+                board["error"] = message or f"manna show {item_id} returned no issue"
+        self._board_cache[item_id] = (row, board)
+        return row, board
+
+    def _item_attempt(self, item_id: str, root: Path) -> dict[str, Any]:
+        """The managed attempt from `manna assess --json`; unknown stays unknown."""
+        payload, message = manna_json(["assess", item_id, "--json"], cwd=root)
+        if not payload:
+            return {"attempt": None, "managed": None, "source": "manna assess --json", "error": message}
+        return {
+            "attempt": payload.get("attempt"),
+            "managed": payload.get("managed"),
+            "source": "manna assess --json",
+            "claimant_observation": payload.get("claimant"),
+        }
+
+    @staticmethod
+    def _pin_item(row: dict[str, Any], board: dict[str, Any], attempt: dict[str, Any] | None) -> dict[str, Any]:
+        attempt = attempt or {}
+        return {
+            "id": row.get("id"),
+            "title": row.get("title"),
+            "status": row.get("status"),
+            "board": board.get("path"),
+            "board_root": board.get("root"),
+            "via_worktree": board.get("via_worktree"),
+            "claimant": row.get("claimed_by"),
+            "claim_proof": row.get("claim_token_hash"),
+            "claimed_at": row.get("claimed_at"),
+            "attempt": attempt.get("attempt"),
+            "managed": attempt.get("managed"),
+            "work_order": {"prompt": row.get("prompt"), "digest": row.get("handoff_digest")},
+            "observed_at": board.get("observed_at"),
+            "source": "manna show --json" + (", manna assess --json" if attempt.get("attempt") is not None or attempt.get("managed") is not None else ""),
+        }
+
+    @staticmethod
+    def _record_anchor(agent_id: str, record: dict[str, Any]) -> str:
+        return str(record.get("identity_raw") or record.get("session") or agent_id)
+
+    def _resolve_item_recipient(self, pinned: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        """The exact coord session for a pinned claim: one live record, one proof, or an honest reason."""
+        item_id = pinned.get("id")
+        claimant = pinned.get("claimant")
+        proof = pinned.get("claim_proof")
+        if not claimant or not proof:
+            return {
+                "state": "unassigned",
+                "agent_id": None,
+                "candidates": [],
+                "reason": f"{item_id} is {pinned.get('status')} with no claimant on the board; nobody is assigned",
+            }
+        bound = [
+            (agent_id, record)
+            for agent_id, record in agents.items()
+            if isinstance(record.get("manna"), dict) and record["manna"].get("proof") == proof
+        ]
+        live = [(agent_id, record) for agent_id, record in bound if classify_presence(record) in {"active", "idle"}]
+        if not live:
+            gone = {agent_id: classify_presence(record) for agent_id, record in bound}
+            reason = (
+                f"no live coord session has bound the claimant's proof (claimant {claimant}); "
+                "the worker binds by running `agent-do coord touch` in its own session"
+            )
+            if gone:
+                reason += "; sessions that bound it and are not live: " + ", ".join(f"{k} ({v})" for k, v in sorted(gone.items()))
+            return {"state": "pending", "agent_id": None, "candidates": [], "not_live": gone, "reason": reason}
+        anchors = {self._record_anchor(agent_id, record) for agent_id, record in live}
+        if len(anchors) > 1:
+            ids = sorted(agent_id for agent_id, _ in live)
+            return {
+                "state": "ambiguous",
+                "agent_id": None,
+                "candidates": ids,
+                "reason": (
+                    f"{len(ids)} live sessions carry the claimant's proof but anchor to different harness sessions "
+                    f"({', '.join(ids)}); refusing to pick one"
+                ),
+            }
+        live.sort(key=lambda item: str(item[1].get("last_seen") or ""), reverse=True)
+        agent_id, record = live[0]
+        return {
+            "state": "resolved",
+            "agent_id": agent_id,
+            "also": [other for other, _ in live[1:]],
+            "candidates": [agent_id, *[other for other, _ in live[1:]]],
+            "how": "coord record manna.proof == board claim_token_hash (exact)",
+            "manna_session": record["manna"].get("session"),
+            "bound_at": record["manna"].get("bound_at"),
+            "presence": classify_presence(record),
+            "resolved_at": now_iso(),
+            "reason": None,
+        }
+
+    def _staleness(self, drop: dict[str, Any]) -> dict[str, Any] | None:
+        """Has the assignment moved since this drop pinned it? Read from the board, never assumed."""
+        for_item = drop.get("for_item")
+        if not isinstance(for_item, dict) or not for_item.get("id"):
+            return None
+        row, board = self._board_item(str(for_item["id"]))
+        if row is None:
+            return {"reason": "unverified", "detail": board.get("error")}
+        pinned_proof = for_item.get("claim_proof")
+        if row.get("claim_token_hash") != pinned_proof:
+            return {
+                "reason": "reassigned",
+                "detail": (
+                    f"claimant now {row.get('claimed_by') or 'nobody'} (recorded for {for_item.get('claimant')}); "
+                    "not forwarded to the replacement"
+                ),
+            }
+        if row.get("status") == "done":
+            return {"reason": "item closed", "detail": f"{for_item['id']} is done"}
+        pinned_digest = (for_item.get("work_order") or {}).get("digest")
+        if row.get("handoff_digest") != pinned_digest:
+            return {
+                "reason": "work-order revised",
+                "detail": (
+                    f"work order {short_digest(pinned_digest)} -> {short_digest(row.get('handoff_digest'))}; "
+                    "recorded against the earlier revision and does not extend to this one"
+                ),
+            }
+        return None
+
+    def _exact_recipient_ids(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> set[str]:
+        """The sessions whose acknowledgment counts as the recipient's: the resolved id, its siblings, and proof-bound records."""
+        ids: set[str] = set()
+        target_id = drop.get("for_agent_id")
+        if isinstance(target_id, str) and target_id:
+            ids.add(target_id)
+            anchor_record = agents.get(target_id)
+            if anchor_record:
+                anchor = self._record_anchor(target_id, anchor_record)
+                for agent_id, record in agents.items():
+                    if self._record_anchor(agent_id, record) == anchor:
+                        ids.add(agent_id)
+        for_item = drop.get("for_item")
+        if isinstance(for_item, dict) and for_item.get("claim_proof"):
+            for agent_id, record in agents.items():
+                manna = record.get("manna")
+                if isinstance(manna, dict) and manna.get("proof") == for_item["claim_proof"]:
+                    ids.add(agent_id)
+        return ids
+
+    def _delivery_view(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        """Each stage as a fact: recorded, recipient resolved, bell queued, acknowledged, completed."""
+        target = str(drop.get("for") or "any")
+        for_item = drop.get("for_item") if isinstance(drop.get("for_item"), dict) else None
+        target_id = drop.get("for_agent_id")
+        recipient: dict[str, Any]
+        if for_item:
+            if isinstance(target_id, str) and target_id:
+                stored = drop.get("recipient") if isinstance(drop.get("recipient"), dict) else {}
+                recipient = {
+                    "state": "resolved",
+                    "agent_id": target_id,
+                    "at": stored.get("resolved_at"),
+                    "how": stored.get("how") or "coord record manna.proof == board claim_token_hash (exact)",
+                    "also": stored.get("also") or [],
+                }
+            else:
+                current = self._resolve_item_recipient(for_item, agents)
+                recipient = {
+                    "state": current["state"],
+                    "agent_id": None,
+                    "at": None,
+                    "reason": current.get("reason"),
+                    "candidates": current.get("candidates", []),
+                }
+        elif target == "any":
+            recipient = {"state": "broadcast", "agent_id": None, "how": "everyone"}
+        elif target in ROLES:
+            recipient = {"state": "broadcast", "agent_id": None, "how": f"role {target}"}
+        elif isinstance(target_id, str) and target_id:
+            recipient = {"state": "resolved", "agent_id": target_id, "at": drop.get("created_at"), "how": "named directly"}
+        else:
+            recipient = {
+                "state": "unknown",
+                "agent_id": None,
+                "reason": f"{target} was not a registered coord session when this drop was written",
+            }
+        if recipient.get("agent_id"):
+            record = agents.get(str(recipient["agent_id"]))
+            recipient["presence"] = classify_presence(record) if record else "unknown"
+
+        if drop.get("bell_queued_at"):
+            bell = {"state": "queued", "at": drop.get("bell_queued_at")}
+        elif recipient["state"] == "broadcast":
+            bell = {"state": "not queued", "reason": "broadcasts are ledger entries, never bells"}
+        elif recipient["state"] != "resolved":
+            bell = {"state": "not queued", "reason": "no exact recipient"}
+        else:
+            bell = {"state": "not queued", "reason": "the recipient was not live when the drop was recorded"}
+
+        acks = drop.get("acks") or {}
+        acknowledged: dict[str, Any] | None = None
+        if recipient["state"] == "broadcast":
+            readers = [
+                {"by": reader, "at": ack.get("at"), "revision": ack.get("revision")}
+                for reader, ack in sorted(acks.items())
+                if isinstance(ack, dict)
+            ]
+            acknowledged = {"readers": readers} if readers else None
+        else:
+            counted = self._exact_recipient_ids(drop, agents)
+            for reader, ack in sorted(acks.items()):
+                if reader in counted and isinstance(ack, dict):
+                    try:
+                        current_revision = int(ack.get("revision", 0)) >= int(drop.get("revision", 1))
+                    except (TypeError, ValueError):
+                        current_revision = False
+                    if current_revision:
+                        acknowledged = {"by": reader, "at": ack.get("at"), "revision": ack.get("revision")}
+                        break
+
+        resolved = drop.get("resolved") if isinstance(drop.get("resolved"), dict) else None
+        completed = (
+            {"by": resolved.get("by"), "at": resolved.get("at"), "reason": resolved.get("reason"), "evidence": resolved.get("evidence")}
+            if resolved and drop.get("status") == "resolved"
+            else None
+        )
+        if completed:
+            stage = "completed"
+        elif acknowledged:
+            stage = "acknowledged"
+        elif bell["state"] == "queued":
+            stage = "bell queued"
+        elif recipient["state"] in {"resolved", "broadcast"}:
+            stage = "recipient resolved" if recipient["state"] == "resolved" else "recorded"
+        else:
+            stage = "recorded"
+        return {
+            "stage": stage,
+            "recorded": {"at": drop.get("created_at")},
+            "recipient": recipient,
+            "bell": bell,
+            "acknowledged": acknowledged,
+            "completed": completed,
+            "stale": self._staleness(drop),
+            "note": "a ledger write or a queued bell is not acknowledgment; only the recipient's ack and resolve are",
+        }
+
+    def _deliver_pending_item_drops(self) -> list[dict[str, Any]]:
+        """Resolve item-addressed drops that were waiting for this session's proof; ring once each."""
+        delivered: list[dict[str, Any]] = []
+        with self.locked():
+            agents = self._load_agents()
+            proofs = self._my_proofs(agents)
+            if not proofs:
+                return delivered
+            drops = self._load_drops()
+            changed = False
+            for drop in drops:
+                for_item = drop.get("for_item")
+                if not isinstance(for_item, dict) or drop.get("status") == "resolved" or drop.get("for_agent_id"):
+                    continue
+                if for_item.get("claim_proof") not in proofs or drop.get("owner") == self.agent_id:
+                    continue
+                current = self._resolve_item_recipient(for_item, agents)
+                if current["state"] != "resolved" or current["agent_id"] not in self._identity_group(agents):
+                    continue
+                stamp = now_iso()
+                drop["for_agent_id"] = current["agent_id"]
+                drop["recipient"] = {
+                    "agent_id": current["agent_id"],
+                    "also": current.get("also", []),
+                    "how": current["how"],
+                    "manna_session": current.get("manna_session"),
+                    "bound_at": current.get("bound_at"),
+                    "resolved_at": stamp,
+                    "resolved_by": "recipient touch",
+                }
+                drop["history"].append({"event": "recipient_resolved", "at": stamp, "by": self.agent_id, "revision": drop.get("revision"), "recipient": current["agent_id"]})
+                if self._ring_locked(current["agent_id"]):
+                    drop["bell_queued_at"] = stamp
+                drop["updated_at"] = stamp
+                changed = True
+                delivered.append({"id": drop["id"], "item": for_item.get("id"), "recipient": current["agent_id"]})
+            if changed:
+                self._save_drops(drops)
+                for entry in delivered:
+                    self._append_event(
+                        kind="drop_deliver",
+                        paths=[],
+                        summary=f"{entry['recipient']} resolved as the recipient of {entry['id']} (worker on {entry['item']})",
+                        extra={"drop_id": entry["id"], "recipient": entry["recipient"], "item": entry["item"]},
+                    )
+        return delivered
+
+    def worker(self, item_id: str) -> tuple[bool, dict[str, Any]]:
+        """Who is the worker on an item: exact session, assignment versus declared title, liveness evidence, obligations."""
+        self.register_self()
+        row, board = self._board_item(item_id)
+        if row is None:
+            return False, {"error": str(board.get("error")), "board": board}
+        attempt = self._item_attempt(item_id, Path(str(board["root"])))
+        pinned = self._pin_item(row, board, attempt)
+        agents = self._load_agents()
+        recipient = self._resolve_item_recipient(pinned, agents)
+        focus_map = self.focus_map()
+        pulse_map = self.pulse_map()
+        session: dict[str, Any] | None = None
+        liveness: dict[str, Any] | None = None
+        assignment: dict[str, Any] | None = None
+        if recipient.get("agent_id"):
+            agent_id = str(recipient["agent_id"])
+            record = agents.get(agent_id, {})
+            manna = record.get("manna") if isinstance(record.get("manna"), dict) else {}
+            session = {
+                "agent_id": agent_id,
+                "alias": record.get("alias"),
+                "also": recipient.get("also", []),
+                "binding": {
+                    "how": recipient.get("how"),
+                    "manna_session": manna.get("session"),
+                    "proof": manna.get("proof"),
+                    "bound_at": manna.get("bound_at"),
+                    "source": manna.get("source"),
+                },
+                "harness": {
+                    "runtime": record.get("runtime"),
+                    "identity_source": record.get("identity_source"),
+                    "pid": record.get("pid"),
+                    "host": record.get("host"),
+                    "pane": record.get("pane"),
+                },
+            }
+            verified = process_liveness(record)
+            liveness = {
+                "presence": classify_presence(record),
+                "last_seen": record.get("last_seen"),
+                "age": format_age(record.get("last_seen")),
+                "lease_expires_at": record.get("lease_expires_at"),
+                "process": {
+                    "pid": record.get("pid"),
+                    "verified": "alive" if verified is True else "gone" if verified is False else "unverifiable",
+                },
+                "pulse": pulse_map.get(agent_id),
+                "source": "coord agents.json lease; kill -0 and ps lstart on this host",
+                "observed_at": now_iso(),
+            }
+            focus = focus_map.get(agent_id) or {}
+            focus_updated = parse_iso(focus.get("updated_at"))
+            claimed = parse_iso(pinned.get("claimed_at"))
+            predates = bool(focus_updated and claimed and focus_updated < claimed)
+            assignment = {
+                "board_assignment": {
+                    "item": pinned["id"],
+                    "title": pinned.get("title"),
+                    "claimed_at": pinned.get("claimed_at"),
+                    "attempt": pinned.get("attempt"),
+                    "source": "manna board row (recorded claim)",
+                },
+                "declared_focus": (
+                    {
+                        "goal": focus.get("goal"),
+                        "phase": focus.get("phase"),
+                        "updated_at": focus.get("updated_at"),
+                        "age": format_age(focus.get("updated_at")),
+                        "source": "coord focus (the session's own title, a dated declaration)",
+                    }
+                    if focus
+                    else None
+                ),
+                "focus_predates_claim": predates,
+                "note": (
+                    "the declared focus predates the claim: a title set before this assignment was recorded; "
+                    "the board row is the current assignment"
+                    if predates
+                    else "the declared focus was set after the claim" if focus else "no focus declared"
+                ),
+            }
+        obligations: list[dict[str, Any]] = []
+        group_ids = {recipient["agent_id"], *recipient.get("also", [])} if recipient.get("agent_id") else set()
+        for drop in self._load_drops():
+            if drop.get("status") == "resolved":
+                continue
+            for_item = drop.get("for_item") if isinstance(drop.get("for_item"), dict) else None
+            addressed = (for_item and for_item.get("id") == item_id) or (
+                group_ids and (drop.get("for_agent_id") in group_ids or drop.get("for") in group_ids)
+            )
+            if not addressed:
+                continue
+            view = self._drop_view(drop, agents)
+            obligations.append(
+                {
+                    "id": view["id"],
+                    "kind": view.get("kind"),
+                    "path": view.get("path"),
+                    "note": view.get("note"),
+                    "owner": view.get("owner_label") or view.get("owner"),
+                    "revision": view.get("revision"),
+                    "approval": view.get("approval"),
+                    "stage": view["delivery"]["stage"],
+                    "delivery": view["delivery"],
+                }
+            )
+        obligations.sort(key=lambda item: (item.get("kind") != "action", item.get("stage") in {"acknowledged", "completed"}, str(item.get("id"))))
+        return True, {
+            "item": pinned,
+            "board": board,
+            "recipient_state": recipient["state"],
+            "reason": recipient.get("reason"),
+            "candidates": recipient.get("candidates", []),
+            "not_live": recipient.get("not_live"),
+            "session": session,
+            "liveness": liveness,
+            "assignment": assignment,
+            "manna_observation": attempt.get("claimant_observation"),
+            "obligations": obligations,
+            "authority_note": "a lookup confers nothing; the board row and the drop records are the facts",
+        }
 
     def add_drop(
         self,
         path: str,
-        target: str,
+        target: str | None,
         note: str | None,
         key: str | None,
         kind: str = "info",
-    ) -> dict[str, Any]:
+        item: str | None = None,
+        approval: dict[str, Any] | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Record a pointer for a peer, a role, everyone, or the worker on an item.
+
+        A direct target must be a registered session or alias, a role, or
+        `any`; anything else is refused rather than written to nobody. An
+        item target pins the board's claimant, claim proof, attempt and
+        work-order digest, resolves the exact session by proof, and stays
+        visibly pending when none is live. An approval must say what it
+        allows, what it excludes, and who authorized it; it is an action.
+        """
         self.register_self()
         kind = "action" if kind == "action" else "info"
         normalized = normalize_path(self.project_root, self.cwd, path)
         alias = self.self_record(refresh=False).get("alias")
-        resolved, _ = self._resolve_peer(target)
-        known_agent = resolved in self._load_agents()
+        agents = self._load_agents()
+        for_item: dict[str, Any] | None = None
+        recipient: dict[str, Any] | None = None
+        resolved: str | None = None
+        known_agent = False
+        if item:
+            if target and target != "any":
+                return False, {"error": "--for and --for-item name one destination each; pass one of them"}
+            row, board = self._board_item(item)
+            if row is None:
+                return False, {"error": f"cannot address {item}: {board.get('error')}", "board": board}
+            if row.get("status") == "done":
+                return False, {
+                    "error": f"{row.get('id')} is done; nobody is assigned to it (claimed_by on the row is history, not an assignment)",
+                    "item": {"id": row.get("id"), "status": row.get("status"), "claimed_by": row.get("claimed_by")},
+                }
+            if not row.get("claimed_by") or not row.get("claim_token_hash"):
+                return False, {
+                    "error": (
+                        f"{row.get('id')} is {row.get('status')} with no claimant; address a role or any, "
+                        "or wait for a claim"
+                    ),
+                    "item": {"id": row.get("id"), "status": row.get("status")},
+                }
+            attempt = self._item_attempt(item, Path(str(board["root"])))
+            for_item = self._pin_item(row, board, attempt)
+            recipient = self._resolve_item_recipient(for_item, agents)
+            if recipient.get("agent_id") in self._identity_group(agents):
+                return False, {
+                    "error": f"the worker on {for_item['id']} is this session ({recipient['agent_id']}); a drop addresses someone else",
+                    "destination": recipient,
+                }
+            target = f"{ITEM_TARGET_PREFIX}{for_item['id']}"
+            resolved = recipient.get("agent_id")
+            known_agent = bool(resolved)
+            if approval:
+                allows = [str(text).strip() for text in approval.get("allows", []) if str(text).strip()]
+                excludes = [str(text).strip() for text in approval.get("excludes", []) if str(text).strip()]
+                authorized_by = str(approval.get("authorized_by") or "").strip()
+                missing = [
+                    name
+                    for name, present in (("--allows", bool(allows)), ("--excludes", bool(excludes)), ("--authorized-by", bool(authorized_by)))
+                    if not present
+                ]
+                if missing:
+                    return False, {
+                        "error": (
+                            "an approval record names what it allows, what it excludes, and who authorized it; "
+                            f"missing {', '.join(missing)}"
+                        )
+                    }
+                approval = {
+                    "item": for_item["id"],
+                    "work_order": dict(for_item["work_order"]),
+                    "attempt": for_item.get("attempt"),
+                    "allows": allows,
+                    "excludes": excludes,
+                    "authorized_by": authorized_by,
+                    "recorded_by": self.agent_id,
+                    "recorded_at": now_iso(),
+                    "note": (
+                        "scope as recorded by the coordinator; routing confers no authority beyond it, "
+                        "and approval to implement locally is not approval to deploy"
+                    ),
+                }
+                kind = "action"
+        else:
+            if approval:
+                return False, {"error": "an approval is recorded against an item: pass --for-item <mn-id> with --allows/--excludes/--authorized-by"}
+            target = target or "any"
+            resolved, _ = self._resolve_peer(target)
+            known_agent = resolved in agents
+            if not known_agent and target != "any" and target not in ROLES:
+                live = sorted(
+                    (record.get("alias") and f"{agent_id} (alias {record['alias']})") or agent_id
+                    for agent_id, record in agents.items()
+                    if classify_presence(record) in {"active", "idle"}
+                )
+                return False, {
+                    "error": (
+                        f"unknown destination {target!r}: no coord session or alias is registered under that name, "
+                        f"and it is not a role ({', '.join(ROLES)}) or any. "
+                        f"Live sessions: {', '.join(live) if live else 'none'}. "
+                        "Address the assignment instead: drop add <path> --for-item <mn-id>; "
+                        "look the worker up with: worker <mn-id>"
+                    ),
+                    "live_sessions": live,
+                }
         with self.locked():
             drops = self._load_drops()
             stamp = now_iso()
@@ -1806,6 +2564,7 @@ class CoordStore:
                 (item for item in drops if item.get("owner") == self.agent_id and item.get("path") == normalized),
                 None,
             )
+            pin_changed = False
             if existing is None:
                 payload = {
                     "id": "drp-" + uuid.uuid4().hex[:12],
@@ -1829,11 +2588,21 @@ class CoordStore:
                 change = "added"
             else:
                 payload = existing
+                previous_item = existing.get("for_item") if isinstance(existing.get("for_item"), dict) else None
+                if for_item and previous_item:
+                    pin_changed = (
+                        previous_item.get("claim_proof") != for_item.get("claim_proof")
+                        or (previous_item.get("work_order") or {}).get("digest") != for_item["work_order"].get("digest")
+                        or previous_item.get("attempt") != for_item.get("attempt")
+                    )
                 content_changed = (
                     existing.get("note") != note
                     or existing.get("key") != key
                     or existing.get("for") != target
                     or existing.get("kind") != kind
+                    or bool(for_item) != bool(previous_item)
+                    or pin_changed
+                    or (existing.get("approval") or None) != (approval or None)
                 )
                 reopened = existing.get("status") == "resolved"
                 if content_changed or reopened:
@@ -1857,17 +2626,69 @@ class CoordStore:
                         payload["history"].append(
                             {"event": "updated", "at": stamp, "by": self.agent_id, "revision": payload["revision"]}
                         )
+                    if pin_changed and previous_item:
+                        # Re-addressing is the owner's explicit act and is
+                        # journaled; it is never done for them.
+                        payload["history"].append(
+                            {
+                                "event": "readdressed",
+                                "at": stamp,
+                                "by": self.agent_id,
+                                "revision": payload["revision"],
+                                "from": {
+                                    "claimant": previous_item.get("claimant"),
+                                    "attempt": previous_item.get("attempt"),
+                                    "work_order": (previous_item.get("work_order") or {}).get("digest"),
+                                },
+                                "to": {
+                                    "claimant": for_item.get("claimant") if for_item else None,
+                                    "attempt": for_item.get("attempt") if for_item else None,
+                                    "work_order": for_item["work_order"].get("digest") if for_item else None,
+                                },
+                            }
+                        )
                     payload["updated_at"] = stamp
                     change = "reopened" if reopened else "updated"
                 else:
                     change = "unchanged"
                 payload["owner_label"] = alias or self.agent_id
                 payload["for"] = target
-                payload["for_agent_id"] = resolved if known_agent else None
+                if change != "unchanged" or not for_item:
+                    payload["for_agent_id"] = resolved if known_agent else None
                 payload["note"] = note
                 payload["key"] = key
                 payload["kind"] = kind
                 payload.pop("legacy", None)
+            if for_item:
+                payload["for_item"] = for_item
+                if change != "unchanged":
+                    payload["recipient"] = (
+                        {
+                            "agent_id": recipient["agent_id"],
+                            "also": recipient.get("also", []),
+                            "how": recipient.get("how"),
+                            "manna_session": recipient.get("manna_session"),
+                            "bound_at": recipient.get("bound_at"),
+                            "resolved_at": stamp,
+                            "resolved_by": "drop add",
+                        }
+                        if recipient and recipient.get("agent_id")
+                        else None
+                    )
+                    payload.pop("bell_queued_at", None)
+                if approval:
+                    payload["approval"] = approval
+                elif "approval" in payload and change != "unchanged":
+                    payload.pop("approval", None)
+            else:
+                payload.pop("for_item", None)
+                payload.pop("recipient", None)
+                payload.pop("approval", None)
+            if change != "unchanged":
+                # Roles and 'any' remain ordinary ledger entries, not broadcasts.
+                # The bell is a bit on the exact recipient; its timestamp is a stage, not an acknowledgment.
+                if self._ring_locked(resolved if known_agent else None):
+                    payload["bell_queued_at"] = stamp
             self._save_drops(drops)
             if change != "unchanged":
                 self._append_event(
@@ -1875,13 +2696,35 @@ class CoordStore:
                     paths=[normalized],
                     keys=[key] if key else [],
                     summary=f"{alias or self.agent_id} dropped {normalized} for {target} ({payload['id']} r{payload['revision']})",
-                    extra={"drop_id": payload["id"], "revision": payload["revision"], "change": change},
+                    extra={
+                        "drop_id": payload["id"],
+                        "revision": payload["revision"],
+                        "change": change,
+                        "item": for_item.get("id") if for_item else None,
+                        "recipient": payload.get("for_agent_id"),
+                    },
                 )
-                # Roles and 'any' remain ordinary ledger entries, not broadcasts.
-                self._ring_locked(resolved if known_agent else None)
-            result = dict(payload)
-            result["change"] = change
-            return result
+            view = self._drop_view(payload, self._load_agents())
+            view["change"] = change
+            if for_item:
+                view["destination"] = {
+                    "item": for_item["id"],
+                    "board": for_item.get("board"),
+                    "via_worktree": for_item.get("via_worktree"),
+                    "claimant": for_item.get("claimant"),
+                    "claim_proof": for_item.get("claim_proof"),
+                    "attempt": for_item.get("attempt"),
+                    "work_order": for_item.get("work_order"),
+                    "session": payload.get("for_agent_id"),
+                    "state": recipient["state"] if recipient else "pending",
+                    "reason": recipient.get("reason") if recipient else None,
+                    "candidates": recipient.get("candidates", []) if recipient else [],
+                    "provenance": [
+                        f"board row: {for_item.get('source')} at {for_item.get('observed_at')}",
+                        "session: " + (recipient.get("how") or "no exact session; see reason") if recipient else "",
+                    ],
+                }
+            return True, view
 
     def ack_drop(self, drop_id: str) -> tuple[bool, dict[str, Any]]:
         """Acknowledge delivery of a drop addressed to me, at its current revision.
@@ -1923,6 +2766,10 @@ class CoordStore:
         record = self.self_record(refresh=False)
         if drop.get("for_agent_id") == self.agent_id or target == self.agent_id or target == record.get("alias"):
             return None
+        if isinstance(drop.get("for_item"), dict):
+            if self._drop_targets_me(drop):
+                return None
+            return f"{drop['id']} is addressed to the worker on {drop['for_item'].get('id')}; only its owner or that worker may resolve it"
         if target == "any":
             if for_everyone:
                 return None
@@ -2006,7 +2853,7 @@ class CoordStore:
         agents = self._load_agents()
         drops = self._load_drops()
         if for_me:
-            drops = [item for item in drops if item.get("owner") != self.agent_id and self._drop_targets_me(item)]
+            drops = [item for item in drops if item.get("owner") != self.agent_id and self._drop_targets_me(item, agents)]
         if not include_resolved:
             drops = [item for item in drops if item.get("status") != "resolved"]
         drops.sort(key=lambda item: item.get("updated_at") or item.get("created_at", ""), reverse=True)
@@ -2407,14 +3254,15 @@ class CoordStore:
         # "finished", so it stays listed (no longer new) until it is
         # resolved, and the router keeps reminding at work boundaries.
         # Everything stays readable through `drops --all` and `drop history`.
-        for drop in self._load_drops():
+        all_drops = self._load_drops()
+        for drop in all_drops:
             if drop.get("owner") == self.agent_id:
                 continue
             if drop.get("status") == "resolved":
                 continue
             key = drop.get("key")
             key_match = bool(key) and str(key) in my_need_keys
-            if not (self._drop_targets_me(drop) or key_match):
+            if not (self._drop_targets_me(drop, agents) or key_match):
                 continue
             acknowledged = self._drop_acknowledged_by_me(drop)
             is_action = drop.get("kind") == "action"
@@ -2455,6 +3303,14 @@ class CoordStore:
                 state = "informational"
                 remedy = f"ack when read: agent-do coord drop ack {drop_id}"
                 label = "Drop"
+            for_item = drop.get("for_item") if isinstance(drop.get("for_item"), dict) else None
+            stale = self._staleness(drop) if for_item else None
+            if for_item:
+                label = "Approval" if drop.get("approval") else label
+                label = f"{label} for the worker on {for_item.get('id')}"
+                note += approval_text(drop.get("approval"))
+                if stale:
+                    state = f"{state}; STALE: {stale.get('reason')}: {stale.get('detail')}"
             interrupts.append(
                 {
                     # An obligation is a dependency (the router reminds at work
@@ -2470,12 +3326,62 @@ class CoordStore:
                     "revision": drop.get("revision"),
                     "reported_at": reported_at,
                     "acknowledged": acknowledged,
+                    "item": for_item.get("id") if for_item else None,
+                    "stale": stale,
                     "summary": (
                         f"{label} {drop_id} from {drop.get('owner_label') or drop.get('owner')}: {drop_path}{note} "
                         f"[{state}; reported {format_age(reported_at)}, not re-verified; {remedy}]"
                     ),
                     "new": seq > last_seen_seq and not acknowledged,
                     "event_id": latest_event.get("id") if latest_event else None,
+                }
+            )
+
+        # My own obligations that nobody has acknowledged stay in front of me:
+        # an unacknowledged action drop or approval is undelivered work, not a
+        # finished handoff, whatever the ledger write or the bell said.
+        for drop in all_drops:
+            if drop.get("owner") != self.agent_id or drop.get("status") == "resolved" or drop.get("kind") != "action":
+                continue
+            delivery = self._delivery_view(drop, agents)
+            if delivery["stage"] in {"acknowledged", "completed"}:
+                continue
+            recipient = delivery["recipient"]
+            if recipient["state"] == "broadcast":
+                continue
+            drop_id = str(drop.get("id"))
+            for_item = drop.get("for_item") if isinstance(drop.get("for_item"), dict) else None
+            where = (
+                f"the worker on {for_item.get('id')}" if for_item else str(drop.get("for"))
+            ) + (f" ({recipient['agent_id']}, {recipient.get('presence')})" if recipient.get("agent_id") else "")
+            if recipient["state"] == "resolved":
+                detail = f"stage {delivery['stage']}; not acknowledged since {format_age(drop.get('updated_at') or drop.get('created_at'))}"
+            else:
+                detail = f"{recipient['state']}: {recipient.get('reason')}"
+            stale = delivery.get("stale")
+            if stale:
+                detail += f"; STALE: {stale.get('reason')}: {stale.get('detail')}"
+            interrupts.append(
+                {
+                    "kind": "notice",
+                    "severity": "info",
+                    "peer": recipient.get("agent_id"),
+                    "peer_label": recipient.get("agent_id"),
+                    "paths": [str(drop.get("path", ""))],
+                    "keys": [],
+                    "drop_id": drop_id,
+                    "drop_kind": "action",
+                    "awaiting": True,
+                    "item": for_item.get("id") if for_item else None,
+                    "delivery": delivery,
+                    "summary": (
+                        f"Awaiting acknowledgment: {'approval' if drop.get('approval') else 'action'} {drop_id} "
+                        f"for {where}: {detail} [re-check: agent-do coord worker {for_item.get('id')}]"
+                        if for_item
+                        else f"Awaiting acknowledgment: action {drop_id} for {where}: {detail}"
+                    ),
+                    "new": False,
+                    "event_id": None,
                 }
             )
 
@@ -2540,7 +3446,8 @@ class CoordStore:
         }
 
     def touch(self) -> dict[str, Any]:
-        agent = self.register_self()
+        agent = self.register_self(bind=True)
+        delivered = self._deliver_pending_item_drops()
         current_focus = self.focus_for()
         peers = self.peers(include_stale=True)
         others = [peer for peer in peers if not peer["current"]]
@@ -2555,6 +3462,8 @@ class CoordStore:
                 "status": classify_presence(agent),
             },
             "focus": current_focus,
+            "manna": agent.get("manna"),
+            "delivered": delivered,
             "active_peers": active_peers,
             "peer_counts": peer_counts,
             "active_window_seconds": ACTIVE_WINDOW_SECONDS,
@@ -2700,10 +3609,14 @@ def parser() -> argparse.ArgumentParser:
     drop_sub = drop_p.add_subparsers(dest="drop_command")
     drop_add = drop_sub.add_parser("add")
     drop_add.add_argument("path")
-    drop_add.add_argument("--for", dest="target", default="any")
+    drop_add.add_argument("--for", dest="target", default=None)
+    drop_add.add_argument("--for-item", dest="item", default=None)
     drop_add.add_argument("--note")
     drop_add.add_argument("--key")
     drop_add.add_argument("--action", action="store_const", const="action", default="info", dest="kind")
+    drop_add.add_argument("--allows", action="append", default=[])
+    drop_add.add_argument("--excludes", action="append", default=[])
+    drop_add.add_argument("--authorized-by", dest="authorized_by", default=None)
     drop_ack = drop_sub.add_parser("ack")
     drop_ack.add_argument("drop_id")
     drop_resolve = drop_sub.add_parser("resolve")
@@ -2717,6 +3630,9 @@ def parser() -> argparse.ArgumentParser:
     drops_p = sub.add_parser("drops")
     drops_p.add_argument("--for-me", action="store_true", dest="for_me")
     drops_p.add_argument("--all", action="store_true", dest="include_resolved")
+
+    worker_p = sub.add_parser("worker")
+    worker_p.add_argument("item")
 
     history_p = sub.add_parser("history")
     history_p.add_argument("peer", nargs="?")
@@ -2899,7 +3815,7 @@ def main(argv: list[str]) -> int:
         return print_payload(payload, args.json)
 
     if args.command == "whoami":
-        record = store.self_record()
+        record = store.register_self(bind=True)
         payload = {
             "success": True,
             "tool": "coord",
@@ -2919,6 +3835,7 @@ def main(argv: list[str]) -> int:
             "last_seen": record.get("last_seen"),
             "lease_expires_at": record.get("lease_expires_at"),
             "status": classify_presence(record),
+            "manna": record.get("manna"),
             "active_window_seconds": ACTIVE_WINDOW_SECONDS,
             "idle_window_seconds": IDLE_WINDOW_SECONDS,
         }
@@ -3126,8 +4043,40 @@ def main(argv: list[str]) -> int:
 
     if args.command == "drop":
         if args.drop_command == "add":
-            payload = store.add_drop(args.path, args.target, args.note, args.key, kind=args.kind)
-            return print_payload({"success": True, "tool": "coord", "drop": payload}, args.json)
+            approval = None
+            if args.allows or args.excludes or args.authorized_by:
+                approval = {"allows": args.allows, "excludes": args.excludes, "authorized_by": args.authorized_by}
+            ok, payload = store.add_drop(
+                args.path, args.target, args.note, args.key, kind=args.kind, item=args.item, approval=approval
+            )
+            if not ok:
+                extra = {k: v for k, v in payload.items() if k != "error"}
+                return error(str(payload.get("error")), args.json, code=2, **extra)
+            if args.json:
+                return print_payload({"success": True, "tool": "coord", "drop": payload}, True)
+            delivery = payload.get("delivery") or {}
+            destination = payload.get("destination")
+            print(f'{payload["id"]} r{payload["revision"]} {payload["change"]}: {payload["path"]} for {payload["for"]} ({payload["kind"]})')
+            if destination:
+                print(
+                    f'  destination: {destination["item"]} claimed by {destination["claimant"]} '
+                    f'(attempt {destination.get("attempt") if destination.get("attempt") is not None else "n/a"}, '
+                    f'work order {short_digest((destination.get("work_order") or {}).get("digest"))}) '
+                    f'-> session {destination.get("session") or "none"} [{destination.get("state")}]'
+                )
+                if destination.get("reason"):
+                    print(f'  reason: {destination["reason"]}')
+                for line in destination.get("provenance", []):
+                    if line:
+                        print(f"  provenance: {line}")
+            print(
+                f'  delivery: stage {delivery.get("stage")}; recipient {delivery.get("recipient", {}).get("state")}; '
+                f'bell {delivery.get("bell", {}).get("state")}; acknowledged {"yes" if delivery.get("acknowledged") else "no"}; '
+                f'completed {"yes" if delivery.get("completed") else "no"}'
+            )
+            if delivery.get("stale"):
+                print(f'  STALE: {delivery["stale"].get("reason")}: {delivery["stale"].get("detail")}')
+            return 0
         if args.drop_command == "ack":
             ok, payload = store.ack_drop(args.drop_id)
             if not ok:
@@ -3163,13 +4112,67 @@ def main(argv: list[str]) -> int:
             return 0
         for item in payload:
             target = item.get("for") or "any"
+            delivery = item.get("delivery") or {}
+            recipient = delivery.get("recipient") or {}
+            if item.get("for_item") and recipient.get("agent_id"):
+                target = f'{target} -> {recipient["agent_id"]}'
+            elif item.get("for_item"):
+                target = f'{target} -> {recipient.get("state")}'
             note = f' — {item.get("note")}' if item.get("note") else ""
             marks = [str(item.get("kind") or "info"), f'r{item.get("revision")}', str(item.get("status"))]
             if item.get("acknowledged_by_me"):
                 marks.append("acked")
+            if delivery.get("stage"):
+                marks.append(f'stage {delivery["stage"]}')
+            if delivery.get("stale"):
+                marks.append(f'STALE {delivery["stale"].get("reason")}')
             print(
                 f'{item.get("id")} {item.get("path")} (from {item.get("owner_label")}, for {target}; '
                 f'{", ".join(marks)}; reported {item.get("reported_age")}){note}'
+            )
+        return 0
+
+    if args.command == "worker":
+        ok, payload = store.worker(args.item)
+        if not ok:
+            extra = {k: v for k, v in payload.items() if k != "error"}
+            return error(str(payload.get("error")), args.json, code=2, **extra)
+        if args.json:
+            return print_payload({"success": True, "tool": "coord", **payload}, True)
+        item = payload["item"]
+        print(
+            f'{item["id"]} {item.get("status")}: claimant {item.get("claimant") or "none"} '
+            f'(attempt {item.get("attempt") if item.get("attempt") is not None else "n/a"}, '
+            f'work order {short_digest((item.get("work_order") or {}).get("digest"))}, board {item.get("board")})'
+        )
+        session = payload.get("session")
+        if session:
+            binding = session["binding"]
+            liveness = payload["liveness"] or {}
+            print(
+                f'session: {session["agent_id"]}'
+                + (f' (also {", ".join(session["also"])})' if session.get("also") else "")
+                + f' bound {format_age(binding.get("bound_at"))} via {binding.get("how")}'
+            )
+            print(
+                f'liveness: {liveness.get("presence")} (last seen {liveness.get("age")}; process {liveness.get("process", {}).get("verified")})'
+            )
+            assignment = payload.get("assignment") or {}
+            declared = assignment.get("declared_focus")
+            print(
+                f'assignment: {item["id"]} claimed {format_age(item.get("claimed_at"))} | declared focus: '
+                + (f'"{declared.get("goal")}" ({declared.get("age")})' if declared else "none")
+                + f' | {assignment.get("note")}'
+            )
+        else:
+            print(f'session: none [{payload.get("recipient_state")}] {payload.get("reason")}')
+        obligations = payload.get("obligations") or []
+        print(f"obligations: {len(obligations)} open")
+        for item_view in obligations:
+            stale = (item_view.get("delivery") or {}).get("stale")
+            print(
+                f'  {item_view["id"]} {item_view.get("kind")} {item_view.get("path")} from {item_view.get("owner")}: '
+                f'stage {item_view.get("stage")}' + (f'; STALE {stale.get("reason")}' if stale else "")
             )
         return 0
 

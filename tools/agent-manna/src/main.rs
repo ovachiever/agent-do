@@ -314,6 +314,9 @@ enum Commands {
     Show {
         /// Issue ID (e.g., mn-abc123)
         id: String,
+        /// Emit JSON instead of YAML
+        #[arg(long)]
+        json: bool,
     },
 
     /// Update issue metadata; lifecycle state changes use dedicated verbs
@@ -1909,7 +1912,7 @@ fn cmd_state(json: bool, decision_markers: Vec<String>, cached_drift: bool) -> !
     output_success(state);
 }
 
-fn cmd_show(id: String) -> ! {
+fn cmd_show(id: String, json: bool) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -1928,10 +1931,14 @@ fn cmd_show(id: String) -> ! {
     // Find issue
     let issue = find_issue(&issues, &id);
 
-    output_success(IssueData {
+    let data = IssueData {
         age: (&issue).into(),
         issue,
-    });
+    };
+    if json {
+        output_success_json(data);
+    }
+    output_success(data);
 }
 
 fn cmd_update(request: UpdateRequest) -> ! {
@@ -3882,7 +3889,7 @@ fn main() {
             track,
             json,
         } => cmd_list(status, issue_type, track, json),
-        Commands::Show { id } => cmd_show(id),
+        Commands::Show { id, json } => cmd_show(id, json),
         Commands::Update {
             id,
             title,

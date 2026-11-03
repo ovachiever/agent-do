@@ -44,7 +44,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [coderabbit](#coderabbit) | Local AI diff review via CodeRabbit CLI — review uncommitted changes, staged diffs, or branch diffs before opening a PR | mixed | 6 |
 | [colab](#colab) | Google Colab notebook management | mixed | 4 |
 | [context](#context) | Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal). | mixed | 27 |
-| [coord](#coord) | Project-local agent state and interrupt broker | mixed | 24 |
+| [coord](#coord) | Project-local agent state and interrupt broker | mixed | 25 |
 | [creds](#creds) | Secure credential storage and resolution for agent-do tools | mixed | 8 |
 | [cronitor](#cronitor) | Cronitor scheduled job and uptime monitoring | mixed | 11 |
 | [db](#db) | Control database clients | mixed | 5 |
@@ -1238,8 +1238,9 @@ Concurrency: `mixed`
 - `need`: Manage dependencies: need add \<key> --why \<text> [--from \<agent>|--for \<agent>] | need list [--all] | need clear \<key>
 - `publishes`: List published artifacts
 - `publish`: Manage published artifacts: publish add [--file \<path>]|clear
-- `drop`: Drop lifecycle (stable ids, never deleted): drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>] [--action] (default kind info is a delivery shown as a notice; --action is an obligation shown as a dependency until resolved; re-adding changed content bumps the revision) | drop ack \<id> (recipient acknowledges: read, never done; an info drop leaves that reader's interrupts, an action drop stays listed until resolved) | drop resolve \<id> --reason \<text> [--evidence \<ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; kept in history) | drop history \<id>
-- `drops`: List open drops: drops [--for-me] [--all] (--all includes resolved); a note is a dated report, never a verified present fact
+- `drop`: Drop lifecycle (stable ids, never deleted): drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>] [--action] (default kind info is a delivery shown as a notice; --action is an obligation shown as a dependency until resolved; re-adding changed content bumps the revision; a direct --for must be a registered session or alias, a role, or any, else refused) | drop add \<path> --for-item \<mn-id> [--action] [--allows \<text> ... --excludes \<text> ... --authorized-by \<who>] (address the worker on an item: pins the board claimant, claim proof, attempt and work-order digest, resolves the exact coord session by proof equality, never a label or prefix; no live bound session leaves it visibly pending until the worker's next touch; a replacement claimant or revised work order marks it STALE, never forwards it; --allows/--excludes/--authorized-by record an approval's scope, all three required, and the drop is an action; routing confers no authority) | drop ack \<id> (recipient acknowledges: read, never done; an info drop leaves that reader's interrupts, an action drop stays listed until resolved) | drop resolve \<id> --reason \<text> [--evidence \<ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; kept in history) | drop history \<id>
+- `drops`: List open drops: drops [--for-me] [--all] (--all includes resolved), each with its delivery stage: recorded, recipient resolved, bell queued, acknowledged, completed; a ledger write or a queued bell is never acknowledgment; a note is a dated report, never a verified present fact
+- `worker`: The worker on an item: worker \<mn-id> shows the exact coord session bound by claim proof, the board assignment beside the session's declared focus title, liveness evidence (lease, process, pulse) and its open obligations with delivery stages; a lookup confers nothing
 - `history`: Read the coordination event journal: history [peer] [--limit \<n>]
 
 **Examples**
@@ -1269,6 +1270,10 @@ agent-do coord drop add .dev/research-drops/report.md --for builder-a --note "ep
 agent-do coord drop ack drp-1a2b3c4d5e6f
 # hand another agent an obligation that keeps reminding until resolved
 agent-do coord drop add .dev/fix-me.md --for builder-a --note "please fix" --action
+# record an approval for the worker on an item without copying a session id
+agent-do coord drop add .dev/mn-261c29/approval.md --for-item mn-261c29 --allows "write the migration file; local build and test" --excludes "applying it to staging or production" --authorized-by "Erik, 2026-10-30 16:20 CDT, via Claude"
+# who is the worker on this item and did they read my drop
+agent-do coord worker mn-261c29
 # settle a drop for every reader once its work is done
 agent-do coord drop resolve drp-1a2b3c4d5e6f --reason "folded into the release" --evidence "commit abc123"
 # see whether anything should interrupt me
@@ -1283,7 +1288,7 @@ agent-do coord stop --note "lane 14 shipped"
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `aliases`, `claims`, `drops`, `history`, `need list`, `peers`, `publishes`, `status`, `territory`, `whoami`
+- Read-only (snapshot/verify; safe to parallelize): `aliases`, `claims`, `drops`, `history`, `need list`, `peers`, `publishes`, `status`, `territory`, `whoami`, `worker`
 - Write (connect/interact/save): `alias`, `bell`, `bye`, `claim soft`, `claim strong`, `drop`, `focus`, `guard`, `interrupts`, `need add`, `need clear`, `publish add`, `publish clear`, `pulse`, `release`, `role`, `stop`, `touch`
 - destructive (irreversible data loss; confirm before auto-running): `bye`, `need clear`, `publish clear`
 - polymorphic (beat decided by payload or flag at call time): `guard`, `interrupts`, `pulse`
