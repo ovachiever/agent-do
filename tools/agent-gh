@@ -1373,11 +1373,25 @@ def merge_gate(ref: PrRef) -> dict[str, Any]:
     if merge_state and merge_state not in {"CLEAN", "UNKNOWN"}:
         blocks.append({"gate": "mergeable", "reason": f"merge state is {merge_state}, not CLEAN"})
 
+    # GitHub's reviewDecision already applies the base branch's protection
+    # and rulesets: REVIEW_REQUIRED when an approval is required and missing,
+    # CHANGES_REQUESTED when a reviewer blocked, APPROVED when satisfied, and
+    # null when the branch requires no review at all. Blocking on null refused
+    # every PR in repos that require 0 approvals (a sole author cannot approve
+    # their own PR), leaving --force — the emergency path — as the only route.
+    notes: list[dict[str, str]] = []
     decision = str(detail.get("review_decision") or "").upper()
-    if decision != "APPROVED":
+    if decision == "CHANGES_REQUESTED":
+        blocks.append({"gate": "approval", "reason": "a reviewer requested changes"})
+    elif decision == "REVIEW_REQUIRED":
         blocks.append({
             "gate": "approval",
-            "reason": f"no approving review recorded (review_decision={decision or 'none'})",
+            "reason": "the base branch requires an approving review and none is recorded",
+        })
+    elif decision != "APPROVED":
+        notes.append({
+            "gate": "approval",
+            "reason": "the base branch requires no review and none is recorded — merging on the author's authority",
         })
 
     risk = classify_risk(changed_paths(detail))
@@ -1388,7 +1402,7 @@ def merge_gate(ref: PrRef) -> dict[str, Any]:
             "reason": f"critical-tier paths changed ({crit}) — pass --confirm-risk after tracing the control flow",
         })
 
-    return {"allowed": not blocks, "blocks": blocks, "warnings": warnings, "risk": risk}
+    return {"allowed": not blocks, "blocks": blocks, "warnings": warnings, "notes": notes, "risk": risk}
 
 
 def add_finding(
@@ -2111,6 +2125,9 @@ def cmd_merge(args: argparse.Namespace) -> None:
                     file=sys.stderr,
                 )
         sys.exit(2)
+
+    for note in gate.get("notes", []):
+        print(f"  NOTE   [{note['gate']}] {note['reason']}", file=sys.stderr)
 
     if args.force and gate["blocks"]:
         bypassed = ", ".join(block["gate"] for block in gate["blocks"])
