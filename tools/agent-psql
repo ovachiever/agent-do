@@ -909,7 +909,7 @@ cmd_describe() {
                 SELECT json_agg(json_build_object(
                     'name', indexname,
                     'definition', indexdef,
-                    'size', pg_size_pretty(pg_relation_size(quote_ident(indexname)))
+                    'size', pg_size_pretty(pg_relation_size(format('%I.%I', schemaname, indexname)::regclass))
                 ))
                 FROM pg_indexes
                 WHERE tablename = '$_TBL_NAME' AND schemaname = '$_TBL_SCHEMA'
