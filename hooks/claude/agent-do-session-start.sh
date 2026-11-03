@@ -80,6 +80,10 @@ run_native_bootstrap_prompt() {
     local ask_prompt="$1"
     local project_root="$2"
     local response
+    # A person answered the dialog. Only then may a failure open a second,
+    # blocking dialog: an auto-response is a script (tests, CI, headless
+    # lanes), and a modal dialog there waits forever on nobody.
+    local answered_by_person=0
     # With many sessions open, an unlabeled dialog is unanswerable: the title
     # names the repo, and the body always ends with its full path.
     local dialog_label
@@ -108,6 +112,7 @@ display dialog "$(printf '%s' "$ask_prompt" | sed 's/\\/\\\\/g; s/"/\\"/g')" wit
 button returned of result
 EOF
 )
+            answered_by_person=1
             ;;
     esac
 
@@ -137,7 +142,10 @@ EOF
                 osascript -e "display notification \"Bootstrap completed for $project_label. Log: $log_file\" with title \"agent-do Bootstrap\" sound name \"Glass\"" 2>/dev/null || true
             else
                 osascript -e "display notification \"Bootstrap FAILED for $project_label (exit $run_exit). Log: $log_file\" with title \"agent-do Bootstrap\" sound name \"Basso\"" 2>/dev/null || true
-                # On failure also offer to open the log right now.
+                echo "[agent-do bootstrap] FAILED for $project_label (exit $run_exit). Log: $log_file" >&2
+            fi
+            if [[ "$run_exit" -ne 0 && "$answered_by_person" -eq 1 ]]; then
+                # The person who clicked Bootstrap is at the screen: offer the log.
                 local choice
                 choice=$(osascript <<DLG 2>/dev/null || true
 display dialog "agent-do bootstrap failed (exit $run_exit) for $project_label.
