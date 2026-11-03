@@ -54,8 +54,9 @@ def main() -> int:
         def session(sid: str) -> dict[str, str]:
             return dict(base, CLAUDE_SESSION_ID=sid, AGENT_DO_COORD_SESSION=sid)
 
-        def host(hid: str) -> dict[str, str]:
-            return dict(base, AGENT_DO_COORD_SESSION=hid, AGENT_DO_COORD_PID=str(os.getpid()), AGENT_DO_COORD_PID_START=lstart(os.getpid()))
+        def host(hid: str, pid: int | None = None) -> dict[str, str]:
+            anchor = pid if pid is not None else os.getpid()
+            return dict(base, AGENT_DO_COORD_SESSION=hid, AGENT_DO_COORD_PID=str(anchor), AGENT_DO_COORD_PID_START=lstart(anchor))
 
         lead = session("fixture-lead")
         worker = session("fixture-worker")
@@ -110,6 +111,42 @@ def main() -> int:
         write("refusal-unknown-outstanding", refusal(["drop", "wake", revised["id"]], cwd=project, env=host_b))
         write("outcome-failed-after-unknown", coord_json(["drop", "wake", revised["id"], "--request", r2["request"]["id"], "--outcome", "failed", "--evidence", "pane scrollback shows no submission; composer still holds the draft"], cwd=project, env=host_a))
         write("refusal-no-evidence", refusal(["drop", "wake", revised["id"], "--request", r2["request"]["id"], "--outcome", "submitted"], cwd=project, env=host_a))
+
+        # Reservation versus dispatch-started: the three crash windows.
+        lane = coord_json(["drop", "add", ".dev/dispatch-lane.md", "--for-item", item, "--action", "--note", "dispatch lane"], cwd=project, env=lead)["drop"]
+        proc = subprocess.Popen(["sleep", "300"])
+        try:
+            host_c = host("holy-fixture-c", pid=proc.pid)
+            c_request = coord_json(["drop", "wake", lane["id"]], cwd=project, env=host_c)["request"]
+            write("refusal-dispatching-not-holder", refusal(["drop", "wake", lane["id"], "--request", c_request["id"], "--dispatching", "tmux pane %7"], cwd=project, env=host_a))
+            write("dispatch-started", coord_json(["drop", "wake", lane["id"], "--request", c_request["id"], "--dispatching", "tmux pane %7, server epoch 12, worker pid alive, composer empty"], cwd=project, env=host_c))
+            write("dispatch-started-replay", coord_json(["drop", "wake", lane["id"], "--request", c_request["id"], "--dispatching", "tmux pane %7, server epoch 12, worker pid alive, composer empty"], cwd=project, env=host_c))
+            write("refusal-waiting-after-dispatch", refusal(["drop", "wake", lane["id"], "--request", c_request["id"], "--waiting", "composer busy"], cwd=project, env=host_c))
+            write("refusal-released-after-dispatch", refusal(["drop", "wake", lane["id"], "--request", c_request["id"], "--outcome", "released", "--evidence", "stepping back"], cwd=project, env=host_c))
+            write("demands-dispatching-held", coord_json(["drops", "--wake"], cwd=project, env=host_b))
+        finally:
+            proc.kill()
+            proc.wait()
+        # The holder died after dispatch-started: a missing receipt proves nothing, so the demand reads unknown.
+        write("demands-unknown-after-dispatch-crash", coord_json(["drops", "--wake"], cwd=project, env=host_a))
+        write("refusal-unknown-after-dispatch-crash", refusal(["drop", "wake", lane["id"]], cwd=project, env=host_a))
+        write("outcome-established-after-crash", coord_json(["drop", "wake", lane["id"], "--request", c_request["id"], "--outcome", "submitted", "--evidence", "pane %7 scrollback shows the wake instruction after epoch 12; composer empty"], cwd=project, env=host_a))
+        # A reservation whose holder died before dispatch is reclaimable: the next request supersedes it.
+        reserve = coord_json(["drop", "add", ".dev/reserve-lane.md", "--for-item", item, "--action", "--note", "reservation lane"], cwd=project, env=lead)["drop"]
+        proc = subprocess.Popen(["sleep", "300"])
+        try:
+            host_d = host("holy-fixture-d", pid=proc.pid)
+            coord_json(["drop", "wake", reserve["id"]], cwd=project, env=host_d)
+        finally:
+            proc.kill()
+            proc.wait()
+        write("demands-lapsed-reservation", coord_json(["drops", "--wake"], cwd=project, env=host_a))
+        write("request-superseded-lapsed-reservation", coord_json(["drop", "wake", reserve["id"]], cwd=project, env=host_a))
+        # The dispatch boundary revalidates: a revision that moved after the reservation refuses the mark.
+        gate = coord_json(["drop", "add", ".dev/gate.md", "--for-item", item, "--action", "--note", "gate v1"], cwd=project, env=lead)["drop"]
+        g1 = coord_json(["drop", "wake", gate["id"]], cwd=project, env=host_a)["request"]
+        coord_json(["drop", "add", ".dev/gate.md", "--for-item", item, "--action", "--note", "gate v2"], cwd=project, env=lead)
+        write("refusal-dispatch-demand-moved", refusal(["drop", "wake", gate["id"], "--request", g1["id"], "--dispatching", "tmux pane %7, server epoch 13"], cwd=project, env=host_a))
         manna(["abandon", item], cwd=project, env=worker)
         manna(["claim", item], cwd=project, env=session("fixture-replacement"))
         coord_json(["touch"], cwd=project, env=session("fixture-replacement"))
@@ -122,6 +159,9 @@ def main() -> int:
         "Real `agent-do coord` payloads from an isolated board, written by `tests/gen_coord_wake_fixtures.py`.\n"
         "Session ids, pids, paths and timestamps are the fixture run's own. `tests/test_coord_v2.py::test_wake_fixtures`\n"
         "checks every file against the contract's required keys. Contract: `docs/COORD-WAKE.md`.\n\n"
+        "`dispatch-*`, `*-after-dispatch*`, `demands-lapsed-reservation` and `request-superseded-lapsed-reservation` are the\n"
+        "crash-window shapes: a reservation (no dispatch mark) whose holder died is reclaimable; a dispatch-started request\n"
+        "whose holder died reads `unknown` and refuses every new request until a live consumer establishes its outcome.\n\n"
         + "".join(f"- `{name}.json`\n" for name in written)
     )
     print(f"wrote {len(written)} fixtures to {OUT}")

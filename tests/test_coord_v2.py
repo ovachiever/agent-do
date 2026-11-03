@@ -2090,11 +2090,13 @@ def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
     """The host-driven wake contract (coord-wake/1) through the real CLI and hooks, in a throwaway board.
 
     Standalone use with no host, two competing consumers, duplicate and replayed
-    receipts, crash and restart, an unknown transport outcome, reassignment
-    after enqueue, a changed revision, unavailable and ambiguous recipients,
-    acknowledged-action suppression, a fresh demand on a new revision, and the
-    invariant that a recorded or submitted notification is never an
-    acknowledgment. No live harness session is launched.
+    receipts, crash and restart in each of the three windows (before dispatch,
+    after dispatch-started but before sending, after sending but before the
+    receipt), an unknown transport outcome, reassignment after enqueue, a
+    changed revision, unavailable and ambiguous recipients, acknowledged-action
+    suppression, a fresh demand on a new revision, revalidation at the dispatch
+    boundary, and the invariant that a recorded, dispatched or submitted
+    notification is never an acknowledgment. No live harness session is launched.
     """
     project, base, lead, worker, worker_id, item, session, host, create_item = wake_fixture(tmp_path, env_base, "wake-contract")
     row = manna_json(["show", item], cwd=project, env=lead)["issue"]
@@ -2246,8 +2248,9 @@ def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
     released = coord_json(["drop", "wake", approval["id"], "--request", b_holds["id"], "--outcome", "released", "--evidence", "this host does not own that pane"], cwd=project, env=host_b)
     require(released["demand"]["notification"]["state"] == "wanted" and released["demand"]["notification"]["attempts"] == 1, "released steps back without counting an attempt")
 
-    # --- I. Crash and restart: presence is the lease. A dead holder with no outcome lapses and is superseded;
-    # a dead holder's unknown outcome still blocks until a live consumer establishes it; a restart is the same consumer. ---
+    # --- I. Crash before dispatch: presence is the lease. A dead holder that never entered dispatch holds only a
+    # reservation, which lapses and is superseded; a dead holder's recorded unknown still blocks until a live consumer
+    # establishes it; a restart is the same consumer. (Crashes after dispatch-started are N and O below.) ---
     proc = subprocess.Popen(["sleep", "300"])
     try:
         host_c = host("holy-host-c", pid=proc.pid)
@@ -2261,6 +2264,8 @@ def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
     lapsed_view = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), approval["id"])
     require(lapsed_view["notification"]["state"] == "wanted" and lapsed_view["notification"]["lapsed"]["request"] == c_request["id"], f"a dead holder lapses: {lapsed_view['notification']}")
     require(lapsed_view["notification"]["lapsed"]["consumer_presence"] == "dead", f"the lapse names the verified presence: {lapsed_view['notification']['lapsed']}")
+    require(lapsed_view["notification"]["lapsed"]["reclaimable"] is True and c_request["dispatch"] is None, f"a reservation that never entered dispatch is reclaimable: {lapsed_view['notification']['lapsed']}")
+    require(lapsed_view["wake_wanted"] is True and lapsed_view["notification"]["unknown"] is None, "a lapsed reservation wants a wake again; nothing is unknown about it")
     superseding = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)
     require(superseding["change"] == "superseded" and superseding["supersedes"]["request"] == c_request["id"] and superseding["supersedes"]["consumer"] == c_id, f"supersession is explicit: {superseding['supersedes']}")
     restarted_c = host("holy-host-c")
@@ -2301,6 +2306,115 @@ def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
     r3_request = coord_json(["drop", "wake", approval["id"]], cwd=project, env=host_a)["request"]
     require(":r3:" in r3_request["demand_id"] and r3_request["revision"] == 3, f"the new request binds r3: {r3_request}")
 
+    # --- N. Crash after dispatch-started, before sending: a missing receipt proves nothing. The dispatch mark is the
+    # durable fence, so the dead holder's request reads unknown, is never reclaimed, and no consumer sends until a live
+    # one establishes the outcome on that same request with transport evidence. ---
+    lane = coord_json(["drop", "add", ".dev/dispatch.md", "--for-item", item, "--action", "--note", "dispatch lane"], cwd=project, env=lead)["drop"]
+    proc = subprocess.Popen(["sleep", "300"])
+    try:
+        host_e = host("holy-host-e", pid=proc.pid)
+        e_id = coord_json(["whoami"], cwd=project, env=host_e)["agent_id"]
+        e_request = coord_json(["drop", "wake", lane["id"]], cwd=project, env=host_e)["request"]
+        require(e_request["dispatch"] is None, f"a fresh request is a reservation: {e_request}")
+        bad = coord(["drop", "wake", lane["id"], "--request", e_request["id"], "--dispatching", "  ", "--json"], cwd=project, env=host_e)
+        require(bad.returncode == 2 and "evidence" in json.loads(bad.stdout)["error"], "dispatch needs the evidence it re-checked")
+        bad = coord(["drop", "wake", lane["id"], "--request", e_request["id"], "--dispatching", "pane %2", "--json"], cwd=project, env=host_a)
+        require(bad.returncode == 2 and "holder's own act" in json.loads(bad.stdout)["error"], "only the holder enters dispatch")
+        bad = coord(["drop", "wake", lane["id"], "--dispatching", "pane %2", "--json"], cwd=project, env=host_e)
+        require(bad.returncode == 2 and "--request" in json.loads(bad.stdout)["error"], "dispatch names its request")
+        entered = coord_json(["drop", "wake", lane["id"], "--request", e_request["id"], "--dispatching", "tmux pane %2, server epoch 7, worker pid alive, composer empty"], cwd=project, env=host_e)
+        require(entered["change"] == "recorded" and entered["phase"] == "dispatch-started" and entered["request"]["dispatch"]["evidence"].startswith("tmux pane %2"), f"dispatch-started is recorded: {entered['request']}")
+        require(entered["demand"]["notification"]["state"] == "dispatching" and entered["demand"]["notification"]["request"]["phase"] == "dispatch-started", f"state: {entered['demand']['notification']}")
+        require(entered["request"]["dispatch"]["recipient"]["agent_id"] == worker_id and entered["request"]["dispatch"]["recipient"]["pid"] is not None, f"the recipient incarnation is pinned at dispatch: {entered['request']['dispatch']['recipient']}")
+        require(entered["request"]["dispatch"]["instruction"] == listing["instruction"] and entered["request"]["history"][-1]["event"] == "dispatching", "the fixed instruction and the event ride on the record")
+        require(entered["delivery_stage"] == "bell queued" and entered["demand"]["acknowledged"] is None, "dispatch never moves the delivery stage")
+        replay = coord_json(["drop", "wake", lane["id"], "--request", e_request["id"], "--dispatching", "tmux pane %2, server epoch 7, worker pid alive, composer empty"], cwd=project, env=host_e)
+        require(replay["duplicate"] is True and replay["change"] == "unchanged" and replay["request"]["dispatch"]["at"] == entered["request"]["dispatch"]["at"], "a replayed dispatch mark changes nothing; the first fence stands")
+        bad = coord(["drop", "wake", lane["id"], "--request", e_request["id"], "--waiting", "composer busy", "--json"], cwd=project, env=host_e)
+        require(bad.returncode == 2 and "entered dispatch" in json.loads(bad.stdout)["error"], "waiting applies before dispatch")
+        bad = coord(["drop", "wake", lane["id"], "--request", e_request["id"], "--outcome", "released", "--evidence", "changed my mind", "--json"], cwd=project, env=host_e)
+        require(bad.returncode == 2 and "released" in json.loads(bad.stdout)["error"], "released is a reservation's exit, never a dispatch's")
+        bad = coord(["drop", "wake", lane["id"], "--json"], cwd=project, env=host_b)
+        require(bad.returncode == 2 and e_id in json.loads(bad.stdout)["error"], "a dispatching holder is honored")
+        held_text = coord(["drops", "--wake"], cwd=project, env=host_b)
+        require(held_text.returncode == 0 and "[dispatching]" in held_text.stdout, f"the text listing names the phase: {held_text.stdout}")
+    finally:
+        proc.kill()
+        proc.wait()
+    view = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), lane["id"])
+    require(view["bucket"] == "demands" and view["notification"]["state"] == "unknown" and view["wake_wanted"] is False, f"a dead holder after dispatch reads unknown, never wanted: {view['notification']}")
+    require(view["notification"]["lapsed"]["reclaimable"] is False and view["notification"]["lapsed"]["request"] == e_request["id"] and view["notification"]["lapsed"]["consumer_presence"] == "dead", f"the lapse is not reclaimable: {view['notification']['lapsed']}")
+    require(view["notification"]["unknown"]["how"] == "lapsed after dispatch-started" and view["notification"]["attempts"] == 1, f"unknown names its cause: {view['notification']['unknown']}")
+    for env in (host_a, host_b):
+        bad = coord(["drop", "wake", lane["id"], "--json"], cwd=project, env=env)
+        payload = json.loads(bad.stdout)
+        require(bad.returncode == 2 and "may have occurred" in payload["error"] and "unknown" in payload["error"] and payload["outstanding"]["id"] == e_request["id"], f"no consumer may request while a dead holder's dispatch is unestablished: {payload}")
+    record = next(d for d in coord_json(["drops", "--all"], cwd=project, env=lead)["drops"] if d["id"] == lane["id"])
+    e_record = next(r for b in record["wake"].values() for r in b["requests"] if r["id"] == e_request["id"])
+    require(e_record.get("lapsed") is None and e_record["outcome"] is None and e_record["dispatch"], f"reads wrote nothing and nothing superseded the fence: {e_record}")
+    bad = coord(["drop", "wake", lane["id"], "--request", e_request["id"], "--outcome", "released", "--evidence", "the holder is dead", "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "released" in json.loads(bad.stdout)["error"], "a dead holder's dispatch cannot be released away")
+    bad = coord(["drop", "wake", lane["id"], "--request", e_request["id"], "--dispatching", "pane %2 again", "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "holder's own act" in json.loads(bad.stdout)["error"], "nobody dispatches on the dead holder's behalf")
+    settled = coord_json(["drop", "wake", lane["id"], "--request", e_request["id"], "--outcome", "failed", "--evidence", "pane %2 scrollback: no instruction appeared after epoch 7; composer still empty"], cwd=project, env=host_a)
+    require(settled["change"] == "recorded" and settled["holder_presence"] == "dead" and settled["request"]["outcome"]["by"] == a_id and settled["phase"] == "dispatch-started", f"a live consumer establishes the dead holder's dispatch: {settled['request']['outcome']}")
+    require(settled["demand"]["notification"]["state"] == "wanted" and settled["demand"]["notification"]["attempts"] == 1, f"established as failed, the demand is open again: {settled['demand']['notification']}")
+    n_request = coord_json(["drop", "wake", lane["id"]], cwd=project, env=host_a)
+    require(n_request["change"] == "requested" and n_request["supersedes"] is None and n_request["request"]["dispatch"] is None, f"the next request is a fresh reservation, not a supersession: {n_request['change']} {n_request['supersedes']}")
+    coord_json(["drop", "wake", lane["id"], "--request", n_request["request"]["id"], "--outcome", "released", "--evidence", "handing the pane to the next host"], cwd=project, env=host_a)
+    kinds = [e["kind"] for e in coord_json(["drop", "history", lane["id"]], cwd=project, env=lead)["events"]]
+    require("wake_dispatch" in kinds, f"the journal carries the dispatch mark: {kinds}")
+
+    # --- O. Crash after sending, before the receipt: the same fence. The surviving consumer finds the instruction in the
+    # terminal and establishes submitted on the dead holder's request; nothing is sent twice, and the submission is still
+    # not an acknowledgment. ---
+    proc = subprocess.Popen(["sleep", "300"])
+    try:
+        host_f = host("holy-host-f", pid=proc.pid)
+        f_request = coord_json(["drop", "wake", lane["id"]], cwd=project, env=host_f)["request"]
+        coord_json(["drop", "wake", lane["id"], "--request", f_request["id"], "--dispatching", "tmux pane %2, server epoch 8, composer empty"], cwd=project, env=host_f)
+        # The transport delivered the instruction here; the host died before it could write the receipt.
+    finally:
+        proc.kill()
+        proc.wait()
+    view = wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_b), lane["id"])
+    require(view["notification"]["state"] == "unknown" and view["notification"]["lapsed"]["reclaimable"] is False, f"after sending, a lost receipt reads unknown: {view['notification']}")
+    bad = coord(["drop", "wake", lane["id"], "--json"], cwd=project, env=host_b)
+    require(bad.returncode == 2 and json.loads(bad.stdout)["outstanding"]["id"] == f_request["id"], "the survivor cannot request, so it cannot send again")
+    established = coord_json(["drop", "wake", lane["id"], "--request", f_request["id"], "--outcome", "submitted", "--evidence", "pane %2 scrollback shows the wake instruction after epoch 8; composer empty"], cwd=project, env=host_b)
+    require(established["change"] == "recorded" and established["request"]["outcome"]["state"] == "submitted" and established["request"]["outcome"]["by"] == b_id, f"the survivor establishes submitted from transport evidence: {established['request']['outcome']}")
+    require(established["demand"]["notification"]["state"] == "submitted" and established["delivery_stage"] == "bell queued" and established["demand"]["acknowledged"] is None, f"submitted, never acknowledged: {established['demand']['notification']['state']} {established['delivery_stage']}")
+    bad = coord(["drop", "wake", lane["id"], "--json"], cwd=project, env=host_a)
+    require(bad.returncode == 2 and "--after" in json.loads(bad.stdout)["error"], "after the established submission a new request still needs --after with evidence")
+    acked_lane = coord_json(["drop", "ack", lane["id"]], cwd=project, env=worker)["drop"]
+    require(acked_lane["delivery"]["stage"] == "acknowledged" and acked_lane["delivery"]["acknowledged"]["by"] == worker_id, "the recipient's own ack ends the demand")
+    require(wake_of(coord_json(["drops", "--wake"], cwd=project, env=host_a), lane["id"])["bucket"] == "held", "the acknowledged lane is held")
+
+    # --- P. The dispatch boundary revalidates the demand: a moved revision or an acknowledged drop refuses the mark with
+    # "do not send" and writes nothing; the text form names the phase. ---
+    gate = coord_json(["drop", "add", ".dev/gate.md", "--for-item", item, "--action", "--note", "gate v1"], cwd=project, env=lead)["drop"]
+    g1 = coord_json(["drop", "wake", gate["id"]], cwd=project, env=host_a)["request"]
+    gate2 = coord_json(["drop", "add", ".dev/gate.md", "--for-item", item, "--action", "--note", "gate v2"], cwd=project, env=lead)["drop"]
+    require(gate2["revision"] == 2, f"gate r2: {gate2['revision']}")
+    bad = coord(["drop", "wake", gate["id"], "--request", g1["id"], "--dispatching", "pane %3 epoch 9", "--json"], cwd=project, env=host_a)
+    payload = json.loads(bad.stdout)
+    require(bad.returncode == 2 and "do not send" in payload["error"] and payload["demand_moved"]["from"] == g1["demand_id"] and ":r2:" in payload["demand_moved"]["to"], f"a moved revision refuses dispatch: {payload}")
+    record = next(d for d in coord_json(["drops", "--all"], cwd=project, env=lead)["drops"] if d["id"] == gate["id"])
+    require(next(r for b in record["wake"].values() for r in b["requests"] if r["id"] == g1["id"])["dispatch"] is None, "the refused dispatch wrote nothing")
+    g2 = coord_json(["drop", "wake", gate["id"], "--revision", "2"], cwd=project, env=host_a)["request"]
+    coord_json(["drop", "ack", gate["id"]], cwd=project, env=worker)
+    bad = coord(["drop", "wake", gate["id"], "--request", g2["id"], "--dispatching", "pane %3 epoch 10", "--json"], cwd=project, env=host_a)
+    payload = json.loads(bad.stdout)
+    require(bad.returncode == 2 and "acknowledged" in payload["error"] and "do not send" in payload["error"], f"an acknowledged drop refuses dispatch: {payload['error']}")
+    gate3 = coord_json(["drop", "add", ".dev/gate.md", "--for-item", item, "--action", "--note", "gate v3"], cwd=project, env=lead)["drop"]
+    require(gate3["revision"] == 3, f"gate r3: {gate3['revision']}")
+    g3 = coord_json(["drop", "wake", gate["id"], "--revision", "3"], cwd=project, env=host_a)["request"]
+    text = coord(["drop", "wake", gate["id"], "--request", g3["id"], "--dispatching", "pane %3 epoch 11, composer empty"], cwd=project, env=host_a)
+    require(text.returncode == 0 and "dispatch started:" in text.stdout and "[dispatching]" in text.stdout, f"dispatch text: {text.stdout}")
+    coord_json(["drop", "wake", gate["id"], "--request", g3["id"], "--outcome", "failed", "--evidence", "aborted before send: the pane was mid-tool-call"], cwd=project, env=host_a)
+    g4 = coord_json(["drop", "wake", gate["id"]], cwd=project, env=host_a)["request"]
+    require(g4["demand_id"] == g3["demand_id"] and g4["dispatch"] is None, "a fresh reservation on the same r3 demand, carried into the reassignment below")
+
     # --- K. Reassignment after enqueue: the pin is unchanged, so the demand is the same one, now stale; nothing is forwarded. ---
     require(manna(["abandon", item], cwd=project, env=worker).returncode == 0, "worker abandons")
     replacement = session("wake-replacement-0001")
@@ -2316,6 +2430,11 @@ def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
     require(approval["id"] not in {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=replacement)["drops"]}, "the replacement never sees the old worker's approval")
     bad = coord(["drop", "wake", approval["id"], "--json"], cwd=project, env=host_b)
     require(bad.returncode == 2 and "stale" in json.loads(bad.stdout)["error"], "a stale demand refuses a request")
+    bad = coord(["drop", "wake", gate["id"], "--request", g4["id"], "--dispatching", "pane %3 epoch 12", "--json"], cwd=project, env=host_a)
+    payload = json.loads(bad.stdout)
+    require(bad.returncode == 2 and "stale" in payload["error"] and "do not send" in payload["error"], f"a stale assignment refuses the dispatch mark: {payload['error']}")
+    record = next(d for d in coord_json(["drops", "--all"], cwd=project, env=lead)["drops"] if d["id"] == gate["id"])
+    require(next(r for b in record["wake"].values() for r in b["requests"] if r["id"] == g4["id"])["dispatch"] is None, "the refused dispatch on a stale assignment wrote nothing")
     fresh = coord_json(["drop", "add", ".dev/fresh.md", "--for-item", item, "--action", "--note", "for the replacement"], cwd=project, env=lead)["drop"]
     listing = coord_json(["drops", "--wake"], cwd=project, env=host_a)
     entry = wake_of(listing, fresh["id"])
@@ -2353,8 +2472,10 @@ def test_wake_contract(tmp_path: Path, env_base: dict[str, str]) -> None:
 
     # Nothing here deleted a record or acknowledged anything on the recipients' behalf.
     on_disk = json.loads((project / ".git/agent-do/coord/drops.json").read_text())["drops"]
-    require({d["id"] for d in on_disk} >= {approval["id"], info["id"], broadcast["id"], pending["id"], ambiguous["id"], direct["id"]}, "drops are never deleted")
-    require(all(not d["acks"] for d in on_disk if d["id"] != approval["id"]), "the only acknowledgment on disk is the worker's own")
+    require({d["id"] for d in on_disk} >= {approval["id"], info["id"], broadcast["id"], pending["id"], ambiguous["id"], direct["id"], lane["id"], gate["id"]}, "drops are never deleted")
+    acked_ids = {approval["id"], lane["id"], gate["id"]}
+    require(all(not d["acks"] for d in on_disk if d["id"] not in acked_ids), "no acknowledgment exists beyond the worker's own")
+    require(all(set(d["acks"]) == {worker_id} for d in on_disk if d["id"] in acked_ids), "every acknowledgment on disk is the worker's own; no host wrote one")
 
 
 def test_wake_fixtures() -> None:
@@ -2372,13 +2493,17 @@ def test_wake_fixtures() -> None:
             require(set(payload) >= {"instruction", "observed_at", "consumer", "demands", "held", "counts", "note"}, f"{name}: listing keys")
             for entry in [*payload["demands"], *payload["held"]]:
                 require(set(entry) >= required_demand_keys, f"{name}: demand keys missing {required_demand_keys - set(entry)}")
-                require(set(entry["notification"]) >= {"state", "demand_id", "request", "lapsed", "attempts", "requests"}, f"{name}: notification keys")
+                require(set(entry["notification"]) >= {"state", "demand_id", "request", "lapsed", "unknown", "attempts", "requests"}, f"{name}: notification keys")
             require(all(e["actionable"] for e in payload["demands"]) and all(not e["actionable"] for e in payload["held"]), f"{name}: buckets agree with actionable")
             seen.add("demands")
-        elif name.startswith("request") or name.startswith("outcome") or name.startswith("waiting"):
+        elif name.startswith("request") or name.startswith("outcome") or name.startswith("waiting") or name.startswith("dispatch"):
             require(payload["success"] is True and payload["contract"] == "coord-wake/1", f"{name}: contract header")
             require(payload["request"]["id"].startswith("wrq-") and payload["request"]["demand_id"], f"{name}: request identity")
             require(set(payload["demand"]) >= required_demand_keys, f"{name}: demand keys")
+            if name.startswith("dispatch"):
+                dispatch = payload["request"]["dispatch"]
+                require(payload["phase"] == "dispatch-started" and dispatch["evidence"] and dispatch["recipient"]["agent_id"] and dispatch["instruction"], f"{name}: dispatch mark with evidence and the pinned recipient")
+                require(payload["delivery_stage"] != "acknowledged" and payload["demand"]["notification"]["state"] in {"dispatching", "unknown"}, f"{name}: a dispatch mark is a transport fact")
             if name.startswith("outcome"):
                 require(payload["request"]["outcome"]["state"] in {"submitted", "unknown", "failed", "released"} and payload["request"]["outcome"]["evidence"], f"{name}: outcome with evidence")
                 require("delivery_stage" in payload and payload["delivery_stage"] != "acknowledged", f"{name}: a receipt never reads acknowledged")
@@ -2388,7 +2513,7 @@ def test_wake_fixtures() -> None:
             seen.add("refusal")
         else:
             raise AssertionError(f"unexpected fixture {path.name}")
-    require(seen >= {"demands", "request", "outcome", "refusal"}, f"fixture set incomplete: {seen}")
+    require(seen >= {"demands", "request", "outcome", "refusal", "dispatch"}, f"fixture set incomplete: {seen}")
 
 
 def main() -> int:

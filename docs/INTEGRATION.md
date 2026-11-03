@@ -90,16 +90,20 @@ sitting at an empty composer never hears it. A host that owns the worker's
 terminal (Holy, or any other) can close that gap through the `coord-wake/1`
 contract in [COORD-WAKE.md](COORD-WAKE.md): `agent-do coord drops --wake`
 lists the wake demands open action drops raise, `agent-do coord drop wake
-<drop-id>` claims one under the host's own coord identity (its presence is
-the lease, so two hosts never duplicate one demand and a crashed host lapses),
-and `drop wake <drop-id> --request <id> --waiting|--outcome … --evidence …`
-records what the transport did. The host submits only the fixed content-free
-instruction the contract hands it; the substance stays on the ledger. A
-request or a submission is a transport fact: the delivery stage, the
-acknowledgment and the resolution still move only on the recipient's own
-`drop ack` and `drop resolve`, an unknown outcome blocks resubmission until
-the host establishes what happened, and a new revision or a changed
-assignment is a fresh demand. With no host present nothing changes.
+<drop-id>` reserves one under the host's own coord identity (its presence is
+the lease, so two hosts never duplicate one demand, and a host that dies
+holding only a reservation lapses), `drop wake <drop-id> --request <id>
+--dispatching <evidence>` is the durable dispatch-started mark the host writes
+immediately before it touches the transport, and `--waiting|--outcome …
+--evidence …` records what the transport did. The host submits only the fixed
+content-free instruction the contract hands it; the substance stays on the
+ledger. A request, a dispatch mark or a submission is a transport fact: the
+delivery stage, the acknowledgment and the resolution still move only on the
+recipient's own `drop ack` and `drop resolve`. A missing receipt proves
+nothing: a host that dies after dispatch-started leaves the outcome unknown,
+nobody may request or send again until a live consumer establishes it from
+transport evidence, and a new revision or a changed assignment is a fresh
+demand. With no host present nothing changes.
 
 ## Installation (install.sh)
 
