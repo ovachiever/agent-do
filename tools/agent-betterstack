@@ -42,7 +42,9 @@ MONITORS
   resume <monitor>              Resume a monitor
 
 INCIDENTS
-  incidents [--active]          List incidents (--active = unresolved only)
+  incidents [--active] [--since D] [--until D] [--all]
+                                List incidents (--active = unresolved only;
+                                D = YYYY-MM-DD or Nd; --all follows every page)
   incident <id>                 Detailed incident info
   ack <id>                      Acknowledge an incident
   resolve <id>                  Resolve an incident
@@ -253,22 +255,63 @@ cmd_response_times() {
 cmd_incidents() {
     _pop_json_flag "$@"
     local url="${BETTERSTACK_API_V3}/incidents"
-    local active_only=false
+    local active_only=false all_pages=false since="" until=""
 
     local -a args=("${_JSON_ARGS[@]}")
     while [[ ${#args[@]} -gt 0 ]]; do
         case "${args[0]}" in
             --active) active_only=true; args=("${args[@]:1}") ;;
+            --all) all_pages=true; args=("${args[@]:1}") ;;
+            --since|--until)
+                if [[ ${#args[@]} -lt 2 ]]; then echo "Error: ${args[0]} needs a value" >&2; return 2; fi
+                local value="${args[1]}"
+                # The API filters by calendar day (YYYY-MM-DD); a time of day
+                # is accepted but ignored, so only dates and day counts here.
+                if [[ "$value" =~ ^([0-9]+)d$ ]]; then
+                    value=$(python3 -c 'import sys, datetime; print((datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=int(sys.argv[1]))).isoformat())' "${BASH_REMATCH[1]}")
+                elif [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                    echo "Error: ${args[0]} takes YYYY-MM-DD or Nd (e.g. 7d)" >&2
+                    return 2
+                fi
+                if [[ "${args[0]}" == "--since" ]]; then since="$value"; else until="$value"; fi
+                args=("${args[@]:2}")
+                ;;
             *) echo "Unknown option: ${args[0]}" >&2; return 1 ;;
         esac
     done
 
-    if [[ "$active_only" == "true" ]]; then
-        url="${url}?resolved=false"
+    local -a query=()
+    [[ "$active_only" == "true" ]] && query+=("resolved=false")
+    [[ -n "$since" ]] && query+=("from=$since")
+    [[ -n "$until" ]] && query+=("to=$until")
+    [[ "$all_pages" == "true" ]] && query+=("per_page=50")
+    if [[ ${#query[@]} -gt 0 ]]; then
+        local IFS='&'
+        url="${url}?${query[*]}"
+        unset IFS
     fi
 
-    local result
-    result=$(bs_get "$url") || return 1
+    # Pages are 10 by default (50 max); `next` says more exist. --all follows
+    # it and returns one combined {"data": [...]} document.
+    local result page next pages=0
+    page=$(bs_get "$url") || return 1
+    if [[ "$all_pages" == "true" ]]; then
+        result="$page"
+        while :; do
+            next=$(printf '%s' "$page" | python3 -c 'import sys, json; print((json.load(sys.stdin).get("pagination") or {}).get("next") or "")' 2>/dev/null)
+            pages=$((pages + 1))
+            [[ -n "$next" && $pages -lt 40 ]] || break
+            page=$(bs_get "$next") || return 1
+            result=$(python3 -c '
+import json, sys
+acc, more = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+acc["data"] = acc.get("data", []) + more.get("data", [])
+acc["pagination"] = more.get("pagination")
+print(json.dumps(acc))' "$result" "$page")
+        done
+    else
+        result="$page"
+    fi
 
     if $_json_mode; then
         _emit_json "$result"
@@ -278,6 +321,9 @@ cmd_incidents() {
     echo "$result" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
+if d.get('errors'):
+    print('Error:', '; '.join(map(str, d['errors'])), file=sys.stderr)
+    sys.exit(1)
 items = d.get('data', [])
 if not items:
     print('No incidents found.')
@@ -295,6 +341,8 @@ for item in items:
         (a.get('started_at', '') or '')[:24],
         resolved[:24],
     ))
+if (d.get('pagination') or {}).get('next'):
+    print(f'Showing {len(items)}; more incidents exist. Use --all, or narrow with --since/--until.', file=sys.stderr)
 "
 }
 
