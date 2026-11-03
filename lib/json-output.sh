@@ -41,16 +41,18 @@ parse_output_format() {
 json_success() {
     local data="$1"
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
-        python3 -c "
+        # Payload goes through stdin: as an argument, a large result failed
+        # with "Argument list too long" before python ever ran.
+        printf '%s' "$data" | python3 -c "
 import json, sys
-data = sys.argv[1]
+data = sys.stdin.read()
 # Try to parse as JSON first
 try:
     parsed = json.loads(data)
     print(json.dumps({'success': True, 'result': parsed}, indent=2))
-except:
+except Exception:
     print(json.dumps({'success': True, 'result': data}, indent=2))
-" "$data"
+"
     else
         echo "$data"
     fi
@@ -75,17 +77,19 @@ print(json.dumps({'success': False, 'error': sys.argv[1], 'code': int(sys.argv[2
 json_result() {
     local json_data="$1"
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
-        python3 -c "
+        # Through stdin, not argv (see json_success).
+        printf '%s' "$json_data" | python3 -c "
 import json, sys
+raw = sys.stdin.read()
 try:
-    data = json.loads(sys.argv[1])
+    data = json.loads(raw)
     print(json.dumps({'success': True, 'result': data}, indent=2))
-except:
-    print(json.dumps({'success': True, 'result': sys.argv[1]}, indent=2))
-" "$json_data"
+except Exception:
+    print(json.dumps({'success': True, 'result': raw}, indent=2))
+"
     else
         # Pretty-print JSON for human reading
-        echo "$json_data" | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read()), indent=2))" 2>/dev/null || echo "$json_data"
+        printf '%s\n' "$json_data" | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read()), indent=2))" 2>/dev/null || printf '%s\n' "$json_data"
     fi
 }
 
@@ -93,11 +97,11 @@ except:
 json_list() {
     local items="$1"  # Newline-separated items
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
-        python3 -c "
+        printf '%s' "$items" | python3 -c "
 import json, sys
-items = [line.strip() for line in sys.argv[1].split('\n') if line.strip()]
+items = [line.strip() for line in sys.stdin.read().split('\n') if line.strip()]
 print(json.dumps({'success': True, 'count': len(items), 'items': items}, indent=2))
-" "$items"
+"
     else
         echo "$items"
     fi
