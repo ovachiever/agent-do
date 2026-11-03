@@ -24,6 +24,17 @@ The board is read at the checkout that owns the common git dir (the same
 rule coord uses), never at a worktree's copy; worker board copies are never
 merged into canonical state, and a submission that touches `.manna/` or
 `.handoff/` is refused.
+
+Landing invariants (each held by a fixture in tests/test_git_integration.py):
+the checks run on the candidate commit's own tree and that tree is verified
+unchanged (HEAD, index, tracked files) before anything lands; the policy in
+force at the ref update is, by digest, the policy the checks ran under; the
+assignment is re-read immediately before the ref update; recovery before the
+ref update re-verifies target, policy digest and assignment from the intent
+and voids the landing otherwise, while recovery after the ref update only
+finishes the record; the intent is retired after the queue row, the receipt,
+the routing record and the audit line; and the integrator resets only a
+candidate worktree carrying its own ownership marker.
 """
 
 from __future__ import annotations
@@ -68,10 +79,35 @@ BOARD_OWNED_PREFIXES = (".manna/", ".handoff/")
 INTEGRATOR_IDENT = ["-c", "user.name=agent-do integrator", "-c", "user.email=integrator@agent-do.invalid"]
 
 # Test seam, mirroring manna's MANNA_MANAGED_FAULT: the process exits here,
-# before the next write, so interruption before and after the ref update can
+# before the next write, so interruption before the ref update, after it, and
+# after the landed queue row (before routing, audit and intent retirement) can
 # be reproduced deterministically.
 FAULT_ENV = "AGENT_GIT_INTEGRATION_FAULT"
 FAULT_EXIT = 70
+FAULT_POINTS = ("after_intent", "after_ref_update", "after_landed_row")
+
+# The check command runs the candidate's own scripts (a submitted branch can
+# rewrite ci.sh), so the integrator's identity and credentials are withheld
+# from its environment: names in IDENTITY_ENV, and any name carrying a
+# secret-shaped marker. Names only are reported in the check log; values never.
+IDENTITY_ENV = {
+    "MANNA_SESSION_ID",
+    "MANNA_SESSION_TOKEN",
+    "MANNA_OPERATOR",
+    "CLAUDE_SESSION_ID",
+    "CLAUDE_THREAD_ID",
+    "CLAUDE_AGENT_ID",
+    "CODEX_THREAD_ID",
+    "AGENT_DO_COORD_SESSION",
+    "AGENT_DO_COORD_PID",
+    "AGENT_DO_COORD_PID_START",
+}
+SECRET_NAME_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "API_KEY", "ACCESS_KEY", "PRIVATE_KEY", "AUTH_KEY", "SESSION_KEY")
+
+# Ownership marker the integrator writes into its candidate worktree's private
+# git dir when it creates the tree; a detached worktree at the candidate path
+# without it belongs to someone else and is never reset or cleaned.
+CANDIDATE_MARKER = "agent-do-integration-candidate"
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
@@ -79,7 +115,7 @@ EXIT_CONTENDED = 2
 
 # Blocked reasons the worker must act on (routed as action drops) versus
 # reasons the integrator retries on its own once the operator clears them.
-WORKER_REASONS = {"conflict", "checks_failed", "board_paths", "stale_submission", "reassigned", "item_closed"}
+WORKER_REASONS = {"conflict", "checks_failed", "candidate_changed", "board_paths", "stale_submission", "reassigned", "item_closed"}
 RETRYABLE_REASONS = {"target_checkout_busy", "config_disabled", "config_invalid", "config_changed"}
 
 
@@ -1038,8 +1074,20 @@ class Integrator:
 
     # -- candidate tree -----------------------------------------------------
 
+    def configured_candidate_path(self) -> Path:
+        return Path(self.cfg.candidate_path) if self.cfg.candidate_path else default_candidate_path(self.repo)
+
+    def candidate_marker(self, path: Path) -> Path | None:
+        probe = run(["git", "rev-parse", "--path-format=absolute", "--git-dir"], cwd=path)
+        if probe.returncode != 0:
+            return None
+        return Path(probe.stdout.strip()) / CANDIDATE_MARKER
+
     def ensure_candidate(self) -> Path:
-        path = Path(self.cfg.candidate_path) if self.cfg.candidate_path else default_candidate_path(self.repo)
+        """The integrator's own detached worktree. An existing tree is adopted only
+        when it carries this integrator's ownership marker; anything else at the
+        candidate path is left exactly as it is and the run refuses."""
+        path = self.configured_candidate_path()
         registered = {Path(item["path"]).resolve(): item for item in self.repo.worktrees()}
         base = self.repo.tip(self.cfg.target or "")
         if base is None:
@@ -1050,20 +1098,94 @@ class Integrator:
                 raise Refusal(f"candidate path exists but is not a worktree of this repository; refusing to touch it: {path}")
             if item.get("branch"):
                 raise Refusal(f"candidate worktree at {path} has branch {item['branch']} checked out; the integrator's tree must be detached")
+            marker = self.candidate_marker(path)
+            if marker is None or not marker.is_file():
+                raise Refusal(
+                    f"a detached worktree exists at {path} that this integrator did not create (no {CANDIDATE_MARKER} marker in its git dir); "
+                    "refusing to reset or clean it. Remove it yourself (`git worktree remove <path>`) or set `candidate-path` to a path of the integrator's own.",
+                    candidate_path=str(path),
+                )
         else:
             if path.resolve() in registered:
                 run(["git", "worktree", "prune"], cwd=self.repo.canonical_root)
             add = run(["git", "worktree", "add", "--detach", str(path), base], cwd=self.repo.canonical_root)
             if add.returncode != 0:
                 raise Refusal(f"could not create the candidate worktree at {path}: {(add.stderr or add.stdout).strip()}")
+            marker = self.candidate_marker(path)
+            if marker is None:
+                raise Refusal(f"created the candidate worktree at {path} but cannot resolve its git dir to record ownership")
+            created = {"created_at": now_iso(), "by": self.label, "path": str(path), "common_dir": str(self.repo.common_dir)}
+            marker.write_text(json.dumps(created, sort_keys=True) + "\n", encoding="utf-8")
+            self.store.save("candidate.json", {"version": 1, "marker": str(marker), **created})
+            self.store.event("candidate_created", path=str(path), marker=str(marker), by=self.label)
         self.candidate_path = path
         return path
 
+    def verify_candidate(self, candidate: str, receipts: Path) -> dict[str, Any]:
+        """The tree the checks ran in must still be the candidate commit itself:
+        HEAD at it and detached, index and tracked files identical to it. A check
+        that repaired a tracked file, staged one, or committed has validated
+        something other than what would land. Untracked files are build output
+        outside the landed tree: reported, allowed."""
+        path = self.candidate_path
+        assert path is not None
+        head = run(["git", "rev-parse", "--verify", "HEAD"], cwd=path).stdout.strip()
+        detached = run(["git", "symbolic-ref", "-q", "HEAD"], cwd=path).returncode != 0
+        run(["git", "update-index", "-q", "--refresh"], cwd=path)
+        # Porcelain `git diff` compares content, not stat: a touched file whose
+        # bytes equal the candidate's is clean, and a staged blob that differs
+        # from both the candidate and the working file is an index change only.
+        index_clean = run(["git", "diff", "--cached", "--quiet", candidate, "--"], cwd=path).returncode == 0
+        tree_clean = run(["git", "diff", "--quiet", candidate, "--"], cwd=path).returncode == 0
+        listed = run(["git", "diff", "--name-status", candidate, "--"], cwd=path).stdout + run(["git", "diff", "--cached", "--name-status", candidate, "--"], cwd=path).stdout
+        changed = sorted({line.strip() for line in listed.splitlines() if line.strip()})
+        untracked = [line[3:] for line in run(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=path).stdout.splitlines() if line.startswith("?? ")]
+        ok = head == candidate and detached and index_clean and tree_clean
+        record: dict[str, Any] = {
+            "ok": ok,
+            "candidate": candidate,
+            "head": head,
+            "detached": detached,
+            "index_clean": index_clean,
+            "tree_clean": tree_clean,
+            "changed": changed,
+            "untracked": untracked,
+            "verified_at": now_iso(),
+        }
+        if not ok:
+            drift = receipts / "candidate-drift.patch"
+            drift.write_text(
+                f"# candidate {candidate}\n"
+                f"# HEAD now {head} ({'detached' if detached else 'ATTACHED to a branch'})\n"
+                f"# index {'clean' if index_clean else 'CHANGED'}, tracked files {'clean' if tree_clean else 'CHANGED'}\n\n"
+                "# --- working tree vs the candidate ---\n" + run(["git", "diff", candidate, "--"], cwd=path).stdout
+                + "\n# --- index vs the candidate ---\n" + run(["git", "diff", "--cached", candidate, "--"], cwd=path).stdout,
+                encoding="utf-8",
+            )
+            record["patch"] = str(drift)
+        return record
+
+    def check_env(self) -> tuple[dict[str, str], list[str]]:
+        env: dict[str, str] = {}
+        withheld: list[str] = []
+        for name, value in os.environ.items():
+            upper = name.upper()
+            if name in IDENTITY_ENV or any(marker in upper for marker in SECRET_NAME_MARKERS):
+                withheld.append(name)
+                continue
+            env[name] = value
+        env["MANNA_OPERATOR"] = "0"
+        return env, sorted(withheld)
+
     def reset_candidate(self, sha: str) -> None:
+        """Put the owned candidate tree exactly at `sha`: abandon any merge, discard
+        whatever the last checks left in the index and tracked files (a check may
+        dirty the tree; the previous landing refused it, the next build must not
+        trip over it), detach at the commit, and drop untracked files."""
         path = self.candidate_path
         assert path is not None
         run(["git", "-C", str(path), "merge", "--abort"], cwd=path)
-        for args in (["checkout", "-q", "--detach", sha], ["reset", "-q", "--hard"], ["clean", "-q", "-fd"]):
+        for args in (["reset", "-q", "--hard"], ["checkout", "-q", "-f", "--detach", sha], ["reset", "-q", "--hard"], ["clean", "-q", "-fd"]):
             proc = run(["git", "-C", str(path), *args], cwd=path)
             if proc.returncode != 0:
                 raise Refusal(f"candidate tree at {path}: git {' '.join(args)} failed: {(proc.stderr or proc.stdout).strip()}")
@@ -1104,6 +1226,14 @@ class Integrator:
             f"- target: {entry['target']} at {result.get('base_sha') or entry['base_sha']}",
             f"- candidate: {result.get('candidate_sha') or 'none'}" + (f" (pinned at {result.get('candidate_ref')})" if result.get("candidate_ref") else ""),
             f"- integrated: {result.get('integrated_sha') or 'not landed'}",
+            f"- policy: tested under {result.get('config_digest') or result.get('policy_digest') or 'no checks run'}"
+            + (f", in force at landing {result.get('policy_digest_at_landing')}" if result.get("policy_digest_at_landing") else ""),
+            "- candidate tree after the checks: "
+            + (
+                ("verified unchanged" if (result.get("candidate_integrity") or {}).get("ok") else "CHANGED: " + ", ".join((result.get("candidate_integrity") or {}).get("changed") or ["HEAD or index"]))
+                if result.get("candidate_integrity")
+                else "not verified (no checks ran)"
+            ),
             f"- recorded at: {now_iso()} by {self.label}",
             "",
         ]
@@ -1163,47 +1293,94 @@ class Integrator:
         self.store.event("blocked", entry=entry["id"], item=entry["item"], reason=reason, retryable=merged["retryable"], routing=routing)
         return {"entry": entry["id"], "item": entry["item"], "outcome": "blocked", "reason": reason, "retryable": merged["retryable"], "summary": str(summary), "routing": routing}
 
-    def complete(self, entry: dict[str, Any], candidate: str, base: str, via: str, *, recovered: bool = False) -> dict[str, Any]:
-        if entry.get("status") == "landed":
+    def complete(self, entry: dict[str, Any], candidate: str, base: str, via: str, *, recovered: bool = False, tested_digest: str | None = None) -> dict[str, Any]:
+        """Record a landing whose ref has moved. Order matters for recovery: the
+        queue row first (the landing is then durable), the receipt, the routing
+        record, the audit line, and the intent last, so an interruption anywhere
+        in the tail is finished by `recover`, never replayed as a landing."""
+        already_recorded = entry.get("status") == "landed"
+        if already_recorded and self.store.intent() is None:
             return {"entry": entry["id"], "item": entry["item"], "outcome": "landed", "already": True}
-        target_after = self.repo.tip(entry["target"])
-        result = dict(entry.get("result") or {})
-        result.update(
-            {
-                "reason": None,
-                "candidate_sha": candidate,
-                "candidate_ref": f"{CANDIDATE_REF_PREFIX}{entry['id']}",
-                "integrated_sha": candidate,
-                "base_sha": base,
-                "target_before": base,
-                "target_after": target_after,
-                "fast_forward": candidate == entry["source_sha"],
-                "landed_at": now_iso(),
-                "landed_via": via,
-                "landed_by": self.label,
-                "recovered": recovered,
-                "config_digest": self.cfg.digest,
-                "provenance": {"submission_sha": entry["source_sha"], "integrated_sha": candidate, "submission_id": entry["submission"]["id"], "attempt": entry["attempt"]},
-            }
-        )
-        entry["result"] = result
-        entry["status"] = "landed"
-        entry.setdefault("history", []).append({"at": now_iso(), "event": "landed", "via": via, "recovered": recovered})
+        live = Config(self.repo)
+        if not already_recorded:
+            target_after = self.repo.tip(entry["target"])
+            result = dict(entry.get("result") or {})
+            tested = tested_digest or result.get("policy_digest") or self.cfg.digest
+            result.update(
+                {
+                    "reason": None,
+                    "candidate_sha": candidate,
+                    "candidate_ref": f"{CANDIDATE_REF_PREFIX}{entry['id']}",
+                    "integrated_sha": candidate,
+                    "base_sha": base,
+                    "target_before": base,
+                    "target_after": target_after,
+                    "fast_forward": candidate == entry["source_sha"],
+                    "landed_at": now_iso(),
+                    "landed_via": via,
+                    "landed_by": self.label,
+                    "recovered": recovered,
+                    "config_digest": tested,
+                    "policy_digest_at_landing": live.digest,
+                    "policy_changed_since_test": live.digest != tested,
+                    "provenance": {"submission_sha": entry["source_sha"], "integrated_sha": candidate, "submission_id": entry["submission"]["id"], "attempt": entry["attempt"]},
+                }
+            )
+            entry["result"] = result
+            entry["status"] = "landed"
+            entry.setdefault("history", []).append({"at": now_iso(), "event": "landed", "via": via, "recovered": recovered})
+            self.save_entry(entry)
+        result = entry.get("result") or {}
+        fault("after_landed_row")
+        detail = [f"landed via {via}", f"target {entry['target']}: {short_hex(base)} -> {short_hex(candidate)}"]
+        if result.get("policy_changed_since_test"):
+            detail.append(f"the policy changed after this candidate was validated (tested {result.get('config_digest')}, now {result.get('policy_digest_at_landing')}); the ref had already moved, so the landing is recorded as it happened")
+        summary = self.write_summary(entry, "landed", None, detail)
+        recorded = [row for row in entry.get("routing") or [] if row.get("kind") == "info" and row.get("state") == "recorded"]
+        if recorded:
+            routing = recorded[-1]
+        else:
+            routing = self.route(entry, "info", summary, f"{entry['item']} landed on {entry['target']} as {short_hex(candidate)} (submission {short_hex(entry['source_sha'])}); receipts in {summary.parent}")
+            self.save_entry(entry)
+        self.store.event("landed" if not already_recorded else "landed_tail_recovered", entry=entry["id"], item=entry["item"], integrated=candidate, base=base, via=via, recovered=recovered, routing=routing)
         self.store.remove("intent.json")
-        summary = self.write_summary(entry, "landed", None, [f"landed via {via}", f"target {entry['target']}: {short_hex(base)} -> {short_hex(candidate)}"])
-        routing = self.route(entry, "info", summary, f"{entry['item']} landed on {entry['target']} as {short_hex(candidate)} (submission {short_hex(entry['source_sha'])}); receipts in {summary.parent}")
-        self.save_entry(entry)
-        self.store.event("landed", entry=entry["id"], item=entry["item"], integrated=candidate, base=base, via=via, recovered=recovered, routing=routing)
-        return {"entry": entry["id"], "item": entry["item"], "outcome": "landed", "integrated_sha": candidate, "fast_forward": result["fast_forward"], "via": via, "summary": str(summary), "routing": routing, "recovered": recovered}
+        return {"entry": entry["id"], "item": entry["item"], "outcome": "landed", "integrated_sha": candidate, "fast_forward": result.get("fast_forward"), "via": via, "summary": str(summary), "routing": routing, "recovered": recovered, "tail_recovered": already_recorded}
 
     # -- landing ------------------------------------------------------------
 
-    def land(self, entry: dict[str, Any], candidate: str, base: str) -> tuple[str, str]:
-        """Advance the target from `base` to `candidate`. Returns (state, detail)."""
+    def land(self, entry: dict[str, Any], candidate: str, base: str, *, tested_digest: str) -> tuple[str, str]:
+        """Advance the target from `base` to `candidate`. Returns (state, detail).
+
+        The write-ahead intent carries the tested policy digest, the worker
+        binding, the attempt, the submission id, the check results and the
+        candidate-tree verification, so recovery before the ref update can
+        re-verify all of it instead of trusting a candidate that was validated
+        under a policy or an assignment that no longer holds."""
         target = entry["target"]
         holder = self.repo.checkout_holding(target)
-        self.store.save("intent.json", {"entry": entry["id"], "item": entry["item"], "candidate": candidate, "base": base, "target": target, "holder": str(holder) if holder else None, "written_at": now_iso(), "by": self.label})
-        self.store.event("landing_intent", entry=entry["id"], candidate=candidate, base=base, target=target, holder=str(holder) if holder else None)
+        result = entry.get("result") or {}
+        self.store.save(
+            "intent.json",
+            {
+                "version": 2,
+                "entry": entry["id"],
+                "item": entry["item"],
+                "attempt": entry["attempt"],
+                "submission_id": entry["submission"]["id"],
+                "source_sha": entry["source_sha"],
+                "candidate": candidate,
+                "base": base,
+                "target": target,
+                "holder": str(holder) if holder else None,
+                "config_digest": tested_digest,
+                "worker": entry.get("worker"),
+                "checks": result.get("checks"),
+                "candidate_integrity": result.get("candidate_integrity"),
+                "written_at": now_iso(),
+                "by": self.label,
+            },
+        )
+        self.store.event("landing_intent", entry=entry["id"], candidate=candidate, base=base, target=target, holder=str(holder) if holder else None, config_digest=tested_digest)
         fault("after_intent")
         if holder is not None:
             proc = run(["git", *INTEGRATOR_IDENT, "merge", "--ff-only", "--no-edit", candidate], cwd=holder)
@@ -1244,11 +1421,34 @@ class Integrator:
 
     # -- one entry ----------------------------------------------------------
 
+    def policy_reason(self, cfg: Config) -> tuple[str, list[str]]:
+        reason = "config_disabled" if cfg.state == "disabled" else "config_invalid"
+        return reason, ["the policy is " + cfg.state + ": " + (cfg.disabled_reason or "; ".join(cfg.problems) or "not enabled")]
+
     def integrate(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Build, validate and land one entry. Invariants the fixtures hold:
+
+        - the checks run on the candidate commit's own tree, and the tree is
+          verified unchanged (HEAD, index, tracked files) before anything lands;
+        - the policy in force when the ref moves is the policy the checks ran
+          under (digest equality); a policy that changed during validation is
+          adopted once and the candidate revalidated under it; one that moves
+          again during that revalidation blocks (`config_changed`, retryable);
+        - the assignment (claim proof, managed attempt and submission, item not
+          closed) is re-read immediately before the ref update, not only before
+          the checks;
+        - the target must still equal the tested base, else rebuild.
+        """
         repo = self.repo
         target = entry["target"]
+        self.cfg = Config(repo)
+        if self.cfg.state != "enabled":
+            reason, detail = self.policy_reason(self.cfg)
+            return self.block(entry, reason, detail)
         if target != self.cfg.target:
             return self.block(entry, "config_changed", [f"submitted against {target}; the policy now targets {self.cfg.target}"])
+        if self.candidate_path is None or self.candidate_path != self.configured_candidate_path():
+            self.ensure_candidate()
         entry["status"] = "integrating"
         entry.setdefault("history", []).append({"at": now_iso(), "event": "integrating", "by": self.label})
         self.save_entry(entry)
@@ -1260,14 +1460,17 @@ class Integrator:
             return self.block(entry, "stale_submission", [f"the submitted commit {source} is no longer in this repository"])
         receipts = self.receipts_for(entry)
         rebuilds: list[dict[str, Any]] = list(entry.get("rebuilds") or [])
+        revalidations: list[dict[str, Any]] = list(entry.get("revalidations") or [])
+        adopted_digest: str | None = None
+        validation_pass = 0
         while True:
             base = repo.tip(target)
             if base is None:
                 return self.block(entry, "config_invalid", [f"target {target} has no commit"])
             if repo.is_ancestor(source, base):
-                entry["result"] = dict(entry.get("result") or {}, candidate_sha=source, base_sha=base, checks=[])
+                entry["result"] = dict(entry.get("result") or {}, candidate_sha=source, base_sha=base, checks=[], policy_digest=self.cfg.digest)
                 git(["update-ref", f"{CANDIDATE_REF_PREFIX}{entry['id']}", source], cwd=repo.canonical_root)
-                return self.complete(entry, source, base, f"already contained in {target} at {short_hex(base)}; nothing moved")
+                return self.complete(entry, source, base, f"already contained in {target} at {short_hex(base)}; nothing moved", tested_digest=self.cfg.digest)
             self.reset_candidate(base)
             path = self.candidate_path
             assert path is not None
@@ -1290,26 +1493,75 @@ class Integrator:
             owned = board_paths_in(repo.changed_paths(base, candidate))
             if owned:
                 return self.block(entry, "board_paths", ["the combined result changes board-owned paths: " + ", ".join(owned)], result={"base_sha": base, "candidate_sha": candidate, "candidate_ref": f"{CANDIDATE_REF_PREFIX}{entry['id']}"})
-            checks = self.run_checks(entry, candidate, receipts)
-            entry["result"] = dict(entry.get("result") or {}, base_sha=base, candidate_sha=candidate, candidate_ref=f"{CANDIDATE_REF_PREFIX}{entry['id']}", built=built, checks=checks)
+            tested = self.cfg
+            validation_pass += 1
+            checks = self.run_checks(entry, candidate, receipts, validation_pass=validation_pass)
+            integrity = self.verify_candidate(candidate, receipts)
+            entry["result"] = dict(
+                entry.get("result") or {},
+                base_sha=base,
+                candidate_sha=candidate,
+                candidate_ref=f"{CANDIDATE_REF_PREFIX}{entry['id']}",
+                built=built,
+                checks=checks,
+                candidate_integrity=integrity,
+                policy_digest=tested.digest,
+                validation_passes=validation_pass,
+            )
+            if not integrity["ok"]:
+                detail = ["the checks changed the candidate tree, so what they validated is not what would land:"]
+                if integrity["head"] != candidate:
+                    detail.append(f"HEAD moved from {short_hex(candidate)} to {short_hex(integrity['head'])}")
+                if not integrity["detached"]:
+                    detail.append("the candidate worktree now has a branch checked out")
+                if not integrity["index_clean"]:
+                    detail.append("the index differs from the candidate commit")
+                if not integrity["tree_clean"]:
+                    detail.append("tracked files differ from the candidate commit")
+                detail.extend(f"changed: {line}" for line in integrity["changed"])
+                if integrity.get("patch"):
+                    detail.append(f"diff of the tree the checks left behind: {integrity['patch']}")
+                detail.append("commit what the checks generate (or fix the check command with the operator) and resubmit; the original candidate stays pinned and untouched")
+                return self.block(entry, "candidate_changed", detail)
             failed = [check for check in checks if not check["ok"]]
             if failed:
                 return self.block(entry, "checks_failed", [f"{check['command']} exited {check['exit']}; log: {check['log']}" for check in failed])
             live = Config(repo)
             if live.state != "enabled":
-                return self.block(entry, "config_disabled" if live.state == "disabled" else "config_invalid", ["the policy changed before landing: " + (live.disabled_reason or "; ".join(live.problems) or live.state)])
+                reason, detail = self.policy_reason(live)
+                return self.block(entry, reason, ["the policy changed before landing"] + detail)
             if live.target != target:
                 return self.block(entry, "config_changed", [f"the policy now targets {live.target}, not {target}"])
-            self.cfg = live
+            if live.digest != tested.digest:
+                revalidations.append({"at": now_iso(), "tested_digest": tested.digest, "live_digest": live.digest, "candidate": candidate, "base": base, "checks": checks, "validation_pass": validation_pass})
+                entry["revalidations"] = revalidations
+                self.store.event("policy_changed_during_validation", entry=entry["id"], tested_digest=tested.digest, live_digest=live.digest, validation_pass=validation_pass)
+                if adopted_digest is not None:
+                    return self.block(
+                        entry,
+                        "config_changed",
+                        [
+                            f"the policy changed while it was being validated, twice in one run: tested {short_hex(tested.digest.split(':')[-1])} after adopting {short_hex(adopted_digest.split(':')[-1])}, and it now reads {short_hex(live.digest.split(':')[-1])}",
+                            "a policy that moves during its own validation is not trusted as integration authority; settle the policy (`agent-do git integration config`) and run the integrator again",
+                        ],
+                    )
+                adopted_digest = live.digest
+                self.cfg = live
+                if self.candidate_path != self.configured_candidate_path():
+                    self.ensure_candidate()
+                continue
+            stale = self.staleness(entry)
+            if stale:
+                return self.block(entry, stale[0], stale[1] + ["found after the checks, immediately before the ref update; nothing landed"])
             tip = repo.tip(target)
             if tip != base:
                 rebuilds.append({"at": now_iso(), "tested_base": base, "target_now": tip, "candidate": candidate})
                 entry["rebuilds"] = rebuilds
                 self.store.event("rebuild", entry=entry["id"], tested_base=base, target_now=tip)
                 continue
-            state, detail = self.land(entry, candidate, base)
+            state, detail = self.land(entry, candidate, base, tested_digest=tested.digest)
             if state == "landed":
-                return self.complete(entry, candidate, base, detail)
+                return self.complete(entry, candidate, base, detail, tested_digest=tested.digest)
             if state == "moved":
                 rebuilds.append({"at": now_iso(), "tested_base": base, "target_now": repo.tip(target), "candidate": candidate, "note": detail})
                 entry["rebuilds"] = rebuilds
@@ -1317,19 +1569,28 @@ class Integrator:
                 continue
             return self.block(entry, "target_checkout_busy", [detail, "nothing was changed in that checkout; clean it (or commit) and run the integrator again"])
 
-    def run_checks(self, entry: dict[str, Any], candidate: str, receipts: Path) -> list[dict[str, Any]]:
+    def run_checks(self, entry: dict[str, Any], candidate: str, receipts: Path, *, validation_pass: int = 1) -> list[dict[str, Any]]:
         path = self.candidate_path
         assert path is not None
-        env = dict(os.environ)
-        env.update({"AGENT_GIT_INTEGRATION": "1", "AGENT_GIT_INTEGRATION_ITEM": entry["item"], "AGENT_GIT_INTEGRATION_ENTRY": entry["id"], "AGENT_GIT_INTEGRATION_CANDIDATE": candidate})
+        env, withheld = self.check_env()
+        env.update(
+            {
+                "AGENT_GIT_INTEGRATION": "1",
+                "AGENT_GIT_INTEGRATION_ITEM": entry["item"],
+                "AGENT_GIT_INTEGRATION_ENTRY": entry["id"],
+                "AGENT_GIT_INTEGRATION_CANDIDATE": candidate,
+                "AGENT_GIT_INTEGRATION_POLICY": self.cfg.digest,
+            }
+        )
         results: list[dict[str, Any]] = []
         for number, command in enumerate(self.cfg.checks, start=1):
-            log = receipts / f"check-{number}.log"
+            log = receipts / (f"check-{number}.log" if validation_pass == 1 else f"check-{number}.pass{validation_pass}.log")
             with open(log, "w", encoding="utf-8") as handle:
-                handle.write(f"$ {command}\n(cwd {path}, candidate {candidate})\n\n")
+                handle.write(f"$ {command}\n(cwd {path}, candidate {candidate}, policy {self.cfg.digest}, validation pass {validation_pass})\n")
+                handle.write(f"(withheld from the environment: {', '.join(withheld) if withheld else 'nothing'})\n\n")
                 handle.flush()
                 proc = subprocess.run(command, shell=True, cwd=str(path), env=env, stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, check=False)
-            results.append({"n": number, "command": command, "exit": proc.returncode, "ok": proc.returncode == 0, "log": str(log)})
+            results.append({"n": number, "command": command, "exit": proc.returncode, "ok": proc.returncode == 0, "log": str(log), "pass": validation_pass})
             if proc.returncode != 0:
                 break
         return results
@@ -1337,6 +1598,11 @@ class Integrator:
     # -- recovery -----------------------------------------------------------
 
     def recover(self) -> list[dict[str, Any]]:
+        """Settle an interrupted landing. A ref that already moved gets its record
+        finished (never a second landing). A ref that did not move is re-landed
+        only when the target, the policy digest and the assignment are exactly
+        what the candidate was validated under; otherwise the intent is voided
+        and the submission requeued (policy) or blocked (assignment)."""
         outcomes: list[dict[str, Any]] = []
         intent = self.store.intent()
         if intent:
@@ -1348,32 +1614,42 @@ class Integrator:
                 outcomes.append({"entry": intent.get("entry"), "outcome": "voided", "reason": "entry missing from the queue; intent retired"})
             else:
                 candidate, base, target = intent["candidate"], intent["base"], intent["target"]
+                tested_digest = intent.get("config_digest")
                 tip = self.repo.tip(target)
+                self.cfg = Config(self.repo)
                 if entry.get("status") == "landed":
-                    self.store.remove("intent.json")
-                    outcomes.append({"entry": entry["id"], "outcome": "landed", "already": True})
+                    outcomes.append(self.complete(entry, candidate, base, "recovered: the landed row was durable; finished its receipt, routing and audit", recovered=True, tested_digest=tested_digest))
                 elif tip is not None and self.repo.is_ancestor(candidate, tip):
-                    outcomes.append(self.complete(entry, candidate, base, f"recovered: refs/heads/{target} already contains the candidate (interrupted after the ref update)", recovered=True))
-                elif tip == base and self.cfg.state == "enabled" and self.cfg.target == target:
-                    self.store.event("recover_retry", entry=entry["id"], candidate=candidate, base=base)
-                    state, detail = self.land(entry, candidate, base)
-                    if state == "landed":
-                        outcomes.append(self.complete(entry, candidate, base, f"recovered: {detail} (interrupted before the ref update; target unchanged, same tested candidate)", recovered=True))
-                    elif state == "moved":
-                        entry["status"] = "queued"
-                        entry.setdefault("history", []).append({"at": now_iso(), "event": "requeued", "reason": detail})
-                        self.save_entry(entry)
-                        outcomes.append({"entry": entry["id"], "outcome": "requeued", "reason": detail})
-                    else:
-                        outcomes.append(self.block(entry, "target_checkout_busy", [detail]))
+                    outcomes.append(self.complete(entry, candidate, base, f"recovered: refs/heads/{target} already contains the candidate (interrupted after the ref update)", recovered=True, tested_digest=tested_digest))
+                elif tip != base:
+                    outcomes.append(self.void_intent(entry, f"target {target} moved from {short_hex(base)} to {short_hex(tip or '')} while a landing was interrupted; the candidate stays pinned and the next run rebuilds"))
+                elif self.cfg.state != "enabled" or self.cfg.target != target:
+                    outcomes.append(self.void_intent(entry, "integration is not enabled for that target any more; the interrupted landing is voided, the candidate stays pinned"))
+                elif tested_digest is None or tested_digest != self.cfg.digest:
+                    reason = (
+                        "the interrupted landing recorded no tested policy (written by an earlier version); voided, requeued for validation under the current policy"
+                        if tested_digest is None
+                        else f"the policy changed after the candidate was validated (tested {tested_digest}, now {self.cfg.digest}); the interrupted landing is voided and the submission requeued for validation under the current policy; the candidate stays pinned"
+                    )
+                    outcomes.append(self.void_intent(entry, reason))
                 else:
-                    self.store.remove("intent.json")
-                    reason = f"target {target} moved from {short_hex(base)} to {short_hex(tip or '')}" if tip != base else "integration is not enabled; the interrupted landing is voided, the candidate stays pinned"
-                    entry["status"] = "queued"
-                    entry.setdefault("history", []).append({"at": now_iso(), "event": "requeued", "reason": reason})
-                    self.save_entry(entry)
-                    self.store.event("intent_voided", entry=entry["id"], reason=reason)
-                    outcomes.append({"entry": entry["id"], "outcome": "requeued", "reason": reason})
+                    stale = self.staleness(entry)
+                    if stale:
+                        self.store.remove("intent.json")
+                        self.store.event("intent_voided", entry=entry["id"], reason=stale[0])
+                        outcomes.append(self.block(entry, stale[0], stale[1] + ["found while recovering an interrupted landing; the landing was voided and nothing moved"]))
+                    else:
+                        self.store.event("recover_retry", entry=entry["id"], candidate=candidate, base=base, config_digest=tested_digest)
+                        state, detail = self.land(entry, candidate, base, tested_digest=tested_digest)
+                        if state == "landed":
+                            outcomes.append(self.complete(entry, candidate, base, f"recovered: {detail} (interrupted before the ref update; target, policy and assignment unchanged, same tested candidate)", recovered=True, tested_digest=tested_digest))
+                        elif state == "moved":
+                            entry["status"] = "queued"
+                            entry.setdefault("history", []).append({"at": now_iso(), "event": "requeued", "reason": detail})
+                            self.save_entry(entry)
+                            outcomes.append({"entry": entry["id"], "outcome": "requeued", "reason": detail})
+                        else:
+                            outcomes.append(self.block(entry, "target_checkout_busy", [detail]))
         for entry in self.store.queue():
             if entry.get("status") == "integrating":
                 entry["status"] = "queued"
@@ -1382,6 +1658,14 @@ class Integrator:
                 self.store.event("requeued", entry=entry["id"], reason="interrupted before any landing intent")
                 outcomes.append({"entry": entry["id"], "outcome": "requeued", "reason": "interrupted before any landing intent"})
         return outcomes
+
+    def void_intent(self, entry: dict[str, Any], reason: str) -> dict[str, Any]:
+        self.store.remove("intent.json")
+        entry["status"] = "queued"
+        entry.setdefault("history", []).append({"at": now_iso(), "event": "requeued", "reason": reason})
+        self.save_entry(entry)
+        self.store.event("intent_voided", entry=entry["id"], reason=reason)
+        return {"entry": entry["id"], "outcome": "requeued", "reason": reason}
 
     # -- the loop -----------------------------------------------------------
 
@@ -1422,6 +1706,8 @@ def next_action_for(entry: dict[str, Any]) -> str:
         return f"worker: merge {entry.get('target')} into {entry.get('branch')} in the workspace, resolve, commit, then `agent-do git integration submit {item}`"
     if reason == "checks_failed":
         return f"worker: read the failing check log, fix in the workspace, commit, then `agent-do git integration submit {item}`"
+    if reason == "candidate_changed":
+        return f"worker: the checks changed the candidate tree (see candidate-drift.patch in the receipts); commit what they generate, or fix the check command with the operator, then `agent-do git integration submit {item}`"
     if reason == "board_paths":
         return "worker: drop board-owned paths from the branch (board edits belong to the canonical checkout) and resubmit"
     if reason in {"stale_submission", "reassigned", "item_closed"}:
@@ -1508,7 +1794,10 @@ def item_status(repo: Repo, store: Store, item: str, workspaces: list[dict[str, 
             "submission_ref": entry.get("submission_ref"),
             "candidate_ref": result.get("candidate_ref"),
             "checks": result.get("checks"),
+            "candidate_integrity": result.get("candidate_integrity"),
+            "policy_digest": result.get("config_digest") or result.get("policy_digest"),
             "rebuilds": entry.get("rebuilds"),
+            "revalidations": entry.get("revalidations"),
             "routing": entry.get("routing"),
         }
     return {

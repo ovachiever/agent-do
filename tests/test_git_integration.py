@@ -12,6 +12,16 @@ board across worktrees, two competing submissions, stale base, conflicts,
 failed checks, dirty target checkout, worker disappearance and replacement,
 authority and config change, interruption before and after the ref update,
 replay without duplicate integration, branches that stay recoverable.
+
+Round two, from the independent review of 90f49ca: a policy changed during
+the checks (revalidated under the new policy, or refused when it keeps
+moving); recovery before the ref update re-verifying the tested policy and the
+assignment, and only finishing the record after the ref update; a check that
+repairs, stages or commits in the candidate tree (the tested tree must be the
+commit that lands); a crash after the landed queue row finished without a
+second landing or a second drop; a foreign detached worktree at the candidate
+path never reset; the assignment re-read immediately before landing; and the
+check environment without the integrator's identity or secrets.
 """
 
 from __future__ import annotations
@@ -21,6 +31,7 @@ import json
 import os
 import pty
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -824,6 +835,364 @@ def test_integrator_lock(root: Path, base: dict[str, str]) -> None:
     print("  ok: one integrator per repository")
 
 
+# ---------------------------------------------------------------------------
+# Round two: the independent review's reproduced blockers and source concerns.
+# Each scenario fails on the reviewed engine (90f49ca) and passes on the fix.
+# ---------------------------------------------------------------------------
+
+
+def policy_digest(estate: Estate) -> str:
+    return integ_json(["config"], cwd=estate.primary, env=estate.lead.env)["config"]["digest"]
+
+
+def test_policy_changes_during_checks(root: Path, base: dict[str, str]) -> None:
+    """Review blocker 1: the policy in force when the ref moves must be the policy the checks ran under."""
+    estate = Estate(root, "policy", base)
+    primary = estate.primary
+
+    # (a) A check rewrites the check list to `false` (the reviewer's probe). The
+    # reviewed engine landed and reported success; the candidate must instead be
+    # revalidated under the policy now in force, which fails it.
+    item = estate.create("policy rewritten to false during checks")
+    worker = Session(base, "worker-policy-a")
+    estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/feature.txt", "feature\n", "feat: probe")
+    estate.enable(checks=["git config --local --replace-all agent-do.integration.check false"])
+    estate.submit(item, worker, ws)
+    tip_before = estate.tip()
+    outcome = estate.run_integrator()["processed"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "checks_failed", f"a policy rewritten during checks is applied before landing: {outcome}")
+    require(estate.tip() == tip_before and not (primary / "src" / "feature.txt").exists(), "nothing landed under the superseded policy")
+    require(git(primary, "config", "--get-all", "agent-do.integration.check") == "false", "the check really did rewrite the policy on disk")
+    state = estate.item_state(item)
+    revalidations = state["evidence"]["revalidations"]
+    require(len(revalidations) == 1 and revalidations[0]["tested_digest"] != revalidations[0]["live_digest"], f"one revalidation, both digests recorded: {revalidations}")
+    checks = state["entry"]["result"]["checks"]
+    require(checks == [dict(checks[0], command="false", ok=False)] and checks[0]["pass"] == 2, f"the second pass ran the new policy's check and it failed: {checks}")
+    require(revalidations[0]["checks"][0]["command"].startswith("git config") and revalidations[0]["checks"][0]["ok"], "the first pass's checks are kept as history")
+    receipts = Path(state["evidence"]["receipts"])
+    require((receipts / "check-1.log").is_file() and (receipts / "check-1.pass2.log").is_file(), "both passes leave their logs")
+    require(git(primary, "rev-parse", state["entry"]["result"]["candidate_ref"]) == source, "the candidate stays pinned")
+    require(len([d for d in drops_for(estate, worker, item) if d["kind"] == "action"]) == 1, "the failure under the new policy is the worker's obligation")
+
+    # (b) A policy edited once during validation (an operator correcting the
+    # authority text, here done by the check itself, idempotently) is adopted:
+    # the candidate is revalidated under it and lands only when the live policy
+    # equals the tested one.
+    item_b = estate.create("policy edited once during checks")
+    worker_b = Session(base, "worker-policy-b")
+    estate.claim(item_b, worker_b)
+    ws_b = Path(estate.workspace(item_b, worker_b)["workspace"]["path"])
+    source_b = commit(ws_b, item_b, "src/b.txt", "b\n", "feat: b")
+    estate.enable(checks=["git config --local --replace-all agent-do.integration.authorized-by 'fixture operator, rewritten once'", "sh ./ci.sh"])
+    before = policy_digest(estate)
+    estate.submit(item_b, worker_b, ws_b)
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source_b, f"an adopted policy lands after revalidation: {landed}")
+    state = estate.item_state(item_b)
+    result = state["entry"]["result"]
+    require(len(state["evidence"]["revalidations"]) == 1 and state["evidence"]["revalidations"][0]["tested_digest"] == before, f"revalidated once from the queued policy: {state['evidence']['revalidations']}")
+    require(result["validation_passes"] == 2 and all(check["ok"] and check["pass"] == 2 for check in result["checks"]), f"the landing's checks are the second pass: {result['checks']}")
+    require(result["config_digest"] == result["policy_digest_at_landing"] == policy_digest(estate) != before, f"landed under the policy now in force: {result['config_digest']}")
+    require(result["policy_changed_since_test"] is False, "tested and landing digests agree")
+
+    # (c) A policy that keeps moving during its own validation is not trusted:
+    # the second change blocks (retryable). The operator settles the policy and
+    # the retained entry lands.
+    item_c = estate.create("policy moving during validation")
+    worker_c = Session(base, "worker-policy-c")
+    estate.claim(item_c, worker_c)
+    ws_c = Path(estate.workspace(item_c, worker_c)["workspace"]["path"])
+    source_c = commit(ws_c, item_c, "src/c.txt", "c\n", "feat: c")
+    estate.enable(checks=["git config --local --add agent-do.integration.check 'sh ./ci.sh'"])
+    estate.submit(item_c, worker_c, ws_c)
+    tip_before = estate.tip()
+    blocked = estate.run_integrator()["processed"][0]
+    require(blocked["outcome"] == "blocked" and blocked["reason"] == "config_changed" and blocked["retryable"] is True, f"a policy moving twice blocks, retryable: {blocked}")
+    require(estate.tip() == tip_before, "nothing landed under a moving policy")
+    state = estate.item_state(item_c)
+    require(len(state["evidence"]["revalidations"]) == 2 and "twice" in " ".join(state["entry"]["result"]["detail"]), f"both changes recorded: {state['entry']['result']['detail']}")
+    require([d for d in drops_for(estate, worker_c, item_c) if d["kind"] == "action"] == [], "a policy problem is not the worker's obligation")
+    estate.enable()
+    settled = estate.run_integrator()["processed"][0]
+    require(settled["outcome"] == "landed" and settled["integrated_sha"] == source_c and settled["entry"] == state["entry"]["id"], f"the retained entry lands once the policy is settled: {settled}")
+    print("  ok: a policy changed during checks is revalidated (once) or refused, never landed under the old one")
+
+
+def test_recovery_revalidates_policy_and_assignment(root: Path, base: dict[str, str]) -> None:
+    """Review blocker 2: recovery before the ref update re-verifies the tested policy and the assignment; after it, only the record is finished."""
+    estate = Estate(root, "recovery", base)
+    primary = estate.primary
+    fault_before = dict(estate.integrator.env, AGENT_GIT_INTEGRATION_FAULT="after_intent")
+
+    # (a) The policy changed while a landing sat interrupted before the ref
+    # update: the reviewed engine re-landed the old candidate. Now the intent is
+    # voided, the entry requeued, and the next run validates under the new policy.
+    item = estate.create("policy changed during recovery")
+    worker = Session(base, "worker-rec-a")
+    estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/feature.txt", "feature\n", "feat: a")
+    tested = policy_digest(estate)
+    estate.submit(item, worker, ws)
+    count = count_commits(primary)
+    require(integ(["run", "--json"], cwd=primary, env=fault_before).returncode == FAULT_EXIT, "fault before the ref update")
+    intent = json.loads((estate.state_dir() / "intent.json").read_text())
+    estate.enable(checks=["false"])
+    recovered = integ_json(["recover"], cwd=primary, env=estate.integrator.env)
+    outcome = recovered["recovered"][0]
+    require(outcome["outcome"] == "requeued" and "policy changed" in outcome["reason"] and tested in outcome["reason"], f"a changed policy voids the interrupted landing: {outcome}")
+    require(intent.get("config_digest") == tested and (intent.get("worker") or {}).get("proof") == worker.proof(primary) and (intent.get("checks") or [{}])[0].get("ok") and (intent.get("candidate_integrity") or {}).get("ok"), f"the intent carries what recovery must re-verify: {intent}")
+    require(estate.tip() != source and count_commits(primary) == count and not (estate.state_dir() / "intent.json").exists(), "nothing landed; intent voided")
+    require(git(primary, "rev-parse", f"refs/integration/candidates/{outcome['entry']}") == source, "the voided candidate stays pinned")
+    require(estate.item_state(item)["state"] == "queued", "requeued for validation under the current policy")
+    blocked = estate.run_integrator()["processed"][0]
+    require(blocked["outcome"] == "blocked" and blocked["reason"] == "checks_failed" and estate.tip() != source, f"the new policy is what validates it: {blocked}")
+    estate.enable()
+    estate.submit(item, worker, ws)
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source and count_commits(primary) == count + 1, f"resubmitted under the restored policy, it lands once: {landed}")
+
+    # (b) The assignment moved while a landing sat interrupted: voided and blocked, never landed.
+    item_b = estate.create("reassigned during recovery")
+    worker_a = Session(base, "worker-rec-b1")
+    worker_b = Session(base, "worker-rec-b2")
+    estate.claim(item_b, worker_a)
+    ws_b = Path(estate.workspace(item_b, worker_a)["workspace"]["path"])
+    source_b = commit(ws_b, item_b, "src/b.txt", "b\n", "feat: b")
+    estate.submit(item_b, worker_a, ws_b)
+    count = count_commits(primary)
+    require(integ(["run", "--json"], cwd=primary, env=fault_before).returncode == FAULT_EXIT, "fault before the ref update")
+    require(manna(["abandon", item_b], cwd=primary, env=worker_a.env).returncode == 0, "worker A abandons while the landing is interrupted")
+    estate.claim(item_b, worker_b)
+    recovered = integ_json(["recover"], cwd=primary, env=estate.integrator.env)
+    outcome = recovered["recovered"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "reassigned", f"a moved assignment voids the interrupted landing: {outcome}")
+    require(estate.tip() != source_b and count_commits(primary) == count and not (estate.state_dir() / "intent.json").exists(), "nothing landed; intent voided")
+    require(estate.item_state(item_b)["state"] == "blocked" and "recovering" in " ".join(estate.item_state(item_b)["entry"]["result"]["detail"]), "the block says it was found in recovery")
+
+    # (c) The policy changed after the ref had already advanced: the record is
+    # finished (never a second landing) and the change is stated in it.
+    item_c = estate.create("policy changed after the ref update")
+    worker_c = Session(base, "worker-rec-c")
+    estate.claim(item_c, worker_c)
+    ws_c = Path(estate.workspace(item_c, worker_c)["workspace"]["path"])
+    commit(ws_c, item_c, "src/c.txt", "c\n", "feat: c")
+    tested = policy_digest(estate)
+    estate.submit(item_c, worker_c, ws_c)
+    count = count_commits(primary)
+    fault_after = dict(estate.integrator.env, AGENT_GIT_INTEGRATION_FAULT="after_ref_update")
+    require(integ(["run", "--json"], cwd=primary, env=fault_after).returncode == FAULT_EXIT, "fault after the ref update")
+    candidate = json.loads((estate.state_dir() / "intent.json").read_text())["candidate"]
+    require(estate.tip() == candidate and count_commits(primary) == count + 1, "the ref advanced before the crash")
+    estate.enable(checks=["false"])
+    recovered = integ_json(["recover"], cwd=primary, env=estate.integrator.env)
+    outcome = recovered["recovered"][0]
+    require(outcome["outcome"] == "landed" and outcome["recovered"] is True and "already contains" in outcome["via"], f"an advanced ref gets its record finished: {outcome}")
+    require(estate.tip() == candidate and count_commits(primary) == count + 1, "no second landing")
+    result = estate.item_state(item_c)["entry"]["result"]
+    require(result["policy_changed_since_test"] is True and result["config_digest"] == tested != result["policy_digest_at_landing"], f"the record says the policy moved after the test: {result}")
+    require("policy changed after this candidate was validated" in Path(result["landed_via"] and estate.item_state(item_c)["evidence"]["receipts"], "summary.md").read_text(), "the summary states it")
+    estate.enable()
+
+    # (d) An intent from the reviewed version (no tested policy recorded) fails closed.
+    item_d = estate.create("legacy intent")
+    worker_d = Session(base, "worker-rec-d")
+    estate.claim(item_d, worker_d)
+    ws_d = Path(estate.workspace(item_d, worker_d)["workspace"]["path"])
+    source_d = commit(ws_d, item_d, "src/d.txt", "d\n", "feat: d")
+    estate.submit(item_d, worker_d, ws_d)
+    count = count_commits(primary)
+    require(integ(["run", "--json"], cwd=primary, env=fault_before).returncode == FAULT_EXIT, "fault before the ref update")
+    legacy = json.loads((estate.state_dir() / "intent.json").read_text())
+    for key in ("config_digest", "worker", "checks", "candidate_integrity", "version"):
+        legacy.pop(key, None)
+    (estate.state_dir() / "intent.json").write_text(json.dumps(legacy), encoding="utf-8")
+    outcome = integ_json(["recover"], cwd=primary, env=estate.integrator.env)["recovered"][0]
+    require(outcome["outcome"] == "requeued" and "no tested policy" in outcome["reason"] and count_commits(primary) == count, f"an intent without a tested policy is never re-landed: {outcome}")
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source_d, "validated afresh, it lands")
+    print("  ok: recovery re-verifies policy and assignment before the ref update, and only finishes the record after it")
+
+
+def test_candidate_tree_integrity(root: Path, base: dict[str, str]) -> None:
+    """Review blocker 3: the tree the checks validated must be the candidate commit that lands."""
+    estate = Estate(root, "tree", base)
+    primary = estate.primary
+    cases = [
+        ("repaired", "printf 'repaired\\n' > src/feature.txt; sh ./ci.sh", "BROKEN\n", "tree_clean"),
+        ("committed", "printf 'repaired\\n' > src/feature.txt && git add src/feature.txt && git -c user.name=c -c user.email=c@x commit -qm 'check commits' && sh ./ci.sh", "BROKEN\n", "head"),
+        ("staged", "printf 'staged\\n' > src/feature.txt && git add src/feature.txt && printf 'feature\\n' > src/feature.txt && sh ./ci.sh", "feature\n", "index_clean"),
+    ]
+    for name, check, content, broken_field in cases:
+        item = estate.create(f"candidate {name} by a check")
+        worker = Session(base, f"worker-tree-{name}")
+        estate.claim(item, worker)
+        ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+        source = commit(ws, item, "src/feature.txt", content, f"feat: {name}")
+        estate.enable(checks=[check])
+        estate.submit(item, worker, ws)
+        tip_before = estate.tip()
+        outcome = estate.run_integrator()["processed"][0]
+        require(outcome["outcome"] == "blocked" and outcome["reason"] == "candidate_changed" and outcome["retryable"] is False, f"{name}: a check that changed the tree must not land: {outcome}")
+        require(estate.tip() == tip_before and not (primary / "src" / "feature.txt").exists(), f"{name}: nothing landed")
+        state = estate.item_state(item)
+        result = state["entry"]["result"]
+        integrity = result["candidate_integrity"]
+        require(integrity["ok"] is False and integrity["candidate"] == source, f"{name}: integrity recorded: {integrity}")
+        if broken_field == "head":
+            require(integrity["head"] != source, f"{name}: HEAD moved: {integrity}")
+        else:
+            require(integrity[broken_field] is False, f"{name}: {broken_field} must be false: {integrity}")
+        if name == "staged":
+            require(integrity["tree_clean"] is True, f"{name}: the working tree matched; only the index moved: {integrity}")
+        require(any("src/feature.txt" in line for line in integrity["changed"]), f"{name}: the changed path is named: {integrity['changed']}")
+        require(all(check["ok"] for check in result["checks"]), f"{name}: the checks themselves passed on the altered tree: {result['checks']}")
+        patch = Path(integrity["patch"])
+        require(patch.is_file() and "src/feature.txt" in patch.read_text(encoding="utf-8"), f"{name}: the drift patch is the receipt")
+        require(git(primary, "rev-parse", result["candidate_ref"]) == source, f"{name}: the original candidate stays pinned")
+        require("candidate-drift.patch" in state["next_action"], f"{name}: the next action points at the drift: {state['next_action']}")
+        actions = [d for d in drops_for(estate, worker, item) if d["kind"] == "action"]
+        require(len(actions) == 1 and "candidate_changed" in actions[0]["note"], f"{name}: the worker owes the fix: {actions}")
+
+    # Untracked build output is outside the landed tree: reported, allowed.
+    item = estate.create("untracked build output")
+    worker = Session(base, "worker-tree-untracked")
+    estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/built.txt", "built\n", "feat: built")
+    estate.enable(checks=["echo artifact > build.out; sh ./ci.sh"])
+    estate.submit(item, worker, ws)
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source, f"untracked output does not block: {landed}")
+    integrity = estate.item_state(item)["entry"]["result"]["candidate_integrity"]
+    require(integrity["ok"] is True and integrity["untracked"] == ["build.out"], f"the artifact is reported, not landed: {integrity}")
+    require(not (primary / "build.out").exists(), "the artifact never reached the target checkout")
+    print("  ok: a check that repairs, stages or commits in the candidate blocks with the drift; untracked output is reported and allowed")
+
+
+def test_landing_tail_recovery(root: Path, base: dict[str, str]) -> None:
+    """Source concern: the intent is retired after the queue row, receipt, routing and audit, so a crash in the tail is finished, never re-landed."""
+    estate = Estate(root, "tail", base)
+    primary = estate.primary
+    item = estate.create("crash after the landed row")
+    worker = Session(base, "worker-tail")
+    estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/tail.txt", "tail\n", "feat: tail")
+    estate.submit(item, worker, ws)
+    count = count_commits(primary)
+    fault_env = dict(estate.integrator.env, AGENT_GIT_INTEGRATION_FAULT="after_landed_row")
+    require(integ(["run", "--json"], cwd=primary, env=fault_env).returncode == FAULT_EXIT, "fault after the landed row")
+    require(estate.tip() == source and count_commits(primary) == count + 1, "the ref moved")
+    entries = json.loads((estate.state_dir() / "queue.json").read_text())["entries"]
+    entry = next(row for row in entries if row["item"] == item)
+    require(entry["status"] == "landed" and entry["result"]["integrated_sha"] == source and not entry.get("routing"), f"the landed row is durable before routing: {entry['status']} {entry.get('routing')}")
+    require((estate.state_dir() / "intent.json").exists(), "the intent survives until the record is complete")
+    require(drops_for(estate, worker, item) == [], "no drop was sent before the crash")
+    require(not (Path(entry["receipts"]) / "summary.md").exists(), "no summary yet")
+
+    recovered = integ_json(["recover"], cwd=primary, env=estate.integrator.env)
+    outcome = recovered["recovered"][0]
+    require(outcome["outcome"] == "landed" and outcome["recovered"] is True and outcome["tail_recovered"] is True, f"recovery finishes the tail: {outcome}")
+    require(estate.tip() == source and count_commits(primary) == count + 1, "no second landing")
+    require(not (estate.state_dir() / "intent.json").exists(), "intent retired last")
+    info = [d for d in drops_for(estate, worker, item) if d["kind"] == "info"]
+    require(len(info) == 1, f"exactly one info drop after recovery: {info}")
+    state = estate.item_state(item)
+    require(state["state"] == "landed" and len(state["evidence"]["routing"]) == 1 and Path(state["evidence"]["receipts"], "summary.md").is_file(), f"record complete: {state['evidence']['routing']}")
+    events = [json.loads(line) for line in (estate.state_dir() / "events.jsonl").read_text().splitlines() if line.strip()]
+    kinds = [event["kind"] for event in events if event.get("entry") == entry["id"] and event["kind"] in {"landed", "landed_tail_recovered"}]
+    require(kinds == ["landed_tail_recovered"], f"the audit line is written once, as a recovered tail: {kinds}")
+    replay = estate.run_integrator()
+    require(replay["processed"] == [] and replay["recovered"] == [], f"replay finds nothing: {replay}")
+    require(len([d for d in drops_for(estate, worker, item) if d["kind"] == "info"]) == 1, "no duplicate drop on replay")
+    print("  ok: a crash after the landed row is finished by recovery: one drop, one audit line, intent retired last")
+
+
+def test_candidate_ownership(root: Path, base: dict[str, str]) -> None:
+    """Source concern: a detached worktree at the candidate path is adopted only with the integrator's own marker."""
+    estate = Estate(root, "owner", base)
+    primary = estate.primary
+    item = estate.create("foreign candidate tree")
+    worker = Session(base, "worker-owner")
+    estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/owner.txt", "owner\n", "feat: owner")
+    estate.submit(item, worker, ws)
+
+    git(primary, "worktree", "add", "--detach", str(estate.candidate), "main")
+    (estate.candidate / "README.md").write_text("# fixture\n\nsomeone's uncommitted edit\n", encoding="utf-8")
+    (estate.candidate / "notes.txt").write_text("untracked notes\n", encoding="utf-8")
+    tip_before = estate.tip()
+    refused = integ(["run", "--json"], cwd=primary, env=estate.integrator.env)
+    payload = json.loads(refused.stdout)
+    require(refused.returncode == 1 and "did not create" in payload["error"] and payload["candidate_path"] == str(estate.candidate), f"a foreign detached worktree is refused: {payload}")
+    require((estate.candidate / "README.md").read_text(encoding="utf-8").endswith("someone's uncommitted edit\n") and (estate.candidate / "notes.txt").is_file(), "the foreign tree is untouched")
+    require(estate.tip() == tip_before and estate.item_state(item)["state"] == "queued", "nothing landed; the entry waits")
+    require(not (estate.state_dir() / "candidate.json").exists(), "no ownership was claimed over it")
+
+    git(primary, "worktree", "remove", "--force", str(estate.candidate))
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source, f"with the path free, the integrator creates its own tree: {landed}")
+    owned = json.loads((estate.state_dir() / "candidate.json").read_text())
+    require(owned["path"] == str(estate.candidate) and Path(owned["marker"]).is_file(), f"ownership recorded: {owned}")
+    require(Path(owned["marker"]).parent == Path(git(estate.candidate, "rev-parse", "--path-format=absolute", "--git-dir")), "the marker lives in the candidate worktree's own git dir")
+    again = estate.run_integrator()
+    require(again["ok"] and again["processed"] == [], "the owned tree is adopted on the next run")
+    print("  ok: a candidate worktree is reset only when it carries the integrator's own marker")
+
+
+def test_assignment_rechecked_before_landing(root: Path, base: dict[str, str]) -> None:
+    """Source concern: the assignment is re-read immediately before the ref update, not only before the checks."""
+    estate = Estate(root, "fresh", base)
+    primary = estate.primary
+    item = estate.create("reassigned while the checks ran")
+    worker_a = Session(base, "worker-fresh-a")
+    worker_b = Session(base, "worker-fresh-b")
+    estate.claim(item, worker_a)
+    ws = Path(estate.workspace(item, worker_a)["workspace"]["path"])
+    source = commit(ws, item, "src/fresh.txt", "fresh\n", "feat: fresh")
+    # The check itself moves the claim on the canonical board, standing in for a
+    # release and a new claim that happen while a long check runs.
+    reassign = (
+        f"(cd {shlex.quote(str(primary))} && "
+        f"MANNA_SESSION_ID={worker_a.name} MANNA_SESSION_TOKEN={worker_a.env['MANNA_SESSION_TOKEN']} {shlex.quote(str(MANNA))} abandon {item} >/dev/null && "
+        f"MANNA_SESSION_ID={worker_b.name} MANNA_SESSION_TOKEN={worker_b.env['MANNA_SESSION_TOKEN']} {shlex.quote(str(MANNA))} claim {item} >/dev/null) && sh ./ci.sh"
+    )
+    estate.enable(checks=[reassign])
+    estate.submit(item, worker_a, ws)
+    tip_before = estate.tip()
+    outcome = estate.run_integrator()["processed"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "reassigned", f"a claim that moved during the checks is caught before the ref update: {outcome}")
+    require(estate.tip() == tip_before and estate.row(item)["claimed_by"] == worker_b.name, "nothing landed; the board shows the new claimant")
+    result = estate.item_state(item)["entry"]["result"]
+    require(all(check["ok"] for check in result["checks"]) and "immediately before the ref update" in " ".join(result["detail"]), f"the checks passed; the recheck refused: {result['detail']}")
+    print("  ok: assignment freshness is rechecked after the checks, immediately before landing")
+
+
+def test_check_environment(root: Path, base: dict[str, str]) -> None:
+    """The check runs the candidate's own scripts: the integrator's identity and credentials are withheld from it."""
+    estate = Estate(root, "env", base)
+    item = estate.create("check environment")
+    worker = Session(base, "worker-env")
+    estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/env.txt", "env\n", "feat: env")
+    probe = (
+        'test -z "$MANNA_SESSION_TOKEN" && test -z "$MANNA_SESSION_ID" && test "$MANNA_OPERATOR" = 0 && test -z "$FIXTURE_API_KEY" '
+        '&& test -n "$AGENT_GIT_INTEGRATION_CANDIDATE" && test -n "$AGENT_GIT_INTEGRATION_POLICY" && test -n "$AGENT_DO_HOME" && sh ./ci.sh'
+    )
+    estate.enable(checks=[probe])
+    estate.submit(item, worker, ws)
+    landed = estate.run_integrator(env=dict(estate.integrator.env, FIXTURE_API_KEY="leak-me"))["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source, f"the check saw no identity or secret and still had its own variables: {landed}")
+    log = Path(estate.item_state(item)["entry"]["result"]["checks"][0]["log"]).read_text(encoding="utf-8")
+    require("withheld from the environment:" in log and "MANNA_SESSION_TOKEN" in log and "FIXTURE_API_KEY" in log and "leak-me" not in log, f"names withheld are logged, values never: {log}")
+    print("  ok: checks run without the integrator's identity or credential-shaped variables")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp).resolve()
@@ -845,6 +1214,13 @@ def main() -> None:
             test_authority_and_config_change,
             test_managed_replacement,
             test_integrator_lock,
+            test_policy_changes_during_checks,
+            test_recovery_revalidates_policy_and_assignment,
+            test_candidate_tree_integrity,
+            test_landing_tail_recovery,
+            test_candidate_ownership,
+            test_assignment_rechecked_before_landing,
+            test_check_environment,
         ]
         chosen = sys.argv[1:]
         for scenario in scenarios:
