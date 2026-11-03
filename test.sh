@@ -162,6 +162,7 @@ check_cmd "spec tests" python3 "$SCRIPT_DIR/tests/test_spec.py"
 check_cmd "resend tests" python3 "$SCRIPT_DIR/tests/test_resend.py"
 check_cmd "render tests" python3 "$SCRIPT_DIR/tests/test_render.py"
 check_cmd "psql tests" python3 "$SCRIPT_DIR/tests/test_psql.py"
+check_cmd "psql large-field test" python3 "$SCRIPT_DIR/tests/test_psql_large_field.py"
 check_cmd "vector tests" python3 "$SCRIPT_DIR/tests/test_vector.py"
 check_output "vector --help" "today" "$AGENT_DO" vector --help
 check_cmd "gh tests" python3 "$SCRIPT_DIR/tests/test_gh.py"
