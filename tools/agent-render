@@ -178,7 +178,7 @@ render_request_checked() {
     tmp_body="$(mktemp)"
     trap 'rm -f "$tmp_body"' RETURN
 
-    local args=(-sS --max-time 30 --connect-timeout 10 -o "$tmp_body" -w "%{http_code}" -X "$method" "${RENDER_API}${endpoint}" \
+    local args=(-sS --max-time "${RENDER_HTTP_TIMEOUT:-30}" --connect-timeout 10 -o "$tmp_body" -w "%{http_code}" -X "$method" "${RENDER_API}${endpoint}" \
         -H "Authorization: Bearer $token" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json")
@@ -197,6 +197,10 @@ render_request_checked() {
         return 0
     fi
 
+    if [[ "$status" == "000" ]]; then
+        echo "Error: Render API ${method} ${endpoint%%\?*}: no HTTP response (network error or the ${RENDER_HTTP_TIMEOUT:-30}s time limit) — not a 'not found'" >&2
+        return 1
+    fi
     echo "Error: Render API ${method} ${endpoint} returned HTTP ${status}" >&2
     if [[ -n "$body" ]]; then
         printf '%s\n' "$body" >&2
@@ -330,9 +334,14 @@ PY
 
 show_logs_help() {
     cat <<'EOF'
-Usage: agent-render logs <service> [options]
+Usage: agent-render logs <resource> [options]
+
+Resource: a service or cron by name or id (srv-/crn-), a Postgres (dpg-) or
+Key Value (red-) id. For a one-off job's output: logs <service> --job <job-id>.
 
 Options:
+  --job <job-id>      Logs of one one-off job (`job run`) on <service>.
+  --timeout <sec>     HTTP time limit (default: 90). Wide windows can be slow.
   --since <time>      Start of time range. Accepts minutes ago (`60`), duration (`1h`, `24h`, `7d`), or ISO timestamp.
   --until <time>      End of time range. Same formats as --since.
   --limit <n>         Max number of log entries to return (1-100, default: 20).
@@ -500,6 +509,8 @@ cmd_logs() {
     local limit="20"
     local direction="backward"
     local json_output="${RENDER_JSON:-0}"
+    local job_id=""
+    local http_timeout="90"
     local -a type_filters=()
     local -a level_filters=()
     local -a text_filters=()
@@ -568,6 +579,16 @@ cmd_logs() {
                 json_output=1
                 shift
                 ;;
+            --job)
+                job_id="${2:-}"
+                [[ "$job_id" =~ ^job-[a-z0-9]+$ ]] || { echo "Error: --job takes a job id (job-…)" >&2; return 2; }
+                shift 2
+                ;;
+            --timeout)
+                http_timeout="${2:-}"
+                [[ "$http_timeout" =~ ^[0-9]+$ && "$http_timeout" -ge 1 ]] || { echo "Error: --timeout takes whole seconds" >&2; return 2; }
+                shift 2
+                ;;
             --forward)
                 direction="forward"
                 shift
@@ -602,24 +623,51 @@ cmd_logs() {
         return 1
     fi
 
-    local sid
-    sid=$(resolve_service "$name_or_id") || return 1
+    # The logs API is keyed by owner + resource id. Services and crons carry
+    # ownerId; Postgres and Key Value carry owner.id; a one-off job's id is a
+    # resource of its own but only its service knows the owner.
+    local resource lookup_path
+    case "$name_or_id" in
+        job-*)
+            echo "Error: a job's logs need its service: agent-render logs <service> --job $name_or_id" >&2
+            return 2
+            ;;
+        dpg-*|red-*)
+            if [[ -n "$job_id" ]]; then
+                echo "Error: --job applies to a service, not $name_or_id" >&2
+                return 2
+            fi
+            resource="$name_or_id"
+            if [[ "$name_or_id" == dpg-* ]]; then lookup_path="/postgres/$name_or_id"; else lookup_path="/key-value/$name_or_id"; fi
+            ;;
+        *)
+            local sid
+            if [[ "$name_or_id" == crn-* ]]; then
+                sid="$name_or_id"
+            else
+                sid=$(resolve_service "$name_or_id") || return 1
+            fi
+            resource="$sid"
+            [[ -n "$job_id" ]] && resource="$job_id"
+            lookup_path="/services/$sid"
+            ;;
+    esac
 
-    local service
-    service=$(render_request_checked GET "/services/$sid") || return 1
+    local owner_obj
+    owner_obj=$(render_request_checked GET "$lookup_path") || return 1
 
     local owner_id
-    owner_id=$(echo "$service" | python3 -c "
+    owner_id=$(echo "$owner_obj" | python3 -c "
 import sys, json
-svc = json.load(sys.stdin)
-print(svc.get('ownerId', ''))
+obj = json.load(sys.stdin)
+print(obj.get('ownerId') or (obj.get('owner') or {}).get('id', ''))
 " 2>/dev/null)
     if [[ -z "$owner_id" ]]; then
-        echo "Error: Could not resolve ownerId for service '$name_or_id' ($sid)" >&2
+        echo "Error: Could not resolve the owner of '$name_or_id'" >&2
         return 1
     fi
 
-    local -a query_parts=("ownerId=$owner_id" "resource=$sid" "limit=$limit" "direction=$direction")
+    local -a query_parts=("ownerId=$owner_id" "resource=$resource" "limit=$limit" "direction=$direction")
     if [[ -n "$since" ]]; then
         query_parts+=("startTime=$(normalize_log_time "$since")")
     fi
@@ -639,7 +687,7 @@ print(svc.get('ownerId', ''))
     query=$(urlencode_pairs "${query_parts[@]}")
 
     local result
-    result=$(render_request_checked GET "/logs?$query") || return 1
+    result=$(RENDER_HTTP_TIMEOUT="$http_timeout" render_request_checked GET "/logs?$query") || return 1
 
     if [[ "$json_output" == "1" ]]; then
         echo "$result"
