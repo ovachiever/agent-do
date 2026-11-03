@@ -1922,6 +1922,86 @@ def test_assignment_targeting(tmp_path: Path, env_base: dict[str, str]) -> None:
     require(f"item:{item} -> {replacement_id}" in listing.stdout and "stage" in listing.stdout, f"drops text names the resolved session: {listing.stdout}")
 
 
+def assignment_fixture(tmp_path: Path, env_base: dict[str, str], name: str):
+    project = make_project(tmp_path, name)
+    subprocess.run(["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "init"], cwd=project, check=True)
+    base = clean_env(env_base)
+    base.update(AGENT_DO_HOOK_AI="off", AGENT_DO_TELEMETRY_SUPPRESS="1")
+    lead = dict(base, CLAUDE_SESSION_ID="correction-lead", AGENT_DO_COORD_SESSION="correction-lead")
+    worker = dict(base, CLAUDE_SESSION_ID="correction-worker", AGENT_DO_COORD_SESSION="correction-worker")
+    require(manna(["init"], cwd=project, env=lead).returncode == 0, "init fixture")
+    result = manna(["create", name, "fixture"], cwd=project, env=lead)
+    item = re.search(r"^  id: (mn-[0-9a-f]{6})$", result.stdout, re.MULTILINE).group(1)
+    require(manna(["claim", item], cwd=project, env=worker).returncode == 0, "claim fixture")
+    return project, lead, worker, item
+
+
+def test_assignment_ambiguity(tmp_path: Path, env_base: dict[str, str]) -> None:
+    project, lead, worker, item = assignment_fixture(tmp_path, env_base, "ambiguity-regression")
+    coord_json(["touch"], cwd=project, env=worker)
+    args = ["drop", "add", "approval.md", "--for-item", item, "--allows", "local test", "--excludes", "deployment", "--authorized-by", "fixture", "--key", "approval-key"]
+    unique = coord_json(args, cwd=project, env=lead)["drop"]
+    coord_json(["drop", "ack", unique["id"]], cwd=project, env=worker)
+    twin = dict(worker, AGENT_DO_COORD_SESSION="different-anchor")
+    coord_json(["touch"], cwd=project, env=twin)
+    # Mapping becomes ambiguous after recording and acknowledgment.
+    viewed = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == unique["id"])
+    require(viewed["delivery"]["recipient"]["state"] == "ambiguous", "current ambiguity must supersede a stored destination")
+    require(viewed["delivery"]["acknowledged"] is None, "old ack cannot satisfy an ambiguous mapping")
+    fresh = coord_json([*args[:2], "second.md", *args[3:]], cwd=project, env=lead)["drop"]
+    for candidate in (worker, twin):
+        coord_json(["need", "add", "approval-key", "--why", "matching key must not bypass assignment"], cwd=project, env=candidate)
+        notices = coord_json(["interrupts"], cwd=project, env=candidate)["interrupts"]
+        require(not any(n.get("drop_id") in {unique["id"], fresh["id"]} for n in notices), "need key cannot bypass ambiguous destination")
+        ids = {d["id"] for d in coord_json(["drops", "--for-me"], cwd=project, env=candidate)["drops"]}
+        require(not {unique["id"], fresh["id"]} & ids, "ambiguous candidates must not receive approvals")
+        for drop in (unique, fresh):
+            require(coord(["drop", "ack", drop["id"]], cwd=project, env=candidate).returncode == 2, "ambiguous ack refused")
+            require(coord(["drop", "resolve", drop["id"], "--reason", "done"], cwd=project, env=candidate).returncode == 2, "ambiguous completion refused")
+        hook = router_hook(project, candidate, candidate["AGENT_DO_COORD_SESSION"])
+        require(fresh["id"] not in hook and unique["id"] not in hook, "hook cannot deliver ambiguous approval")
+    # Removing ambiguity restores exact routing, without discarding history.
+    coord_json(["stop"], cwd=project, env=twin)
+    touched = coord_json(["touch"], cwd=project, env=worker)
+    require(fresh["id"] in {d["id"] for d in touched["delivered"]}, "unique worker receives pending drop")
+    coord_json(["drop", "ack", fresh["id"]], cwd=project, env=worker)
+
+
+def test_assignment_turnover(tmp_path: Path, env_base: dict[str, str]) -> None:
+    project, lead, worker, item = assignment_fixture(tmp_path, env_base, "turnover-regression")
+    # Record before the worker registers: stale pending drops must not ring later.
+    args = ["drop", "add", "approval.md", "--for-item", item, "--allows", "local test", "--excludes", "deployment", "--authorized-by", "fixture"]
+    old = coord_json(args, cwd=project, env=lead)["drop"]
+    require(manna(["abandon", item], cwd=project, env=worker).returncode == 0, "abandon")
+    require(manna(["claim", item], cwd=project, env=worker).returncode == 0, "same worker reclaims")
+    touched = coord_json(["touch"], cwd=project, env=worker)
+    require(not touched["delivered"], "new claim must not deliver an old pending approval")
+    observed = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == old["id"])
+    require(observed["delivery"]["stale"]["reason"] == "claim changed", "same proof is not the same claim")
+    require(coord(["drop", "ack", old["id"]], cwd=project, env=worker).returncode == 2, "old claim ack refused")
+    require(coord(["drop", "resolve", old["id"], "--reason", "done"], cwd=project, env=worker).returncode == 2, "old claim completion refused")
+    hook = router_hook(project, worker, worker["CLAUDE_SESSION_ID"])
+    require("STALE: claim changed" in hook, f"hook must label old approval: {hook}")
+    renewed = coord_json(args, cwd=project, env=lead)["drop"]
+    require(renewed["revision"] == old["revision"] + 1 and renewed["delivery"]["stale"] is None, "explicit readdress creates new revision")
+    # Recorded managed metadata is an isolated fixture, not a live board edit.
+    # Turnover and malformed/unknown observations must fail closed even while
+    # the board claim and work-order digest stay identical.
+    managed = project / ".manna/managed.json"
+    metadata = {"version": 1, "items": {item: {"id": item, "attempt": 1}}}
+    managed.write_text(json.dumps(metadata))
+    managed_drop = coord_json(args, cwd=project, env=lead)["drop"]
+    require(managed_drop["for_item"]["attempt"] == 1, "managed generation pinned")
+    metadata["items"][item]["attempt"] = 2
+    managed.write_text(json.dumps(metadata))
+    observed = next(d for d in coord_json(["drops"], cwd=project, env=lead)["drops"] if d["id"] == old["id"])
+    require(observed["delivery"]["stale"]["reason"] == "attempt changed", "managed attempt must be revalidated")
+    require(coord(["drop", "ack", old["id"]], cwd=project, env=worker).returncode == 2, "old managed attempt refused")
+    managed.write_text("{broken")
+    require(coord([*args, "--json"], cwd=project, env=lead).returncode == 2, "unknown attempt must refuse new approval")
+    require(coord(["drop", "ack", old["id"]], cwd=project, env=worker).returncode == 2, "unknown attempt must refuse acknowledgment")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -1939,6 +2019,8 @@ def main() -> int:
         test_drops_and_history(tmp_path, env_base)
         test_drop_lifecycle(tmp_path, env_base)
         test_assignment_targeting(tmp_path, env_base)
+        test_assignment_ambiguity(tmp_path, env_base)
+        test_assignment_turnover(tmp_path, env_base)
         test_pulse(tmp_path, env_base)
         test_explicit_pulse(tmp_path, env_base)
         test_v1_migration(tmp_path, env_base)

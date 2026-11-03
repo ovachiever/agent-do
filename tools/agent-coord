@@ -1902,13 +1902,10 @@ class CoordStore:
     def _drop_targets_me(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]] | None = None) -> bool:
         for_item = drop.get("for_item")
         if isinstance(for_item, dict):
-            # Addressed by assignment: delivered to the exact session resolved
-            # under the pinned claim proof, or to any session of mine that
-            # carries that proof. A label or prefix never matches.
-            if drop.get("for_agent_id") and drop.get("for_agent_id") in self._identity_group(agents):
-                return True
-            proof = for_item.get("claim_proof")
-            return bool(proof) and proof in self._my_proofs(agents)
+            current = self._resolve_item_recipient(for_item, agents or self._load_agents())
+            if current["state"] != "resolved":
+                return False
+            return bool(set(current["candidates"]) & self._identity_group(agents).keys())
         target = str(drop.get("for") or "any")
         if target == "any":
             return True
@@ -2038,16 +2035,31 @@ class CoordStore:
         return row, board
 
     def _item_attempt(self, item_id: str, root: Path) -> dict[str, Any]:
-        """The managed attempt from `manna assess --json`; unknown stays unknown."""
-        payload, message = manna_json(["assess", item_id, "--json"], cwd=root)
-        if not payload:
-            return {"attempt": None, "managed": None, "source": "manna assess --json", "error": message}
-        return {
-            "attempt": payload.get("attempt"),
-            "managed": payload.get("managed"),
-            "source": "manna assess --json",
-            "claimant_observation": payload.get("claimant"),
-        }
+        """Read atomic managed metadata without calling assess back into Coord.
+
+        assess observes Coord liveness; invoking it while holding the Coord
+        lock would create a lock cycle. This is a recorded generation, not an
+        acceptance verdict. Missing means unmanaged; unreadable never does.
+        """
+        path = root / ".manna" / "managed.json"
+        source = str(path)
+        try:
+            if path.is_symlink():
+                raise ValueError("managed metadata is a symlink")
+            try:
+                data = json.loads(path.read_text())
+            except FileNotFoundError:
+                return {"attempt": None, "managed": False, "source": source}
+            if not isinstance(data, dict) or data.get("version", 1) != 1 or not isinstance(data.get("items", {}), dict):
+                raise ValueError("invalid managed metadata")
+            record = data.get("items", {}).get(item_id)
+            if item_id not in data.get("items", {}):
+                return {"attempt": None, "managed": False, "source": source}
+            if not isinstance(record, dict) or record.get("id") != item_id or type(record.get("attempt")) is not int or record["attempt"] < 1:
+                raise ValueError("invalid managed attempt")
+            return {"attempt": record["attempt"], "managed": True, "source": source}
+        except (OSError, ValueError) as exc:
+            return {"attempt": None, "managed": None, "source": source, "error": str(exc)}
 
     @staticmethod
     def _pin_item(row: dict[str, Any], board: dict[str, Any], attempt: dict[str, Any] | None) -> dict[str, Any]:
@@ -2066,7 +2078,7 @@ class CoordStore:
             "managed": attempt.get("managed"),
             "work_order": {"prompt": row.get("prompt"), "digest": row.get("handoff_digest")},
             "observed_at": board.get("observed_at"),
-            "source": "manna show --json" + (", manna assess --json" if attempt.get("attempt") is not None or attempt.get("managed") is not None else ""),
+            "source": "manna show --json; " + str(attempt.get("source", "attempt unavailable")),
         }
 
     @staticmethod
@@ -2135,6 +2147,8 @@ class CoordStore:
         row, board = self._board_item(str(for_item["id"]))
         if row is None:
             return {"reason": "unverified", "detail": board.get("error")}
+        if for_item.get("board") != board.get("path"):
+            return {"reason": "board changed", "detail": "the canonical board differs from the recorded destination"}
         pinned_proof = for_item.get("claim_proof")
         if row.get("claim_token_hash") != pinned_proof:
             return {
@@ -2144,6 +2158,13 @@ class CoordStore:
                     "not forwarded to the replacement"
                 ),
             }
+        if not for_item.get("claimed_at") or row.get("claimed_at") != for_item.get("claimed_at"):
+            return {"reason": "claim changed", "detail": "this is a different claim, even if the same worker reclaimed it"}
+        attempt = self._item_attempt(str(for_item["id"]), Path(str(board["root"])))
+        if attempt.get("error") or for_item.get("managed") is None:
+            return {"reason": "unverified", "detail": attempt.get("error") or "recorded managed status is unknown; explicitly readdress"}
+        if attempt.get("managed") != for_item.get("managed") or attempt.get("attempt") != for_item.get("attempt"):
+            return {"reason": "attempt changed", "detail": "approval belongs to an earlier managed assignment"}
         if row.get("status") == "done":
             return {"reason": "item closed", "detail": f"{for_item['id']} is done"}
         pinned_digest = (for_item.get("work_order") or {}).get("digest")
@@ -2159,6 +2180,11 @@ class CoordStore:
 
     def _exact_recipient_ids(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> set[str]:
         """The sessions whose acknowledgment counts as the recipient's: the resolved id, its siblings, and proof-bound records."""
+        if isinstance(drop.get("for_item"), dict):
+            current = self._resolve_item_recipient(drop["for_item"], agents)
+            if current["state"] != "resolved" or self._staleness(drop):
+                return set()
+            return set(current["candidates"])
         ids: set[str] = set()
         target_id = drop.get("for_agent_id")
         if isinstance(target_id, str) and target_id:
@@ -2169,12 +2195,6 @@ class CoordStore:
                 for agent_id, record in agents.items():
                     if self._record_anchor(agent_id, record) == anchor:
                         ids.add(agent_id)
-        for_item = drop.get("for_item")
-        if isinstance(for_item, dict) and for_item.get("claim_proof"):
-            for agent_id, record in agents.items():
-                manna = record.get("manna")
-                if isinstance(manna, dict) and manna.get("proof") == for_item["claim_proof"]:
-                    ids.add(agent_id)
         return ids
 
     def _delivery_view(self, drop: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -2184,24 +2204,14 @@ class CoordStore:
         target_id = drop.get("for_agent_id")
         recipient: dict[str, Any]
         if for_item:
-            if isinstance(target_id, str) and target_id:
-                stored = drop.get("recipient") if isinstance(drop.get("recipient"), dict) else {}
-                recipient = {
-                    "state": "resolved",
-                    "agent_id": target_id,
-                    "at": stored.get("resolved_at"),
-                    "how": stored.get("how") or "coord record manna.proof == board claim_token_hash (exact)",
-                    "also": stored.get("also") or [],
-                }
-            else:
-                current = self._resolve_item_recipient(for_item, agents)
-                recipient = {
-                    "state": current["state"],
-                    "agent_id": None,
-                    "at": None,
-                    "reason": current.get("reason"),
-                    "candidates": current.get("candidates", []),
-                }
+            current = self._resolve_item_recipient(for_item, agents)
+            recipient = {
+                "state": current["state"],
+                "agent_id": current.get("agent_id"),
+                "at": (drop.get("recipient") or {}).get("resolved_at"),
+                "reason": current.get("reason"),
+                "candidates": current.get("candidates", []),
+            }
         elif target == "any":
             recipient = {"state": "broadcast", "agent_id": None, "how": "everyone"}
         elif target in ROLES:
@@ -2256,6 +2266,8 @@ class CoordStore:
         )
         if completed:
             stage = "completed"
+        elif for_item and (recipient["state"] != "resolved" or self._staleness(drop)):
+            stage = "recorded"
         elif acknowledged:
             stage = "acknowledged"
         elif bell["state"] == "queued":
@@ -2290,6 +2302,8 @@ class CoordStore:
                 if not isinstance(for_item, dict) or drop.get("status") == "resolved" or drop.get("for_agent_id"):
                     continue
                 if for_item.get("claim_proof") not in proofs or drop.get("owner") == self.agent_id:
+                    continue
+                if self._staleness(drop):
                     continue
                 current = self._resolve_item_recipient(for_item, agents)
                 if current["state"] != "resolved" or current["agent_id"] not in self._identity_group(agents):
@@ -2494,6 +2508,8 @@ class CoordStore:
                     "item": {"id": row.get("id"), "status": row.get("status")},
                 }
             attempt = self._item_attempt(item, Path(str(board["root"])))
+            if attempt.get("error"):
+                return False, {"error": "cannot verify assignment attempt", "observation": attempt}
             for_item = self._pin_item(row, board, attempt)
             recipient = self._resolve_item_recipient(for_item, agents)
             if recipient.get("agent_id") in self._identity_group(agents):
@@ -2592,6 +2608,9 @@ class CoordStore:
                 if for_item and previous_item:
                     pin_changed = (
                         previous_item.get("claim_proof") != for_item.get("claim_proof")
+                        or previous_item.get("claimed_at") != for_item.get("claimed_at")
+                        or previous_item.get("board") != for_item.get("board")
+                        or previous_item.get("managed") != for_item.get("managed")
                         or (previous_item.get("work_order") or {}).get("digest") != for_item["work_order"].get("digest")
                         or previous_item.get("attempt") != for_item.get("attempt")
                     )
@@ -2741,6 +2760,8 @@ class CoordStore:
                 return False, {"error": f"No drop {drop_id}"}
             if drop.get("owner") == self.agent_id:
                 return False, {"error": f"{drop_id} is your own drop; owners resolve, recipients acknowledge"}
+            if isinstance(drop.get("for_item"), dict) and self._staleness(drop):
+                return False, {"error": "assignment changed or unverified; approval must be explicitly readdressed"}
             if not self._drop_targets_me(drop):
                 return False, {"error": f"{drop_id} is addressed to {drop.get('for')}, not to this agent"}
             stamp = now_iso()
@@ -2762,14 +2783,14 @@ class CoordStore:
         """Return a refusal reason, or None when this agent may resolve the drop."""
         if drop.get("owner") == self.agent_id:
             return None
+        if isinstance(drop.get("for_item"), dict):
+            if self._staleness(drop) or not self._drop_targets_me(drop):
+                return "assignment is stale, unverified, or has no unique recipient; only its owner may retire this drop"
+            return None
         target = str(drop.get("for") or "any")
         record = self.self_record(refresh=False)
         if drop.get("for_agent_id") == self.agent_id or target == self.agent_id or target == record.get("alias"):
             return None
-        if isinstance(drop.get("for_item"), dict):
-            if self._drop_targets_me(drop):
-                return None
-            return f"{drop['id']} is addressed to the worker on {drop['for_item'].get('id')}; only its owner or that worker may resolve it"
         if target == "any":
             if for_everyone:
                 return None
@@ -3261,7 +3282,7 @@ class CoordStore:
             if drop.get("status") == "resolved":
                 continue
             key = drop.get("key")
-            key_match = bool(key) and str(key) in my_need_keys
+            key_match = not isinstance(drop.get("for_item"), dict) and bool(key) and str(key) in my_need_keys
             if not (self._drop_targets_me(drop, agents) or key_match):
                 continue
             acknowledged = self._drop_acknowledged_by_me(drop)
