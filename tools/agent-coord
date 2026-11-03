@@ -87,17 +87,23 @@ Commands:
                                          digest, resolves the exact coord session by proof (equality,
                                          never a label or prefix), and shows the destination with its
                                          provenance. No live bound session: the drop stays visibly
-                                         pending until the worker's next touch; a replacement claimant
-                                         or a revised work order marks it STALE, never forwards it.
+                                         pending until the worker's next touch; a replacement claimant,
+                                         a new claim or attempt, or a revised work order marks it
+                                         STALE, never forwards it. A STALE drop is void for its
+                                         recipient (ack and resolve refused; shown as a notice that
+                                         names only the owner's way out); only its owner retires it
+                                         (drop resolve) or readdresses it (re-add the same path).
                                          --allows/--excludes/--authorized-by record an approval's scope
                                          (all three required; the drop is an action); routing confers
                                          no authority beyond what the record says
   drop ack <drop-id>                     Acknowledge a drop addressed to you ("read", never "done"):
                                          an info drop leaves YOUR routine interrupts at this revision;
-                                         an action drop stays listed, no longer new, until resolved
+                                         an action drop stays listed, no longer new, until resolved;
+                                         a STALE item drop refuses (only its owner retires it)
   drop resolve <drop-id> --reason <text> [--evidence <ref>] [--for-everyone]
                                          Settle a drop for every reader (owner or addressed
-                                         recipient; a broadcast/role drop needs --for-everyone).
+                                         recipient; a broadcast/role drop needs --for-everyone;
+                                         a STALE item drop, only its owner).
                                          The record and its audit trail are kept, never deleted
   drop history <drop-id>                 Read one drop's lifecycle (added/updated/acked/resolved)
   drops [--for-me] [--all]               List open drops (or just the ones addressed to you);
@@ -810,6 +816,50 @@ def approval_text(approval: dict[str, Any] | None) -> str:
         f"authorized by {approval.get('authorized_by')}; work order {short_digest((approval.get('work_order') or {}).get('digest'))}; "
         f"routing confers nothing beyond it"
     )
+
+
+def stale_recipient_remedy(drop: dict[str, Any], for_item: dict[str, Any]) -> str:
+    """What the recipient of a stale assignment drop can do: nothing coord would refuse.
+
+    Once the assignment has moved, `drop ack` and `drop resolve` are both
+    refused for the recipient, so the guidance names only the owner's way
+    out and the one read that re-checks the assignment.
+    """
+    noun = "approval" if drop.get("approval") else "drop"
+    owner = drop.get("owner_label") or drop.get("owner")
+    return (
+        f"void for you: its recipient can neither acknowledge nor resolve a stale {noun}; "
+        f"only its owner ({owner}) retires it or readdresses it, and you need a fresh {noun} "
+        f"before relying on it; re-check: agent-do coord worker {for_item.get('id')}"
+    )
+
+
+def readdress_command(project_root: Path, drop: dict[str, Any], for_item: dict[str, Any]) -> str:
+    """The exact `drop add` that re-pins this drop against the current assignment.
+
+    Re-adding the owner's own path re-pins the claim, attempt and work order
+    and bumps the revision (journaled as `readdressed`). The path is rendered
+    absolute so the command works from any working directory.
+    """
+    parts = [
+        "agent-do", "coord", "drop", "add",
+        shlex.quote(str(project_root / str(drop.get("path") or ""))),
+        "--for-item", str(for_item.get("id")),
+    ]
+    approval = drop.get("approval") if isinstance(drop.get("approval"), dict) else None
+    if drop.get("kind") == "action" and not approval:
+        parts.append("--action")
+    if drop.get("note"):
+        parts.extend(["--note", shlex.quote(str(drop["note"]))])
+    if drop.get("key"):
+        parts.extend(["--key", shlex.quote(str(drop["key"]))])
+    if approval:
+        for text in approval.get("allows", []):
+            parts.extend(["--allows", shlex.quote(str(text))])
+        for text in approval.get("excludes", []):
+            parts.extend(["--excludes", shlex.quote(str(text))])
+        parts.extend(["--authorized-by", shlex.quote(str(approval.get("authorized_by") or ""))])
+    return " ".join(parts)
 
 
 class CoordStore:
@@ -3330,14 +3380,20 @@ class CoordStore:
                 label = "Approval" if drop.get("approval") else label
                 label = f"{label} for the worker on {for_item.get('id')}"
                 note += approval_text(drop.get("approval"))
-                if stale:
-                    state = f"{state}; STALE: {stale.get('reason')}: {stale.get('detail')}"
+            if stale:
+                # The assignment moved since this drop pinned it. Coord refuses
+                # the recipient both ack and resolve, so for them it is void: a
+                # notice that never blocks the router and names no command
+                # coord would refuse. Only the owner retires or readdresses it.
+                state = f"STALE: {stale.get('reason')}: {stale.get('detail')}"
+                remedy = stale_recipient_remedy(drop, for_item)
+                dependency_kind = False
             interrupts.append(
                 {
                     # An obligation is a dependency (the router reminds at work
                     # boundaries); a delivery is a notice (shown, never blocking).
                     "kind": "dependency" if dependency_kind else "notice",
-                    "severity": "warning" if is_action and not acknowledged else "info",
+                    "severity": "warning" if is_action and not acknowledged and not stale else "info",
                     "peer": drop.get("owner"),
                     "peer_label": drop.get("owner_label") or drop.get("owner"),
                     "paths": [drop_path],
@@ -3380,8 +3436,25 @@ class CoordStore:
             else:
                 detail = f"{recipient['state']}: {recipient.get('reason')}"
             stale = delivery.get("stale")
-            if stale:
-                detail += f"; STALE: {stale.get('reason')}: {stale.get('detail')}"
+            noun = "approval" if drop.get("approval") else "action"
+            if for_item and stale:
+                # Nobody can acknowledge a stale assignment drop. The owner's
+                # two ways out are retiring it or re-pinning it explicitly;
+                # both commands run as the owner, so both are named exactly.
+                summary = (
+                    f"Stale {noun} {drop_id} for {where}: {stale.get('reason')}: {stale.get('detail')}; "
+                    f"its recipient can neither acknowledge nor resolve it "
+                    f"[retire: agent-do coord drop resolve {drop_id} --reason <text>; "
+                    f"or readdress: {readdress_command(self.project_root, drop, for_item)}; "
+                    f"re-check: agent-do coord worker {for_item.get('id')}]"
+                )
+            elif for_item:
+                summary = (
+                    f"Awaiting acknowledgment: {noun} {drop_id} for {where}: {detail} "
+                    f"[re-check: agent-do coord worker {for_item.get('id')}]"
+                )
+            else:
+                summary = f"Awaiting acknowledgment: action {drop_id} for {where}: {detail}"
             interrupts.append(
                 {
                     "kind": "notice",
@@ -3394,13 +3467,9 @@ class CoordStore:
                     "drop_kind": "action",
                     "awaiting": True,
                     "item": for_item.get("id") if for_item else None,
+                    "stale": stale,
                     "delivery": delivery,
-                    "summary": (
-                        f"Awaiting acknowledgment: {'approval' if drop.get('approval') else 'action'} {drop_id} "
-                        f"for {where}: {detail} [re-check: agent-do coord worker {for_item.get('id')}]"
-                        if for_item
-                        else f"Awaiting acknowledgment: action {drop_id} for {where}: {detail}"
-                    ),
+                    "summary": summary,
                     "new": False,
                     "event_id": None,
                 }

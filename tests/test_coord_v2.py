@@ -8,6 +8,7 @@ import fcntl
 import os
 import re
 import runpy
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1980,10 +1981,45 @@ def test_assignment_turnover(tmp_path: Path, env_base: dict[str, str]) -> None:
     require(observed["delivery"]["stale"]["reason"] == "claim changed", "same proof is not the same claim")
     require(coord(["drop", "ack", old["id"]], cwd=project, env=worker).returncode == 2, "old claim ack refused")
     require(coord(["drop", "resolve", old["id"], "--reason", "done"], cwd=project, env=worker).returncode == 2, "old claim completion refused")
+
+    # The guidance matches the enforcement (mn-e6e1a8). For the recipient a
+    # stale approval is a notice, never an obligation the router nags about,
+    # and its text names no command coord would refuse.
+    def stale_notice(env: dict[str, str]) -> dict:
+        found = [i for i in coord_json(["interrupts"], cwd=project, env=env)["interrupts"] if i.get("drop_id") == old["id"] and not i.get("awaiting")]
+        require(len(found) == 1, f"the recipient sees the stale approval once: {found}")
+        return found[0]
+
+    notice = stale_notice(worker)
+    require(notice["kind"] == "notice" and notice["severity"] == "info" and notice["stale"]["reason"] == "claim changed", f"a stale approval is an info notice: {notice}")
+    require("STALE: claim changed" in notice["summary"] and "void for you" in notice["summary"] and f"agent-do coord worker {item}" in notice["summary"], f"the notice says what it is and how to re-check: {notice['summary']}")
+    require("drop ack" not in notice["summary"] and "drop resolve" not in notice["summary"], f"stale guidance must name no refused command: {notice['summary']}")
     hook = router_hook(project, worker, worker["CLAUDE_SESSION_ID"])
-    require("STALE: claim changed" in hook, f"hook must label old approval: {hook}")
-    renewed = coord_json(args, cwd=project, env=lead)["drop"]
-    require(renewed["revision"] == old["revision"] + 1 and renewed["delivery"]["stale"] is None, "explicit readdress creates new revision")
+    require(old["id"] not in hook, f"a stale approval must not reach the hook as an obligation: {hook}")
+
+    # The owner's side names the two ways out, and both commands run as the owner.
+    owner_view = next(i for i in coord_json(["interrupts"], cwd=project, env=lead)["interrupts"] if i.get("awaiting") and i.get("drop_id") == old["id"])
+    require(owner_view["summary"].startswith("Stale approval") and owner_view["stale"]["reason"] == "claim changed", f"the owner is told it is stale: {owner_view['summary']}")
+    require(f"retire: agent-do coord drop resolve {old['id']} --reason <text>" in owner_view["summary"], f"the owner's remedy names retirement: {owner_view['summary']}")
+    readdress = re.search(r"readdress: (agent-do coord drop add .+?); re-check:", owner_view["summary"]).group(1)
+    parsed = shlex.split(readdress)
+    require(parsed[:3] == ["agent-do", "coord", "drop"], f"readdress is a coord command: {readdress}")
+    elsewhere = project / "sub"
+    elsewhere.mkdir()
+    renewed = coord_json(parsed[2:], cwd=elsewhere, env=lead)["drop"]
+    require(renewed["id"] == old["id"] and renewed["revision"] == old["revision"] + 1 and renewed["delivery"]["stale"] is None, f"the named readdress re-pins the same drop from another cwd: {renewed}")
+    require(renewed["approval"]["allows"] == ["local test"] and renewed["approval"]["excludes"] == ["deployment"] and renewed["approval"]["authorized_by"] == "fixture", f"readdress keeps the recorded scope: {renewed['approval']}")
+    # Fresh again: an obligation whose named remedy is accepted.
+    hook = router_hook(project, worker, worker["CLAUDE_SESSION_ID"])
+    require(f"drop ack {old['id']}" in hook, f"a fresh approval is an obligation again: {hook}")
+    require(coord(["drop", "ack", old["id"]], cwd=project, env=worker).returncode == 0, "the named ack is accepted")
+    # Probe P1 of the mn-5cdd6e review: acknowledged, then the same worker abandons and reclaims.
+    require(manna(["abandon", item], cwd=project, env=worker).returncode == 0, "abandon again")
+    require(manna(["claim", item], cwd=project, env=worker).returncode == 0, "reclaim again")
+    notice = stale_notice(worker)
+    require(notice["kind"] == "notice" and notice["new"] is False and notice["stale"]["reason"] == "claim changed", f"an acknowledged approval gone stale is a quiet notice: {notice}")
+    require("drop resolve" not in notice["summary"] and "drop ack" not in notice["summary"], f"no refused command after an ack either: {notice['summary']}")
+    require(coord(["drop", "resolve", old["id"], "--reason", "done"], cwd=project, env=worker).returncode == 2, "the recipient is still refused")
     # Recorded managed metadata is an isolated fixture, not a live board edit.
     # Turnover and malformed/unknown observations must fail closed even while
     # the board claim and work-order digest stay identical.
@@ -2000,6 +2036,16 @@ def test_assignment_turnover(tmp_path: Path, env_base: dict[str, str]) -> None:
     managed.write_text("{broken")
     require(coord([*args, "--json"], cwd=project, env=lead).returncode == 2, "unknown attempt must refuse new approval")
     require(coord(["drop", "ack", old["id"]], cwd=project, env=worker).returncode == 2, "unknown attempt must refuse acknowledgment")
+    # Unverified is stale too: the recipient's notice still names no refused
+    # command, and the owner's named retirement is accepted and clears both sides.
+    notice = stale_notice(worker)
+    require(notice["kind"] == "notice" and notice["stale"]["reason"] == "unverified", f"unverified metadata is a notice for the recipient: {notice}")
+    require("drop ack" not in notice["summary"] and "drop resolve" not in notice["summary"], f"unverified guidance must name no refused command: {notice['summary']}")
+    owner_view = next(i for i in coord_json(["interrupts"], cwd=project, env=lead)["interrupts"] if i.get("awaiting") and i.get("drop_id") == old["id"])
+    retire = re.search(r"retire: (agent-do coord drop resolve \S+ --reason) <text>", owner_view["summary"]).group(1)
+    require(coord([*shlex.split(retire)[2:], "obsolete after the reclaim"], cwd=project, env=lead).returncode == 0, "the owner's named retirement is accepted")
+    for env in (worker, lead):
+        require(not [i for i in coord_json(["interrupts"], cwd=project, env=env)["interrupts"] if i.get("drop_id") == old["id"]], "retired: the stale drop leaves both sides")
 
 
 def main() -> int:
