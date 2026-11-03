@@ -39,6 +39,8 @@ The vessel's sense of visual craft is now a method rather than a score. Two earl
 
 27 tools declare the secrets they need. Those are stored once in the operating system's secure store, and the dispatcher resolves each one at the moment of the call and passes it to the tool as an environment variable, so a token never appears in a command line, a log, a document, or a commit. A worker never carries a key in a command or a note.
 
+`OPENAI_API_KEY` is an explicit-access exception: ordinary tool dispatch and intent routing never load it from the secure store. On macOS, credential status, source, and check commands inspect Keychain metadata without reading the secret or opening an unlock prompt. A stored key being present does not authorize its use. After user authorization, only a named `creds get OPENAI_API_KEY --reveal` or `creds export OPENAI_API_KEY` request can unlock it; a denied read fails without retrying. Bulk `creds export --tool ...` refuses tools that include this key. Existing explicitly supplied process environments remain supported.
+
 ### Where the vessel ends (+live)
 
 The worker's reach stops at the edge of the human's desktop. Commands that drive the visible desktop or a real browser window, and message delivery in the human's own name, refuse to run unless the command is prefixed with an explicit `+live(...)` modifier naming a scope, an application, and a time limit. Absent the modifier, the tool declines. The human's machine stays the human's.
