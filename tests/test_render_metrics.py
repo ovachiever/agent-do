@@ -34,6 +34,7 @@ set -uo pipefail
 source <(awk '/^# --- Main ---/{{exit}} {{print}}' "{ROOT / 'tools/agent-render'}")
 resolve_service() {{ [[ "$1" == "my-svc" ]] && echo "srv-test" || return 1; }}
 resolve_postgres() {{ [[ "$1" == "my-db" ]] && echo "dpg-test" || return 1; }}
+resolve_kv() {{ [[ "$1" == "my-cache" ]] && echo "red-test" || return 1; }}
 render_get_or_fail() {{
   printf '%s\\n' "$1" >> "{capture}"
   case "$1" in
@@ -66,6 +67,9 @@ def main() -> int:
         r = run("cmd_metrics my-db --type disk-usage", capture)
         require(r.returncode == 0 and "resource=dpg-test" in capture.read_text().splitlines()[-1], "Postgres by name")
         require("no data in this window" in r.stdout, f"empty series must say so: {r.stdout!r}")
+
+        r = run("cmd_metrics my-cache --type memory", capture)
+        require(r.returncode == 0 and "resource=red-test" in capture.read_text().splitlines()[-1], "Key Value by name")
 
         r = run("cmd_metrics srv-test --type bogus", capture)
         require(r.returncode == 1 and "invalid metric name bogus" in r.stderr, f"API reason must surface: {r.stderr!r}")

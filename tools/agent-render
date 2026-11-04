@@ -909,7 +909,7 @@ metrics_usage() {
 Usage: agent-render metrics <resource> [options]
 
 Resource: a service, cron, Postgres or Key Value — by name or by id
-(srv-/crn-/dpg-/red-). Names are looked up as services, then as Postgres.
+(srv-/crn-/dpg-/red-). Names are looked up as services, then Postgres, then Key Value.
 
 Options:
   --type, -t <metric>     cpu (default), memory, bandwidth, http-requests,
@@ -1003,7 +1003,8 @@ cmd_metrics() {
         *)
             rid=$(resolve_service "$name_or_id" 2>/dev/null) \
                 || rid=$(resolve_postgres "$name_or_id" 2>/dev/null) \
-                || { echo "Error: no service or Postgres named '$name_or_id'" >&2; return 1; }
+                || rid=$(resolve_kv "$name_or_id" 2>/dev/null) \
+                || { echo "Error: no service, Postgres or Key Value named '$name_or_id'" >&2; return 1; }
             ;;
     esac
 
