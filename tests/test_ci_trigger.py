@@ -15,8 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# One line per call; arguments separated by a unit separator (\\x1f) so a
+# value with spaces is visibly one argument.
 STUB_GH = """#!/bin/bash
-printf '%s\\n' "$*" >> "$GH_LOG"
+(IFS=$'\\x1f'; printf '%s\\n' "$*") >> "$GH_LOG"
 exit 0
 """
 
@@ -46,18 +48,19 @@ def main() -> int:
 
         r = ci("ios-release.yml", "main", "-f", "upload_to_testflight=true", "--field", "notes=a b=c")
         require(r.returncode == 0, f"trigger failed: {r.stderr}")
-        call = log.read_text().splitlines()[-1]
-        require(call == "workflow run ios-release.yml --ref main --repo acme/widgets "
-                        "-f upload_to_testflight=true -f notes=a b=c", f"unexpected gh argv: {call}")
+        call = log.read_text().splitlines()[-1].split("\x1f")
+        require(call == ["workflow", "run", "ios-release.yml", "--ref", "main", "--repo", "acme/widgets",
+                         "-f", "upload_to_testflight=true", "-f", "notes=a b=c"], f"unexpected gh argv: {call}")
         require("with 2 input(s)" in r.stdout, f"summary: {r.stdout!r}")
 
         r = ci("deploy.yml", "--ref", "v1.2.3")
         require(r.returncode == 0, r.stderr)
-        require(log.read_text().splitlines()[-1] == "workflow run deploy.yml --ref v1.2.3 --repo acme/widgets",
-                "--ref and no inputs")
+        require(log.read_text().splitlines()[-1].split("\x1f") ==
+                ["workflow", "run", "deploy.yml", "--ref", "v1.2.3", "--repo", "acme/widgets"], "--ref and no inputs")
 
         r = ci("deploy.yml")
-        require(log.read_text().splitlines()[-1].startswith("workflow run deploy.yml --ref main "), "defaults to current branch")
+        require(log.read_text().splitlines()[-1].split("\x1f")[:5] == ["workflow", "run", "deploy.yml", "--ref", "main"],
+                "defaults to current branch")
 
         for bad in (["deploy.yml", "-f", "novalue"], ["deploy.yml", "--bogus"], ["deploy.yml", "main", "extra"]):
             before = len(log.read_text().splitlines())
