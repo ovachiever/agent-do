@@ -292,23 +292,45 @@ cmd_incidents() {
     fi
 
     # Pages are 10 by default (50 max); `next` says more exist. --all follows
-    # it and returns one combined {"data": [...]} document.
-    local result page next pages=0
+    # it and returns one combined {"data": [...]} document. Pages go to temp
+    # files and are merged from disk (incidents carry header dumps; passing
+    # them as arguments hit ARG_MAX). `next` is an absolute URL and bs_get
+    # sends the bearer token to it, so only https Better Stack hosts are
+    # followed. A 40-page cap stops a runaway loop and is reported as such.
+    local result page next pages=1 capped=false
     page=$(bs_get "$url") || return 1
     if [[ "$all_pages" == "true" ]]; then
-        result="$page"
+        local dir
+        dir=$(mktemp -d)
+        printf '%s' "$page" > "$dir/0001.json"
         while :; do
-            next=$(printf '%s' "$page" | python3 -c 'import sys, json; print((json.load(sys.stdin).get("pagination") or {}).get("next") or "")' 2>/dev/null)
-            pages=$((pages + 1))
-            [[ -n "$next" && $pages -lt 40 ]] || break
-            page=$(bs_get "$next") || return 1
-            result=$(python3 -c '
+            next=$(python3 -c '
 import json, sys
-acc, more = json.loads(sys.argv[1]), json.loads(sys.argv[2])
-acc["data"] = acc.get("data", []) + more.get("data", [])
-acc["pagination"] = more.get("pagination")
-print(json.dumps(acc))' "$result" "$page")
+from urllib.parse import urlparse
+nxt = (json.load(open(sys.argv[1])).get("pagination") or {}).get("next") or ""
+if nxt:
+    u = urlparse(nxt)
+    if u.scheme != "https" or u.hostname not in ("uptime.betterstack.com", "incidents.betterstack.com"):
+        sys.exit("refusing to follow pagination.next outside Better Stack: " + (u.hostname or nxt))
+print(nxt)' "$dir/$(printf '%04d' "$pages").json") || { rm -rf "$dir"; return 1; }
+            [[ -n "$next" ]] || break
+            if [[ $pages -ge 40 ]]; then capped=true; break; fi
+            pages=$((pages + 1))
+            bs_get "$next" > "$dir/$(printf '%04d' "$pages").json" || { rm -rf "$dir"; return 1; }
         done
+        result=$(python3 -c '
+import glob, json, os, sys
+files = sorted(glob.glob(os.path.join(sys.argv[1], "*.json")))
+acc = json.load(open(files[0]))
+for f in files[1:]:
+    more = json.load(open(f))
+    acc["data"] = acc.get("data", []) + more.get("data", [])
+    acc["pagination"] = more.get("pagination")
+print(json.dumps(acc))' "$dir")
+        rm -rf "$dir"
+        if [[ "$capped" == "true" ]]; then
+            echo "Warning: stopped at the 40-page cap ($((pages * 50)) incidents); more exist. Narrow with --since/--until." >&2
+        fi
     else
         result="$page"
     fi
@@ -342,8 +364,9 @@ for item in items:
         resolved[:24],
     ))
 if (d.get('pagination') or {}).get('next'):
-    print(f'Showing {len(items)}; more incidents exist. Use --all, or narrow with --since/--until.', file=sys.stderr)
-"
+    if sys.argv[1] != 'true':
+        print(f'Showing {len(items)}; more incidents exist. Use --all, or narrow with --since/--until.', file=sys.stderr)
+" "$all_pages"
 }
 
 cmd_incident() {

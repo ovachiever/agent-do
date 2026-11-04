@@ -21,15 +21,16 @@ def page(ids, nxt):
                        "pagination": {"next": nxt}})
 
 
-def run(cmd: str, calls: Path) -> subprocess.CompletedProcess[str]:
-    p1 = page(range(1, 4), "https://uptime.betterstack.com/api/v3/incidents?page=2&per_page=50").replace("'", "")
-    p2 = page(range(4, 6), None).replace("'", "")
+def run(cmd: str, calls: Path, first_next: str = "https://uptime.betterstack.com/api/v3/incidents?page=2&per_page=50",
+        endless: bool = False) -> subprocess.CompletedProcess[str]:
+    p1 = page(range(1, 4), first_next).replace("'", "")
+    p2 = page(range(4, 6), "https://uptime.betterstack.com/api/v3/incidents?page=3" if endless else None).replace("'", "")
     script = f"""
 set -uo pipefail
 source <(awk '/^# --- Main ---/{{exit}} {{print}}' "{ROOT / 'tools/agent-betterstack'}")
 bs_get() {{
   printf '%s\\n' "$1" >> "{calls}"
-  case "$1" in *page=2*) printf '%s' '{p2}' ;; *) printf '%s' '{p1}' ;; esac
+  case "$1" in *\\?page=*|*\\&page=*) printf '%s' '{p2}' ;; *) printf '%s' '{p1}' ;; esac
 }}
 {cmd}
 """
@@ -56,6 +57,17 @@ def main() -> int:
         lines = calls.read_text().splitlines()
         require(len(lines) == 2 and "per_page=50" in lines[0] and "page=2" in lines[1], f"pages fetched: {lines}")
         require([d["id"] for d in json.loads(r.stdout)["data"]] == ["1", "2", "3", "4", "5"], r.stdout[:300])
+
+        require("more incidents exist" not in r.stderr, "--all must not tell the caller to pass --all")
+
+        calls.unlink()
+        r = run("cmd_incidents --all --json || echo rc=$?", calls, first_next="https://evil.example/steal?page=2")
+        require("rc=1" in r.stdout and "outside Better Stack" in r.stderr, f"foreign next must be refused: {r.stderr!r}")
+        require(len(calls.read_text().splitlines()) == 1, "token must never be sent to a foreign host")
+
+        r = run("cmd_incidents --all --json", calls, endless=True)
+        require("40-page cap" in r.stderr, f"cap must be reported: {r.stderr!r}")
+        require(len(json.loads(r.stdout)["data"]) == 3 + 39 * 2, "40 pages merged")
 
         r = run("cmd_incidents --since 7d", calls)
         require("from=20" in calls.read_text().splitlines()[-1], "Nd becomes a date")
