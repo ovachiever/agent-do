@@ -426,7 +426,19 @@ impl MannaStore {
             .iter_mut()
             .find(|issue| issue.id == id)
             .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        let was_done = issue.status == IssueStatus::Done;
         mutation(issue, &snapshot).map_err(MannaError::MutationRejected)?;
+        // Every transition to done that arrives by this primitive, repair
+        // included, meets the track gate against the rows as they are under
+        // the lock: an item created under or moved into the track after a
+        // caller inspected the board is open work this write would orphan
+        // (mn-9b4359 review). `finish_issue_unlocked` runs the same gate for
+        // the lifecycle close paths.
+        if !was_done && issue.status == IssueStatus::Done {
+            if let Some(reason) = crate::track::track_close_refusal(issue, &snapshot) {
+                return Err(MannaError::MutationRejected(reason));
+            }
+        }
         issue.validate().map_err(MannaError::MutationRejected)?;
         let updated = issue.clone();
         if self.board_is_strict()? {
@@ -1699,5 +1711,84 @@ mod tests {
             .complete_issue_as_operator(&issue.id, &operator)
             .unwrap();
         assert_eq!(completed.issue.status, IssueStatus::Done);
+    }
+
+    fn track_with_item(store: &MannaStore, track: &str, item: Option<&str>) {
+        let mut row = Issue::new(track.to_string(), format!("track {}", track)).unwrap();
+        row.issue_type = crate::issue::IssueType::Track;
+        store.append_issue(&row).unwrap();
+        if let Some(item) = item {
+            let mut row = Issue::new(item.to_string(), format!("item {}", item)).unwrap();
+            row.track = Some(track.to_string());
+            store.append_issue(&row).unwrap();
+        }
+    }
+
+    fn close_by_repair(store: &MannaStore, id: &str) -> Result<Issue> {
+        store.repair_issue(id, |issue, _| {
+            issue.status = IssueStatus::Done;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn repair_never_closes_a_track_over_an_open_item() {
+        let (_temp, store) = setup_store();
+        track_with_item(&store, "mn-trk100", Some("mn-kid100"));
+
+        // The repair path carries no lifecycle precondition of its own; the
+        // primitive under it still refuses a transition to done that would
+        // close the track over the open item it finds under the lock.
+        let error = close_by_repair(&store, "mn-trk100")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("mn-kid100 (open)")
+                && error.contains("A track closes only when every item in it is done"),
+            "{}",
+            error
+        );
+        let rows = store.load_issues().unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.id == "mn-trk100")
+                .unwrap()
+                .status,
+            IssueStatus::Open
+        );
+
+        // The same repair closes once the item is done.
+        close_by_repair(&store, "mn-kid100").unwrap();
+        let closed = close_by_repair(&store, "mn-trk100").unwrap();
+        assert_eq!(closed.status, IssueStatus::Done);
+    }
+
+    #[test]
+    fn repair_never_closes_an_empty_track_and_leaves_done_rows_done() {
+        let (_temp, store) = setup_store();
+        track_with_item(&store, "mn-trk101", None);
+        let error = close_by_repair(&store, "mn-trk101")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("is a track with no items"), "{}", error);
+
+        // A row already done is not a transition, so a metadata repair on a
+        // done track with no items is not refused by the gate.
+        track_with_item(&store, "mn-trk102", Some("mn-kid102"));
+        close_by_repair(&store, "mn-kid102").unwrap();
+        close_by_repair(&store, "mn-trk102").unwrap();
+        store
+            .repair_issue("mn-kid102", |issue, _| {
+                issue.track = None;
+                Ok(())
+            })
+            .unwrap();
+        let touched = store
+            .repair_issue("mn-trk102", |issue, _| {
+                issue.title = "renamed after close".to_string();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(touched.status, IssueStatus::Done);
     }
 }

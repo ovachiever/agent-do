@@ -358,8 +358,11 @@ For a **track**, `done` closes only when every item in the track is done. Any
 other state refuses with exit 2, writes nothing, and lists the open items with
 their status; a submitted-but-unaccepted managed item is open. The same gate
 runs under the board lock on every close path (owner, operator, landed
-evidence, acceptance) and in `reconcile --fix`, so no authority closes a track
-over open work. An empty track cannot close: give it items or `delete` it.
+evidence, acceptance) and inside the locked write of `reconcile --fix`, where
+it reads the items as they are at that moment rather than as they were when
+the board was inspected: an item created under or moved into the track in
+between refuses the close. No authority closes a track over open work. An
+empty track cannot close: give it items or `delete` it.
 
 ### Managed lifecycle
 

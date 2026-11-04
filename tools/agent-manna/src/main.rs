@@ -3823,6 +3823,9 @@ fn apply_reconcile_fixes(
                 }
                 // A track never closes mechanically over open items: a
                 // trailer on the track proves board paperwork, not the work.
+                // This read of the inspection snapshot only saves the coord
+                // round trip; the gate that decides runs inside the locked
+                // write below, against the rows as they are then.
                 if let Some(reason) = track_close_refusal(&expected, &issues) {
                     failures.push(format!("{}: {}", id, reason));
                     continue;
@@ -3845,12 +3848,20 @@ fn apply_reconcile_fixes(
                     }
                 }
                 let evidence = finding.evidence.clone().unwrap_or_default();
-                match store.repair_issue(&id, move |issue, _| {
+                match store.repair_issue(&id, move |issue, current| {
                     if issue != &expected {
                         return Err(
                             "stale reconcile evidence: row changed after inspection; nothing was closed"
                                 .to_string(),
                         );
+                    }
+                    // The track row being unchanged proves nothing about its
+                    // items: one created under it or moved into it since the
+                    // inspection is open work. The gate re-runs here against
+                    // the rows under the lock (review of mn-9b4359), and the
+                    // store refuses the same transition on its own.
+                    if let Some(reason) = track_close_refusal(issue, current) {
+                        return Err(reason);
                     }
                     issue.release_dead_claim()?;
                     issue.status = IssueStatus::Done;
@@ -5492,5 +5503,148 @@ mod tests {
         let current = store.load_issues().unwrap().pop().unwrap();
         assert_eq!(current.status, IssueStatus::InProgress);
         current.require_owner(&new_owner).unwrap();
+    }
+
+    fn track_row(id: &str) -> Issue {
+        let mut issue = Issue::new(id.to_string(), format!("track {}", id)).unwrap();
+        issue.issue_type = IssueType::Track;
+        issue
+    }
+
+    fn item_in_track(id: &str, track: &str, status: IssueStatus) -> Issue {
+        let mut issue = Issue::new(id.to_string(), format!("item {}", id)).unwrap();
+        issue.track = Some(track.to_string());
+        issue.status = status;
+        issue
+    }
+
+    fn landed_track_finding(id: &str) -> Vec<Finding> {
+        vec![Finding {
+            kind: FindingKind::LandedOpen,
+            issue_id: Some(id.to_string()),
+            detail: "referenced by landed commit trailer but status is in_progress".to_string(),
+            evidence: Some("abc123def456".to_string()),
+            proposed_fix: Some("review the commits".to_string()),
+        }]
+    }
+
+    #[test]
+    fn landed_open_fix_refuses_a_track_whose_item_was_created_after_inspection() {
+        let (_temp, store) = setup_store();
+        store.append_issue(&track_row("mn-trk001")).unwrap();
+        store
+            .append_issue(&item_in_track("mn-kid001", "mn-trk001", IssueStatus::Done))
+            .unwrap();
+        let owner = session("ses_track");
+        store.claim_issue("mn-trk001", &owner).unwrap();
+        // Inspection: every item in the track is done, so the pre-lock read
+        // of the gate passes and the cure proceeds to its write.
+        let snapshot = store.load_issues().unwrap();
+        // Between inspection and the write, an item is created under the track.
+        store
+            .append_issue(&item_in_track("mn-late01", "mn-trk001", IssueStatus::Open))
+            .unwrap();
+
+        let (fixed, failures) = apply_reconcile_fixes(
+            &store,
+            &snapshot,
+            &landed_track_finding("mn-trk001"),
+            Some(&owner),
+        );
+        assert!(
+            fixed.is_empty(),
+            "the track must not close over the late item: {:?}",
+            fixed
+        );
+        assert_eq!(failures.len(), 1, "{:?}", failures);
+        assert!(
+            failures[0].contains("mn-late01 (open)")
+                && failures[0].contains("A track closes only when every item in it is done"),
+            "the refusal names the late item and the rule: {:?}",
+            failures
+        );
+        let rows = store.load_issues().unwrap();
+        let track = rows.iter().find(|row| row.id == "mn-trk001").unwrap();
+        assert_eq!(track.status, IssueStatus::InProgress);
+        track.require_owner(&owner).unwrap();
+        let late = rows.iter().find(|row| row.id == "mn-late01").unwrap();
+        assert_eq!(late.status, IssueStatus::Open);
+        assert_eq!(late.track.as_deref(), Some("mn-trk001"));
+    }
+
+    #[test]
+    fn landed_open_fix_refuses_a_track_whose_item_moved_in_after_inspection() {
+        let (_temp, store) = setup_store();
+        store.append_issue(&track_row("mn-trk002")).unwrap();
+        store.append_issue(&track_row("mn-trk003")).unwrap();
+        store
+            .append_issue(&item_in_track("mn-kid002", "mn-trk002", IssueStatus::Done))
+            .unwrap();
+        store
+            .append_issue(&item_in_track("mn-stray1", "mn-trk003", IssueStatus::Open))
+            .unwrap();
+        let owner = session("ses_track");
+        store.claim_issue("mn-trk002", &owner).unwrap();
+        let snapshot = store.load_issues().unwrap();
+        // Between inspection and the write, the open stray moves into the track.
+        let mover = session("ses_mover");
+        store
+            .mutate_issue_metadata("mn-stray1", &mover, |issue, _| {
+                issue.track = Some("mn-trk002".to_string());
+                Ok(())
+            })
+            .unwrap();
+
+        let (fixed, failures) = apply_reconcile_fixes(
+            &store,
+            &snapshot,
+            &landed_track_finding("mn-trk002"),
+            Some(&owner),
+        );
+        assert!(fixed.is_empty(), "{:?}", fixed);
+        assert_eq!(failures.len(), 1, "{:?}", failures);
+        assert!(
+            failures[0].contains("mn-stray1 (open)"),
+            "the refusal names the moved item: {:?}",
+            failures
+        );
+        let rows = store.load_issues().unwrap();
+        let track = rows.iter().find(|row| row.id == "mn-trk002").unwrap();
+        assert_eq!(track.status, IssueStatus::InProgress);
+        track.require_owner(&owner).unwrap();
+        let stray = rows.iter().find(|row| row.id == "mn-stray1").unwrap();
+        assert_eq!(stray.status, IssueStatus::Open);
+        assert_eq!(stray.track.as_deref(), Some("mn-trk002"));
+    }
+
+    #[test]
+    fn landed_open_fix_closes_a_track_whose_items_are_all_done() {
+        let (_temp, store) = setup_store();
+        store.append_issue(&track_row("mn-trk004")).unwrap();
+        store
+            .append_issue(&item_in_track("mn-kid004", "mn-trk004", IssueStatus::Done))
+            .unwrap();
+        let owner = session("ses_track");
+        store.claim_issue("mn-trk004", &owner).unwrap();
+        let snapshot = store.load_issues().unwrap();
+
+        let (fixed, failures) = apply_reconcile_fixes(
+            &store,
+            &snapshot,
+            &landed_track_finding("mn-trk004"),
+            Some(&owner),
+        );
+        assert!(failures.is_empty(), "{:?}", failures);
+        assert_eq!(fixed.len(), 1, "{:?}", fixed);
+        assert!(
+            fixed[0].contains("mn-trk004") && fixed[0].contains("closed on landed evidence"),
+            "{:?}",
+            fixed
+        );
+        let rows = store.load_issues().unwrap();
+        let track = rows.iter().find(|row| row.id == "mn-trk004").unwrap();
+        assert_eq!(track.status, IssueStatus::Done);
+        assert!(track.claimed_by.is_none());
+        assert!(track.claim_token_hash.is_none());
     }
 }

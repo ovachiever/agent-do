@@ -360,8 +360,11 @@ added since the claim). A paired track follows the item lifecycle in `state`
 (`ready` while an item is claimable, `waiting` while nothing is, `active`,
 `done`), enters priority and the index like an item, keeps `kind: track`, and
 closes only when every item in it is done, a gate the store applies under the
-lock on every close path. Holding a track reserves no item and confers no
-authority; the board's atomic child claim decides every item (mn-9b4359).
+lock to every transition to done, against the items as they are at the write
+(the `reconcile --fix` cure re-reads them inside its locked write rather than
+trusting its inspection snapshot). Holding a track reserves no item and
+confers no authority; the board's atomic child claim decides every item
+(mn-9b4359).
 
 Ordered presentation is a derived build product over board truth. The ordered
 ID list in `.manna/handoff-order.yaml` is the priority authority; every

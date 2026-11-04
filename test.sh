@@ -190,6 +190,7 @@ check_cmd "quantity authority tests" python3 "$SCRIPT_DIR/tests/test_quantities.
 check_cmd "manna release binary is current" cargo build --quiet --release --manifest-path "$SCRIPT_DIR/tools/agent-manna/Cargo.toml"
 check_cmd "manna estate tests" python3 "$SCRIPT_DIR/tests/test_manna_estate.py"
 check_cmd "manna reconcile liveness tests" python3 "$SCRIPT_DIR/tests/test_manna_reconcile_liveness.py"
+check_cmd "manna reconcile track gate tests" python3 "$SCRIPT_DIR/tests/test_manna_reconcile_track_gate.py"
 check_cmd "contracts gate tests" python3 "$SCRIPT_DIR/tests/test_contracts_gate.py"
 check_cmd "contracts drift tests" python3 "$SCRIPT_DIR/tests/test_contracts_drift.py"
 check_cmd "contracts audit tests" python3 "$SCRIPT_DIR/tests/test_contracts_audit.py"
