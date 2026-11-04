@@ -7,7 +7,7 @@ base_commit: 4227aed0a551631cf4acecb03b1b839565777862
 scope: 'Git: Managed Integration with per-repository opt-in workspaces and durable automatic landing'
 inputs:
 - 'Erik conversation 2026-11-03: Managed Integration, reusable agent-do capability with one-repository pilot'
-binding: sha256:de47caf42efa015c76d67366f6e38da5a7d089ad53d40bef6f78163900ced0ed
+binding: sha256:3a0bdb24caafb395b950f606a0ab2834ec00832c7478c42ae40c047e776e13e7
 ---
 
 # Handoff: Git: Managed Integration with per-repository opt-in workspaces and durable automatic landing
@@ -128,3 +128,29 @@ Independent review (`.dev/independent-integration-review/review.md`, probes in `
 - Pilot authorization unchanged: repository and local integration authority named by Erik, then `enable`, two real assignments, one demonstrated recovery.
 - `.manna/issues.jsonl` carries this claim and the new seal digest beside other lanes' uncommitted rows; left for the operator's board commit, as in round one.
 - The wake-contract branch (mn-88d1ac, be27371) is not merged or rebased by this lane; main advanced by two more commits.
+
+## Delivery receipts, round three (2026-11-03, worker claude-ccc4d8f0e9ed4447, SUBMITTED for independent review)
+
+Independent re-review of ba76f34 (`.dev/independent-integration-review/review-round2.md`, `assignment-round2.py`, `assignment-round2.log`) confirmed the three round-two fixes and reproduced one remaining blocker: the same worker abandoned and reclaimed an item while a landing sat interrupted at `after_intent`, and `recover` landed the old submission. Fixed at 9fe3a44 (`Manna: mn-54fe40`).
+
+### Dispositions
+
+1. **Claim incarnation not pinned (reproduced): fixed.** A submission's binding was the session proof alone; manna writes only `claimed_at` and `claim_token_hash` on a claim, so a stable proof named the worker, never the claim. `submit` and the landing intent (version 3) now pin the claim incarnation (`claimed_at`, claimant, proof) and the work-order digest. `staleness()` judges that binding before the checks, immediately before the ref update, and in recovery before the ref update from the intent's own binding, with coord's five answers for an item-addressed drop in coord's order: `item_closed`, `reassigned`, `claim_changed` (new), `stale_submission`, `work_order_revised` (new). The reviewer's probe on the fix reports `landed_old_A: false`, outcome `blocked claim_changed`.
+2. **Stale or missing binding evidence: fails closed.** A submission recording no claim incarnation blocks `claim_changed` ("recorded no claim incarnation"); an intent without a claim binding, or one differing from its queue row, is voided and requeued, nothing re-landed; the next run judges the submission against the live claim.
+3. **Fresh submission after a reclaim, workspace rebinding included.** `workspace add` rebinds when the claim changed, not only the proof (history records `rebound` with `claim_changed`), follows a resealed work order (`work_order_rebound`), and names the pending submissions the rebinding voids (`stale_submissions`); it never revives one. `submit` refuses from a workspace bound to an earlier claim and names `workspace add`. The old entry is superseded by the fresh submission or blocked by the integrator; either way it lands nothing.
+4. **Work-order binding applied consistently.** A reseal of the handoff since the submission blocks `work_order_revised` before the checks and immediately before the ref update, the same answer coord gives a drop; the fresh submission pins the new digest.
+5. **Refusing an unperformed landing versus finishing a performed one: preserved.** Recovery before the ref update voids and blocks (`claim_changed`, "found while recovering"); recovery after the ref update finishes the record without a second landing and the record now carries `assignment_at_landing` and `assignment_changed_since_test`, stated in `summary.md`.
+
+### Executed validation (all exit 0 unless stated)
+
+- `python3 tests/test_git_integration.py`: 21/21 scenarios, one run, 2 min 22 s wall (`full-suite-round3.log`).
+- The three new scenarios (`test_reclaim_voids_queued_submission`, `test_reclaim_voids_interrupted_landing`, `test_work_order_binding`) against a `git archive ba76f34` of the reviewed engine with the manna build symlinked: each exits 1 on the landing assertion (outcome `landed`, the old submission on main) before any shape check (`reviewed-r3-<scenario>.log`).
+- The reviewer's `assignment-round2.py` rerun against the fix from a scratchpad fixture root: `same_worker_reclaim` prints `landed_old_A: false`, recovered outcome `blocked claim_changed`; the second mode raises on the in-flight refusal exactly as the review recorded (a safe refusal, not a defect).
+- `agent-do harness contracts validate`: Errors 0, Warnings 0, Gate PASS. `contracts drift`: 0 failing. `bin/gen-tools-doc --check`: exit 0. `tests/test_git_guardrails.py`, `tests/test_contracts_gate.py`, `tests/test_bounds_gate.py`: passed.
+- Not rerun this round: the manna Rust suites and the coord suites (neither tool changed), the full `./test.sh`.
+
+### Remaining acceptance and open dispositions
+
+- Independent review of this round closes the item; the worker does not self-close. Not done: pilot activation, push, pull request, merging or rebasing the wake-contract branch.
+- Checkpoint C (two real assignments plus recovery in an explicitly selected pilot) still waits on Erik naming the repository and the local integration authority.
+- `.manna/issues.jsonl` carries this claim and seal beside other lanes' uncommitted rows, left for the operator's board commit.
