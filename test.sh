@@ -92,6 +92,13 @@ find_macos_test_python() {
 echo "Testing agent-do..."
 echo
 
+# Build the release binary selected by the Manna wrapper before any check runs
+# it: the bootstrap hook in the routing tests initializes a Manna workflow, the
+# serve tests start manna-core (which refuses a binary older than its
+# sources), and contract drift executes each registered tool's real help
+# surface. A fresh clone or git worktree has no binary or a stale one; building
+# first keeps every later result from depending on a per-worktree artifact.
+check_cmd "manna release binary is current" cargo build --quiet --release --manifest-path "$SCRIPT_DIR/tools/agent-manna/Cargo.toml"
 check_cmd "--help works" "$AGENT_DO" --help
 check_cmd "--list works" "$AGENT_DO" --list
 check_cmd "creds help works" "$AGENT_DO" creds --help
@@ -173,10 +180,6 @@ check_cmd "hardware tests" python3 "$SCRIPT_DIR/tests/test_hardware.py"
 check_cmd "meetings tests" python3 "$SCRIPT_DIR/tests/test_meetings.py"
 check_cmd "harness tests" python3 "$SCRIPT_DIR/tests/test_harness.py"
 check_cmd "quantity authority tests" python3 "$SCRIPT_DIR/tests/test_quantities.py"
-# Contract drift executes each registered tool's real help surface. Build the
-# release binary selected by the Manna wrapper first so the result cannot
-# depend on a stale or missing per-worktree artifact.
-check_cmd "manna release binary is current" cargo build --quiet --release --manifest-path "$SCRIPT_DIR/tools/agent-manna/Cargo.toml"
 check_cmd "manna estate tests" python3 "$SCRIPT_DIR/tests/test_manna_estate.py"
 check_cmd "contracts gate tests" python3 "$SCRIPT_DIR/tests/test_contracts_gate.py"
 check_cmd "contracts drift tests" python3 "$SCRIPT_DIR/tests/test_contracts_drift.py"
@@ -197,11 +200,24 @@ check_cmd "coord tests" python3 "$SCRIPT_DIR/tests/test_coord.py"
 check_cmd "coord v2 tests" python3 "$SCRIPT_DIR/tests/test_coord_v2.py"
 check_cmd "obsidian tests" python3 "$SCRIPT_DIR/tests/test_obsidian.py"
 check_cmd "browser import tests" python3 "$SCRIPT_DIR/tests/test_browser_import.py"
-check_cmd "browse daemon isolation tests" python3 "$SCRIPT_DIR/tests/test_browse_daemon_isolation.py"
+# These two drive a real browser through tools/agent-browse, which needs its
+# npm packages. CI installs them (.github/workflows/ci.yml); a fresh clone or
+# git worktree does not, and the failure was a bare Node module-not-found
+# trace. Name the missing setup instead of running into it.
+check_browser_cmd() {
+    local desc="$1"
+    shift
+    if [[ ! -f "$SCRIPT_DIR/tools/agent-browse/node_modules/playwright-core/package.json" ]]; then
+        fail "$desc" "setup needed: tools/agent-browse has no npm packages. Run: (cd tools/agent-browse && npm ci --omit=dev), then install Chromium as in .github/workflows/ci.yml"
+        return
+    fi
+    check_cmd "$desc" "$@"
+}
+check_browser_cmd "browse daemon isolation tests" python3 "$SCRIPT_DIR/tests/test_browse_daemon_isolation.py"
 check_cmd "browse session default tests" python3 "$SCRIPT_DIR/tests/test_browse_session_defaults.py"
 check_cmd "tool regression tests" python3 "$SCRIPT_DIR/tests/test_tool_regressions.py"
 check_cmd "dpt offline tests" python3 "$SCRIPT_DIR/tests/test_dpt.py"
-check_cmd "dpt browser integration tests" bash "$SCRIPT_DIR/tools/agent-dpt/test/integration.sh"
+check_browser_cmd "dpt browser integration tests" bash "$SCRIPT_DIR/tools/agent-dpt/test/integration.sh"
 check_cmd "manna unit tests" cargo test --quiet --manifest-path "$SCRIPT_DIR/tools/agent-manna/Cargo.toml"
 check_cmd "manna integration tests" bash "$SCRIPT_DIR/tools/agent-manna/test/integration.sh"
 
