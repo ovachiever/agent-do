@@ -25,6 +25,12 @@ Control:
   3. nothing changes at the boundary: the cure still closes the track on the
      landed evidence and releases the orphaned claim
 
+The cure reaches its write only over a claimant coord has positively verified
+gone (mn-880173: a stale, unbound, ambiguous or unseen claimant refuses before
+the write, with status and claim kept). The stand-in therefore answers every
+peers read with coord's verdict on the track owner: one record bound by the
+claim proof, dead. The gate under test is unchanged.
+
 Nothing here touches the developer's repositories or $HOME.
 """
 
@@ -51,10 +57,11 @@ GATE = "A track closes only when every item in it is done"
 CLOSED = "closed on landed evidence"
 
 # The stand-in agent-do. manna resolves `agent-do` on PATH, finds no sibling
-# tools/agent-coord beside it, and routes `coord peers --json` through it. The
-# first peers read runs the boundary action (one real manna-core command on the
-# same board) and then answers like an empty estate; every later call answers
-# the same without acting. Every invocation is logged.
+# tools/agent-coord beside it, and routes `coord peers --all --json` through it.
+# The first peers read runs the boundary action (one real manna-core command on
+# the same board) and then answers with the records in GATE_SHIM_PEERS (the
+# track owner, dead, bound by its claim proof); every later call answers the
+# same without acting. Every invocation is logged.
 SHIM = """#!/usr/bin/env python3
 import json, os, subprocess, sys
 from pathlib import Path
@@ -80,7 +87,7 @@ if sys.argv[1:3] == ["coord", "peers"]:
                 json.dumps({"code": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}),
                 encoding="utf-8",
             )
-    print(json.dumps({"success": True, "peers": []}))
+    print(json.dumps({"success": True, "peers": json.loads(os.environ.get("GATE_SHIM_PEERS", "[]"))}))
     sys.exit(0)
 print(json.dumps({"success": True}))
 """
@@ -125,7 +132,9 @@ def build_landed_track(estate: fx.Estate, owner: fx.Session, label: str) -> tupl
 class Boundary:
     """One reconcile run with the stand-in on PATH and a boundary action, or none."""
 
-    def __init__(self, root: Path, estate: fx.Estate, stranger: fx.Session, tag: str, action: dict | None) -> None:
+    def __init__(
+        self, root: Path, estate: fx.Estate, stranger: fx.Session, tag: str, action: dict | None, claimant: dict | None = None
+    ) -> None:
         self.dir = root / "shims" / tag
         self.dir.mkdir(parents=True)
         shim = self.dir / "agent-do"
@@ -142,6 +151,21 @@ class Boundary:
         self.env["GATE_SHIM_CORE"] = str(MANNA_CORE)
         self.env["GATE_SHIM_CWD"] = str(estate.primary)
         self.env["GATE_SHIM_RESULT"] = str(self.result)
+        # coord's verdict on the claimant, as `peers --all --json` would render
+        # it: the pinned track owner's record, dead, bound by its claim proof.
+        # Positive evidence is the only thing that lets the cure reach its
+        # write (mn-880173); an empty estate would refuse as "unseen".
+        self.env["GATE_SHIM_PEERS"] = json.dumps(
+            [
+                {
+                    "agent_id": "session-trackowner",
+                    "status": "dead",
+                    "manna": {"session": claimant["claimed_by"], "proof": claimant["claim_token_hash"], "source": "fixture"},
+                }
+            ]
+            if claimant
+            else []
+        )
         self.estate = estate
 
     def reconcile(self, *flags: str) -> tuple[int, dict]:
@@ -169,8 +193,8 @@ def findings(payload: dict, kind: str, item: str) -> list[dict]:
     return [f for f in (payload.get("findings") or []) if f.get("kind") == kind and f.get("issue_id") == item]
 
 
-def advisory_pass(root: Path, estate: fx.Estate, stranger: fx.Session, tag: str, track: str) -> None:
-    quiet = Boundary(root, estate, stranger, f"{tag}-advisory", None)
+def advisory_pass(root: Path, estate: fx.Estate, stranger: fx.Session, tag: str, track: str, claimant: dict) -> None:
+    quiet = Boundary(root, estate, stranger, f"{tag}-advisory", None, claimant)
     _, payload = quiet.reconcile()
     require(findings(payload, "landed_open", track), f"{tag}: the track's landed evidence is reported before any fix: {payload.get('findings')}")
     require(estate.row(track)["status"] == "in_progress", f"{tag}: an advisory pass mutates nothing")
@@ -179,8 +203,8 @@ def advisory_pass(root: Path, estate: fx.Estate, stranger: fx.Session, tag: str,
 def refused_variant(root: Path, estate: fx.Estate, stranger: fx.Session, label: str, action_for: callable) -> None:
     owner = fx.Session(estate.base, "track-owner")
     track, item, before = build_landed_track(estate, owner, label)
-    advisory_pass(root, estate, stranger, label, track)
-    boundary = Boundary(root, estate, stranger, label, action_for(track))
+    advisory_pass(root, estate, stranger, label, track, before)
+    boundary = Boundary(root, estate, stranger, label, action_for(track), before)
     code, payload = boundary.reconcile("--fix", "--only", "landed_open")
 
     acted = boundary.action_result()
@@ -232,8 +256,8 @@ def control_variant(root: Path, estate: fx.Estate, stranger: fx.Session) -> None
     label = "all-items-done"
     owner = fx.Session(estate.base, "track-owner")
     track, item, before = build_landed_track(estate, owner, label)
-    advisory_pass(root, estate, stranger, label, track)
-    boundary = Boundary(root, estate, stranger, label, None)
+    advisory_pass(root, estate, stranger, label, track, before)
+    boundary = Boundary(root, estate, stranger, label, None, before)
     code, payload = boundary.reconcile("--fix", "--only", "landed_open")
     closed = entries(payload, "fixed", track)
     require(

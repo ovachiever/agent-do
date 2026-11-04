@@ -663,7 +663,10 @@ daemon's own pinned identity (`$AGENT_DO_HOME/manna/serve/identity.json`, mode
 600, the same `MANNA_SESSION_ID` + `MANNA_SESSION_TOKEN` pin scripted lanes
 use), behind the loopback Host/Origin checks and a per-process token the page
 carries; manna's own refusals print on the row verbatim. Nothing on the page
-edits a file. The SessionEnd hook applies the same two safe repairs.
+edits a file. The SessionEnd hook applies the same two safe repairs
+(`reconcile --fix --only dead_claim,blocker_desync`) and never closes a landed
+row; the daemon's `apply` still runs the full `--fix`, which since mn-880173
+closes only over a claimant coord has positively verified dead or stopped.
 
 Agents never need the daemon: `state --json` is the complete board contract,
 and `estate --json` is the registered-board index contract. `context`, `list`,

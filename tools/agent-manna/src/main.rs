@@ -21,7 +21,7 @@ use manna_core::issue::{
     DREAM_INERT_MARKER,
 };
 use manna_core::liveness::{
-    all_gone, live_bound, parse_peers, peers_bound_to_claim, BoundPeer, CoordPeer,
+    claim_presence, not_gone, parse_peers_strict, BoundPeer, ClaimPresence, CoordPeer,
 };
 use manna_core::reconcile::{
     check_blocker_desync, check_dangling_track, check_landed_open, check_stale_dream,
@@ -2891,17 +2891,14 @@ fn pid_alive(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-/// Read coord peers bounded to ~2s: each record with coord's classification
-/// and the Manna binding coord stored on it (`manna.session`, `manna.proof`).
-/// Stale peers are left out, as `coord peers` leaves them out: reconcile's
-/// dead-claim check keeps its historical view.
-fn coord_peers() -> Result<Vec<CoordPeer>, String> {
-    coord_peers_with(&["peers", "--json"])
-}
-
-/// The same read including stale peers (`peers --all`), for callers that
-/// must distinguish an aged lease from no verdict at all: the managed
-/// lifecycle reports `stale` as what it is and never treats it as death.
+/// Read coord's complete presence records (`peers --all --json`) bounded to
+/// ~2s: each record with coord's classification and the Manna binding coord
+/// stored on it (`manna.session`, `manna.proof`). Every lifecycle reader
+/// takes this read. The default `coord peers` leaves stale records out, and
+/// a reader that took it saw absence where coord had said "aged": the review
+/// of ec30858 (mn-880173) aged a living claimant's record three days and the
+/// landed_open cure closed its item. A payload with a row this binary cannot
+/// read is an error, not a shorter list (`parse_peers_strict`).
 fn coord_peers_all() -> Result<Vec<CoordPeer>, String> {
     coord_peers_with(&["peers", "--all", "--json"])
 }
@@ -2959,19 +2956,24 @@ fn coord_peers_with(verb: &[&str]) -> Result<Vec<CoordPeer>, String> {
         .map_err(|_| "coord peers produced no output".to_string())?;
     let value: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("coord peers JSON invalid: {}", e))?;
-    Ok(parse_peers(&value))
+    parse_peers_strict(&value)
 }
 
 /// dead_claim: claims held by sessions that are provably gone.
 ///
 /// Legacy pid-format sessions are probed by pid. Every other claimant is
-/// matched to coord's records by exact facts only (`liveness`): the record's
-/// bound Manna proof equals the row's `claim_token_hash`, its bound label
-/// equals `claimed_by`, or its agent id is the claimant label verbatim. The
-/// claim is dead when every record bound to it is dead, stopped, or stale;
-/// one live record among dead twins keeps it; a claimant coord never bound
-/// is inconclusive, not dead. Nothing is respelled from the label to find a
-/// record (mn-4e7229).
+/// matched to coord's complete records (`peers --all`) by exact facts only
+/// (`liveness::claim_presence`): the record's bound Manna proof equals the
+/// row's `claim_token_hash`, its bound label equals `claimed_by`, or its
+/// agent id is the claimant label verbatim. The claim is dead only on
+/// positive evidence: every record bound to it dead or stopped. A stale
+/// record is an aged lease on a process coord could not call dead and keeps
+/// the claim; one such record among dead twins keeps it; a claimant coord
+/// never bound is unseen, not dead; a record that contradicts the claim's
+/// facts (the claimant's label under another proof, or its proof under
+/// another label) is an ambiguous identity, reported as a skipped repair and
+/// never released. Nothing is respelled from the label to find a record
+/// (mn-4e7229, mn-880173).
 fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut coord_lookups: Vec<&Issue> = Vec::new();
@@ -2998,30 +3000,46 @@ fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
     }
 
     if !coord_lookups.is_empty() {
-        match coord_peers() {
+        match coord_peers_all() {
             Ok(peers) => {
                 for issue in coord_lookups {
                     let claimed_by = issue.claimed_by.as_ref().unwrap();
-                    let bound =
-                        peers_bound_to_claim(&peers, claimed_by, issue.claim_token_hash.as_deref());
-                    if !all_gone(&bound) {
-                        continue;
+                    match claim_presence(&peers, claimed_by, issue.claim_token_hash.as_deref()) {
+                        ClaimPresence::Gone(bound) => {
+                            let status = bound[0].peer.status.clone();
+                            findings.push(Finding {
+                                kind: FindingKind::DeadClaim,
+                                issue_id: Some(issue.id.clone()),
+                                detail: format!("claimed by {} session {}", status, claimed_by),
+                                evidence: Some(format!(
+                                    "coord status: {}",
+                                    bound
+                                        .iter()
+                                        .map(BoundPeer::describe)
+                                        .collect::<Vec<_>>()
+                                        .join("; ")
+                                )),
+                                proposed_fix: Some("abandon the claim".to_string()),
+                            });
+                        }
+                        ClaimPresence::Ambiguous(reasons) => findings.push(Finding {
+                            kind: FindingKind::Skipped,
+                            issue_id: Some(issue.id.clone()),
+                            detail: format!(
+                                "dead_claim skipped: the identity of claimant {} is ambiguous in coord ({})",
+                                claimed_by,
+                                reasons.join("; ")
+                            ),
+                            evidence: Some("coord peers --all --json".to_string()),
+                            proposed_fix: Some(format!(
+                                "no lifecycle repair acts on an ambiguous identity; the claimant releases or closes {} in its own shell, or the operator does after review",
+                                issue.id
+                            )),
+                        }),
+                        // Present (active, idle, stale, or no verdict) and
+                        // unseen are not death; nothing is reported.
+                        ClaimPresence::Present(_) | ClaimPresence::Unseen => {}
                     }
-                    let status = bound[0].peer.status.clone();
-                    findings.push(Finding {
-                        kind: FindingKind::DeadClaim,
-                        issue_id: Some(issue.id.clone()),
-                        detail: format!("claimed by {} session {}", status, claimed_by),
-                        evidence: Some(format!(
-                            "coord status: {}",
-                            bound
-                                .iter()
-                                .map(BoundPeer::describe)
-                                .collect::<Vec<_>>()
-                                .join("; ")
-                        )),
-                        proposed_fix: Some("abandon the claim".to_string()),
-                    });
                 }
             }
             Err(reason) => findings.push(Finding::skipped("dead_claim", &reason)),
@@ -3631,44 +3649,78 @@ fn write_drift_file(findings: &[Finding]) -> Result<String, String> {
 /// existing state machine. Returns (fixed issue ids, failure messages).
 /// Decide whether the landed_open cure may close over the row's claim.
 ///
-/// The landed commit trailers are the authorizing evidence for the closure;
-/// this guard exists only to avoid closing over a session that is verifiably
-/// mid-work. The claimant is found by exact facts (`liveness`): a coord
-/// record bound to the claim by proof or by label, or carrying the claimant
-/// label as its agent id. Any such record coord has not classified dead,
-/// stopped, or stale blocks the cure, idle included: an aged lease on a
-/// process coord could not call dead is a lane that has not touched coord
-/// lately, not a lane that is gone. Nothing is respelled from the label to
-/// find a record: before mn-4e7229 `claude-<16 hex>` was looked up as
-/// `session-claude<10 hex>`, matched nothing, and a live lane's item was
-/// closed by the next SessionEnd reconcile. Coord transport failure means no
-/// liveness signal at all, so it fails closed. Absent-from-coord does NOT
-/// block: an orphaned claim's owner routinely has no coord record (that
-/// absence is the wedge itself), and demanding positive death evidence would
-/// recreate the deadlock this cure exists to break. A caller presenting the
-/// claim's verified ownership proof bypasses this guard entirely (checked
-/// before calling) — a bare label never does; labels are public and carry no
-/// lifecycle authority.
+/// A `Manna:` trailer proves that a commit advanced the item, not that the
+/// item is complete or accepted; the close it authorizes mechanically is the
+/// orphan's: an in_progress row whose claimant coord has positively verified
+/// gone. The claimant is found by exact facts (`liveness::claim_presence`):
+/// a coord record bound to the claim by proof or by label, or carrying the
+/// claimant label as its agent id, read from coord's complete records
+/// (`peers --all`). The cure proceeds only when every bound record is dead
+/// or stopped. Everything else refuses and leaves the row's status and claim
+/// as they are, with the finding and its next step still reported:
+///
+/// - a bound record coord has not called gone (active, idle, stale, or no
+///   verdict): a lane that is or may be alive. Stale is an aged lease past
+///   the idle window on a process coord could not call dead; the review of
+///   ec30858 aged a living claimant's record three days and the old guard,
+///   reading `peers` without `--all`, saw absence and closed its item;
+/// - no bound record at all: coord has said nothing about this claimant, and
+///   absence is not evidence of death (the same review watched a living
+///   claimant that never ran a coord command lose its item). The orphan
+///   whose record coord pruned, or who never bound one, is closed by a hand
+///   with authority (`manna done`: the claimant's own shell, or the
+///   operator after review), never mechanically;
+/// - a record that contradicts the claim's facts: an identity nobody can
+///   vouch for;
+/// - coord unreachable, or a payload with a row this binary cannot read: no
+///   liveness signal at all.
+///
+/// Nothing is respelled from the label to find a record: before mn-4e7229
+/// `claude-<16 hex>` was looked up as `session-claude<10 hex>`, matched
+/// nothing, and a live lane's item was closed by the next SessionEnd
+/// reconcile. A caller presenting the claim's verified ownership proof
+/// bypasses this guard entirely (checked before calling) — a bare label never
+/// does; labels are public and carry no lifecycle authority (mn-880173).
 fn landed_open_close_blocked(
     issue: &Issue,
     coord: &Result<Vec<CoordPeer>, String>,
 ) -> Option<String> {
     let owner = issue.claimed_by.as_deref()?;
+    let by_hand = format!(
+        "the claimant closes {} with `manna done` in its own shell, or the operator does after review",
+        issue.id
+    );
     match coord {
-        Ok(peers) => {
-            let bound = peers_bound_to_claim(peers, owner, issue.claim_token_hash.as_deref());
-            let live = live_bound(&bound)
-                .into_iter()
-                .map(BoundPeer::describe)
-                .collect::<Vec<_>>();
-            (!live.is_empty()).then(|| {
-                format!(
-                    "claiming session {} is live in coord [{}]; not closing over live work",
+        Ok(peers) => match claim_presence(peers, owner, issue.claim_token_hash.as_deref()) {
+            ClaimPresence::Gone(_) => None,
+            ClaimPresence::Present(bound) => {
+                let kept = not_gone(&bound);
+                let gloss = if kept.iter().any(|record| record.peer.status == "stale") {
+                    " (a stale record is an aged lease on a process coord could not call dead, not death)"
+                } else {
+                    ""
+                };
+                Some(format!(
+                    "claiming session {} is present in coord [{}]; not closing over live work{}",
                     owner,
-                    live.join("; ")
-                )
-            })
-        }
+                    kept.iter()
+                        .map(|record| record.describe())
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                    gloss
+                ))
+            }
+            ClaimPresence::Unseen => Some(format!(
+                "no coord record is bound to claimant {} (by proof, by label, or by agent id); absence is not evidence of death, so nothing closes mechanically — {}",
+                owner, by_hand
+            )),
+            ClaimPresence::Ambiguous(reasons) => Some(format!(
+                "the identity of claimant {} is ambiguous in coord [{}]; no lifecycle repair acts on an ambiguous identity — {}",
+                owner,
+                reasons.join("; "),
+                by_hand
+            )),
+        },
         Err(error) => Some(format!(
             "coord liveness unavailable ({}); refusing to close over a possibly live owner — rerun where `agent-do coord` resolves, or rerun with the owner's verified identity",
             error
@@ -3810,11 +3862,11 @@ fn apply_reconcile_fixes(
                     continue;
                 };
                 // Only the orphaned-claim wedge closes mechanically: an
-                // in_progress row whose owner can no longer present its proof
-                // (mn-ba8db6). Unclaimed landed_open stays advisory — merge
-                // judgment remains with the human/orchestrator. The landed
-                // commit trailers are the authorizing evidence, never the
-                // requester.
+                // in_progress row whose claimant coord has positively
+                // verified gone (mn-ba8db6, narrowed by mn-880173). Unclaimed
+                // landed_open stays advisory — merge judgment remains with the
+                // human/orchestrator. The landed commit trailers are the
+                // authorizing evidence, never the requester.
                 let Some(owner) = expected.claimed_by.clone() else {
                     continue;
                 };
@@ -3838,7 +3890,7 @@ fn apply_reconcile_fixes(
                     caller.is_some_and(|identity| expected.require_owner(identity).is_ok());
                 if !owner_verified {
                     if coord_records.is_none() {
-                        coord_records = Some(coord_peers());
+                        coord_records = Some(coord_peers_all());
                     }
                     if let Some(reason) =
                         landed_open_close_blocked(&expected, coord_records.as_ref().unwrap())
@@ -4170,6 +4222,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use manna_core::liveness::{all_gone, peers_bound_to_claim};
     use std::sync::Mutex;
     use tempfile::TempDir;
 
@@ -5344,6 +5397,14 @@ mod tests {
                 Some("claude-idle000000000000"),
                 Some("sha256:idle"),
             ),
+            // The review's aged claimant (mn-880173): the lease is three days
+            // old, the process is alive, coord says stale.
+            coord_peer(
+                "session-d9c459ef4559",
+                "stale",
+                Some("claude-d9c459ef4559496f"),
+                Some("sha256:aged"),
+            ),
             coord_peer(
                 "session-gone00000000",
                 "dead",
@@ -5358,6 +5419,20 @@ mod tests {
             ),
             coord_peer("session-twin-a", "dead", None, Some("sha256:twin")),
             coord_peer("session-twin-b", "active", None, Some("sha256:twin")),
+            coord_peer("session-aged-twin-a", "dead", None, Some("sha256:agedtwin")),
+            coord_peer(
+                "session-aged-twin-b",
+                "stale",
+                None,
+                Some("sha256:agedtwin"),
+            ),
+            // Another process wearing a claimant's label under its own proof.
+            coord_peer(
+                "session-impostor0000",
+                "active",
+                Some("claude-worn000000000000"),
+                Some("sha256:someone-else"),
+            ),
         ]);
         let down: Result<Vec<CoordPeer>, String> = Err("agent-do unavailable".to_string());
 
@@ -5379,8 +5454,20 @@ mod tests {
             &live
         )
         .is_some());
-        // Dead and stopped bound records do not block; neither does absence,
-        // which is the wedge's normal state.
+        // Stale is an older aged lease on the same kind of process: not death.
+        let reason = landed_open_close_blocked(
+            &claimed_row("mn-guard10", "claude-d9c459ef4559496f", "sha256:aged"),
+            &live,
+        )
+        .expect("a stale bound record blocks the cure");
+        assert!(
+            reason.contains("session-d9c459ef4559 stale")
+                && reason.contains("not closing over live work")
+                && reason.contains("aged lease"),
+            "{reason}"
+        );
+        // Dead and stopped bound records are coord's positive verdicts: the
+        // cure may proceed.
         assert!(landed_open_close_blocked(
             &claimed_row("mn-guard3", "claude-gone000000000000", "sha256:gone"),
             &live
@@ -5391,17 +5478,48 @@ mod tests {
             &live
         )
         .is_none());
-        assert!(landed_open_close_blocked(
+        // Absence is not evidence of death: a claimant coord never bound (or
+        // whose record coord pruned) is closed by a hand with authority.
+        let reason = landed_open_close_blocked(
             &claimed_row("mn-guard5", "ses_absent", "sha256:absent"),
-            &live
+            &live,
         )
-        .is_none());
-        // One live record among dead twins is enough to block.
+        .expect("an unseen claimant blocks the cure");
+        assert!(
+            reason.contains("absence is not evidence of death")
+                && reason.contains("manna done")
+                && reason.contains("mn-guard5"),
+            "{reason}"
+        );
+        // One live record among dead twins is enough to block; so is one
+        // stale record among dead twins.
         assert!(landed_open_close_blocked(
             &claimed_row("mn-guard6", "claude-twin0000000000000", "sha256:twin"),
             &live
         )
         .is_some());
+        let reason = landed_open_close_blocked(
+            &claimed_row("mn-guard11", "claude-agedtwin000000000", "sha256:agedtwin"),
+            &live,
+        )
+        .expect("a stale twin keeps the claim");
+        assert!(
+            reason.contains("session-aged-twin-b stale") && !reason.contains("session-aged-twin-a"),
+            "the refusal names only the records that keep the claim: {reason}"
+        );
+        // A record wearing the claimant's label under a different proof is an
+        // identity nobody can vouch for: refused, named as ambiguous.
+        let reason = landed_open_close_blocked(
+            &claimed_row("mn-guard12", "claude-worn000000000000", "sha256:mine"),
+            &live,
+        )
+        .expect("an ambiguous identity blocks the cure");
+        assert!(
+            reason.contains("ambiguous")
+                && reason.contains("session-impostor0000")
+                && reason.contains("under a different proof"),
+            "{reason}"
+        );
         // An unclaimed row has no owner to protect.
         let unclaimed = Issue::new("mn-guard7".to_string(), "open".to_string()).unwrap();
         assert!(landed_open_close_blocked(&unclaimed, &live).is_none());

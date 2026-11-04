@@ -275,7 +275,7 @@ The hooks decide what to inject by looking at the repo, not configuration:
 
 | Signal | Effect |
 |--------|--------|
-| `$CWD/.manna/` exists | SessionStart injects the Manna board (`manna context --max-tokens 1500`) and, when `.manna/drift.yaml` contains findings, the drift greeting; SessionEnd runs `manna reconcile --fix --write-drift` (`--fix` applies only the two safe repairs: dead claims abandoned, resolved blockers cleared) |
+| `$CWD/.manna/` exists | SessionStart injects the Manna board (`manna context --max-tokens 1500`) and, when `.manna/drift.yaml` contains findings, the drift greeting; SessionEnd runs `manna reconcile --fix --only dead_claim,blocker_desync --write-drift` (the two safe repairs: claims coord positively verified dead or stopped abandoned, resolved blockers cleared; a landed row is never closed by this hook, only reported with its next step; mn-880173) |
 | `<git-dir>/agent-do/coord/` exists | SessionEnd runs `coord stop`; SessionStart injects coord interrupts or a focus reminder when active peers exist |
 | `$CWD/.zpc/` exists | SessionStart mentions the experience journal and its status commands |
 | Frontend markers (package.json frameworks, `.tsx`/`.vue`/`.svelte` files, Flutter) | SessionStart injects the design-toolkit workflow |
@@ -354,9 +354,10 @@ session ids; Codex supplies its opaque thread id. Manna derives ownership from
 those ids plus a machine-local secret. Scripted lanes set both explicit values,
 for example:
 `MANNA_SESSION_ID=lane6-internals MANNA_SESSION_TOKEN=<32+-character-secret> agent-do manna claim mn-133ad6`.
-Claims made under an identity that coord later reports dead, stale, or stopped
-surface as `dead_claim` findings, and `reconcile --fix` releases only when the
-complete inspected row still matches.
+Claims made under an identity that coord later reports dead or stopped
+surface as `dead_claim` findings (a stale record is an aged lease, not death;
+an unbound claimant is unseen, not dead), and `reconcile --fix` releases only
+when the complete inspected row still matches.
 
 **Generated handoff pairing.** `agent-do bootstrap` runs `manna init` for new
 boards and strict-scaffold repair, and `manna migrate` for a detected nonempty
