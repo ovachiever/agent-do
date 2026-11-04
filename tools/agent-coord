@@ -34,6 +34,8 @@ Commands:
                                          List known peers: liveness-verified status + last_seen age,
                                          attention-first (pulse needs-user/failed above working);
                                          each row carries its stored Manna binding (session, proof)
+                                         and its anchor verdict; a record whose anchor coord could
+                                         not verify reads by lease, never dead
   stop [--note <text>]                   Retire this session cleanly (Stop-hook safe, idempotent)
   bye                                    Delete this agent's own board records
   role set <builder|auditor|researcher|overseer> [--mode read-only|writer] --territory <path> [...]
@@ -384,14 +386,32 @@ def process_table() -> dict[int, tuple[int, str]]:
     return table
 
 
-def find_anchor_pid() -> int:
-    """The long-lived process this agent session hangs off.
+# Anchor kinds that can prove a session gone: the runtime process found by
+# walking the ancestry, or a process the caller pinned explicitly. A
+# `session-leader` or `parent` fallback identifies the session well enough
+# for identity minting but says nothing about liveness (mn-dd9be1).
+DURABLE_ANCHOR_KINDS = {"explicit", "runtime"}
 
-    Agent harnesses spawn a fresh shell per command (its own session leader,
-    gone seconds later), so os.getsid(0) is unusable there: it would mint a
-    new identity per call and record a pid that immediately dies. Walk the
-    ancestry to the nearest process named like an agent runtime instead;
-    plain interactive shells fall back to the session leader (the pane shell).
+
+def find_anchor() -> tuple[int, str]:
+    """The long-lived process this agent session hangs off, and how it was found.
+
+    Returns `(pid, kind)`. Agent harnesses spawn a fresh shell per command
+    (its own session leader, gone seconds later), so os.getsid(0) is
+    unusable there: it would mint a new identity per call and record a pid
+    that immediately dies. Walk the ancestry to the nearest process named like
+    an agent runtime instead (`runtime`); plain interactive shells fall back
+    to the session leader, the pane shell (`session-leader`).
+
+    The fallback is also what a coord call made from an orphaned process gets:
+    a hook that backgrounds and disowns its coord call exits first, the
+    subshell is reparented to launchd, the walk ends at pid 1 without a
+    runtime, and the session leader it falls back to is that hook shell,
+    alive for milliseconds (observed 2026-11-04 on the agent-do board: every
+    pulse hook rewrote a live Claude lane's record to a pid that was gone
+    before the next read, `pid_start` empty, and peers read the lane dead).
+    Such an anchor must never prove death; `process_liveness` treats it as
+    unverifiable, and `register_self` never lets it replace a verified one.
     """
     table = process_table()
     pid = os.getpid()
@@ -402,38 +422,68 @@ def find_anchor_pid() -> int:
         ppid, comm = entry
         name = os.path.basename(comm).lstrip("-").lower()
         if pid != os.getpid() and name in ANCHOR_RUNTIME_NAMES:
-            return pid
+            return pid, "runtime"
         if ppid <= 1:
             break
         pid = ppid
     try:
-        return os.getsid(0)
+        return os.getsid(0), "session-leader"
     except OSError:
-        return os.getppid()
+        return os.getppid(), "parent"
+
+
+def find_anchor_pid() -> int:
+    """The anchor pid alone (kept for callers that only need the number)."""
+    return find_anchor()[0]
+
+
+def anchor_is_verified(kind: str | None, start: str | None) -> bool:
+    """A verified anchor is a durable kind whose start time is known: only then
+    can `kill -0` plus a start-time match tell a dead runtime from a recycled
+    pid or from a shell that exited on schedule."""
+    return kind in DURABLE_ANCHOR_KINDS and bool(start)
 
 
 def process_anchor() -> dict[str, Any]:
-    """Anchor process for identity + liveness: pid + start time + display hints."""
+    """Anchor process for identity + liveness: pid, start time, how it was
+    found (`anchor`), whether it can prove death (`anchor_verified`), and
+    display hints."""
     pid_env = os.environ.get("AGENT_DO_COORD_PID")
     pid: int | None = None
+    kind = "explicit"
     if pid_env:
         try:
             pid = int(pid_env)
         except ValueError:
             pid = None
     if pid is None:
-        pid = find_anchor_pid()
+        pid, kind = find_anchor()
     start = os.environ.get("AGENT_DO_COORD_PID_START") or ps_lstart(pid) or ""
     return {
         "pid": pid,
         "pid_start": start,
+        "anchor": kind,
+        "anchor_verified": anchor_is_verified(kind, start),
         "pane": os.environ.get("TMUX_PANE"),
         "host": socket.gethostname(),
     }
 
 
 def process_liveness(record: dict[str, Any]) -> bool | None:
-    """True = verified alive, False = verified gone/reused, None = unverifiable."""
+    """True = verified alive, False = verified gone/reused, None = unverifiable.
+
+    Only a verified anchor can prove death. A record whose anchor is marked
+    unverified (a session-leader or parent fallback, or a durable kind whose
+    start time could not be read), or that carries no start time at all,
+    cannot tell a dead runtime from a tool-call shell that exited on
+    schedule, so it answers None and the lease decides (mn-dd9be1). Records
+    written before the anchor kind existed keep the process check when they
+    carry a start time, so a runtime that is verifiably gone still reads
+    dead; one with an empty start time was never verifiable and reads by
+    lease.
+    """
+    if "anchor" in record and not record.get("anchor_verified"):
+        return None
     pid = record.get("pid")
     if pid is None:
         return None
@@ -444,6 +494,9 @@ def process_liveness(record: dict[str, Any]) -> bool | None:
         pid = int(pid)
     except (TypeError, ValueError):
         return None
+    expected_start = record.get("pid_start")
+    if not expected_start:
+        return None
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -452,12 +505,26 @@ def process_liveness(record: dict[str, Any]) -> bool | None:
         pass
     except OSError:
         return None
-    expected_start = record.get("pid_start")
-    if expected_start:
-        current_start = ps_lstart(pid)
-        if current_start and current_start != expected_start:
-            return False
+    current_start = ps_lstart(pid)
+    if current_start and current_start != expected_start:
+        return False
     return True
+
+
+def liveness_label(verdict: bool | None) -> str:
+    return "alive" if verdict is True else "gone" if verdict is False else "unverifiable"
+
+
+def anchor_summary(record: dict[str, Any], verdict: bool | None) -> dict[str, Any]:
+    """How this record's liveness was decided, for readers that must not
+    mistake "unverifiable" for "alive" or for "dead"."""
+    if "anchor" in record:
+        verified = bool(record.get("anchor_verified"))
+        kind = record.get("anchor")
+    else:
+        verified = bool(record.get("pid_start"))
+        kind = "legacy"
+    return {"kind": kind, "verified": verified, "liveness": liveness_label(verdict)}
 
 
 def detect_runtime(identity_source: str) -> str:
@@ -560,12 +627,13 @@ def path_overlaps(a: str, b: str) -> bool:
     return a.startswith(f"{b}/") or b.startswith(f"{a}/")
 
 
-def classify_presence(record: dict[str, Any]) -> str:
+def classify_presence(record: dict[str, Any], liveness: bool | None | object = ...) -> str:
     if record.get("dead"):
         return "dead"
     if record.get("stopped"):
         return "stopped"
-    if process_liveness(record) is False:
+    verdict = process_liveness(record) if liveness is ... else liveness
+    if verdict is False:
         return "dead"
     lease_expires_at = parse_iso(record.get("lease_expires_at"))
     if lease_expires_at and now() <= lease_expires_at:
@@ -1107,7 +1175,9 @@ class CoordStore:
             v1_pane = record.get("identity_raw") if record.get("identity_source") == "TMUX_PANE" else None
             if pane not in (record_pane, v1_pane):
                 continue
-            if process_liveness(record) is not True:
+            # Only a verified exit tombstones the previous occupant; an
+            # unverifiable anchor is uncertainty, not death (mn-dd9be1).
+            if process_liveness(record) is False:
                 record["dead"] = True
                 record["superseded_by"] = self.agent_id
                 record["tombstoned_at"] = now_iso()
@@ -1177,6 +1247,22 @@ class CoordStore:
         with self.locked():
             agents = self._load_agents()
             current = agents.get(self.agent_id, {})
+            anchor_fields: dict[str, Any] = {
+                "pid": self.anchor.get("pid"),
+                "pid_start": self.anchor.get("pid_start"),
+                "anchor": self.anchor.get("anchor"),
+                "anchor_verified": bool(self.anchor.get("anchor_verified")),
+            }
+            if current.get("anchor_verified") is True and not anchor_fields["anchor_verified"]:
+                # A registration whose anchor could not be verified (a hook
+                # process whose parent exited before coord ran, so its
+                # ancestry ends at launchd and the fallback is a shell gone in
+                # milliseconds) never replaces a verified anchor: same
+                # session, same runtime, and the caller's shell is gone by
+                # design. Repair runs the other way only: the owning session's
+                # next call with intact ancestry writes the verified anchor
+                # (mn-dd9be1).
+                anchor_fields = {key: current.get(key) for key in anchor_fields}
             current.update(
                 {
                     "agent_id": self.agent_id,
@@ -1186,8 +1272,7 @@ class CoordStore:
                     ).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
                     "project_root": str(self.project_root),
                     "identity_source": self.identity_source,
-                    "pid": self.anchor.get("pid"),
-                    "pid_start": self.anchor.get("pid_start"),
+                    **anchor_fields,
                     "host": self.anchor.get("host"),
                     "runtime": self.runtime,
                 }
@@ -1460,7 +1545,8 @@ class CoordStore:
         pulse_map = self.pulse_map()
         peers: list[dict[str, Any]] = []
         for agent_id, record in sorted(self._load_agents().items()):
-            status = classify_presence(record)
+            verdict = process_liveness(record)
+            status = classify_presence(record, verdict)
             if status == "stale" and not include_stale:
                 continue
             if active_only and status != "active":
@@ -1493,6 +1579,12 @@ class CoordStore:
                 # facts coord recorded and never respells one id into another
                 # (mn-4e7229). Null until the session's own shell has bound it.
                 "manna": record["manna"] if isinstance(record.get("manna"), dict) else None,
+                # How liveness was decided: the anchor kind (`runtime`,
+                # `explicit`, `session-leader`, `parent`, `legacy`), whether
+                # it can prove death, and the verdict (`alive`, `gone`,
+                # `unverifiable`). An unverifiable record reads by lease; a
+                # reader must not take its status for a verified one (mn-dd9be1).
+                "anchor": anchor_summary(record, verdict),
             }
             if record.get("stop_note"):
                 peer["stop_note"] = record["stop_note"]
@@ -3771,6 +3863,9 @@ def format_peer(peer: dict[str, Any]) -> str:
             parts.append(f'prompt:"{pulse["latest_prompt"]}"')
     if peer.get("stop_note"):
         parts.append(f'note:"{peer.get("stop_note")}"')
+    anchor = peer.get("anchor") or {}
+    if anchor.get("liveness") == "unverifiable" and peer.get("status") not in {"dead", "stopped"}:
+        parts.append("liveness:unverifiable")
     return " ".join(parts) + current
 
 
@@ -3925,6 +4020,8 @@ def main(argv: list[str]) -> int:
             "session": store.session,
             "pid": record.get("pid"),
             "pid_start": record.get("pid_start"),
+            "anchor": record.get("anchor"),
+            "anchor_verified": record.get("anchor_verified"),
             "pane": record.get("pane"),
             "host": record.get("host"),
             "runtime": record.get("runtime"),
