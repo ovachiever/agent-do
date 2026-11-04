@@ -51,6 +51,9 @@ def main() -> int:
 
         dry = tool("worktree", "prune", "--dry-run")
         require(dry.returncode == 0 and "Would prune" in dry.stdout and "gone" in dry.stdout, dry.stdout)
+        dry_json = json.loads(tool("worktree", "prune", "--dry-run", "--json").stdout)
+        require("pruned" not in dry_json and [Path(p["path"]).name for p in dry_json["would_prune"]] == ["gone"],
+                f"dry-run JSON must say would_prune: {dry_json}")
         require(len(subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True)
                     .stdout.splitlines()) == 3, "--dry-run must not prune")
 

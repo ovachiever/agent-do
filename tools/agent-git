@@ -769,8 +769,11 @@ for line in sys.stdin.read().splitlines():
         CANDIDATES="$candidates" DRY="$dry_run" python3 -c '
 import json, os
 rows = [l.split("\t", 1) for l in os.environ["CANDIDATES"].splitlines() if l]
-print(json.dumps({"ok": True, "dry_run": os.environ["DRY"] == "1",
-                  "pruned": [{"path": p, "reason": r} for p, r in rows]}))'
+dry = os.environ["DRY"] == "1"
+entries = [{"path": p, "reason": r} for p, r in rows]
+# A dry run names its list for what it is, so a caller printing it never
+# reports work that did not happen.
+print(json.dumps({"ok": True, "dry_run": dry, ("would_prune" if dry else "pruned"): entries}))'
     elif [[ -z "$candidates" ]]; then
         echo "No stale worktree registrations."
     else
