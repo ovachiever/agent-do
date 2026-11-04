@@ -7,7 +7,7 @@ base_commit: 1ec68d9a044e5465a44459592ec40e98afdf53c2
 scope: 'Manna: stale or unbound living claimants must not be auto-closed by reconcile'
 inputs:
 - Independent review of ec30858 / mn-4e7229; .dev/liveness-review/review.md
-binding: sha256:24e4ff31d2b8f42af81aabc0e98b5bac5be840c0882ef1ebcdf5524bd85225af
+binding: sha256:e53e08e7b695134df61b7a562c701533173c90df8f2caf2140622961244caa92
 ---
 
 # Handoff: Manna: stale or unbound living claimants must not be auto-closed by reconcile
@@ -101,3 +101,39 @@ Delivery: implement a narrow correction, test real CLI paths in isolated fixture
 
 - SUBMITTED: in_progress under claude-833d4f4ab80a40cc, not self-closed per the work order. Review points: the positive-evidence rule and the unseen refusal; the hook narrowing; the known limit above; whether the hook's dead_claim release should also be withheld for landed rows.
 - `.manna/issues.jsonl` carries this claim and seal in the working tree beside other lanes' uncommitted rows; left for the operator's board commit.
+
+## Delivery receipts, round two (2026-11-04, worker claude-833d4f4ab80a40cc; SUBMITTED for independent review, not self-closed)
+
+Erik's acceptance boundary after the independent liveness check passed all ten scenarios: make `landed_open` advisory in every reconcile path, explicit `--fix` and the serve Apply action included; a trailer identifies work, it does not approve completion; keep closure through explicit `manna done` and managed acceptance; preserve positive-death claim release and blocker repair; releasing ownership must not mark work accepted; no new schema, no mandatory managed conversion.
+
+### What landed (dcbb6cf, `Manna: mn-880173`)
+
+- `main.rs`: the landed_open cure is retired from `apply_reconcile_fixes`; the finding is advisory in every path. `--fix` keeps its two repairs: releasing a claim coord has positively verified gone (`dead_claim`; the row reopens under no claim) and clearing resolved blockers (`blocker_desync`). `--only` refuses an advisory kind by name through `FindingKind::repairable` (`reconcile.rs`), and `--only landed_open` names what closes an item. The liveness guard, the owner bypass and the coord read in the fix path are gone; `dead_claim_findings` is the pure classification over coord's complete records (gone, present, unseen, ambiguous as skipped). `liveness.rs` is unchanged from round one.
+- `reconcile.rs`: the landed_open finding's next step says the trailer identifies the work and does not approve completion.
+- `hooks/claude/agent-do-coord-stop.sh`: comment only; `--only dead_claim,blocker_desync` stays as the hook's explicit contract.
+- `tests/test_manna_reconcile_liveness.py`, 12 real-CLI scenarios: the eight claimants reconcile cannot act on (four active; stale, unbound, ambiguous, absent) are left exactly as found (status and claim kept, nothing fixed, nothing failed, the landed finding reported); a dead worker's committed but unreviewed item stays unfinished through every cleanup entry point, each asserting claim released, row reopened, nothing done, the landed finding kept: the explicit `--fix`; the serve daemon's Apply action, run with the argv its `ACTIONS` table defines (imported from `serve.py`, never retyped) under a pinned daemon identity; the SessionEnd hook's own call. `--only landed_open` is refused by name. Explicit completion still works: the operator closes the reopened item with `manna done` (authority evidence) and a live claim-holder closes its own landed item.
+- `tests/test_manna_reconcile_track_gate.py` (mn-9b4359): at the boundary reconcile closes no track (the dead track claim is released, the track reopens, the late item stays open under it); `--only landed_open` is refused; `manna done` refuses over the open item naming it and closes once every item is done. The store gate from 408b5e7 is untouched.
+- `tools/agent-manna/test/integration.sh`: G5b asserts `--fix` closes nothing, `--only landed_open` is refused, the claim-holder's explicit `done` closes; the managed trailer test asserts `--fix` closes nothing, managed or not.
+- Unit tests: landed_open advisory even for the verified owner (then the owner's `complete_issue` closes); a dead claim release reopens a landed row and never marks it done; `--only` refuses advisory kinds; reconcile never closes a track and `done` keeps the gate; dead_claim findings ruled by claim presence (gone, stale, stale twin, absence, ambiguous).
+- Docs: ARCHITECTURE.md (landed_open, `--fix`, SessionEnd), CLAUDE.md (ownership gate), docs/INTEGRATION.md, tools/agent-manna/README.md (reconcile by click), CHANGELOG.md.
+- Not changed: `serve.py` (its Apply argv now runs a `--fix` that cannot close), `managed_cli.rs`, the board schema; no managed conversion is required of anyone.
+
+### Policies decided
+
+- dec-29c1a6 (supersedes the "explicit `--fix` keeps the orphan close" half of dec-8995b2): no reconcile path transitions a row to done. A receipt identifies work; approval is an explicit act by someone with authority (les-65e6b0).
+- Releasing ownership is not acceptance: a dead worker's landed row returns to open under no claim, its landed_open finding and next step stay in the report and in drift.yaml, and `manna done` (claim-holder, operator, or landed evidence) or managed acceptance closes it.
+- The hook keeps `--only dead_claim,blocker_desync` as an explicit contract even though `landed_open` has no repair anywhere now; a misspelled kind is refused by name.
+
+### Executed validation (venv Python on PATH; everything executed, nothing build-only)
+
+- `cargo build --release` clean, no warnings; `cargo test --release` 213 + 54 passed on the formatted final source (liveness.rs and reconcile.rs rustfmt clean; main.rs formatted with managed_cli.rs restored byte-identical).
+- `tests/test_manna_reconcile_liveness.py` 12/12 on dcbb6cf's binary. Against the round-one binary at 69af762 (built in a throwaway worktree) the same fixture fails at its first scenario: that binary still reported a refusal for a live claimant, which the fixture now treats as a failure, so the run stopped there; round one's executed fixture run at 69af762 is the recorded observation that the explicit `--fix` closed a dead worker's item ("--fix closed mn-fa54d2").
+- `tests/test_manna_reconcile_track_gate.py` 4/4; `tools/agent-manna/test/integration.sh` 741 passed, 0 failed; `tests/test_coord.py`, `tests/test_coord_v2.py`, `tests/test_git_integration.py` passed; `tests/test_manna_serve.py` 57 OK; `tests/test_manna_estate.py` 6 OK; `agent-do harness contracts validate` 0 errors, 0 warnings; `contracts drift` 0 failing; `bash -n` on the hook.
+- Not run: the full `./test.sh`. No push, pull request, app launch, install, screenshot, live board cleanup, or live session spawning.
+- zpc: les-65e6b0 (lesson); dec-29c1a6 (decision).
+
+### Remaining acceptance
+
+- SUBMITTED: in_progress under claude-833d4f4ab80a40cc, not self-closed. Review points: the advisory rule in the explicit `--fix` and in serve's Apply argv; the dead-claim release reopening a landed row (ownership released, work not accepted); the refused `--only landed_open`; the track-gate fixture's new shape beside the untouched store gate.
+- Live board consequence: the next SessionEnd or explicit `--fix` on this board releases mn-88d1ac's claim (claimant dead per coord) and reopens it; nothing closes. mn-9b4359's claimant is present again and is untouched.
+- `.manna/issues.jsonl` carries this claim and both seals in the working tree beside other lanes' uncommitted rows; left for the operator's board commit.
