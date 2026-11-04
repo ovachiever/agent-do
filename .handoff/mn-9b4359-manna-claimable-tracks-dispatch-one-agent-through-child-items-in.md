@@ -7,7 +7,7 @@ base_commit: fb540b72ee5419796e1dc6549650dcb61a3996e6
 scope: 'Manna: claimable tracks dispatch one agent through child items in dependency order'
 inputs:
 - 'Erik conversation 2026-11-03: optional track-level build assignment through existing Manna board claim flow'
-binding: sha256:a6693e98340e4bfec8a7e931cdc7ab8edfe0e3a8ff5d0de565b79b61ce13634b
+binding: sha256:33c64b183a465915abc9f8ce183c67be250f3eca4b9551d2adf33e958e72d71c
 ---
 
 # Handoff: Manna: claimable tracks dispatch one agent through child items in dependency order
@@ -103,10 +103,35 @@ zpc: decisions dec-94ce98 (attach as the explicit per-track opt-in), dec-981372 
 - rustfmt: every touched file clean; three pre-existing non-clean files (`managed.rs`, `managed_cli.rs`, `reconcile.rs`) deliberately left untouched.
 - Everything above was executed; nothing is build-only. Not run: the full `./test.sh` (focused suites per the lane rules). No app launches, installs, screenshots, pushes or pull requests.
 
+### Review round two (2026-11-04): the reconcile cure closed a track over an item that arrived after inspection
+
+Independent review (`.dev/track-review/review.md`, `race.py`, `race.log`; reviewer codex-01a18d749b1170e3) reproduced one blocker against 8e78689: the landed_open cure of `reconcile --fix` checked `track_close_refusal` against the issue list it loaded before its coord read, then wrote under the board lock comparing only the track row with that list. An item created under the track between the inspection and the write was invisible to both, and the track closed while that item stayed open under it. No other finding was blocking; the reviewer filed the Holy counterpart as mn-72a933 (under mn-9a97cc, Holy's board).
+
+Fix, commit 408b5e72b9b48669138ffbf358dcc842c8cedf62 (`Manna: mn-9b4359`), on top of ec30858 (mn-4e7229, the cure's liveness match; untouched):
+
+- `store.rs` `mutate_issue_locked`: any transition to done that fails the track gate against the rows under the lock is refused, so `repair_issue` and every other caller of the primitive inherit the gate; `finish_issue_unlocked` already ran it for the lifecycle close paths.
+- `main.rs` landed_open cure: the repair closure re-runs `track_close_refusal` on the lock-held snapshot it is handed, after the row compare; the pre-lock read on the inspection snapshot stays only to save the coord round trip and is documented as such.
+- `tests/test_manna_reconcile_track_gate.py` (registered in `test.sh`): the real CLI through the window, with a stand-in `agent-do` on PATH whose first `coord peers` answer first runs one real manna-core command on the same board. Variant 1 creates an item under the track; variant 2 moves an open item into it (`update --track`). Both refused: `fix_failures` names the gate and the late item, `fixed` carries nothing for the track, the track stays `in_progress` with `claimed_by`, `claim_token_hash` and `claimed_at` unchanged, the late item stays open under the track, exit nonzero. Control: nothing happens at the boundary and the cure closes the track on the landed evidence and releases the claim.
+- Unit tests: `landed_open_fix_refuses_a_track_whose_item_was_created_after_inspection`, `..._moved_in_after_inspection`, `landed_open_fix_closes_a_track_whose_items_are_all_done` (main.rs); `repair_never_closes_a_track_over_an_open_item`, `repair_never_closes_an_empty_track_and_leaves_done_rows_done` (store.rs).
+- Docs: README `done` section, CHANGELOG entry, CLAUDE.md convention bullet, ARCHITECTURE Manna paragraph: the gate reads the items as they are at the write.
+
+Executed receipts (all exit 0 unless stated):
+
+- Discriminating run first: `python3 tests/test_manna_reconcile_track_gate.py` against the binary built at 1ec68d9 (unfixed) failed at variant 1 with the track `done` and the late item `open` under it, the review's result reproduced. Against 408b5e7: 3/3 passed.
+- `cargo test --release`: 210 + 55 passed, 0 failed (five new tests).
+- `bash tools/agent-manna/test/integration.sh`: 736 passed, 0 failed.
+- `python3 tests/test_manna_reconcile_liveness.py` (same cure path): 6/6 passed. `tests/test_manna_serve.py`: 57 OK. `tests/test_manna_estate.py`: 6 OK.
+- rustfmt: every touched file clean (`store.rs` formatted alone with `rustfmt --edition 2021`); the three pre-existing non-clean files untouched.
+- Everything executed; nothing build-only. Not run: the full `./test.sh`; `harness contracts validate|drift` (registry and tool surfaces unchanged). No launches, installs, screenshots, pushes or pull requests.
+
+zpc: les-c8b69d (a CAS on one row proves nothing about an invariant over other rows; evaluate it inside the locked write and in the store primitive), dec-5277de (gate in `mutate_issue_locked` plus the closure, not a reroute through `finish_issue_locked`).
+
+Status: SUBMITTED again for independent review; this worker does not self-close.
+
 ### Remaining acceptance and host gates
 
 - Independent review of this submission; this worker does not self-close.
-- Holy counterpart (not a prerequisite for the agent-do feature; `manna serve`'s launch pointer needs nothing): admit `kind == "track"` in `HolyMannaWorkerDispatch.refusal` (`holy-ghostty/macos/Sources/HolyGhostty/Board/HolyMannaBoardWorker.swift`, the `guard item.kind == "item"` line) when `effective == "ready"` and the pair fields are present. The brief text already fits a track because the track handoff carries the protocol and the close rule.
+- Holy counterpart, filed by the reviewer as mn-72a933 under mn-9a97cc on Holy's board (not a prerequisite for the agent-do feature; `manna serve`'s launch pointer needs nothing): admit `kind == "track"` in `HolyMannaWorkerDispatch.refusal` (`holy-ghostty/macos/Sources/HolyGhostty/Board/HolyMannaBoardWorker.swift`, the `guard item.kind == "item"` line) when `effective == "ready"` and the pair fields are present. The brief text already fits a track because the track handoff carries the protocol and the close rule.
 - Older `manna-core` binaries (other worktrees) refuse a strict board that holds a paired track; rebuild them before pairing a track on a shared board. No track on any board gains a handoff until someone runs `create --type track` or `handoff attach`.
 - SessionEnd `reconcile --fix` (mn-4e7229): with this trailer commit on the branch, another session's end may close this in_progress item mechanically. That would be the cure, not acceptance.
 - `.manna/issues.jsonl` carries this claim and the seal digest in the working tree beside other lanes' uncommitted rows; left for the operator's board commit.
