@@ -7,7 +7,7 @@ base_commit: 4227aed0a551631cf4acecb03b1b839565777862
 scope: 'Git: Managed Integration with per-repository opt-in workspaces and durable automatic landing'
 inputs:
 - 'Erik conversation 2026-11-03: Managed Integration, reusable agent-do capability with one-repository pilot'
-binding: sha256:3a0bdb24caafb395b950f606a0ab2834ec00832c7478c42ae40c047e776e13e7
+binding: sha256:ca64fed991a114b33e74cd9b5055589ab47ee0df82078ae1a5fea118e60ccf49
 ---
 
 # Handoff: Git: Managed Integration with per-repository opt-in workspaces and durable automatic landing
@@ -154,3 +154,7 @@ Independent re-review of ba76f34 (`.dev/independent-integration-review/review-ro
 - Independent review of this round closes the item; the worker does not self-close. Not done: pilot activation, push, pull request, merging or rebasing the wake-contract branch.
 - Checkpoint C (two real assignments plus recovery in an explicitly selected pilot) still waits on Erik naming the repository and the local integration authority.
 - `.manna/issues.jsonl` carries this claim and seal beside other lanes' uncommitted rows, left for the operator's board commit.
+
+### Board state after this round (measured, not chosen by this worker)
+
+This row reads `done`, unclaimed, since 2026-11-04T03:00:51Z: the SessionEnd hook of another session (`.manna/drift.yaml`, `generated_at` 03:00:51Z, session 8d880bb0-c2dc-4127-9e57-f6e5789b72eb) ran `manna reconcile --fix --write-drift`, whose landed_open cure closed the item on the trailer commits already on main and released this worker's claim while this worker's coord session was active. The cure's liveness guard derives a coord id from the manna label (`session-` plus 16 alphanumerics) and never matches a hook-pinned Claude session (`claude-<16 hex>` against coord's `session-<12 hex>`); reproduced in an isolated four-variant fixture and filed as mn-4e7229. This worker did not self-close, did not edit the row, and does not reopen it (nothing reopens). The round-three seal at 03:13:21Z landed on the already-closed row. Pending acceptance of 9fe3a44 and checkpoint C are carried by mn-cbc990 so they stay discoverable with an explicit disposition.
