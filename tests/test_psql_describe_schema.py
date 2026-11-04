@@ -51,7 +51,12 @@ def last_json(text: str) -> dict:
 def main() -> int:
     pg = find_pg_bin()
     if pg is None:
-        print("psql describe schema test skipped (no PostgreSQL server binaries)")
+        # CI can demand the real check: with AGENT_DO_REQUIRE_POSTGRES=1 a
+        # missing server is a failure, not a silent pass.
+        if os.environ.get("AGENT_DO_REQUIRE_POSTGRES") == "1":
+            print("psql describe schema test FAILED: AGENT_DO_REQUIRE_POSTGRES=1 but no PostgreSQL server binaries")
+            return 1
+        print("psql describe schema test SKIPPED (no PostgreSQL server binaries; set AGENT_DO_REQUIRE_POSTGRES=1 to require)")
         return 0
     with tempfile.TemporaryDirectory() as tmp:
         data, home = Path(tmp) / "data", Path(tmp) / "home"
