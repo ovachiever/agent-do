@@ -116,6 +116,24 @@ def test_merge_gate() -> None:
         require(any(n["gate"] == "approval" for n in gate["notes"]),
                 f"unreviewed merge should be noted: {gate}")
 
+    # No decision published, but a latest review requests changes — blocked.
+    patch(detail={**clean_detail, "review_decision": None,
+                  "latest_reviews": [{"author": "grok", "state": "CHANGES_REQUESTED"}]}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(any(b["gate"] == "approval" and "grok" in b["reason"] for b in gate["blocks"]),
+            f"a changes request must block even when the decision is null: {gate}")
+
+    # No decision, an approving review — allowed, and the note names the approver.
+    patch(detail={**clean_detail, "review_decision": "",
+                  "latest_reviews": [{"author": "grok", "state": "APPROVED"}]}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(gate["allowed"] and "approved by grok" in gate["notes"][0]["reason"], f"approver note: {gate}")
+
+    # Anything the gate does not recognise blocks (fail closed).
+    patch(detail={**clean_detail, "review_decision": "SOMETHING_NEW"}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(not gate["allowed"], f"unknown decision must block: {gate}")
+
     # Critical-risk paths — warning, not block.
     patch(detail={**clean_detail, "files": [{"path": "apps/web/middleware.ts"}]},
           checks=[], threads=[])
