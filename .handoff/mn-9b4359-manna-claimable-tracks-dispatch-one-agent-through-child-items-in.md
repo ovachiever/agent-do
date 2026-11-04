@@ -7,7 +7,7 @@ base_commit: fb540b72ee5419796e1dc6549650dcb61a3996e6
 scope: 'Manna: claimable tracks dispatch one agent through child items in dependency order'
 inputs:
 - 'Erik conversation 2026-11-03: optional track-level build assignment through existing Manna board claim flow'
-binding: sha256:33c64b183a465915abc9f8ce183c67be250f3eca4b9551d2adf33e958e72d71c
+binding: sha256:156ea59dcb7ca5b3f5768971a7d1e1bfe848cff84154520762df7a5f9685fa9b
 ---
 
 # Handoff: Manna: claimable tracks dispatch one agent through child items in dependency order
@@ -126,11 +126,11 @@ Executed receipts (all exit 0 unless stated):
 
 zpc: les-c8b69d (a CAS on one row proves nothing about an invariant over other rows; evaluate it inside the locked write and in the store primitive), dec-5277de (gate in `mutate_issue_locked` plus the closure, not a reroute through `finish_issue_locked`).
 
-Status: SUBMITTED again for independent review; this worker does not self-close.
+Status: SUBMITTED again 2026-11-04 for independent review. Accepted by Erik the same day ("accepted, close"); the claim-holder closed the row on that acceptance.
 
 ### Remaining acceptance and host gates
 
-- Independent review of this submission; this worker does not self-close.
+- Independent review of this submission: accepted by Erik 2026-11-04; the row closed on that acceptance.
 - Holy counterpart, filed by the reviewer as mn-72a933 under mn-9a97cc on Holy's board (not a prerequisite for the agent-do feature; `manna serve`'s launch pointer needs nothing): admit `kind == "track"` in `HolyMannaWorkerDispatch.refusal` (`holy-ghostty/macos/Sources/HolyGhostty/Board/HolyMannaBoardWorker.swift`, the `guard item.kind == "item"` line) when `effective == "ready"` and the pair fields are present. The brief text already fits a track because the track handoff carries the protocol and the close rule.
 - Older `manna-core` binaries (other worktrees) refuse a strict board that holds a paired track; rebuild them before pairing a track on a shared board. No track on any board gains a handoff until someone runs `create --type track` or `handoff attach`.
 - SessionEnd `reconcile --fix` (mn-4e7229): with this trailer commit on the branch, another session's end may close this in_progress item mechanically. That would be the cure, not acceptance.
