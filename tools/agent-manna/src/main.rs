@@ -20,6 +20,9 @@ use manna_core::issue::{
     dream_claim_refusal, is_default_type, Issue, IssueStatus, IssueType, SessionIdentity,
     DREAM_INERT_MARKER,
 };
+use manna_core::liveness::{
+    all_gone, live_bound, parse_peers, peers_bound_to_claim, BoundPeer, CoordPeer,
+};
 use manna_core::reconcile::{
     check_blocker_desync, check_dangling_track, check_landed_open, check_stale_dream,
     claim_command_ids, extract_manna_ids, lint_board, manna_trailer_ids, parse_session_pid,
@@ -2888,21 +2891,22 @@ fn pid_alive(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-/// Read coord peers bounded to ~2s; map agent_id -> status. Stale peers are
-/// left out, as `coord peers` leaves them out: reconcile's dead-claim check
-/// keeps its historical view.
-fn coord_peer_statuses() -> Result<HashMap<String, String>, String> {
-    coord_peer_statuses_with(&["peers", "--json"])
+/// Read coord peers bounded to ~2s: each record with coord's classification
+/// and the Manna binding coord stored on it (`manna.session`, `manna.proof`).
+/// Stale peers are left out, as `coord peers` leaves them out: reconcile's
+/// dead-claim check keeps its historical view.
+fn coord_peers() -> Result<Vec<CoordPeer>, String> {
+    coord_peers_with(&["peers", "--json"])
 }
 
 /// The same read including stale peers (`peers --all`), for callers that
 /// must distinguish an aged lease from no verdict at all: the managed
 /// lifecycle reports `stale` as what it is and never treats it as death.
-fn coord_peer_statuses_all() -> Result<HashMap<String, String>, String> {
-    coord_peer_statuses_with(&["peers", "--all", "--json"])
+fn coord_peers_all() -> Result<Vec<CoordPeer>, String> {
+    coord_peers_with(&["peers", "--all", "--json"])
 }
 
-fn coord_peer_statuses_with(verb: &[&str]) -> Result<HashMap<String, String>, String> {
+fn coord_peers_with(verb: &[&str]) -> Result<Vec<CoordPeer>, String> {
     use std::io::Read;
 
     let (program, args) = match direct_coord_program(Path::new("agent-do")) {
@@ -2955,42 +2959,19 @@ fn coord_peer_statuses_with(verb: &[&str]) -> Result<HashMap<String, String>, St
         .map_err(|_| "coord peers produced no output".to_string())?;
     let value: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("coord peers JSON invalid: {}", e))?;
-    let mut statuses = HashMap::new();
-    if let Some(peers) = value.get("peers").and_then(|p| p.as_array()) {
-        for peer in peers {
-            if let (Some(agent_id), Some(status)) = (
-                peer.get("agent_id").and_then(|v| v.as_str()),
-                peer.get("status").and_then(|v| v.as_str()),
-            ) {
-                statuses.insert(agent_id.to_string(), status.to_string());
-            }
-        }
-    }
-    Ok(statuses)
-}
-
-fn coord_status_for_owner<'a>(
-    statuses: &'a HashMap<String, String>,
-    claimed_by: &str,
-) -> Option<&'a String> {
-    statuses.get(claimed_by).or_else(|| {
-        let compact = claimed_by
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .take(16)
-            .collect::<String>();
-        (!compact.is_empty())
-            .then(|| format!("session-{}", compact))
-            .and_then(|label| statuses.get(&label))
-    })
+    Ok(parse_peers(&value))
 }
 
 /// dead_claim: claims held by sessions that are provably gone.
 ///
-/// Legacy pid-format sessions are probed by pid; other formats are matched
-/// against coord peer statuses (finding only when coord reports the agent
-/// dead/stale/stopped — absent from coord is inconclusive, not dead).
+/// Legacy pid-format sessions are probed by pid. Every other claimant is
+/// matched to coord's records by exact facts only (`liveness`): the record's
+/// bound Manna proof equals the row's `claim_token_hash`, its bound label
+/// equals `claimed_by`, or its agent id is the claimant label verbatim. The
+/// claim is dead when every record bound to it is dead, stopped, or stale;
+/// one live record among dead twins keeps it; a claimant coord never bound
+/// is inconclusive, not dead. Nothing is respelled from the label to find a
+/// record (mn-4e7229).
 fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut coord_lookups: Vec<&Issue> = Vec::new();
@@ -3017,21 +2998,30 @@ fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
     }
 
     if !coord_lookups.is_empty() {
-        match coord_peer_statuses() {
-            Ok(statuses) => {
+        match coord_peers() {
+            Ok(peers) => {
                 for issue in coord_lookups {
                     let claimed_by = issue.claimed_by.as_ref().unwrap();
-                    if let Some(status) = coord_status_for_owner(&statuses, claimed_by) {
-                        if matches!(status.as_str(), "dead" | "stale" | "stopped") {
-                            findings.push(Finding {
-                                kind: FindingKind::DeadClaim,
-                                issue_id: Some(issue.id.clone()),
-                                detail: format!("claimed by {} session {}", status, claimed_by),
-                                evidence: Some(format!("coord status: {}", status)),
-                                proposed_fix: Some("abandon the claim".to_string()),
-                            });
-                        }
+                    let bound =
+                        peers_bound_to_claim(&peers, claimed_by, issue.claim_token_hash.as_deref());
+                    if !all_gone(&bound) {
+                        continue;
                     }
+                    let status = bound[0].peer.status.clone();
+                    findings.push(Finding {
+                        kind: FindingKind::DeadClaim,
+                        issue_id: Some(issue.id.clone()),
+                        detail: format!("claimed by {} session {}", status, claimed_by),
+                        evidence: Some(format!(
+                            "coord status: {}",
+                            bound
+                                .iter()
+                                .map(BoundPeer::describe)
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        )),
+                        proposed_fix: Some("abandon the claim".to_string()),
+                    });
                 }
             }
             Err(reason) => findings.push(Finding::skipped("dead_claim", &reason)),
@@ -3639,29 +3629,46 @@ fn write_drift_file(findings: &[Finding]) -> Result<String, String> {
 
 /// Apply --fix for dead_claim and blocker_desync findings through the
 /// existing state machine. Returns (fixed issue ids, failure messages).
-/// Decide whether the landed_open cure may close over `owner`'s claim.
+/// Decide whether the landed_open cure may close over the row's claim.
 ///
 /// The landed commit trailers are the authorizing evidence for the closure;
 /// this guard exists only to avoid closing over a session that is verifiably
-/// mid-work. Coord transport failure means no liveness signal at all, so it
-/// fails closed. Absent-from-coord does NOT block: an orphaned claim's owner
-/// label routinely has no coord record (that absence is the wedge itself),
-/// and demanding positive death evidence would recreate the deadlock this
-/// cure exists to break. A caller presenting the claim's verified ownership
-/// proof bypasses this guard entirely (checked before calling) — a bare
-/// label never does; labels are public and carry no lifecycle authority.
+/// mid-work. The claimant is found by exact facts (`liveness`): a coord
+/// record bound to the claim by proof or by label, or carrying the claimant
+/// label as its agent id. Any such record coord has not classified dead,
+/// stopped, or stale blocks the cure, idle included: an aged lease on a
+/// process coord could not call dead is a lane that has not touched coord
+/// lately, not a lane that is gone. Nothing is respelled from the label to
+/// find a record: before mn-4e7229 `claude-<16 hex>` was looked up as
+/// `session-claude<10 hex>`, matched nothing, and a live lane's item was
+/// closed by the next SessionEnd reconcile. Coord transport failure means no
+/// liveness signal at all, so it fails closed. Absent-from-coord does NOT
+/// block: an orphaned claim's owner routinely has no coord record (that
+/// absence is the wedge itself), and demanding positive death evidence would
+/// recreate the deadlock this cure exists to break. A caller presenting the
+/// claim's verified ownership proof bypasses this guard entirely (checked
+/// before calling) — a bare label never does; labels are public and carry no
+/// lifecycle authority.
 fn landed_open_close_blocked(
-    owner: &str,
-    coord: &Result<HashMap<String, String>, String>,
+    issue: &Issue,
+    coord: &Result<Vec<CoordPeer>, String>,
 ) -> Option<String> {
+    let owner = issue.claimed_by.as_deref()?;
     match coord {
-        Ok(statuses) => match coord_status_for_owner(statuses, owner) {
-            Some(status) if status == "active" => Some(format!(
-                "claiming session {} is active; not closing over live work",
-                owner
-            )),
-            _ => None,
-        },
+        Ok(peers) => {
+            let bound = peers_bound_to_claim(peers, owner, issue.claim_token_hash.as_deref());
+            let live = live_bound(&bound)
+                .into_iter()
+                .map(BoundPeer::describe)
+                .collect::<Vec<_>>();
+            (!live.is_empty()).then(|| {
+                format!(
+                    "claiming session {} is live in coord [{}]; not closing over live work",
+                    owner,
+                    live.join("; ")
+                )
+            })
+        }
         Err(error) => Some(format!(
             "coord liveness unavailable ({}); refusing to close over a possibly live owner — rerun where `agent-do coord` resolves, or rerun with the owner's verified identity",
             error
@@ -3715,7 +3722,11 @@ fn apply_reconcile_fixes(
     let mut fixed = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
-    let mut coord_statuses: Option<Result<HashMap<String, String>, String>> = None;
+    let mut coord_records: Option<Result<Vec<CoordPeer>, String>> = None;
+    // Rows the landed_open cure closed in this pass: the close released the
+    // claim, so a dead_claim finding for the same row has nothing to release
+    // and must not surface as a stale-evidence failure.
+    let mut closed_by_landed: HashSet<String> = HashSet::new();
 
     for finding in findings {
         let id = match &finding.issue_id {
@@ -3739,6 +3750,9 @@ fn apply_reconcile_fixes(
         }
         match finding.kind {
             FindingKind::DeadClaim => {
+                if closed_by_landed.contains(&id) {
+                    continue;
+                }
                 let Some(expected) = issues.iter().find(|issue| issue.id == id).cloned() else {
                     failures.push(format!("{}: stale reconcile evidence: row disappeared", id));
                     continue;
@@ -3820,11 +3834,11 @@ fn apply_reconcile_fixes(
                 let owner_verified =
                     caller.is_some_and(|identity| expected.require_owner(identity).is_ok());
                 if !owner_verified {
-                    if coord_statuses.is_none() {
-                        coord_statuses = Some(coord_peer_statuses());
+                    if coord_records.is_none() {
+                        coord_records = Some(coord_peers());
                     }
                     if let Some(reason) =
-                        landed_open_close_blocked(&owner, coord_statuses.as_ref().unwrap())
+                        landed_open_close_blocked(&expected, coord_records.as_ref().unwrap())
                     {
                         failures.push(format!("{}: {}", id, reason));
                         continue;
@@ -3843,10 +3857,13 @@ fn apply_reconcile_fixes(
                     issue.updated_at = Utc::now();
                     Ok(())
                 }) {
-                    Ok(_) => fixed.push(format!(
-                        "{}: closed on landed evidence [{}]; orphaned claim {} released",
-                        id, evidence, owner
-                    )),
+                    Ok(_) => {
+                        closed_by_landed.insert(id.clone());
+                        fixed.push(format!(
+                            "{}: closed on landed evidence [{}]; orphaned claim {} released",
+                            id, evidence, owner
+                        ));
+                    }
                     Err(error) => failures.push(format!("{}: {}", id, error)),
                 }
             }
@@ -4277,21 +4294,68 @@ mod tests {
         std::env::remove_var("MANNA_SESSION_TOKEN");
     }
 
+    fn coord_peer(
+        agent_id: &str,
+        status: &str,
+        manna_session: Option<&str>,
+        manna_proof: Option<&str>,
+    ) -> CoordPeer {
+        CoordPeer {
+            agent_id: agent_id.to_string(),
+            status: status.to_string(),
+            manna_session: manna_session.map(str::to_string),
+            manna_proof: manna_proof.map(str::to_string),
+        }
+    }
+
+    /// An in_progress row claimed by `claimed_by` under `proof`, as the board
+    /// stores it (label public, proof a digest).
+    fn claimed_row(id: &str, claimed_by: &str, proof: &str) -> Issue {
+        let mut issue = Issue::new(id.to_string(), format!("claimed by {}", claimed_by)).unwrap();
+        issue.status = IssueStatus::InProgress;
+        issue.claimed_by = Some(claimed_by.to_string());
+        issue.claimed_at = Some(Utc::now());
+        issue.claim_token_hash = Some(proof.to_string());
+        issue
+    }
+
     #[test]
-    fn coord_status_matches_raw_explicit_session_labels() {
-        let statuses = HashMap::from([
-            ("session-019d79125a477c01".to_string(), "dead".to_string()),
-            ("codex-aaaaaaaa11114222".to_string(), "active".to_string()),
-        ]);
-        assert_eq!(
-            coord_status_for_owner(&statuses, "019d7912-5a47-7c01-b9ae-90ac2060a27e")
-                .map(String::as_str),
-            Some("dead")
+    fn claimant_is_matched_by_binding_never_by_respelling_the_label() {
+        // The record coord keeps for a hook-pinned Claude session: the agent
+        // id is `session-` plus twelve hex of the session uuid, and the
+        // binding is what `manna identity` said in that session's own shell.
+        let peers = vec![
+            coord_peer(
+                "session-31022d9c53c9",
+                "active",
+                Some("claude-31022d9c53c942eb"),
+                Some("sha256:live"),
+            ),
+            coord_peer("codex-aaaaaaaa11114222", "active", None, None),
+            coord_peer("session-019d79125a477c01", "dead", None, None),
+        ];
+        let row = claimed_row("mn-bind01", "claude-31022d9c53c942eb", "sha256:live");
+        let bound = peers_bound_to_claim(
+            &peers,
+            "claude-31022d9c53c942eb",
+            row.claim_token_hash.as_deref(),
         );
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].peer.agent_id, "session-31022d9c53c9");
+        assert_eq!(bound[0].binding.describe(), "bound by claim proof");
+        // Thread-derived identities spell one label in both tools.
         assert_eq!(
-            coord_status_for_owner(&statuses, "codex-aaaaaaaa11114222").map(String::as_str),
-            Some("active")
+            peers_bound_to_claim(&peers, "codex-aaaaaaaa11114222", None)[0]
+                .peer
+                .status,
+            "active"
         );
+        // A raw session uuid is no longer respelled into `session-<16 hex>`:
+        // that derivation named nothing coord uses. The record is unbound, so
+        // the claim is inconclusive, not dead.
+        let bound = peers_bound_to_claim(&peers, "019d7912-5a47-7c01-b9ae-90ac2060a27e", None);
+        assert!(bound.is_empty());
+        assert!(!all_gone(&bound));
     }
 
     #[test]
@@ -5256,22 +5320,93 @@ mod tests {
 
     #[test]
     fn landed_open_guard_branches() {
-        let live: Result<HashMap<String, String>, String> = Ok(HashMap::from([
-            ("ses_active".to_string(), "active".to_string()),
-            ("ses_idle".to_string(), "idle".to_string()),
-        ]));
-        let down: Result<HashMap<String, String>, String> = Err("agent-do unavailable".to_string());
+        let live: Result<Vec<CoordPeer>, String> = Ok(vec![
+            coord_peer(
+                "session-31022d9c53c9",
+                "active",
+                Some("claude-31022d9c53c942eb"),
+                Some("sha256:live"),
+            ),
+            coord_peer(
+                "session-idle00000000",
+                "idle",
+                Some("claude-idle000000000000"),
+                Some("sha256:idle"),
+            ),
+            coord_peer(
+                "session-gone00000000",
+                "dead",
+                Some("claude-gone000000000000"),
+                Some("sha256:gone"),
+            ),
+            coord_peer(
+                "session-stop00000000",
+                "stopped",
+                Some("claude-stop000000000000"),
+                Some("sha256:stop"),
+            ),
+            coord_peer("session-twin-a", "dead", None, Some("sha256:twin")),
+            coord_peer("session-twin-b", "active", None, Some("sha256:twin")),
+        ]);
+        let down: Result<Vec<CoordPeer>, String> = Err("agent-do unavailable".to_string());
 
-        // An actively working owner blocks the cure.
-        assert!(landed_open_close_blocked("ses_active", &live).is_some());
-        // Idle and absent owners do not: absence is the wedge's normal state.
-        assert!(landed_open_close_blocked("ses_idle", &live).is_none());
-        assert!(landed_open_close_blocked("ses_absent", &live).is_none());
+        // The hook pairing the old derivation missed (mn-4e7229): the active
+        // bound record blocks the cure, and the refusal names it.
+        let reason = landed_open_close_blocked(
+            &claimed_row("mn-guard1", "claude-31022d9c53c942eb", "sha256:live"),
+            &live,
+        )
+        .expect("a live bound record blocks the cure");
+        assert!(
+            reason.contains("session-31022d9c53c9") && reason.contains("bound by claim proof"),
+            "{reason}"
+        );
+        assert!(reason.contains("not closing over live work"));
+        // Idle is an aged lease on a process coord could not call dead: live.
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard2", "claude-idle000000000000", "sha256:idle"),
+            &live
+        )
+        .is_some());
+        // Dead and stopped bound records do not block; neither does absence,
+        // which is the wedge's normal state.
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard3", "claude-gone000000000000", "sha256:gone"),
+            &live
+        )
+        .is_none());
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard4", "claude-stop000000000000", "sha256:stop"),
+            &live
+        )
+        .is_none());
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard5", "ses_absent", "sha256:absent"),
+            &live
+        )
+        .is_none());
+        // One live record among dead twins is enough to block.
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard6", "claude-twin0000000000000", "sha256:twin"),
+            &live
+        )
+        .is_some());
+        // An unclaimed row has no owner to protect.
+        let unclaimed = Issue::new("mn-guard7".to_string(), "open".to_string()).unwrap();
+        assert!(landed_open_close_blocked(&unclaimed, &live).is_none());
         // No liveness signal at all fails closed. (A verified ownership
         // proof bypasses this guard before it is ever consulted; a bare
         // label match never does.)
-        assert!(landed_open_close_blocked("ses_absent", &down).is_some());
-        assert!(landed_open_close_blocked("ses_active", &down).is_some());
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard8", "ses_absent", "sha256:x"),
+            &down
+        )
+        .is_some());
+        assert!(landed_open_close_blocked(
+            &claimed_row("mn-guard9", "claude-31022d9c53c942eb", "sha256:live"),
+            &down
+        )
+        .is_some());
     }
 
     #[test]

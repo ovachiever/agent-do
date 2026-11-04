@@ -1725,6 +1725,14 @@ def test_assignment_targeting(tmp_path: Path, env_base: dict[str, str]) -> None:
     require(touched["manna"]["source"].startswith("manna identity"), "binding provenance names the manna binary")
     lead_id = coord_json(["touch"], cwd=project, env=lead)["agent_id"]
     stranger_id = coord_json(["touch"], cwd=project, env=stranger)["agent_id"]
+    # peers --json carries the same binding, so a board reader (manna
+    # reconcile's liveness guard) matches the claim to this record by exact
+    # facts instead of respelling the label (mn-4e7229); unbound rows say null.
+    seen = next(peer for peer in coord_json(["peers"], cwd=project, env=lead)["peers"] if peer["agent_id"] == worker_id)
+    require(seen["manna"]["proof"] == claimant["claim_token_hash"] and seen["manna"]["session"] == claimant["claimed_by"], f"peers must carry the stored binding: {seen.get('manna')}")
+    require(all("manna" in peer for peer in coord_json(["peers", "--all"], cwd=project, env=lead)["peers"]), "every peers row carries a manna field")
+    peers_text = coord(["peers"], cwd=project, env=lead)
+    require(f"manna:{claimant['claimed_by']}" in peers_text.stdout, f"peers text names the bound label: {peers_text.stdout}")
     require(worker_id != claimant["claimed_by"], "the coord label and the Manna label differ; neither is derived from the other here")
 
     # 1. The incident's guessed destinations are refused, and nothing is written.

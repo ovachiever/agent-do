@@ -32,7 +32,8 @@ Commands:
   aliases                                List known aliases
   peers [--all] [--active-only] [--writers]
                                          List known peers: liveness-verified status + last_seen age,
-                                         attention-first (pulse needs-user/failed above working)
+                                         attention-first (pulse needs-user/failed above working);
+                                         each row carries its stored Manna binding (session, proof)
   stop [--note <text>]                   Retire this session cleanly (Stop-hook safe, idempotent)
   bye                                    Delete this agent's own board records
   role set <builder|auditor|researcher|overseer> [--mode read-only|writer] --territory <path> [...]
@@ -1486,6 +1487,12 @@ class CoordStore:
                 "phase": (peer_focus or {}).get("phase"),
                 "focus": peer_focus,
                 "pulse": pulse_map.get(agent_id),
+                # The stored Manna binding (`session`, `proof`, `bound_at`,
+                # `source`, `operator`), so a board reader such as manna's
+                # reconcile guard matches a claim to this record by the exact
+                # facts coord recorded and never respells one id into another
+                # (mn-4e7229). Null until the session's own shell has bound it.
+                "manna": record["manna"] if isinstance(record.get("manna"), dict) else None,
             }
             if record.get("stop_note"):
                 peer["stop_note"] = record["stop_note"]
@@ -3743,6 +3750,9 @@ def format_peer(peer: dict[str, Any]) -> str:
         parts.append(f"role:{role}[read-only]" if mode == "read-only" else f"role:{role}")
     if peer.get("phase"):
         parts.append(f"phase:{peer.get('phase')}")
+    manna = peer.get("manna") or {}
+    if manna.get("session"):
+        parts.append(f"manna:{manna['session']}")
     if focus.get("goal"):
         parts.append(f'goal:"{focus.get("goal")}"')
     pulse = peer.get("pulse") or {}

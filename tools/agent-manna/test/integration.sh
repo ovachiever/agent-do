@@ -2093,8 +2093,17 @@ Manna: $M_ID"
     check_yaml "$output" "not a verified stop" "the refusal says what would count"
 
     # The worker's coord presence ages into `stale` while its process is alive:
-    # an old lease is not death, and the release still refuses.
-    AGENT_DO_COORD_SESSION="$WORKER_ID" AGENT_DO_COORD_ACTIVE_SECONDS=1 "$COORD" touch --json >/dev/null 2>&1
+    # an old lease is not death, and the release still refuses. The touch runs
+    # in the worker's own shell, where coord asks `manna identity` and binds
+    # the claim proof on the record; the lifecycle matches the claim to that
+    # binding, never by respelling the label (mn-4e7229).
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" AGENT_DO_COORD_SESSION="$WORKER_ID" AGENT_DO_COORD_ACTIVE_SECONDS=1 "$COORD" touch --json >/dev/null 2>&1
+    bound_label=$(AGENT_DO_COORD_SESSION="$LEAD_ID" "$COORD" peers --all --json 2>/dev/null | json_field '[(p.get("manna") or {}).get("session") for p in d["peers"] if p["agent_id"].startswith("session-sesmworker")][0]')
+    if [[ "$bound_label" == "$WORKER_ID" ]]; then
+        pass "the worker's coord record carries its bound Manna label"
+    else
+        fail "the worker's coord record carries its bound Manna label" "got: $bound_label"
+    fi
     sleep 2
     stale_status=$(AGENT_DO_COORD_SESSION="$LEAD_ID" AGENT_DO_COORD_IDLE_SECONDS=0 "$COORD" peers --all --json 2>/dev/null | json_field '[p["status"] for p in d["peers"] if p["agent_id"].startswith("session-sesmworker")][0]')
     if [[ "$stale_status" == "stale" ]]; then

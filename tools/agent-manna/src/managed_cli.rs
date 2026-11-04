@@ -18,6 +18,7 @@ use serde::Serialize;
 
 use manna_core::error::MannaError;
 use manna_core::issue::{Issue, IssueStatus, IssueType, SessionIdentity};
+use manna_core::liveness::{is_live, peers_bound_to_claim, BoundPeer};
 use manna_core::managed::{
     assessment_token, closable_hex, closure_blockers, grant_id, parse_assessment_token,
     revalidate_authority, submission_id, transaction_id, Acceptance, AssessmentConditions,
@@ -29,7 +30,7 @@ use manna_core::state::direct_coord_program;
 use manna_core::store::MannaStore;
 
 use crate::{
-    commit_touches_source, coord_peer_statuses_all, find_issue, handle_manna_error,
+    commit_touches_source, coord_peers_all, find_issue, handle_manna_error,
     load_board_workflow, output_error, output_error_json, output_success, output_success_json,
     require_session_identity, IssueData, EXIT_NEEDS_AUTHORIZATION, EXIT_USER_ERROR,
 };
@@ -1043,51 +1044,15 @@ pub struct Liveness {
     pub note: String,
 }
 
-fn hex_tail(value: &str) -> String {
-    let lower = value.to_ascii_lowercase();
-    let tail = lower.rsplit('-').next().unwrap_or(&lower);
-    if !tail.is_empty() && tail.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        tail.to_string()
-    } else {
-        lower
-    }
-}
-
-/// Match a claim label to a coord peer the way `manna state` does: exact id,
-/// the compact `session-` form, or a shared hex tail (coord keeps twelve
-/// hex characters of a session id, manna's label keeps sixteen).
-fn coord_peer_for_owner(statuses: &std::collections::HashMap<String, String>, owner: &str) -> Option<(String, String)> {
-    if let Some(status) = statuses.get(owner) {
-        return Some((owner.to_string(), status.clone()));
-    }
-    let compact = owner
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .take(16)
-        .collect::<String>();
-    if !compact.is_empty() {
-        // coord keeps twelve characters of an explicit session anchor;
-        // manna's compact label keeps sixteen. Try both spellings.
-        for width in [16usize, 12usize] {
-            let label = format!("session-{}", compact.chars().take(width).collect::<String>());
-            if let Some(status) = statuses.get(&label) {
-                return Some((label, status.clone()));
-            }
-        }
-    }
-    let wanted = hex_tail(owner);
-    if wanted.is_empty() {
-        return None;
-    }
-    statuses.iter().find_map(|(agent_id, status)| {
-        let have = hex_tail(agent_id);
-        (!have.is_empty() && (wanted.starts_with(&have) || have.starts_with(&wanted)))
-            .then(|| (agent_id.clone(), status.clone()))
-    })
-}
-
-pub fn liveness_for(owner: Option<&str>) -> Liveness {
+/// The claimant's liveness as coord classified it. The claim is matched to
+/// coord's records by exact facts only (`liveness`): the record's bound Manna
+/// proof equals the row's `claim_token_hash`, its bound label equals the
+/// claimant label, or its agent id is that label verbatim. Nothing is
+/// respelled or prefix-matched to find a record (mn-4e7229). With several
+/// bound records (a hook twin beside the shell, a restarted process) a live
+/// one speaks for the claim, and the claim is `verified_gone` only when every
+/// one of them is dead or stopped.
+pub fn liveness_for(owner: Option<&str>, claim_proof: Option<&str>) -> Liveness {
     let observed_at = now_label();
     let Some(owner) = owner else {
         return Liveness {
@@ -1099,36 +1064,53 @@ pub fn liveness_for(owner: Option<&str>) -> Liveness {
             note: "no claim on the row".to_string(),
         };
     };
-    match coord_peer_statuses_all() {
-        Ok(statuses) => match coord_peer_for_owner(&statuses, owner) {
-            Some((agent, status)) => {
-                let verified_gone = status == "dead" || status == "stopped";
-                let note = match status.as_str() {
-                    "dead" => "coord verified the process gone or tombstoned the session",
-                    "stopped" => "the session retired itself through coord stop",
-                    "active" => "a current presence lease; the session is live",
-                    "idle" | "stale" => "an aged lease: says nothing about whether the process is alive",
-                    _ => "coord has no verdict",
-                }
-                .to_string();
-                Liveness {
-                    status,
+    match coord_peers_all() {
+        Ok(peers) => {
+            let bound = peers_bound_to_claim(&peers, owner, claim_proof);
+            let Some(representative) = bound
+                .iter()
+                .find(|record| is_live(&record.peer.status))
+                .or_else(|| bound.first())
+            else {
+                return Liveness {
+                    status: "unknown".to_string(),
                     source: "agent-do coord peers --json".to_string(),
                     observed_at,
-                    matched_agent: Some(agent),
-                    verified_gone,
-                    note,
-                }
-            }
-            None => Liveness {
-                status: "unknown".to_string(),
+                    matched_agent: None,
+                    verified_gone: false,
+                    note: "coord lists no record bound to this claim (by proof, by label, or by agent id); the worker binds by running `agent-do coord touch` in its own session"
+                        .to_string(),
+                };
+            };
+            let status = representative.peer.status.clone();
+            let verified_gone = bound
+                .iter()
+                .all(|record| matches!(record.peer.status.as_str(), "dead" | "stopped"));
+            let verdict = match status.as_str() {
+                "dead" => "coord verified the process gone or tombstoned the session",
+                "stopped" => "the session retired itself through coord stop",
+                "active" => "a current presence lease; the session is live",
+                "idle" | "stale" => "an aged lease: says nothing about whether the process is alive",
+                _ => "coord has no verdict",
+            };
+            let note = format!(
+                "{} [{}]",
+                verdict,
+                bound
+                    .iter()
+                    .map(BoundPeer::describe)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+            Liveness {
+                status,
                 source: "agent-do coord peers --json".to_string(),
                 observed_at,
-                matched_agent: None,
-                verified_gone: false,
-                note: "coord lists no peer for this claim label".to_string(),
-            },
-        },
+                matched_agent: Some(representative.peer.agent_id.clone()),
+                verified_gone,
+                note,
+            }
+        }
         Err(error) => Liveness {
             status: "unknown".to_string(),
             source: "agent-do coord peers --json".to_string(),
@@ -1197,7 +1179,7 @@ fn cmd_release(id: String, reason: String, isolated_checkout: Option<String>, js
     // tree, releases a held claim; an aged lease or no verdict never seats a
     // second writer in the same files.
     let worker = issue.claimed_by.clone();
-    let liveness = liveness_for(worker.as_deref());
+    let liveness = liveness_for(worker.as_deref(), issue.claim_token_hash.as_deref());
     let isolation_toplevel = match isolated_checkout.as_deref() {
         Some(path) => Some(validate_isolated_checkout(path).unwrap_or_else(|error| fail(&error, EXIT_USER_ERROR, json))),
         None => None,
@@ -1597,7 +1579,7 @@ pub fn assess(
     deployed: Option<&str>,
 ) -> Assessment {
     let authority = Authority::resolve(session, issue, grants);
-    let claimant = liveness_for(issue.claimed_by.as_deref());
+    let claimant = liveness_for(issue.claimed_by.as_deref(), issue.claim_token_hash.as_deref());
     let store = managed_store();
     let pending = store.pending_intents_affecting(&issue.id).unwrap_or_default();
     let git_observed_at = now_label();
