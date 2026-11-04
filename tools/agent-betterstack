@@ -305,11 +305,10 @@ cmd_incident() {
     local result
     result=$(bs_get "${BETTERSTACK_API_V3}/incidents/${incident_id}") || return 1
 
-    if $_json_mode; then
-        _emit_json "$result"
-        return
-    fi
-
+    # --json gets the same filtered document as the default view: the raw
+    # incident carries response_options (the full header dump, cookies
+    # included) and, under `included`, the monitor with its auth_username,
+    # auth_password and request_headers. None of that is printed.
     echo "$result" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -336,7 +335,11 @@ if isinstance(ro, dict):
         for line in lines[starts[-1] + 1 if starts else 0:]:
             name, sep, value = line.partition(':')
             if sep and name.strip().lower() in KEEP:
-                headers[name.strip().lower()] = value.strip()
+                value = value.strip()
+                if name.strip().lower() == 'location':
+                    # A redirect target can carry a token in its query.
+                    value = value.split('?', 1)[0].split('#', 1)[0]
+                headers[name.strip().lower()] = value
     response = {
         'code': ro.get('response_code'),
         'primary_ip': ro.get('primary_ip'),

@@ -49,13 +49,13 @@ def require(cond: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def run(payload: dict) -> subprocess.CompletedProcess[str]:
+def run(payload: dict, flags: str = "") -> subprocess.CompletedProcess[str]:
     body = json.dumps(payload).replace("'", "'\\''")
     script = f"""
 set -uo pipefail
 source <(awk '/^# --- Main ---/{{exit}} {{print}}' "{ROOT / 'tools/agent-betterstack'}")
 bs_get() {{ printf '%s' '{body}'; }}
-cmd_incident 42
+cmd_incident 42 {flags}
 """
     return subprocess.run(["bash", "-c", script], cwd=ROOT, text=True, capture_output=True, check=False)
 
@@ -71,6 +71,26 @@ def main() -> int:
     require("location" not in h, f"headers must come from the last response only: {h}")
     require("SECRETCOOKIE" not in r.stdout and "set-cookie" not in h, "cookies must never be printed")
     require("may be up" in resp.get("note", ""), f"challenge note: {resp}")
+
+    # --json is filtered the same way: the raw incident inlines the monitor
+    # (auth_username, auth_password, request_headers) under `included`.
+    with_monitor = json.loads(json.dumps(INCIDENT))
+    with_monitor["included"] = [{"type": "monitor", "attributes": {"auth_username": "MONUSER",
+                                                                    "auth_password": "MONPASS"}}]
+    r = run(with_monitor, "--json")
+    require(r.returncode == 0, f"--json failed: {r.stderr}")
+    require("MONPASS" not in r.stdout and "MONUSER" not in r.stdout and "SECRETCOOKIE" not in r.stdout,
+            "--json must not print monitor credentials or cookies")
+    require(json.loads(r.stdout)["response"]["headers"].get("cf-mitigated") == "challenge", "--json keeps the filtered view")
+
+    # A final-hop redirect keeps its target but not a query string.
+    redirect = json.loads(json.dumps(INCIDENT))
+    ro = json.loads(redirect["data"]["attributes"]["response_options"])
+    ro["response_headers"] = "HTTP/2 302 \r\nlocation: https://example.test/login?token=SECRETTOKEN#x\r\n\r\n"
+    redirect["data"]["attributes"]["response_options"] = json.dumps(ro)
+    r = run(redirect)
+    loc = json.loads(r.stdout)["response"]["headers"].get("location")
+    require(loc == "https://example.test/login" and "SECRETTOKEN" not in r.stdout, f"location query must be dropped: {loc}")
 
     bare = json.loads(json.dumps(INCIDENT))
     del bare["data"]["attributes"]["response_options"]
