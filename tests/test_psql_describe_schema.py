@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -24,15 +23,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+SERVER_BINARIES = ("initdb", "pg_ctl", "postgres", "psql")
+
+
+def is_server_bin(directory: Path) -> bool:
+    # Client-only installs (Homebrew's libpq, on GitHub's macOS runners) ship
+    # initdb and pg_ctl without the postgres server, so initdb alone is not
+    # proof of a usable server: require the full set side by side.
+    return all(os.access(directory / name, os.X_OK) for name in SERVER_BINARIES)
+
+
 def find_pg_bin() -> Path | None:
-    initdb = shutil.which("initdb")
-    if initdb:
-        return Path(initdb).parent
-    for version in ("18", "17", "16", "15", "14"):
-        candidate = Path(f"/opt/homebrew/opt/postgresql@{version}/bin")
-        if (candidate / "initdb").exists():
+    candidates = [Path(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    candidates += [Path(f"/opt/homebrew/opt/postgresql@{v}/bin") for v in ("18", "17", "16", "15", "14")]
+    for candidate in candidates:
+        if is_server_bin(candidate):
             return candidate
     return None
+
+
+def unavailable(reason: str) -> int:
+    # CI can demand the real check: with AGENT_DO_REQUIRE_POSTGRES=1 a
+    # missing or unusable server is a failure, not a silent pass.
+    if os.environ.get("AGENT_DO_REQUIRE_POSTGRES") == "1":
+        print(f"psql describe schema test FAILED: AGENT_DO_REQUIRE_POSTGRES=1 but {reason}")
+        return 1
+    print(f"psql describe schema test SKIPPED ({reason}; set AGENT_DO_REQUIRE_POSTGRES=1 to require)")
+    return 0
 
 
 def free_port() -> int:
@@ -51,17 +68,15 @@ def last_json(text: str) -> dict:
 def main() -> int:
     pg = find_pg_bin()
     if pg is None:
-        # CI can demand the real check: with AGENT_DO_REQUIRE_POSTGRES=1 a
-        # missing server is a failure, not a silent pass.
-        if os.environ.get("AGENT_DO_REQUIRE_POSTGRES") == "1":
-            print("psql describe schema test FAILED: AGENT_DO_REQUIRE_POSTGRES=1 but no PostgreSQL server binaries")
-            return 1
-        print("psql describe schema test SKIPPED (no PostgreSQL server binaries; set AGENT_DO_REQUIRE_POSTGRES=1 to require)")
-        return 0
+        return unavailable("no PostgreSQL server binaries (" + ", ".join(SERVER_BINARIES) + " in one directory)")
     with tempfile.TemporaryDirectory() as tmp:
         data, home = Path(tmp) / "data", Path(tmp) / "home"
         user, port = "agentdo", free_port()
-        subprocess.run([pg / "initdb", "-D", data, "-U", user, "--auth=trust"], check=True, capture_output=True)
+        init = subprocess.run([pg / "initdb", "-D", data, "-U", user, "--auth=trust"],
+                              capture_output=True, text=True)
+        if init.returncode != 0:
+            detail = (init.stderr or init.stdout).strip().splitlines()
+            return unavailable(f"initdb in {pg} failed: {detail[0] if detail else f'exit {init.returncode}'}")
         opts = f"-k {tmp} -p {port} -c listen_addresses=127.0.0.1"
         subprocess.run([pg / "pg_ctl", "-D", data, "-o", opts, "-l", Path(tmp) / "log", "-w", "start"],
                        check=True, capture_output=True)
