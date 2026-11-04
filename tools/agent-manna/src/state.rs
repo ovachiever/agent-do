@@ -24,6 +24,7 @@ use crate::federation;
 use crate::issue::{Issue, IssueStatus, IssueType};
 use crate::reconcile::manna_trailer_ids;
 use crate::store::MannaStore;
+use crate::track::{is_paired, track_children};
 
 pub const DEFAULT_DECISION_MARKERS: &[&str] = &["[DECISION]", "[HUMAN]", "[OWNER]"];
 const ATTENTION_ORDER: &[&str] = &[
@@ -773,7 +774,7 @@ fn leading_tags(title: &str) -> Vec<String> {
     tags
 }
 
-fn is_decision(title: &str, markers: &[String]) -> bool {
+pub(crate) fn is_decision(title: &str, markers: &[String]) -> bool {
     let tags: HashSet<String> = leading_tags(title).into_iter().collect();
     markers
         .iter()
@@ -1153,15 +1154,27 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
         let peer = matching_peer(issue.claimed_by.as_deref(), &peers);
         let decision = issue.status != IssueStatus::Done && is_decision(&issue.title, markers);
         let kind = issue.issue_type.to_string();
+        // A track that carries a sealed handoff is a dispatchable assignment
+        // and follows the item lifecycle; it is "ready" only while the board
+        // offers an item to claim (or every item is done and the track can
+        // close), and "waiting" while all remaining work is held elsewhere,
+        // cycled, missing a dependency, or a human's to rule on. A track
+        // without a handoff stays an organizational container.
+        let children = (issue.issue_type == IssueType::Track)
+            .then(|| track_children(issues, issue, order, markers));
+        let dispatch_waits = children.as_ref().is_some_and(|summary| {
+            summary.next.is_none() && (summary.open > 0 || summary.total == 0)
+        });
         let effective = match issue.issue_type {
-            IssueType::Track => "track",
+            IssueType::Track if !is_paired(issue) => "track",
             IssueType::Dream if issue.status != IssueStatus::Done => "dream",
             IssueType::Dream => "done",
-            IssueType::Item if issue.status == IssueStatus::Done => "done",
-            IssueType::Item if issue.status == IssueStatus::InProgress => "active",
-            IssueType::Item if !blockers.is_empty() => "waiting",
-            IssueType::Item if decision => "decision",
-            IssueType::Item => "ready",
+            _ if issue.status == IssueStatus::Done => "done",
+            _ if issue.status == IssueStatus::InProgress => "active",
+            _ if !blockers.is_empty() => "waiting",
+            _ if decision => "decision",
+            IssueType::Track if dispatch_waits => "waiting",
+            _ => "ready",
         };
         let claimant = issue.claimed_by.as_ref().map(|claimed_by| {
             json!({
@@ -1212,6 +1225,13 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
                 .unwrap_or(Value::Null),
         );
         row.insert("blockers".to_string(), Value::Array(blockers));
+        if let Some(summary) = children {
+            row.insert(
+                "children".to_string(),
+                serde_json::to_value(summary)
+                    .map_err(|error| format!("failed to serialize track children: {}", error))?,
+            );
+        }
         row.insert("dependents".to_string(), json!([]));
         row.insert("decision".to_string(), Value::Bool(decision));
         row.insert("claimant".to_string(), claimant.unwrap_or(Value::Null));

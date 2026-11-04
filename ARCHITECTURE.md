@@ -350,7 +350,18 @@ On strict boards, creating an item writes a transaction intent, generates
 crash at any point leaves the authenticated intent for idempotent completion by
 the next Manna command. Recovery verifies the scaffold first, accepts only an
 exact complete-row replay, and cannot write outside `.handoff/`. Delete and item conversion archive the live handoff before
-clearing its pointer. Tracks and dreams never receive live handoffs.
+clearing its pointer. Dreams never receive live handoffs. A track receives
+one at creation, and an older container track through `handoff attach`
+(idempotent; adopts a document already at the canonical path): its generated
+body is the dispatch protocol one agent follows to claim the track's items
+individually in dependency order (`show <track> --json` derives `children`
+with the next eligible item, what is held or waiting and why, and what was
+added since the claim). A paired track follows the item lifecycle in `state`
+(`ready` while an item is claimable, `waiting` while nothing is, `active`,
+`done`), enters priority and the index like an item, keeps `kind: track`, and
+closes only when every item in it is done, a gate the store applies under the
+lock on every close path. Holding a track reserves no item and confers no
+authority; the board's atomic child claim decides every item (mn-9b4359).
 
 Ordered presentation is a derived build product over board truth. The ordered
 ID list in `.manna/handoff-order.yaml` is the priority authority; every

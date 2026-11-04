@@ -3104,6 +3104,459 @@ cd "$TEST_DIR"
 rm -rf "$FED_SOURCE" "$FED_TARGET" "$FED_REPLICA" "$FED_CLONE"
 
 # ============================================================================
+# Track Dispatch Tests (mn-9b4359)
+# ============================================================================
+# A track that carries a sealed handoff is a whole-track build assignment:
+# one agent claims it and works its items in dependency order, one claim at a
+# time. These tests drive the real binary through the board and read the same
+# derived state the serve page and native clients consume.
+
+echo ""
+echo "=== Track Dispatch Tests ==="
+
+# tjson <python expr over d> : evaluate against JSON on stdin
+tjson() {
+    python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"
+}
+# strip_pair <id>: turn a paired row back into a pre-feature container track
+# (no prompt, no binding, no file) without touching anything else on the row.
+strip_pair() {
+    python3 - "$1" <<'PY'
+import json, pathlib, sys
+target = sys.argv[1]
+path = pathlib.Path('.manna/issues.jsonl')
+rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+for row in rows:
+    if row['id'] == target:
+        prompt = row.pop('prompt', None)
+        row.pop('handoff_digest', None)
+        if prompt:
+            pathlib.Path(prompt).unlink(missing_ok=True)
+path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+PY
+}
+# row_field <id> <field>: one field of a row straight from the board file
+row_field() {
+    python3 - "$1" "$2" <<'PY'
+import json, pathlib, sys
+for line in pathlib.Path('.manna/issues.jsonl').read_text().splitlines():
+    row = json.loads(line)
+    if row['id'] == sys.argv[1]:
+        value = row.get(sys.argv[2])
+        print('' if value is None else value)
+PY
+}
+
+TRACK_DIR=$(mktemp -d)
+cd "$TRACK_DIR"
+git init -q -b main
+git -c user.email=manna@test -c user.name=manna-test commit -q --allow-empty -m "root"
+WORKER_A_ID="ses_track_a_$$"; WORKER_A_TOKEN="track-a-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+WORKER_B_ID="ses_track_b_$$"; WORKER_B_TOKEN="track-b-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+WORKER_C_ID="ses_track_c_$$"; WORKER_C_TOKEN="track-c-token-cccccccccccccccccccccccccccccccccc"
+as_a() { MANNA_SESSION_ID="$WORKER_A_ID" MANNA_SESSION_TOKEN="$WORKER_A_TOKEN" "$MANNA" "$@"; }
+as_b() { MANNA_SESSION_ID="$WORKER_B_ID" MANNA_SESSION_TOKEN="$WORKER_B_TOKEN" "$MANNA" "$@"; }
+as_c() { MANNA_SESSION_ID="$WORKER_C_ID" MANNA_SESSION_TOKEN="$WORKER_C_TOKEN" "$MANNA" "$@"; }
+"$MANNA" init >/dev/null 2>&1
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T1: a new track pairs a sealed dispatch work order and enters the board flow"
+output=$("$MANNA" create "Alpha program" "Ship the alpha program end to end" --type track --source "track dispatch fixture" 2>&1) || true
+check_yaml "$output" "success: true" "create --type track succeeds"
+TR=$(extract_id "$output")
+check_yaml "$output" "type: track" "the row is a track"
+check_yaml "$output" "prompt: .handoff/$TR-alpha-program.md" "the track carries a canonical handoff pointer"
+check_yaml "$output" "handoff_digest: sha256:" "the track carries a sealed binding"
+[[ -f ".handoff/$TR-alpha-program.md" ]] && pass "track handoff file exists" || fail "track handoff file exists" "missing"
+TRACK_DOC=$(cat ".handoff/$TR-alpha-program.md")
+for needle in "## Claim" "agent-do manna claim $TR" "## Work order" "Track dispatch protocol" "children.next" "agent-do manna show $TR --json" "## Completion" "agent-do manna done $TR"; do
+    [[ "$TRACK_DOC" == *"$needle"* ]] && pass "track handoff carries '$needle'" || fail "track handoff carries '$needle'" "$TRACK_DOC"
+done
+[[ "$TRACK_DOC" != *"Progress ledger"* && "$TRACK_DOC" != *"- [ ]"* ]] && pass "track handoff carries no progress ledger" || fail "track handoff carries no progress ledger" "$TRACK_DOC"
+
+A=$(extract_id "$("$MANNA" create "Child A" "first step" --track "$TR" 2>&1)")
+B=$(extract_id "$("$MANNA" create "Child B" "second step" --track "$TR" 2>&1)")
+C=$(extract_id "$("$MANNA" create "Child C" "third step" --track "$TR" 2>&1)")
+D=$(extract_id "$("$MANNA" create "Child D" "independent step" --track "$TR" 2>&1)")
+EXT=$(extract_id "$("$MANNA" create "Outside prerequisite" "lives in no track" 2>&1)")
+"$MANNA" block "$B" "$A" >/dev/null 2>&1
+"$MANNA" block "$C" "$B" >/dev/null 2>&1
+output=$("$MANNA" sync 2>&1) || true
+check_yaml "$output" "success: true" "sync admits the paired track into presentation"
+[[ -f ".handoff/01-$TR-alpha-program.md" ]] && pass "track handoff receives a priority number like an item" || fail "track handoff receives a priority number like an item" "$(/bin/ls .handoff)"
+check_yaml "$(cat .handoff/README.md)" "\`$TR\`" "generated index lists the track"
+git add -A >/dev/null 2>&1
+git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file the alpha program"
+
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "ready" "state derives a paired, unclaimed track with claimable work as ready"
+check_yaml "$(echo "$STATE" | tjson "'$TR' in [r['id'] for r in d['next']]")" "True" "a ready track appears in next: the launch pointer can select it"
+check_yaml "$(echo "$STATE" | tjson "[r['handoff_exists'] for r in d['all'] if r['id']=='$TR'][0]")" "True" "state reports the track handoff exists"
+check_yaml "$(echo "$STATE" | tjson "[r['order'] is not None for r in d['all'] if r['id']=='$TR'][0]")" "True" "the track holds a priority slot"
+check_yaml "$(echo "$STATE" | tjson "[r['children']['next'] for r in d['all'] if r['id']=='$TR'][0]")" "$A" "state carries the track's next eligible child"
+check_yaml "$(echo "$STATE" | tjson "[r['kind'] for r in d['all'] if r['id']=='$TR'][0]")" "track" "the row stays a track: containers are preserved"
+check_yaml "$(echo "$STATE" | tjson "d['tracks'][0]['id']")" "$TR" "the track still groups its items"
+check_yaml "$(echo "$STATE" | tjson "sorted(r['id'] for r in d['tracks'][0]['items'])")" "$(python3 -c "print(sorted(['$A','$B','$C','$D']))")" "track grouping lists exactly its items"
+# The same three fields Holy's worker dispatch reads before it launches.
+check_yaml "$(echo "$STATE" | tjson "[(bool(r['prompt']), bool(r['handoff_digest']), r['handoff_exists']) for r in d['all'] if r['id']=='$TR'][0]")" "(True, True, True)" "dispatch fields (prompt, handoff_digest, handoff_exists) are complete for the track"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T2: show orders eligible children by dependency, then priority, deterministically"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['eligible']")" "['$A', '$D']" "dependency-free children are eligible in priority order"
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$A" "next is the first eligible child"
+check_yaml "$(echo "$output" | tjson "sorted(w['id'] for w in d['children']['waiting'])")" "$(python3 -c "print(sorted(['$B', '$C']))")" "blocked children wait"
+check_yaml "$(echo "$output" | tjson "(d['children']['total'], d['children']['done'], d['children']['open'])")" "(4, 0, 4)" "counts cover every item"
+"$MANNA" order "$D" 2 >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['eligible']")" "['$D', '$A']" "moving priority reorders eligibility"
+"$MANNA" order "$A" 2 >/dev/null 2>&1
+"$MANNA" order "$D" 5 >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$A" "priority restored, next follows"
+check_yaml "$(echo "$output" | tjson "d['children']['eligible']")" "['$A', '$D']" "priority restored, eligibility order follows"
+output=$("$MANNA" show "$A" 2>&1) || true
+[[ "$output" != *"children:"* ]] && pass "an item's show output is unchanged (no children block)" || fail "an item's show output is unchanged (no children block)" "$output"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T3: the track is claimed through the ordinary claim gate"
+output=$(as_a claim "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "worker A claims the track"
+check_yaml "$output" "status: in_progress" "the track is in progress"
+check_yaml "$output" "claimed_by: $WORKER_A_ID" "the track names its holder"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "active" "a claimed track is active"
+check_yaml "$(echo "$STATE" | tjson "'$TR' in [r['id'] for r in d['now']]")" "True" "a claimed track sits in now"
+done_exit=0
+output=$(as_a done "$TR" 2>&1) || done_exit=$?
+check_exit 2 "$done_exit" "premature track completion is refused with exit 2"
+check_yaml "$output" "4 open item(s)" "the refusal counts the open items"
+check_yaml "$output" "$A (open)" "the refusal names an open item with its status"
+check_yaml "$(row_field "$TR" status)" "in_progress" "a refused close writes nothing"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T4: the dispatched agent works children one claim at a time from board truth"
+output=$(as_a claim "$A" 2>&1) || true
+check_yaml "$output" "success: true" "track holder claims the next child individually"
+output=$(as_a done "$A" 2>&1) || true
+check_yaml "$output" "success: true" "track holder closes the child under its own lifecycle"
+check_released "$output" "closing A releases B" "$B"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$B" "refreshed board truth advances next to the released child"
+check_yaml "$(echo "$output" | tjson "d['children']['done']")" "1" "completed children are counted done"
+# A child claimed elsewhere is held, never taken.
+output=$(as_b claim "$B" 2>&1) || true
+check_yaml "$output" "success: true" "another worker claims a child while the track is held: independent dispatch still works"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "[(h['id'], h['claimed_by']) for h in d['children']['held']]")" "[('$B', '$WORKER_B_ID')]" "a child claimed elsewhere is listed as held with its owner"
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$D" "next skips the held child and selects another eligible one"
+steal_exit=0
+as_a claim "$B" >/dev/null 2>&1 || steal_exit=$?
+check_exit 2 "$steal_exit" "the track holder cannot claim a child another session holds (refused, exit 2)"
+check_yaml "$(row_field "$B" claimed_by)" "$WORKER_B_ID" "the other worker's claim is untouched"
+# An external prerequisite blocks the last eligible child: nothing is eligible, the stall says why.
+"$MANNA" block "$D" "$EXT" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "None" "no eligible work: next is null"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "held by live claims: $B ($WORKER_B_ID)" "stall names the claim held elsewhere"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "$D waits on $EXT" "stall names the external prerequisite"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "active" "a held track stays active while nothing is eligible"
+"$MANNA" unblock "$D" "$EXT" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$D" "clearing the prerequisite makes the child eligible again"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T5: competing child claims have one winner; the parent's claim state never gates children"
+for i in {1..6}; do
+    (
+        set +e
+        MANNA_SESSION_ID="ses_track_racer_$i" MANNA_SESSION_TOKEN="racer-token-$i-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+            "$MANNA" claim "$D" >"race.$i.out" 2>&1
+        echo $? >"race.$i.rc"
+        exit 0
+    ) &
+done
+wait
+winners=0
+for i in {1..6}; do
+    [[ "$(cat "race.$i.rc")" -eq 0 ]] && winners=$((winners + 1))
+done
+check_exit 1 "$winners" "concurrent claims on one child under a held track have exactly one winner"
+D_OWNER=$(row_field "$D" claimed_by)
+MANNA_SESSION_ID="$D_OWNER" MANNA_SESSION_TOKEN="racer-token-${D_OWNER##*_}-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$MANNA" abandon "$D" >/dev/null 2>&1
+check_yaml "$(row_field "$D" status)" "open" "the racer released the child"
+# Parent unclaimed: a child still dispatches independently.
+output=$(as_a abandon "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "worker A releases the track"
+check_yaml "$(row_field "$B" claimed_by)" "$WORKER_B_ID" "releasing the track preserves another worker's child claim"
+check_yaml "$(row_field "$A" status)" "done" "releasing the track preserves completed child work"
+output=$(as_c claim "$D" 2>&1) || true
+check_yaml "$output" "success: true" "a child is claimable while its track is unclaimed"
+as_c abandon "$D" >/dev/null 2>&1
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T6: a successor resumes the track from board truth"
+output=$(as_b claim "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "worker B claims the released track"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['done']")" "1" "successor sees completed children"
+check_yaml "$(echo "$output" | tjson "[h['id'] for h in d['children']['held']]")" "['$B']" "successor sees its own held child"
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$D" "successor is pointed at the next eligible child"
+# Scope change: a child added after the claim is visible as such, never silent.
+F=$(extract_id "$("$MANNA" create "Child F" "added after the claim" --track "$TR" 2>&1)")
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['added_since_claim']")" "['$F']" "a child added after the claim is flagged"
+check_yaml "$(echo "$output" | tjson "'$F' in d['children']['eligible']")" "True" "the added child is eligible under its own work order"
+# A child moved out of the track disappears; its row and work are untouched.
+"$MANNA" update "$F" --track "" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "'$F' in d['children']['eligible'] or '$F' in d['children']['added_since_claim']")" "False" "a child moved out of the track leaves the children list"
+check_yaml "$(row_field "$F" status)" "open" "the moved child keeps its own row"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T7: the track closes only when every item is done"
+done_exit=0
+output=$(as_b done "$TR" 2>&1) || done_exit=$?
+check_exit 2 "$done_exit" "successor cannot close over open items"
+check_yaml "$(row_field "$TR" claimed_by)" "$WORKER_B_ID" "the refused close leaves the successor's claim intact"
+as_b done "$B" >/dev/null 2>&1
+as_b claim "$C" >/dev/null 2>&1 && as_b done "$C" >/dev/null 2>&1
+as_b claim "$D" >/dev/null 2>&1 && as_b done "$D" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['open']")" "0" "every item is done"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "every item is done; the track can close" "stall says the track can close"
+output=$(as_b done "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "the track closes once every item is done"
+check_yaml "$output" "status: done" "the track is done"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "done" "state derives the closed track as done"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T8: an existing track without a handoff is a container until attached, idempotently"
+T2=$(extract_id "$("$MANNA" create "Legacy program" "a track from before dispatch existed" --type track 2>&1)")
+strip_pair "$T2"
+check_yaml "$(row_field "$T2" prompt)" "" "fixture: the track has no handoff pointer"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T2'][0]")" "track" "an unpaired track derives as a container, not as ready"
+check_yaml "$(echo "$STATE" | tjson "'$T2' in [r['id'] for r in d['next']]")" "False" "an unpaired track is not launchable"
+claim_exit=0
+output=$(as_a claim "$T2" 2>&1) || claim_exit=$?
+check_exit 2 "$claim_exit" "claiming an unpaired track is refused with exit 2"
+check_yaml "$output" "agent-do manna handoff attach $T2" "the refusal names the remedy"
+check_yaml "$(row_field "$T2" status)" "open" "the refused claim writes nothing"
+lint_exit=0
+"$MANNA" lint --json >/dev/null 2>&1 || lint_exit=$?
+output=$("$MANNA" lint --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "[f for f in d['findings'] if f.get('issue_id')=='$T2']")" "[]" "lint does not fault a container track for lacking a handoff"
+output=$(as_a handoff attach "$T2" 2>&1) || true
+check_yaml "$output" "success: true" "handoff attach supplies the missing work order"
+check_yaml "$output" "changed: true" "attach reports the change"
+check_yaml "$output" "adopted: false" "a generated order is not an adoption"
+check_yaml "$output" "prompt: .handoff/$T2-legacy-program.md" "attach writes the canonical pointer"
+[[ -f ".handoff/$T2-legacy-program.md" ]] && pass "attach creates the track handoff" || fail "attach creates the track handoff" "missing"
+check_yaml "$(row_field "$T2" status)" "open" "attach does not reset status"
+output=$(as_a handoff attach "$T2" 2>&1) || true
+check_yaml "$output" "success: true" "a second attach succeeds"
+check_yaml "$output" "changed: false" "a second attach changes nothing"
+DIGEST_BEFORE=$(row_field "$T2" handoff_digest)
+as_a handoff attach "$T2" >/dev/null 2>&1
+check_yaml "$(row_field "$T2" handoff_digest)" "$DIGEST_BEFORE" "repeated attach keeps the binding stable"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T2'][0]")" "waiting" "an attached track with no items waits rather than inviting a launch"
+done_exit=0
+output=$(as_a done "$T2" 2>&1) || done_exit=$?
+check_exit 2 "$done_exit" "an empty track cannot close"
+check_yaml "$output" "no items" "the empty-track refusal says why"
+G=$(extract_id "$("$MANNA" create "Legacy child" "work" --track "$T2" 2>&1)")
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T2'][0]")" "ready" "an attached track with claimable work is ready"
+output=$(as_a claim "$T2" 2>&1) || true
+check_yaml "$output" "success: true" "the attached track passes the claim gate"
+as_a abandon "$T2" >/dev/null 2>&1
+item_attach_exit=0
+output=$(as_a handoff attach "$G" 2>&1) || item_attach_exit=$?
+check_exit 1 "$item_attach_exit" "attach refuses an item: items pair at creation"
+check_yaml "$output" "paired at creation" "the item refusal explains itself"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T9: attach adopts a custom handoff already at the canonical path and preserves it"
+T3=$(extract_id "$("$MANNA" create "Custom program" "hand-written track order" --type track 2>&1)")
+strip_pair "$T3"
+cat > ".handoff/$T3-custom-program.md" <<EOF
+---
+workflow: 2
+manna: $T3
+track: null
+source: null
+base_commit: fixture
+scope: Custom program
+inputs: []
+binding: ''
+---
+
+# Handoff: Custom program
+
+## Claim
+
+\`\`\`bash
+agent-do manna claim $T3
+\`\`\`
+
+## Scope
+
+Custom program
+
+## Inputs
+
+- None declared.
+
+## Work order
+
+CUSTOM TRACK INSTRUCTIONS written by hand.
+
+## Completion
+
+1. Hand-written completion.
+EOF
+output=$(as_a handoff attach "$T3" 2>&1) || true
+check_yaml "$output" "success: true" "attach adopts an existing document"
+check_yaml "$output" "adopted: true" "attach reports the adoption"
+check_yaml "$(cat ".handoff/$T3-custom-program.md")" "CUSTOM TRACK INSTRUCTIONS written by hand." "the custom body is preserved byte for byte"
+check_yaml "$(cat ".handoff/$T3-custom-program.md")" "binding: $(row_field "$T3" handoff_digest)" "the adopted document carries the row's binding"
+output=$(as_a claim "$T3" 2>&1) || true
+check_yaml "$output" "success: true" "an adopted custom order passes the claim gate"
+as_a abandon "$T3" >/dev/null 2>&1
+T4=$(extract_id "$("$MANNA" create "Broken custom program" "invalid document" --type track 2>&1)")
+strip_pair "$T4"
+printf '# Not a handoff\n\nno frontmatter, no sections\n' > ".handoff/$T4-broken-custom-program.md"
+broken_exit=0
+output=$(as_a handoff attach "$T4" 2>&1) || broken_exit=$?
+check_exit 2 "$broken_exit" "attach refuses to adopt an invalid document"
+check_yaml "$(cat ".handoff/$T4-broken-custom-program.md")" "no frontmatter, no sections" "the invalid document is left untouched"
+check_yaml "$(row_field "$T4" prompt)" "" "the refused adoption binds nothing"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T10: attach never steals, resets, or rewrites a claimed track"
+T5=$(extract_id "$("$MANNA" create "Held program" "claimed before dispatch existed" --type track 2>&1)")
+strip_pair "$T5"
+C_PROOF=$(as_c identity --json 2>/dev/null | tjson 'd["proof"]')
+python3 - "$T5" "$WORKER_C_ID" "$C_PROOF" <<'PY'
+import json, pathlib, sys
+target, owner, proof = sys.argv[1:4]
+path = pathlib.Path('.manna/issues.jsonl')
+rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+for row in rows:
+    if row['id'] == target:
+        row['status'] = 'in_progress'
+        row['claimed_by'] = owner
+        row['claimed_at'] = '2026-10-01T00:00:00Z'
+        row['claim_token_hash'] = proof
+path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+PY
+H=$(extract_id "$("$MANNA" create "Held child" "work" --track "$T5" 2>&1)")
+"$MANNA" block "$H" "$EXT" >/dev/null 2>&1
+stranger_exit=0
+as_a handoff attach "$T5" >/dev/null 2>&1 || stranger_exit=$?
+check_exit 1 "$stranger_exit" "a stranger cannot attach a work order to a track another session holds"
+check_yaml "$(row_field "$T5" prompt)" "" "the refused attach binds nothing"
+output=$(as_c handoff attach "$T5" 2>&1) || true
+check_yaml "$output" "success: true" "the holder attaches its own track's work order"
+check_yaml "$(row_field "$T5" claimed_by)" "$WORKER_C_ID" "attach preserves the claim"
+check_yaml "$(row_field "$T5" claimed_at)" "2026-10-01T00:00:00Z" "attach preserves the claim time"
+check_yaml "$(row_field "$T5" status)" "in_progress" "attach preserves status"
+check_yaml "$(row_field "$H" blocked_by)" "['$EXT']" "attach preserves child dependencies"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T11: cycles and missing dependencies are named, never worked around"
+T6=$(extract_id "$("$MANNA" create "Tangled program" "cycle fixture" --type track 2>&1)")
+P=$(extract_id "$("$MANNA" create "Cycle P" "p" --track "$T6" 2>&1)")
+Q=$(extract_id "$("$MANNA" create "Cycle Q" "q" --track "$T6" 2>&1)")
+R=$(extract_id "$("$MANNA" create "Needs deleted" "r" --track "$T6" 2>&1)")
+GONE=$(extract_id "$("$MANNA" create "Will be deleted" "gone" 2>&1)")
+"$MANNA" block "$P" "$Q" >/dev/null 2>&1
+"$MANNA" block "$Q" "$P" >/dev/null 2>&1
+"$MANNA" block "$R" "$GONE" >/dev/null 2>&1
+"$MANNA" delete "$GONE" >/dev/null 2>&1
+output=$("$MANNA" show "$T6" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "None" "a cycled track has no eligible child"
+check_yaml "$(echo "$output" | tjson "sorted(w['id'] for w in d['children']['waiting'] if w['cycle'])")" "$(python3 -c "print(sorted(['$P', '$Q']))")" "both cycle members are flagged"
+check_yaml "$(echo "$output" | tjson "[w['missing'] for w in d['children']['waiting'] if w['id']=='$R'][0]")" "['$GONE']" "a dependency on a deleted row is reported missing"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "dependency cycle: $(python3 -c "print(', '.join(sorted(['$P', '$Q'])))")" "stall names the cycle"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "missing dependencies: $R needs missing $GONE" "stall names the missing dependency"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T6'][0]")" "waiting" "a track with nothing dispatchable derives as waiting, not ready"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T12: converting between item and track regenerates the document; dream -> track pairs"
+DREAM=$(extract_id "$("$MANNA" dream "Someday a program" 2>&1)")
+output=$("$MANNA" update "$DREAM" --type track 2>&1) || true
+check_yaml "$output" "success: true" "a dream converts to a track"
+check_yaml "$output" "prompt: .handoff/$DREAM-someday-a-program.md" "the converted track is paired on conversion"
+check_yaml "$(cat ".handoff/$DREAM-someday-a-program.md")" "Track dispatch protocol" "the converted track carries the dispatch protocol"
+output=$("$MANNA" update "$DREAM" --type item --track "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "a track converts to an item"
+check_yaml "$(cat ".handoff/$DREAM-someday-a-program.md")" "This file is the work order for one item only." "the item document is regenerated under the same pointer"
+[[ "$(cat ".handoff/$DREAM-someday-a-program.md")" != *"Track dispatch protocol"* ]] && pass "the item document no longer carries the track protocol" || fail "the item document no longer carries the track protocol" "$(cat ".handoff/$DREAM-someday-a-program.md")"
+reconcile_exit=0
+output=$("$MANNA" reconcile --json 2>&1) || reconcile_exit=$?
+check_yaml "$(echo "$output" | tjson "[f for f in d['findings'] if f['kind'] in ('orphan_handoff','prompt_pairing','workflow_sprawl')]")" "[]" "track handoffs are neither orphans nor sprawl to reconcile"
+
+# ----------------------------------------------------------------------------
+if [[ "$(uname -s)" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
+    echo ""
+    echo "Test T13: a managed child that is submitted but not accepted holds its track open"
+    T7=$(extract_id "$("$MANNA" create "Managed program" "a track with a coordinator-owned child" --type track 2>&1)")
+    MC=$(extract_id "$("$MANNA" create "Managed child" "coordinator-owned closure" --track "$T7" 2>&1)")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file the managed program"
+    LEAD_ID="ses_track_lead_$$"; LEAD_TOKEN="track-lead-token-dddddddddddddddddddddddddddddddd"
+    LEAD_PROOF=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" identity --json 2>/dev/null | tjson 'd["proof"]')
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --track "$T7" --reason "lead for the managed program" 2>&1 </dev/null | tr -d '\r') || true
+    check_yaml "$output" "success: true" "operator grants the lead authority over the track"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$MC" --check integration 2>&1) || true
+    check_yaml "$output" "success: true" "the lead puts the child under managed closure"
+    output=$(as_a claim "$T7" 2>&1) || true
+    check_yaml "$output" "success: true" "worker A claims the managed program's track"
+    output=$(as_a claim "$MC" 2>&1) || true
+    check_yaml "$output" "success: true" "worker A claims the managed child"
+    printf 'built it\n' > managed-report.md
+    output=$(as_a submit "$MC" --report managed-report.md 2>&1) || true
+    check_yaml "$output" "status: submitted" "worker A submits the managed child"
+    managed_done_exit=0
+    as_a done "$MC" >/dev/null 2>&1 || managed_done_exit=$?
+    check_exit 2 "$managed_done_exit" "the worker cannot close the managed child on a submission"
+    track_done_exit=0
+    output=$(as_a done "$T7" 2>&1) || track_done_exit=$?
+    check_exit 2 "$track_done_exit" "a submitted-but-unaccepted child holds the track open"
+    check_yaml "$output" "$MC (in_progress)" "the refusal names the submitted child as open"
+    output=$("$MANNA" show "$T7" --json 2>&1) || true
+    check_yaml "$(echo "$output" | tjson "[h['id'] for h in d['children']['held']]")" "['$MC']" "the submitted child is held, never counted done"
+    lead_accept "$MC" integration HEAD "reviewed on the integration target" >/dev/null 2>&1 || true
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$MC" 2>&1) || true
+    check_yaml "$output" "success: true" "the lead accepts and closes the managed child"
+    output=$(as_a done "$T7" 2>&1) || true
+    check_yaml "$output" "success: true" "the track closes once the managed child is accepted and done"
+fi
+
+cd "$TEST_DIR"
+rm -rf "$TRACK_DIR"
+
+# ============================================================================
 # Summary
 # ============================================================================
 

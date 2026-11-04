@@ -29,14 +29,15 @@ use manna_core::state::{
     derive_board_state, direct_coord_program, StateOptions, DEFAULT_DECISION_MARKERS,
 };
 use manna_core::store::MannaStore;
+use manna_core::track::{is_paired, pairable, track_children, track_close_refusal, TrackChildren};
 use manna_core::workflow::{
-    attach_handoff, canonical_handoff_path, create_paired_issue, delete_paired_issue,
-    detach_handoff, find_orphan_handoffs, handoff_manna_id, handoff_presentation_drift,
-    initialize_workflow, load_workflow_for_board, migrate_legacy_board, rebind_handoff_metadata,
-    recover_legacy_migration, recover_pair_transactions, runtime_session_identity,
-    runtime_session_label, seal_handoff, set_handoff_priority, sync_handoff_presentation,
-    untracked_durable_paths, validate_handoff, validate_scaffold, HandoffSyncResult,
-    WorkflowConfig, HANDOFF_DIR,
+    adopt_handoff, attach_handoff, canonical_handoff_path, create_paired_issue,
+    delete_paired_issue, detach_handoff, find_orphan_handoffs, handoff_manna_id, handoff_order_ids,
+    handoff_presentation_drift, initialize_workflow, load_workflow_for_board, migrate_legacy_board,
+    rebind_handoff_metadata, recover_legacy_migration, recover_pair_transactions,
+    regenerate_handoff, runtime_session_identity, runtime_session_label, seal_handoff,
+    set_handoff_priority, sync_handoff_presentation, untracked_durable_paths, validate_handoff,
+    validate_scaffold, HandoffSyncResult, WorkflowConfig, HANDOFF_DIR,
 };
 
 /// Exit codes
@@ -428,6 +429,11 @@ enum HandoffCommands {
         /// Issue ID (e.g., mn-abc123)
         id: String,
     },
+    /// Give an existing track its dispatch work order (idempotent; adopts a document already at the canonical path)
+    Attach {
+        /// Track ID (e.g., mn-abc123)
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -487,6 +493,26 @@ struct IssueData {
     /// are RFC 3339 fields that `--json` consumers parse, and an age glued
     /// inside them would break every parser to save a reader one line. The
     /// exact timestamps stay exact, and the distance sits next to them.
+    age: IssueAge,
+}
+
+/// `show`: the row, its age, and for a track the board's answer to what it
+/// still owes. Items serialize exactly as before; `children` is absent.
+#[derive(Serialize)]
+struct ShowData {
+    issue: Issue,
+    age: IssueAge,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<TrackChildren>,
+}
+
+/// `handoff attach`: whether the pair changed and whether a document already
+/// at the canonical path was adopted rather than generated.
+#[derive(Serialize)]
+struct HandoffAttachData {
+    changed: bool,
+    adopted: bool,
+    issue: Issue,
     age: IssueAge,
 }
 
@@ -1362,9 +1388,9 @@ fn cmd_create(
     }
 
     let (existing_issues, workflow) = load_board_workflow(&store);
-    if workflow.is_some() && parsed_type != IssueType::Item && prompt.is_some() {
+    if workflow.is_some() && parsed_type == IssueType::Dream && prompt.is_some() {
         output_error(
-            "Strict workflow boards pair handoffs only with actionable items",
+            "Strict workflow boards pair handoffs with items and tracks, never dreams",
             EXIT_USER_ERROR,
         );
     }
@@ -1391,7 +1417,9 @@ fn cmd_create(
     issue.issue_type = parsed_type;
     issue.track = track;
     issue.source = source;
-    if let Some(config) = workflow.as_ref().filter(|_| parsed_type == IssueType::Item) {
+    // Items and tracks pair at creation: an item's work order, or a track's
+    // dispatch order that lets one agent work the whole track. Dreams never.
+    if let Some(config) = workflow.as_ref().filter(|_| pairable(parsed_type)) {
         if let Err(error) =
             canonical_handoff_path(Path::new("."), config, &issue, prompt.as_deref())
         {
@@ -1421,6 +1449,14 @@ fn cmd_create(
     });
 }
 
+/// The refusal `claim` prints for a track that has no dispatch work order.
+fn track_unpaired_claim_refusal(id: &str) -> String {
+    format!(
+        "{} is a track without a dispatch work order: an organizational container, not an assignment. Give it one with `agent-do manna handoff attach {}` to dispatch the whole track, or claim its items individually",
+        id, id
+    )
+}
+
 fn cmd_claim(id: String) -> ! {
     let store = MannaStore::new(Path::new("."));
 
@@ -1442,6 +1478,15 @@ fn cmd_claim(id: String) -> ! {
     if issue.issue_type == IssueType::Dream {
         output_error(&dream_claim_refusal(&issue.id), EXIT_NEEDS_AUTHORIZATION);
     }
+    // A track is claimable only once it carries a dispatch work order; a
+    // container track is organization, not an assignment. Same exit 2, same
+    // "escalate" reading, and the remedy is named.
+    if workflow.is_some() && issue.issue_type == IssueType::Track && !is_paired(&issue) {
+        output_error(
+            &track_unpaired_claim_refusal(&issue.id),
+            EXIT_NEEDS_AUTHORIZATION,
+        );
+    }
 
     let session = require_session_identity();
 
@@ -1450,13 +1495,14 @@ fn cmd_claim(id: String) -> ! {
             return Err(dream_claim_refusal(&current.id));
         }
         let current_workflow = load_workflow_for_board(Path::new("."), current_board)?;
-        if let Some(config) = current_workflow
-            .as_ref()
-            .filter(|_| current.issue_type == IssueType::Item)
-        {
-            // The exact gate: this item's own work order must resolve inside
-            // the canonical root. Shadow-workflow detection is a text
-            // heuristic and reports below as a warning, never a refusal.
+        if let Some(config) = current_workflow.as_ref() {
+            if current.issue_type == IssueType::Track && !is_paired(current) {
+                return Err(track_unpaired_claim_refusal(&current.id));
+            }
+            // The exact gate: this row's own work order (an item's, or a
+            // dispatchable track's) must resolve inside the canonical root.
+            // Shadow-workflow detection is a text heuristic and reports
+            // below as a warning, never a refusal.
             validate_handoff(Path::new("."), config, current)?;
         }
         Ok(())
@@ -1476,7 +1522,7 @@ fn cmd_claim(id: String) -> ! {
 
     let warnings = workflow
         .as_ref()
-        .filter(|_| claimed.issue_type == IssueType::Item)
+        .filter(|_| pairable(claimed.issue_type))
         .map(|config| check_workflow_sprawl_for_issue(Path::new("."), &issues, config, &claimed.id))
         .unwrap_or_default();
 
@@ -1502,6 +1548,13 @@ fn cmd_done(id: String, assessment: Option<String>) -> ! {
     let (issues, workflow) = load_board_workflow(&store);
     let issue = find_issue(&issues, &id);
     let session = require_session_identity();
+
+    // A track closes only over finished items. Refuse before any store
+    // write, exit 2, and name what is open; the store re-checks under the
+    // lock on every close path as the backstop against a race.
+    if let Some(reason) = track_close_refusal(&issue, &issues) {
+        output_error(&reason, EXIT_NEEDS_AUTHORIZATION);
+    }
 
     // A managed item closes only on recorded acceptance by an authorized
     // coordinator (or the operator, or the claim-holder once acceptance is
@@ -1565,7 +1618,7 @@ fn cmd_done(id: String, assessment: Option<String>) -> ! {
     let mut warnings = managed_warnings;
     if let Some(config) = workflow
         .as_ref()
-        .filter(|_| completed.issue.issue_type == IssueType::Item)
+        .filter(|_| pairable(completed.issue.issue_type) && is_paired(&completed.issue))
     {
         if let Err(error) = validate_handoff(Path::new("."), config, &completed.issue) {
             warnings.push(format!("handoff pairing: {}", error));
@@ -1731,9 +1784,18 @@ fn cmd_handoff_seal(id: String) -> ! {
         )
     });
     let issue = find_issue(&issues, &id);
-    if issue.issue_type != IssueType::Item {
+    if !pairable(issue.issue_type) {
         output_error(
-            "Only actionable items own canonical handoffs",
+            "Only items and dispatchable tracks own canonical handoffs",
+            EXIT_USER_ERROR,
+        );
+    }
+    if issue.issue_type == IssueType::Track && !is_paired(&issue) {
+        output_error(
+            &format!(
+                "{} has no handoff to seal; give the track one with `agent-do manna handoff attach {}`",
+                issue.id, issue.id
+            ),
             EXIT_USER_ERROR,
         );
     }
@@ -1748,6 +1810,101 @@ fn cmd_handoff_seal(id: String) -> ! {
         age: (&sealed).into(),
         issue: sealed,
     });
+}
+
+/// `handoff attach <track-id>`: give an existing track its dispatch work
+/// order, idempotently. A track already carrying a valid pair reports
+/// `changed: false`; a document already at the canonical path is adopted
+/// (body kept, frontmatter normalized, binding computed) rather than
+/// overwritten; otherwise the generated order is created. Claims, status,
+/// dependencies and children are never touched: the attach transaction
+/// carries the lifecycle unchanged, and only the owner may run it on a
+/// claimed track.
+fn cmd_handoff_attach(id: String) -> ! {
+    let store = MannaStore::new(Path::new("."));
+    if !store.is_initialized() {
+        output_error(
+            "Storage not initialized. Run 'manna-core init' first.",
+            EXIT_USER_ERROR,
+        );
+    }
+    let (issues, workflow) = load_board_workflow(&store);
+    let config = workflow.as_ref().unwrap_or_else(|| {
+        output_error(
+            "Legacy boards do not pair handoffs; admit the board with `agent-do manna migrate` first",
+            EXIT_USER_ERROR,
+        )
+    });
+    let issue = find_issue(&issues, &id);
+    match issue.issue_type {
+        IssueType::Dream => output_error(
+            &format!(
+                "{} is a dream and never carries a work order; convert it first with `agent-do manna update {} --type track` (or --type item)",
+                issue.id, issue.id
+            ),
+            EXIT_NEEDS_AUTHORIZATION,
+        ),
+        IssueType::Item if is_paired(&issue) => output_error(
+            &format!(
+                "{} is an item and was paired at creation ({}); edit that file and run `agent-do manna handoff seal {}`",
+                issue.id,
+                issue.prompt.as_deref().unwrap_or(""),
+                issue.id
+            ),
+            EXIT_USER_ERROR,
+        ),
+        IssueType::Item => output_error(
+            &format!(
+                "{} is a strict item missing its pair; that is board drift, not a track: run `agent-do manna reconcile`",
+                issue.id
+            ),
+            EXIT_USER_ERROR,
+        ),
+        IssueType::Track => {}
+    }
+    let session = require_session_identity();
+    if let Err(error) = issue.require_owner(&session) {
+        output_error(&error, EXIT_USER_ERROR);
+    }
+    if is_paired(&issue) {
+        match validate_handoff(Path::new("."), config, &issue) {
+            Ok(_) => output_success(HandoffAttachData {
+                changed: false,
+                adopted: false,
+                age: (&issue).into(),
+                issue,
+            }),
+            Err(error) => output_error(
+                &format!(
+                    "{} already carries {} but it does not validate: {}. Edit it and run `agent-do manna handoff seal {}`",
+                    issue.id,
+                    issue.prompt.as_deref().unwrap_or(""),
+                    error,
+                    issue.id
+                ),
+                EXIT_USER_ERROR,
+            ),
+        }
+    }
+    let relative = match canonical_handoff_path(Path::new("."), config, &issue, None) {
+        Ok(path) => path,
+        Err(error) => output_error(&error, EXIT_USER_ERROR),
+    };
+    let adopted = Path::new(".").join(&relative).is_file();
+    let attached = if adopted {
+        adopt_handoff(Path::new("."), &store, config, &issue)
+    } else {
+        attach_handoff(Path::new("."), &store, config, &issue, &issue, None)
+    };
+    match attached {
+        Ok(attached) => output_success(HandoffAttachData {
+            changed: true,
+            adopted,
+            age: (&attached).into(),
+            issue: attached,
+        }),
+        Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
+    }
 }
 
 fn cmd_block(id: String, blocker_id: String) -> ! {
@@ -1931,9 +2088,24 @@ fn cmd_show(id: String, json: bool) -> ! {
     // Find issue
     let issue = find_issue(&issues, &id);
 
-    let data = IssueData {
+    // A track answers with its children: what is done, what is claimable
+    // now and in which order, what is held or waiting and why. The dispatch
+    // protocol reads this before every claim; nothing else is a ledger.
+    let children = (issue.issue_type == IssueType::Track).then(|| {
+        track_children(
+            &issues,
+            &issue,
+            &handoff_order_ids(Path::new(".")),
+            &DEFAULT_DECISION_MARKERS
+                .iter()
+                .map(|marker| marker.to_string())
+                .collect::<Vec<_>>(),
+        )
+    });
+    let data = ShowData {
         age: (&issue).into(),
         issue,
+        children,
     };
     if json {
         output_success_json(data);
@@ -2026,9 +2198,13 @@ fn cmd_update(request: UpdateRequest) -> ! {
     }
     if let Some(new_prompt) = prompt {
         let trimmed = new_prompt.trim();
-        if workflow.is_some() && trimmed.is_empty() && issue.issue_type == IssueType::Item {
+        if workflow.is_some()
+            && trimmed.is_empty()
+            && pairable(issue.issue_type)
+            && (issue.issue_type == IssueType::Item || is_paired(&before))
+        {
             output_error(
-                "Strict workflow items cannot clear their handoff pointer",
+                "Strict workflow rows cannot clear their handoff pointer",
                 EXIT_USER_ERROR,
             );
         }
@@ -2054,16 +2230,16 @@ fn cmd_update(request: UpdateRequest) -> ! {
     let authorization = conversion_authorization(&issue.id, type_before, issue.issue_type);
 
     let updated = if let Some(config) = workflow.as_ref() {
-        match (
-            type_before == IssueType::Item,
-            issue.issue_type == IssueType::Item,
-        ) {
+        let prompt_requested = prompt_request
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        // Pairing follows the row, not only its type: every strict item is
+        // paired, a track is paired once it has a dispatch work order, and a
+        // dream never is. The arms are (paired before, pairable after).
+        match (is_paired(&before), pairable(issue.issue_type)) {
             (true, true) => {
-                if let Some(requested) = prompt_request
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
+                if let Some(requested) = prompt_requested {
                     if prompt_before.as_deref() != Some(requested) {
                         output_error(
                             "Strict workflow handoff pointers are stable; edit and seal the linked file instead of repointing the item",
@@ -2072,7 +2248,14 @@ fn cmd_update(request: UpdateRequest) -> ! {
                     }
                 }
                 issue.prompt = prompt_before.clone();
-                match rebind_handoff_metadata(Path::new("."), &store, config, &before, &issue) {
+                let rebound = if type_before == issue.issue_type {
+                    rebind_handoff_metadata(Path::new("."), &store, config, &before, &issue)
+                } else {
+                    // Item <-> track: the body's protocol differs by kind, so
+                    // the document is regenerated under the same pointer.
+                    regenerate_handoff(Path::new("."), &store, config, &before, &issue)
+                };
+                match rebound {
                     Ok(issue) => issue,
                     Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
                 }
@@ -2080,26 +2263,37 @@ fn cmd_update(request: UpdateRequest) -> ! {
             (false, true) => {
                 issue.prompt = None;
                 issue.handoff_digest = None;
-                match attach_handoff(
-                    Path::new("."),
-                    &store,
-                    config,
-                    &before,
-                    &issue,
-                    prompt_request.as_deref(),
-                ) {
-                    Ok(issue) => issue,
-                    Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
+                if type_before == IssueType::Track && issue.issue_type == IssueType::Track {
+                    // A container track's metadata changes without acquiring
+                    // a work order; `handoff attach` is the explicit act.
+                    if prompt_requested.is_some() {
+                        output_error(
+                            &format!(
+                                "A track takes its dispatch work order through `agent-do manna handoff attach {}`, not through update --prompt",
+                                issue.id
+                            ),
+                            EXIT_USER_ERROR,
+                        );
+                    }
+                    replace_metadata_atomically(&store, &before, &issue, &session)
+                } else {
+                    match attach_handoff(
+                        Path::new("."),
+                        &store,
+                        config,
+                        &before,
+                        &issue,
+                        prompt_request.as_deref(),
+                    ) {
+                        Ok(issue) => issue,
+                        Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
+                    }
                 }
             }
             (true, false) => {
-                if prompt_request
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty())
-                {
+                if prompt_requested.is_some() {
                     output_error(
-                        "Non-item rows cannot retain a strict handoff pointer",
+                        "Dreams cannot retain a strict handoff pointer",
                         EXIT_USER_ERROR,
                     );
                 }
@@ -2109,13 +2303,9 @@ fn cmd_update(request: UpdateRequest) -> ! {
                 }
             }
             (false, false) => {
-                if prompt_request
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty())
-                {
+                if prompt_requested.is_some() {
                     output_error(
-                        "Strict workflow boards pair handoffs only with actionable items",
+                        "Strict workflow boards pair handoffs with items and tracks, never dreams",
                         EXIT_USER_ERROR,
                     );
                 }
@@ -2198,7 +2388,7 @@ fn cmd_delete(id: String) -> ! {
     }
     if let Some(config) = workflow
         .as_ref()
-        .filter(|_| issue.issue_type == IssueType::Item)
+        .filter(|_| pairable(issue.issue_type) && is_paired(&issue))
     {
         if let Err(error) = delete_paired_issue(Path::new("."), &store, config, &issue) {
             output_error(&error, EXIT_SYSTEM_ERROR);
@@ -2587,7 +2777,12 @@ fn lint_strict_workflow(issues: &[Issue], config: &WorkflowConfig) -> Vec<LintFi
         });
     }
     for issue in issues {
-        if issue.status == IssueStatus::Done || issue.issue_type != IssueType::Item {
+        if issue.status == IssueStatus::Done || !pairable(issue.issue_type) {
+            continue;
+        }
+        // A track without a pair is a container, not a defect; one with a
+        // pair is held to the same contract as an item.
+        if issue.issue_type == IssueType::Track && !is_paired(issue) {
             continue;
         }
         if issue
@@ -3339,7 +3534,7 @@ fn check_workflow_sprawl(base: &Path, issues: &[Issue], config: &WorkflowConfig)
     }
 
     for issue in issues {
-        if issue.status == IssueStatus::Done || issue.issue_type != IssueType::Item {
+        if issue.status == IssueStatus::Done || !pairable(issue.issue_type) {
             continue;
         }
         let pointer = match issue.prompt.as_deref() {
@@ -3533,7 +3728,10 @@ fn apply_reconcile_fixes(
         // Managed items: closure and claim transfer belong to the
         // coordinator's recorded acceptance and release, never to a repair
         // that infers completion from a trailer or a dead pid.
-        if matches!(finding.kind, FindingKind::DeadClaim | FindingKind::LandedOpen) {
+        if matches!(
+            finding.kind,
+            FindingKind::DeadClaim | FindingKind::LandedOpen
+        ) {
             if let Some(reason) = managed_cli::managed_guard(&id) {
                 failures.push(format!("{}: {}", id, reason));
                 continue;
@@ -3607,6 +3805,12 @@ fn apply_reconcile_fixes(
                     continue;
                 };
                 if expected.status != IssueStatus::InProgress {
+                    continue;
+                }
+                // A track never closes mechanically over open items: a
+                // trailer on the track proves board paperwork, not the work.
+                if let Some(reason) = track_close_refusal(&expected, &issues) {
+                    failures.push(format!("{}: {}", id, reason));
                     continue;
                 }
                 // Only a VERIFIED ownership proof bypasses the liveness
@@ -3850,7 +4054,9 @@ fn main() {
             attempt,
             repin,
             json,
-        } => managed_cli::cmd_accept(id, check, target, evidence, submission, attempt, repin, json),
+        } => managed_cli::cmd_accept(
+            id, check, target, evidence, submission, attempt, repin, json,
+        ),
         Commands::Assess {
             id,
             target,
@@ -3862,6 +4068,7 @@ fn main() {
         Commands::Abandon { id } => cmd_abandon(id),
         Commands::Handoff { command } => match command {
             HandoffCommands::Seal { id } => cmd_handoff_seal(id),
+            HandoffCommands::Attach { id } => cmd_handoff_attach(id),
         },
         Commands::Federation { command } => match command {
             FederationCommands::Init => cmd_federation_init(),

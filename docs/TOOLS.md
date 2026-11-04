@@ -2735,9 +2735,9 @@ Concurrency: `write`
 - `status`: Show current session and claimed issues
 - `state`: Emit the full derived board model as JSON or YAML, including graph buckets, receipts, federation, drift, coord attention, and hash-current cached presentation fields
 - `estate`: Emit every registered board as the /api/boards model without starting or contacting the serve daemon
-- `create`: Create an issue; actionable items generate a linked .handoff work order (--type track|item|dream, --track, --source)
-- `claim`: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted)
-- `done`: Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator: done \<id> [--assessment \<digest>]
+- `create`: Create an issue; items and tracks generate a linked .handoff work order, a track's being the dispatch protocol one agent follows through the track's items in dependency order (--type track|item|dream, --track, --source)
+- `claim`: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted and tracks until `handoff attach` gives them a work order)
+- `done`: Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator, and a track only when every item in it is done: done \<id> [--assessment \<digest>]
 - `identity`: Print this session''s public label and ownership proof (the token never prints)
 - `coordinator`: Scoped coordinator authority, operator-granted and proof-bound: coordinator grant --session \<id> --proof \<sha256> [--item \<id>] [--track \<id>] --reason \<text> | revoke \<grant-id> --reason \<text> | list
 - `managed`: Coordinator-owned closure: managed require \<id> --check \<name>... | correct \<id> --reason \<text> | release \<id> --reason \<text> [--isolated-checkout \<path>] (needs coord to have verified the worker dead or stopped, or a validated separate working tree; also completes an interrupted release) | history \<id> | recover \<id|board> (finish an incomplete state-plus-audit transaction: an item id for the operator, a granted coordinator, or the session that started it; board for a grant or revocation, operator only) | doctor [--probe] (commands, hook registration, and with --probe an end-to-end run through the real binaries and hooks)
@@ -2747,7 +2747,7 @@ Concurrency: `write`
 - `order`: Move a paired item to a dense one-based handoff priority and synchronize generated presentation
 - `sync`: Derive numbered handoff filenames, blocker launch gates, and the README index from board state
 - `abandon`: Release a claimed issue back to open
-- `handoff`: Seal and bind an intentional canonical handoff edit
+- `handoff`: Seal and bind an intentional canonical handoff edit (handoff seal \<id>); give an existing track its dispatch work order idempotently, adopting a document already at the canonical path (handoff attach \<track-id>)
 - `federation`: Initialize, inspect, or explicitly fork a portable Manna federation identity
 - `relate`: Add one typed outbound cross-board relation
 - `unrelate`: Remove one typed outbound cross-board relation
@@ -2755,7 +2755,7 @@ Concurrency: `write`
 - `block`: Add a blocker dependency
 - `unblock`: Remove a blocker dependency
 - `list`: List issues (--status, --type, --track filters)
-- `show`: Show issue details
+- `show`: Show issue details; a track also reports its children (what is done, the next eligible item in dispatch order, what is held or waiting and why)
 - `update`: Update issue metadata; lifecycle state changes require claim, done, abandon, block, or unblock
 - `delete`: Delete issue
 - `context`: Get session context
@@ -2785,6 +2785,8 @@ agent-do manna show 1
 agent-do manna dream 'Unify the auth flows'
 # convert a dream into claimable work
 agent-do manna update mn-abc123 --type item
+# let one agent build a whole track in dependency order
+agent-do manna handoff attach mn-abc123
 # check the board for drift
 agent-do manna reconcile --write-drift
 # see what still blocks closing an item and who may close it

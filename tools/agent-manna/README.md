@@ -231,7 +231,10 @@ and any still-building presence count. Output is YAML by default or JSON with
 
 Create a new issue. On strict boards, each actionable item also creates a
 repository-relative `.handoff/<mn-id>-<slug>.md` work order and stores that
-path in the issue's `prompt` field. A write-ahead transaction makes the row and
+path in the issue's `prompt` field. A new track (`--type track`) is paired the
+same way: its generated document is the dispatch protocol one agent follows to
+work the track's items in dependency order (see "Tracks as whole-track build
+assignments" below). Dreams never pair. A write-ahead transaction makes the row and
 file recover as one pair after interruption. The transaction is HMAC-bound to
 the canonical project root, complete rows, filename, canonical paths, and
 payload, then installed with atomic no-clobber semantics.
@@ -311,6 +314,10 @@ issue:
   structured frontmatter, exact Claim section, and whole-document SHA-256
   binding
 - After claim, only the pinned `claimed_by` session may mutate or close the row
+- A track is claimable only once it carries a dispatch work order (new tracks
+  do; an older container track takes one through `handoff attach`). Claiming a
+  track without one exits 2 and names that command; its items stay claimable
+  individually either way
 
 ### `done <id>`
 
@@ -346,6 +353,13 @@ that target, and an identity that is the operator, a granted coordinator, or
 the claim-holder; trailer commits are receipts, never acceptance. Pass
 `--assessment <digest>` from `assess` and the close refuses when the item's
 acceptance state moved since that look. See "Managed lifecycle" below.
+
+For a **track**, `done` closes only when every item in the track is done. Any
+other state refuses with exit 2, writes nothing, and lists the open items with
+their status; a submitted-but-unaccepted managed item is open. The same gate
+runs under the board lock on every close path (owner, operator, landed
+evidence, acceptance) and in `reconcile --fix`, so no authority closes a track
+over open work. An empty track cannot close: give it items or `delete` it.
 
 ### Managed lifecycle
 
@@ -524,7 +538,17 @@ issue:
   claimed_at: null
 ```
 
-### `handoff seal <id>`
+For a track, `show` also carries a `children` block derived from the board at
+that moment: `total`, `done`, `open`; `eligible` (claimable now, in dispatch
+order: handoff priority, then the oldest row, then the lowest id) and `next`
+(its first entry, or `null`); `held` (items another session holds, with the
+owner), `waiting` (items whose blockers are open, `missing` from the board, or
+part of a `cycle`), `decisions` (open items carrying a decision marker, a
+human's to rule on), `dreams`, `added_since_claim` (items created after the
+track was claimed), and `stall`, a sentence saying why `next` is null. Items
+print exactly as before; the block is absent.
+
+### `handoff seal <id>` and `handoff attach <track-id>`
 
 Bind an intentional edit to the board. The command preserves the handoff body,
 normalizes authoritative frontmatter, computes the canonical document SHA-256
@@ -537,6 +561,21 @@ agent-do manna handoff seal mn-abc123
 
 Until sealing succeeds, `claim` fails closed. A comment containing a claim
 command is never a handoff.
+
+`handoff attach <track-id>` gives an existing track its dispatch work order,
+idempotently: a track that already carries a valid pair reports
+`changed: false`; a document already sitting at the canonical path is adopted
+(body kept byte for byte, frontmatter normalized, binding computed) rather than
+overwritten, and reports `adopted: true`; otherwise the generated protocol is
+created. A document that does not validate refuses with the defect named and
+nothing written. The attach transaction carries the lifecycle unchanged: it
+never touches the claim, status, dependencies, or items, and on a claimed
+track only the holder may run it. Items refuse (they pair at creation) and
+dreams refuse (convert first).
+
+```bash
+agent-do manna handoff attach mn-track1
+```
 
 ### `update <id> [metadata]`
 
@@ -631,6 +670,56 @@ Implementation: `serve/serve.py` (daemon, registry, two-clock cache),
 `serve/board.py` (core-state adapter and estate helpers), `serve/digest.py`
 (digests), `serve/estate.py` (daemon-independent estate CLI adapter), and
 `src/state.rs` (the canonical derivation).
+
+## Tracks as whole-track build assignments
+
+A track is an organizational container, and it can also be an assignment: the
+owner selects either the track (one agent works its items in dependency order)
+or individual items (ordinary multi-agent dispatch). Both go through the same
+board claim flow; nothing new is clicked or configured.
+
+**Flow.** `create --type track` pairs the track with a sealed dispatch work
+order; an older container track takes one through `handoff attach <id>`. The
+paired track enters `.manna/handoff-order.yaml` and the generated index like an
+item (`order <id> <n>` moves it). `state` derives it as `ready` while the board
+offers an item to claim (or every item is done and the track can close), as
+`waiting` while all remaining work is held elsewhere, cycled, missing a
+dependency, or a human's to rule on, as `active` once claimed, and `done` when
+closed; a track without a handoff keeps `effective: track`. A ready track sits
+in `next` with `prompt`, `handoff_digest`, and `handoff_exists`, the fields a
+launcher reads, and its `kind` stays `track`, so grouping is unchanged. The
+dispatched agent claims the track, runs `show <track> --json`, claims
+`children.next` individually, follows that item's own sealed work order to its
+own close, re-reads `show` before every selection, and stops when `next` is
+null, recording `children.stall`. A lane that ends releases the track with
+`abandon`; a successor claims it and rebuilds progress from the board.
+
+**Limits, by design.**
+- Holding a track grants only the right to claim its eligible items one at a
+  time. It reserves no item, blocks no independent worker (the board's atomic
+  claim decides), confers no coordinator authority, accepts nothing, and
+  authorizes no merge, deploy, push, or pull request.
+- A refused child claim is final for that child: the agent takes the next
+  eligible item or stops. Nothing retries around a refusal.
+- Items added to a track after the claim appear under `added_since_claim`;
+  each carries its own sealed work order, and the agent names the change of
+  scope before claiming one. Items moved out or deleted leave the list; one
+  the agent already holds stays its own under its own work order.
+- The track closes only when every item in it is done (see `done`); an empty
+  track cannot close. Nothing here wakes an idle or closed worker, spawns
+  one, or schedules anything: the board changes state, and whoever reads it
+  next acts.
+- A paired track is `effective: ready|waiting|active|done` on every consumer
+  of `state`. The Holy board's worker dispatch additionally guards
+  `kind == "item"` in its refusal
+  (`macos/Sources/HolyGhostty/Board/HolyMannaBoardWorker.swift`,
+  `HolyMannaWorkerDispatch.refusal`); until that guard admits a ready track,
+  Holy will refuse to launch one even though the row carries every field it
+  reads. That counterpart is Holy's to change; `manna serve`'s launch pointer
+  needs nothing.
+- Older `manna-core` binaries read a strict board that holds a paired track as
+  invalid (`cannot carry an item handoff`); rebuild them. No track gains a
+  handoff until someone creates one or runs `handoff attach`.
 
 ## Architecture
 

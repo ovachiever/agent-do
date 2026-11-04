@@ -112,7 +112,17 @@ impl MannaStore {
                         issue.id
                     )));
                 }
-                crate::issue::IssueType::Track | crate::issue::IssueType::Dream
+                // A track's handoff is optional, but never half: a pointer
+                // without a binding (or the reverse) is a broken pair.
+                crate::issue::IssueType::Track
+                    if issue.prompt.is_some() != issue.handoff_digest.is_some() =>
+                {
+                    return Err(MannaError::MutationRejected(format!(
+                        "strict workflow track {} carries half a handoff pair",
+                        issue.id
+                    )));
+                }
+                crate::issue::IssueType::Dream
                     if issue.prompt.is_some() || issue.handoff_digest.is_some() =>
                 {
                     return Err(MannaError::MutationRejected(format!(
@@ -528,9 +538,8 @@ impl MannaStore {
             return Err(MannaError::NotInitialized);
         }
         let _board_lock = self.lock_board()?;
-        let completed = self.finish_issue_unlocked(id, precondition, |issue| {
-            issue.complete_on_acceptance()
-        })?;
+        let completed =
+            self.finish_issue_unlocked(id, precondition, |issue| issue.complete_on_acceptance())?;
         let audit_warning = after_write(&completed).err();
         Ok((completed, audit_warning))
     }
@@ -642,6 +651,12 @@ impl MannaStore {
             .position(|issue| issue.id == id)
             .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
         let mut issue = issues[index].clone();
+        // A track closes only when every item in it is done. The gate runs
+        // under the lock on every close path (owner, evidence, operator,
+        // acceptance), so no authority closes a track over open work.
+        if let Some(reason) = crate::track::track_close_refusal(&issue, &issues) {
+            return Err(MannaError::MutationRejected(reason));
+        }
         if issue.issue_type != crate::issue::IssueType::Dream {
             precondition(&issue, &issues).map_err(MannaError::MutationRejected)?;
         }
@@ -936,7 +951,7 @@ impl MannaStore {
             .require_owner(session)
             .map_err(MannaError::MutationRejected)?;
         if self.board_is_strict()?
-            && issues[index].issue_type == crate::issue::IssueType::Item
+            && crate::track::pairable(issues[index].issue_type)
             && (issues[index].prompt.is_some() || issues[index].handoff_digest.is_some())
         {
             return Err(MannaError::MutationRejected(

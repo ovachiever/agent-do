@@ -125,8 +125,14 @@ identity instead of inferring mode from missing files.
 `create` generates the item handoff and writes its path into `prompt`; neither
 side is optional for an active item. Structured frontmatter binds workflow
 version, item, track, source, base commit, scope, inputs, and the SHA-256 of
-the canonical document with its self-referential binding field normalized. The same digest is stored in `handoff_digest`. Tracks
-and dreams do not carry handoffs. A strict pointer cannot be repointed or
+the canonical document with its self-referential binding field normalized. The same digest is stored in `handoff_digest`. Dreams
+never carry handoffs. A track carries one optionally, both fields or neither:
+`create --type track` pairs it with a dispatch work order (the protocol one
+agent follows through the track's items in dependency order) and
+`handoff attach <track-id>` supplies one to an older container track
+idempotently, adopting a document already at the canonical path. A paired
+track enters `handoff-order.yaml` and the generated index exactly like an
+item. A strict pointer cannot be repointed or
 cleared through `update`; after editing the document, run
 `manna handoff seal <id>` to update the binding deliberately.
 
@@ -253,6 +259,14 @@ credential. Host runtimes may derive that proof from an opaque thread identity
 and a machine-local key outside the repository. Plain shells and scripted lanes
 provide both `MANNA_SESSION_ID` and `MANNA_SESSION_TOKEN`. `update --status` is
 rejected; lifecycle state moves only through the named lifecycle verbs.
+
+A track's `done` has one more precondition, checked under the same lock on
+every close path: every `type: item` row whose `track` edge names it is
+`done`. Submitted-but-unaccepted managed items are open; an empty track never
+closes. `show <track>` derives a `children` block (eligible items in dispatch
+order, next, held, waiting with missing and cycle flags, decisions, dreams,
+added_since_claim, stall) from the board at read time; nothing about it is
+stored.
 
 Strict pair create, delete, seal, attach, detach, and presentation rename write an HMAC-authenticated
 transaction intent before touching either side. The key lives outside the
