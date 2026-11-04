@@ -65,7 +65,32 @@ impl FindingKind {
     }
 
     pub fn from_name(name: &str) -> Option<FindingKind> {
-        FindingKind::ALL.iter().copied().find(|kind| kind.name() == name)
+        FindingKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.name() == name)
+    }
+
+    /// The kinds `reconcile --fix` has a repair for: releasing a claim coord
+    /// has positively verified gone, and clearing resolved blockers. Every
+    /// other kind is advisory in every path. `landed_open` in particular has
+    /// no repair anywhere (mn-880173): a `Manna:` trailer identifies the work
+    /// a commit advanced, it does not approve completion, so no reconcile
+    /// path transitions a row to done; closure is `manna done` or managed
+    /// acceptance.
+    pub fn repairable(self) -> bool {
+        matches!(self, FindingKind::DeadClaim | FindingKind::BlockerDesync)
+    }
+
+    /// The repairable kinds, named for error text.
+    pub fn repairable_names() -> String {
+        FindingKind::ALL
+            .iter()
+            .copied()
+            .filter(|kind| kind.repairable())
+            .map(|kind| kind.name())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -233,6 +258,11 @@ pub fn parse_session_pid(session_id: &str) -> Option<u32> {
 
 /// landed_open: issues referenced by landed commit trailers but not yet done.
 ///
+/// Advisory in every path. The trailer identifies the work a commit advanced;
+/// completion and acceptance are declared by `manna done` (claim-holder,
+/// operator, or landed evidence, each an explicit act) or by managed
+/// acceptance, never inferred here (mn-880173).
+///
 /// `landed` maps issue ID -> commit SHAs whose bodies carry its trailer.
 /// Report-only: merge judgment stays with the human/orchestrator.
 pub fn check_landed_open(issues: &[Issue], landed: &HashMap<String, Vec<String>>) -> Vec<Finding> {
@@ -259,7 +289,7 @@ pub fn check_landed_open(issues: &[Issue], landed: &HashMap<String, Vec<String>>
                 ),
                 evidence: Some(evidence.join(", ")),
                 proposed_fix: Some(format!(
-                    "review the commits; if the work landed, claim and done {}",
+                    "review the commits; a trailer identifies the work, it does not approve completion — when the work is complete and accepted, claim and done {} (or the operator closes it)",
                     issue.id
                 )),
             });

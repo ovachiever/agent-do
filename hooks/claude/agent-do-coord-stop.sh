@@ -56,17 +56,17 @@ if [ -d .manna ]; then
     # Same session anchor manna claims used during the session, so the drift
     # file's session field names who last reconciled.
     [ -n "$SESSION_ID" ] && export MANNA_SESSION_ID="$SESSION_ID"
-    # --fix --only names the two repairs the tool itself calls safe (abandon
-    # claims coord has positively verified dead or stopped, unblock resolved
-    # blockers); judgment findings stay findings. The landed_open close is not
-    # among them: a `Manna:` trailer proves a commit advanced an item, not that
-    # the item is complete or accepted, and this hook runs as whichever session
-    # happens to end, never as the claimant or the operator. Without --only the
-    # full cure ran here and closed submitted-but-unaccepted items over their
-    # claimants (mn-54fe40 on 2026-11-04; the review of ec30858, mn-880173).
-    # A landed row stays a finding in drift.yaml with its next step; a hand
-    # with authority (`manna done`, or an explicit `manna reconcile --fix`)
-    # closes it.
+    # --fix --only names the only two repairs the tool has (abandon claims
+    # coord has positively verified dead or stopped, unblock resolved
+    # blockers); judgment findings stay findings. landed_open has no repair in
+    # any path since mn-880173: a `Manna:` trailer identifies the work a commit
+    # advanced, it does not approve completion, and this hook runs as whichever
+    # session happens to end, never as the claimant or the operator. Before
+    # that, the full cure ran here and closed submitted-but-unaccepted items
+    # over their claimants (mn-54fe40 on 2026-11-04). A landed row stays a
+    # finding in drift.yaml with its next step; `manna done` (claim-holder,
+    # operator, or landed evidence) or managed acceptance closes it. --only
+    # keeps this hook's contract explicit and refuses a misspelled kind by name.
     bounded_run 4 "$AGENT_DO" manna reconcile --fix --only dead_claim,blocker_desync --write-drift --json >/dev/null 2>&1
 fi
 

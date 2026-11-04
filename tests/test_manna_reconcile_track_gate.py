@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
-"""`manna reconcile --fix` never closes a track over an item that reached it after inspection (mn-9b4359, review round two).
+"""`manna reconcile --fix` never closes a track, and `manna done` keeps the track gate under the lock (mn-9b4359; mn-880173).
 
 Replays the independent review's probe in an isolated estate with the real
 manna binary: a paired track, claimed, with a landed `Manna:` trailer commit,
-whose every item is done when reconcile inspects the board. The landed_open
-cure then reads coord to rule on the claimant's liveness; that read is the
-synchronization boundary. A stand-in `agent-do` on PATH answers it, and the
-first time it is asked it runs one real manna command against the same board
-before answering: it creates a new item under the track, or moves an open item
-into it. Before the fix the cure checked the track gate against the issue list
-it had loaded before the coord read, and its locked write compared only the
-track row with that list, so the late item was invisible and the track closed
-over it (review.md, race.log, 2026-11-04). The gate now re-runs against the
-rows under the board lock, inside the write itself, and the store refuses any
-transition to done that would close a track over an open item, whatever path
-asks for it.
+whose every item is done when reconcile inspects the board. Reconcile then
+reads coord to rule on the claimant; that read is the synchronization boundary.
+A stand-in `agent-do` on PATH answers it, and the first time it is asked it
+runs one real manna command against the same board before answering: it
+creates a new item under the track, or moves an open item into it. Round two
+of mn-9b4359 (408b5e7) put the track gate inside the locked write so the late
+item refused the cure's close. mn-880173 then retired the close from every
+reconcile path: `landed_open` is advisory, a trailer identifies work and does
+not approve completion, so the only transitions reconcile makes are releasing
+a claim coord positively verified gone and clearing resolved blockers. The
+stand-in therefore reports the track owner dead and bound by its claim proof,
+and what this fixture proves at the boundary is:
 
-Variants:
-  1. an item is created under the track between inspection and the write:
-     refused, the refusal names the new item, the track keeps its claim
-  2. an open item is moved into the track between inspection and the write:
-     refused, the refusal names the moved item, the track keeps its claim
-Control:
-  3. nothing changes at the boundary: the cure still closes the track on the
-     landed evidence and releases the orphaned claim
-
-The cure reaches its write only over a claimant coord has positively verified
-gone (mn-880173: a stale, unbound, ambiguous or unseen claimant refuses before
-the write, with status and claim kept). The stand-in therefore answers every
-peers read with coord's verdict on the track owner: one record bound by the
-claim proof, dead. The gate under test is unchanged.
+Variants (the late item arrives between inspection and the repair):
+  1. an item is created under the track: the track is not done; its dead
+     claim is released and the track reopens; the late item is open under it
+  2. an open item is moved into the track: the same
+Controls:
+  3. `--only landed_open` is refused by name as advisory, nothing written
+  4. explicit completion keeps the gate: `manna done` on the track refuses
+     while an item is open, naming it, and closes once every item is done
 
 Nothing here touches the developer's repositories or $HOME.
 """
@@ -55,6 +49,7 @@ require = fx.require
 
 GATE = "A track closes only when every item in it is done"
 CLOSED = "closed on landed evidence"
+ADVISORY = "landed_open is advisory"
 
 # The stand-in agent-do. manna resolves `agent-do` on PATH, finds no sibling
 # tools/agent-coord beside it, and routes `coord peers --all --json` through it.
@@ -200,12 +195,12 @@ def advisory_pass(root: Path, estate: fx.Estate, stranger: fx.Session, tag: str,
     require(estate.row(track)["status"] == "in_progress", f"{tag}: an advisory pass mutates nothing")
 
 
-def refused_variant(root: Path, estate: fx.Estate, stranger: fx.Session, label: str, action_for: callable) -> None:
+def boundary_variant(root: Path, estate: fx.Estate, stranger: fx.Session, label: str, action_for: callable) -> None:
     owner = fx.Session(estate.base, "track-owner")
     track, item, before = build_landed_track(estate, owner, label)
     advisory_pass(root, estate, stranger, label, track, before)
     boundary = Boundary(root, estate, stranger, label, action_for(track), before)
-    code, payload = boundary.reconcile("--fix", "--only", "landed_open")
+    code, payload = boundary.reconcile("--fix")
 
     acted = boundary.action_result()
     require(acted["code"] == 0, f"{label}: the boundary's manna command succeeded against the live board: {acted}")
@@ -218,22 +213,17 @@ def refused_variant(root: Path, estate: fx.Estate, stranger: fx.Session, label: 
     require(boundary.peers_reads() >= 1, f"{label}: reconcile read coord at least once: {boundary.log.read_text() if boundary.log.exists() else ''}")
 
     after = estate.row(track)
+    require(after["status"] != "done", f"{label}: reconcile never closes a track: {after}")
     require(
-        after["status"] == "in_progress"
-        and after["claimed_by"] == before["claimed_by"]
-        and after["claim_token_hash"] == before["claim_token_hash"]
-        and after.get("claimed_at") == before.get("claimed_at"),
-        f"{label}: the track stays in_progress under its claim: {after}",
+        after["status"] == "open" and not after.get("claimed_by") and not after.get("claim_token_hash"),
+        f"{label}: the dead claim is released and the track reopens; ownership released is not work accepted: {after}",
     )
-    require(not entries(payload, "fixed", track), f"{label}: nothing is fixed for the track: {payload.get('fixed')}")
-    refusals = entries(payload, "fix_failures", track)
-    require(
-        len(refusals) == 1 and GATE in refusals[0] and late in refusals[0],
-        f"{label}: one refusal names the gate and the late item {late}: {refusals}",
-    )
-    require(code != 0, f"{label}: a refused fix exits nonzero, got {code}")
+    require(entries(payload, "fixed", track) == [track], f"{label}: the release is the only repair recorded for the track: {payload.get('fixed')}")
+    require(not any(CLOSED in entry for entry in payload.get("fixed") or []), f"{label}: nothing is closed on landed evidence: {payload.get('fixed')}")
+    require(not entries(payload, "fix_failures", track), f"{label}: no failure for the track: {payload.get('fix_failures')}")
+    require(findings(payload, "landed_open", track), f"{label}: the landed evidence stays a finding with its next step")
     require(estate.row(item)["status"] == "done", f"{label}: the item done before inspection stays done")
-    print(f"  ok: {label}: {late} reached {track} at the boundary; refused: {refusals[0].split(': ', 1)[1]}")
+    print(f"  ok: {label}: {late} reached {track} at the boundary; reconcile released the dead claim (now {after['status']}), closed nothing (exit {code})")
 
 
 def added_action(track: str) -> dict:
@@ -252,26 +242,41 @@ def moved_action_for(estate: fx.Estate, owner: fx.Session) -> callable:
     return action
 
 
-def control_variant(root: Path, estate: fx.Estate, stranger: fx.Session) -> None:
-    label = "all-items-done"
+def only_landed_open_refused(root: Path, estate: fx.Estate, stranger: fx.Session) -> None:
+    label = "--only landed_open"
     owner = fx.Session(estate.base, "track-owner")
     track, item, before = build_landed_track(estate, owner, label)
-    advisory_pass(root, estate, stranger, label, track, before)
     boundary = Boundary(root, estate, stranger, label, None, before)
-    code, payload = boundary.reconcile("--fix", "--only", "landed_open")
-    closed = entries(payload, "fixed", track)
-    require(
-        len(closed) == 1 and CLOSED in closed[0] and before["claimed_by"] in closed[0],
-        f"{label}: the cure closes the track on the landed evidence and names the released claim: {closed} / {payload.get('fix_failures')}",
-    )
-    require(not entries(payload, "fix_failures", track), f"{label}: no refusal for a track whose items are all done: {payload.get('fix_failures')}")
+    proc = fx.manna(["reconcile", "--fix", "--only", "landed_open", "--json"], cwd=estate.primary, env=boundary.env)
+    text = proc.stdout + proc.stderr
+    require(proc.returncode != 0 and ADVISORY in text and "manna done" in text, f"{label}: refused by name, naming what closes an item: {proc.returncode} {text[:400]}")
     after = estate.row(track)
     require(
-        after["status"] == "done" and not after.get("claimed_by") and not after.get("claim_token_hash"),
-        f"{label}: closed and released: {after}",
+        after["status"] == before["status"] and after["claimed_by"] == before["claimed_by"] and after["claim_token_hash"] == before["claim_token_hash"],
+        f"{label}: nothing written: {after}",
     )
     require(estate.row(item)["status"] == "done", f"{label}: the item stays done")
-    print(f"  ok: {label}: --fix closed {track} (exit {code})")
+    print(f"  ok: {label}: refused (exit {proc.returncode}); the track is untouched")
+
+
+def explicit_done_keeps_the_gate(estate: fx.Estate) -> None:
+    label = "explicit done"
+    owner = fx.Session(estate.base, "track-owner")
+    track, item, before = build_landed_track(estate, owner, label)
+    late = create_row(estate, owner, "late item", "open under the track", "--track", track)
+    commit_board(estate, f"board: file {late}")
+    refused = fx.manna(["done", track], cwd=estate.primary, env=owner.env)
+    text = refused.stdout + refused.stderr
+    require(refused.returncode != 0 and GATE in text and late in text, f"{label}: done refuses over the open item, naming it: {refused.returncode} {text[:400]}")
+    require(estate.row(track)["status"] == "in_progress", f"{label}: the track stays in_progress under its claim")
+    estate.claim(late, owner)
+    closed_late = fx.manna(["done", late], cwd=estate.primary, env=owner.env)
+    require(closed_late.returncode == 0, f"{label}: the owner closes the late item: {closed_late.stderr or closed_late.stdout}")
+    closed = fx.manna(["done", track], cwd=estate.primary, env=owner.env)
+    require(closed.returncode == 0, f"{label}: the owner closes the track once every item is done: {closed.stderr or closed.stdout}")
+    after = estate.row(track)
+    require(after["status"] == "done", f"{label}: closed by its claim-holder: {after}")
+    print(f"  ok: {label}: done refused over {late}, then closed {track} once it was done")
 
 
 def main() -> None:
@@ -288,11 +293,12 @@ def main() -> None:
         # The reconciling session: pinned, not the claimant, not the operator,
         # exactly as the SessionEnd hook's reconcile runs in another lane.
         stranger = fx.Session(base, "other-session")
-        print("items reaching the track between inspection and the write (each refused):")
-        refused_variant(root, estate, stranger, "item-created-at-boundary", added_action)
-        refused_variant(root, estate, stranger, "item-moved-in-at-boundary", moved_action_for(estate, fx.Session(base, "track-owner")))
-        print("control (legitimate completion still closes):")
-        control_variant(root, estate, stranger)
+        print("items reaching the track between inspection and the repair (reconcile closes nothing):")
+        boundary_variant(root, estate, stranger, "item-created-at-boundary", added_action)
+        boundary_variant(root, estate, stranger, "item-moved-in-at-boundary", moved_action_for(estate, fx.Session(base, "track-owner")))
+        print("controls (the advisory finding is refused as a repair; explicit completion keeps the gate):")
+        only_landed_open_refused(root, estate, stranger)
+        explicit_done_keeps_the_gate(estate)
     print("manna reconcile track gate tests passed")
 
 

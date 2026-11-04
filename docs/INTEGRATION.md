@@ -275,7 +275,7 @@ The hooks decide what to inject by looking at the repo, not configuration:
 
 | Signal | Effect |
 |--------|--------|
-| `$CWD/.manna/` exists | SessionStart injects the Manna board (`manna context --max-tokens 1500`) and, when `.manna/drift.yaml` contains findings, the drift greeting; SessionEnd runs `manna reconcile --fix --only dead_claim,blocker_desync --write-drift` (the two safe repairs: claims coord positively verified dead or stopped abandoned, resolved blockers cleared; a landed row is never closed by this hook, only reported with its next step; mn-880173) |
+| `$CWD/.manna/` exists | SessionStart injects the Manna board (`manna context --max-tokens 1500`) and, when `.manna/drift.yaml` contains findings, the drift greeting; SessionEnd runs `manna reconcile --fix --only dead_claim,blocker_desync --write-drift` (the only two repairs `--fix` has: claims coord positively verified dead or stopped abandoned, resolved blockers cleared; `landed_open` is advisory in every path, so a landed row is only ever reported with its next step; mn-880173) |
 | `<git-dir>/agent-do/coord/` exists | SessionEnd runs `coord stop`; SessionStart injects coord interrupts or a focus reminder when active peers exist |
 | `$CWD/.zpc/` exists | SessionStart mentions the experience journal and its status commands |
 | Frontend markers (package.json frameworks, `.tsx`/`.vue`/`.svelte` files, Flutter) | SessionStart injects the design-toolkit workflow |

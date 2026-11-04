@@ -664,9 +664,10 @@ daemon's own pinned identity (`$AGENT_DO_HOME/manna/serve/identity.json`, mode
 use), behind the loopback Host/Origin checks and a per-process token the page
 carries; manna's own refusals print on the row verbatim. Nothing on the page
 edits a file. The SessionEnd hook applies the same two safe repairs
-(`reconcile --fix --only dead_claim,blocker_desync`) and never closes a landed
-row; the daemon's `apply` still runs the full `--fix`, which since mn-880173
-closes only over a claimant coord has positively verified dead or stopped.
+(`reconcile --fix --only dead_claim,blocker_desync`). Neither `apply` nor any
+other `reconcile --fix` closes a row: `landed_open` is advisory in every path
+(mn-880173); a trailer identifies work, and `close` (claim then done) is the
+explicit act that approves it.
 
 Agents never need the daemon: `state --json` is the complete board contract,
 and `estate --json` is the registered-board index contract. `context`, `list`,

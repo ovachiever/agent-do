@@ -1,52 +1,59 @@
 #!/usr/bin/env python3
-"""`manna reconcile --fix` closes an in_progress item only over a claimant coord has positively verified gone (mn-4e7229, mn-880173).
+"""`manna reconcile --fix` never closes an item: landed_open is advisory in every path, and only a claim coord has positively verified gone is released (mn-4e7229, mn-880173).
 
-Replays two probes in an isolated estate with the real manna and coord
-binaries: an in_progress item with a landed `Manna:` trailer commit, claimed by
-a session with a living process, reconciled by a different session with the
-exact call the SessionEnd hook used to make. Before mn-4e7229 the landed_open
-cure matched the claimant by respelling its label (`session-` plus sixteen
-alphanumerics), which names nothing coord uses for a hook-pinned Claude session
-(manna labels it `claude-<16 hex>`, coord names it `session-<12 hex>`), read the
-miss as the orphan wedge, and closed the item. The independent review of that
-fix (mn-880173) then aged a living claimant's coord record three days: `peers`
-without `--all` omitted the stale record, the guard saw absence, and the item
-closed over a living process; a living claimant that had never run a coord
-command went the same way. The claimant is now found by the coord record's
-bound Manna proof or label in coord's complete records, and the cure proceeds
-only when every bound record is dead or stopped.
+Replays three probes in an isolated estate with the real manna and coord
+binaries. An in_progress item with a landed `Manna:` trailer commit, claimed by
+a session with a living process, is reconciled by a different session with the
+call the SessionEnd hook used to make. Before mn-4e7229 the landed_open cure
+matched the claimant by respelling its label, read the miss as the orphan
+wedge, and closed the item. The independent review of that fix (mn-880173)
+aged a living claimant's coord record three days: `peers` without `--all`
+omitted the stale record, the guard saw absence, and the item closed over a
+living process; a living claimant that had never run a coord command went the
+same way. The review's acceptance boundary then retired the close from every
+reconcile path: a trailer identifies the work a commit advanced, it does not
+approve completion. Reconcile now makes two transitions only, releasing a
+claim coord positively verified gone (every bound record dead or stopped) and
+clearing resolved blockers; closure is `manna done` or managed acceptance.
 
-Live claimants, each refused:
-  1. underscore label with --write-drift (the hook's exact call)
+Claimants reconcile leaves exactly as it found them (status and claim kept,
+nothing fixed, nothing failed, the landed finding and its next step reported):
+  1. underscore label with --write-drift (the hook's old exact call)
   2. underscore label without the drift file
-  3. plain label with --write-drift (matched before the fix too; still refused)
+  3. plain label with --write-drift
   4. the hook pairing: AGENT_DO_COORD_SESSION and CLAUDE_SESSION_ID both the
      session uuid, no MANNA_* pins
-Living claimants coord cannot vouch for, each refused with status and claim kept:
   5. the hook pairing whose coord record aged three days (stale: an aged lease
      on a process coord could not call dead; only the throwaway store's
      timestamps are seeded)
   6. the hook pairing that never ran a coord command (no record bound)
   7. a pinned label worn by a second shell under another token (ambiguous
-     identity; dead_claim reports it as a skipped repair)
+     identity; dead_claim reports it as a skipped repair and releases nothing)
   8. a pinned scripted lane coord never saw (absence is not evidence of death)
-Positive death:
-  9. the hook pairing whose anchor process died: dead_claim names the bound
-     record, and an explicit --fix closes on the landed evidence without a
-     second, stale release
- 10. the same, through the SessionEnd hook's own call (--only
-     dead_claim,blocker_desync): the dead claim is released, nothing is closed,
-     and the landed evidence stays a finding in drift.yaml with its next step
+A dead worker's committed but unreviewed item stays unfinished through both
+cleanup entry points, and explicit completion still works:
+  9. explicit `manna reconcile --fix`: dead_claim names the bound record, the
+     claim is released, the row reopens, nothing is marked done; `--only
+     landed_open` is refused by name; the operator then closes it with
+     `manna done` on the landed evidence
+ 10. the serve daemon's Apply action, run with the argv its ACTIONS table
+     defines under a pinned daemon identity: the same release, never a close
+ 11. the SessionEnd hook's own call (--only dead_claim,blocker_desync): the
+     same release, the landed finding kept in drift.yaml
+ 12. a live claim-holder closes its own landed item with `manna done`
 
 Nothing here touches the developer's repositories or $HOME.
 """
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
+import sys
 import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -54,6 +61,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "test_git_integration.py"
+SERVE_DIR = ROOT / "tools" / "agent-manna" / "serve"
 
 _spec = importlib.util.spec_from_file_location("git_integration_fixtures", FIXTURES)
 assert _spec is not None and _spec.loader is not None
@@ -62,11 +70,18 @@ _spec.loader.exec_module(fx)
 
 require = fx.require
 
-LIVE_REFUSAL = "not closing over live work"
-UNSEEN_REFUSAL = "absence is not evidence of death"
-AMBIGUOUS_REFUSAL = "ambiguous"
 CLOSED = "closed on landed evidence"
+ADVISORY = "landed_open is advisory"
 HOOK_ONLY = "dead_claim,blocker_desync"
+
+
+def serve_module():
+    """The daemon's own module, so the Apply action's argv is read from its ACTIONS table, never retyped here."""
+    sys.path.insert(0, str(SERVE_DIR))
+    try:
+        return importlib.import_module("serve")
+    finally:
+        sys.path.pop(0)
 
 
 class Owner:
@@ -192,8 +207,8 @@ def claim_land(estate: fx.Estate, owner: Owner | fx.Session, label: str, path: s
     return item, row
 
 
-def retained(label: str, estate: fx.Estate, item: str, row: dict, code: int, payload: dict, reason: str, *named: str) -> str:
-    """What every refused claimant has in common: status and claim untouched, one refusal that says why, the evidence still a finding."""
+def untouched(label: str, estate: fx.Estate, item: str, row: dict, payload: dict, *, skipped: bool = False) -> None:
+    """What every claimant reconcile cannot act on has in common: status and claim as they were, nothing fixed, nothing failed, the landed evidence still a finding."""
     after = estate.row(item)
     require(
         after["status"] == "in_progress"
@@ -202,15 +217,11 @@ def retained(label: str, estate: fx.Estate, item: str, row: dict, code: int, pay
         f"{label}: the item stays in_progress under its claim: {after}",
     )
     require(not entries(payload, "fixed", item), f"{label}: nothing is fixed for this claimant: {payload.get('fixed')}")
-    refusals = entries(payload, "fix_failures", item)
-    require(
-        len(refusals) == 1 and reason in refusals[0] and all(text in refusals[0] for text in named),
-        f"{label}: one refusal names {reason!r} and {named}: {refusals}",
-    )
-    require(code != 0, f"{label}: a refused fix exits nonzero, got {code}")
+    require(not entries(payload, "fix_failures", item), f"{label}: an advisory finding is not a failure: {payload.get('fix_failures')}")
+    require(not any(CLOSED in entry for entry in payload.get("fixed") or []), f"{label}: nothing anywhere is closed on landed evidence: {payload.get('fixed')}")
     require(findings(payload, "landed_open", item), f"{label}: the landed evidence is still reported as a finding")
     require(not findings(payload, "dead_claim", item), f"{label}: this claimant is never reported as a dead claim")
-    return refusals[0].split(": ", 1)[1]
+    require(bool(findings(payload, "skipped", item)) == skipped, f"{label}: skipped finding expected={skipped}: {findings(payload, 'skipped', item)}")
 
 
 def live_variant(estate: fx.Estate, other: fx.Session, label: str, owner: Owner, write_drift: bool) -> None:
@@ -223,12 +234,12 @@ def live_variant(estate: fx.Estate, other: fx.Session, label: str, owner: Owner,
         f"{label}: peers --json carries the owner's stored binding: {manna}",
     )
     flags = ("--write-drift",) if write_drift else ()
-    code, payload = reconcile(estate, other, *flags)
-    refusal = retained(label, estate, item, row, code, payload, LIVE_REFUSAL, coord_id)
+    _, payload = reconcile(estate, other, *flags)
+    untouched(label, estate, item, row, payload)
     if write_drift:
         require((estate.primary / ".manna" / "drift.yaml").is_file(), f"{label}: --write-drift wrote the drift file")
     owner.kill()
-    print(f"  ok: {label}: claimant {row['claimed_by']} is coord {coord_id}; refused: {refusal}")
+    print(f"  ok: {label}: claimant {row['claimed_by']} is coord {coord_id} ({record['status']}); untouched")
 
 
 def stale_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
@@ -241,11 +252,11 @@ def stale_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) ->
     require(complete is not None and complete["status"] == "stale", f"{label}: coord's complete list classifies the aged record stale: {complete}")
     require((complete.get("manna") or {}).get("proof") == row["claim_token_hash"], f"{label}: the stale record is still bound by the claim proof: {complete}")
     require(peer_record(estate, other, coord_id) is None, f"{label}: the default peers read omits the stale record (the read the old guard took)")
-    code, payload = reconcile(estate, other, "--write-drift")
-    refusal = retained(label, estate, item, row, code, payload, LIVE_REFUSAL, coord_id, "stale", "aged lease")
+    _, payload = reconcile(estate, other, "--write-drift")
+    untouched(label, estate, item, row, payload)
     require(owner.alive(), f"{label}: the anchor process is alive after reconcile")
     owner.kill()
-    print(f"  ok: {label}: coord saw {coord_id} stale (last_seen {aged_to}); refused: {refusal}")
+    print(f"  ok: {label}: coord saw {coord_id} stale (last_seen {aged_to}); untouched")
 
 
 def unbound_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
@@ -254,11 +265,11 @@ def unbound_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) 
     item, row = claim_land(estate, owner, label, "unbound")
     require(not bound_records(estate, other, row), f"{label}: no coord record is bound to the claim")
     require(owner.alive(), f"{label}: the anchor process is alive before reconcile")
-    code, payload = reconcile(estate, other, "--write-drift")
-    refusal = retained(label, estate, item, row, code, payload, UNSEEN_REFUSAL, row["claimed_by"], "manna done")
+    _, payload = reconcile(estate, other, "--write-drift")
+    untouched(label, estate, item, row, payload)
     require(owner.alive(), f"{label}: the anchor process is alive after reconcile")
     owner.kill()
-    print(f"  ok: {label}: claimant {row['claimed_by']} unseen by coord; refused: {refusal}")
+    print(f"  ok: {label}: claimant {row['claimed_by']} unseen by coord; untouched")
 
 
 def ambiguous_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
@@ -272,16 +283,16 @@ def ambiguous_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]
         worn.get("session") == row["claimed_by"] and worn.get("proof") and worn.get("proof") != row["claim_token_hash"],
         f"{label}: the second shell's record wears the label under a different proof: {worn} vs {row['claim_token_hash']}",
     )
-    code, payload = reconcile(estate, other, "--write-drift")
-    refusal = retained(label, estate, item, row, code, payload, AMBIGUOUS_REFUSAL, touched["agent_id"], "under a different proof", "manna done")
+    _, payload = reconcile(estate, other, "--write-drift")
+    untouched(label, estate, item, row, payload, skipped=True)
     skipped = findings(payload, "skipped", item)
     require(
-        len(skipped) == 1 and "ambiguous" in skipped[0]["detail"] and touched["agent_id"] in skipped[0]["detail"],
+        len(skipped) == 1 and "ambiguous" in skipped[0]["detail"] and touched["agent_id"] in skipped[0]["detail"] and "under a different proof" in skipped[0]["detail"],
         f"{label}: dead_claim reports the ambiguity as a skipped repair naming the item and the record: {skipped}",
     )
     owner.kill()
     impostor.kill()
-    print(f"  ok: {label}: {touched['agent_id']} wears {row['claimed_by']}; refused: {refusal}")
+    print(f"  ok: {label}: {touched['agent_id']} wears {row['claimed_by']}; untouched, reported as skipped")
 
 
 def absent_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
@@ -289,13 +300,29 @@ def absent_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -
     ghost = fx.Session(base, "ghost-session")  # claims through manna, never runs a coord command
     item, row = claim_land(estate, ghost, label, "ghost")
     require(not bound_records(estate, other, row), f"{label}: no coord record is bound to the ghost's claim")
-    code, payload = reconcile(estate, other)
-    refusal = retained(label, estate, item, row, code, payload, UNSEEN_REFUSAL, "manna done")
-    print(f"  ok: {label}: refused: {refusal}")
+    _, payload = reconcile(estate, other)
+    untouched(label, estate, item, row, payload)
+    print(f"  ok: {label}: untouched")
+
+
+def released_not_done(label: str, estate: fx.Estate, item: str, payload: dict) -> dict:
+    """A dead worker's committed but unreviewed item after a cleanup entry point: claim released, row reopened, nothing marked done."""
+    after = estate.row(item)
+    require(after["status"] != "done", f"{label}: a trailer identifies work, it does not approve completion: {after}")
+    require(
+        after["status"] == "open" and not after.get("claimed_by") and not after.get("claim_token_hash"),
+        f"{label}: the dead claim is released and the row reopens: {after}",
+    )
+    require(entries(payload, "fixed", item) == [item], f"{label}: the release is the only repair recorded for the row: {payload.get('fixed')}")
+    require(not any(CLOSED in entry for entry in payload.get("fixed") or []), f"{label}: nothing anywhere is closed on landed evidence: {payload.get('fixed')}")
+    require(not entries(payload, "fix_failures", item), f"{label}: the release is clean: {payload.get('fix_failures')}")
+    landed = findings(payload, "landed_open", item)
+    require(landed and "claim and done" in (landed[0].get("proposed_fix") or ""), f"{label}: the landed evidence stays a finding with its next step: {landed}")
+    return after
 
 
 def dead_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
-    label = "hook-pairing, anchor died, explicit --fix"
+    label = "worker dead, committed, unreviewed: explicit --fix"
     owner = Owner(base, hook_pairing=True)
     item, row, coord_id = claim_touch_land(estate, owner, label)
     owner.kill()
@@ -313,17 +340,62 @@ def dead_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> 
     require(findings(advisory, "landed_open", item), f"{label}: landed_open is reported beside it")
     require(estate.row(item)["status"] == "in_progress", f"{label}: an advisory pass mutates nothing")
 
+    # --only landed_open is refused by name: there is no such repair.
+    proc = fx.manna(["reconcile", "--fix", "--only", "landed_open", "--json"], cwd=estate.primary, env=other.env)
+    text = proc.stdout + proc.stderr
+    require(proc.returncode != 0 and ADVISORY in text and "manna done" in text, f"{label}: --only landed_open refused by name: {proc.returncode} {text[:300]}")
+    require(estate.row(item)["status"] == "in_progress", f"{label}: the refusal wrote nothing")
+
     code, payload = reconcile(estate, other)
-    closed = entries(payload, "fixed", item)
-    require(len(closed) == 1 and CLOSED in closed[0] and row["claimed_by"] in closed[0], f"{label}: the cure closes on the landed evidence: {closed}")
-    require(not entries(payload, "fix_failures", item), f"{label}: no second release is attempted for the row the close already released: {payload.get('fix_failures')}")
-    after = estate.row(item)
-    require(after["status"] == "done" and not after.get("claimed_by") and not after.get("claim_token_hash"), f"{label}: closed and released: {after}")
-    print(f"  ok: {label}: dead_claim named {coord_id}; --fix closed {item} (exit {code})")
+    after = released_not_done(label, estate, item, payload)
+
+    # Explicit completion still works: the operator closes it on the landed
+    # evidence, the one path that approves the work.
+    done = fx.operator_manna(["done", item], cwd=estate.primary, env=base)
+    require(done.returncode == 0, f"{label}: the operator closes the reopened item: {done.stderr or done.stdout}")
+    require(re.search(r"^authority: evidence$", done.stdout, re.MULTILINE), f"{label}: the close is authorized by the landed evidence: {done.stdout}")
+    closed = estate.row(item)
+    require(closed["status"] == "done", f"{label}: closed by an explicit hand: {closed}")
+    print(f"  ok: {label}: dead_claim named {coord_id}; --fix released the claim (row {after['status']}), closed nothing (exit {code}); operator done closed it on evidence")
+
+
+def serve_apply_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
+    label = "worker dead, committed, unreviewed: the serve daemon's Apply action"
+    serve = serve_module()
+    argv = list(serve.ACTIONS["fix"]["argv"])
+    require(argv[:2] == ["manna", "reconcile"] and "--fix" in argv, f"{label}: the Apply action is a reconcile --fix: {argv}")
+    owner = Owner(base, hook_pairing=True)
+    item, row, coord_id = claim_touch_land(estate, owner, label)
+    owner.kill()
+    record = peer_record(estate, other, coord_id, "--all")
+    require(record is not None and record["status"] == "dead", f"{label}: coord verifies the anchor gone: {record}")
+    # The daemon runs the dispatcher with its own pinned identity (serve.py
+    # run_manna): the same env shape, the same argv, the same cwd.
+    env = dict(base)
+    env["MANNA_SESSION_ID"] = "serve-fixture"
+    env["MANNA_SESSION_TOKEN"] = "serve-fixture-token-" + "z" * 40
+    proc = fx.run([str(serve.AGENT_DO), *argv], cwd=estate.primary, env=env)
+    require(proc.stdout.strip(), f"{label}: the Apply argv printed JSON: {proc.stderr}")
+    payload = json.loads(proc.stdout)
+    after = released_not_done(label, estate, item, payload)
+    print(f"  ok: {label}: {' '.join(argv)} released the claim on {item} (row {after['status']}), closed nothing (exit {proc.returncode})")
+
+
+def owner_done_variant(estate: fx.Estate, base: dict[str, str]) -> None:
+    label = "live claim-holder closes its own landed item"
+    owner = Owner(base, hook_pairing=True)
+    item, row, coord_id = claim_touch_land(estate, owner, label)
+    done = fx.manna(["done", item], cwd=estate.primary, env=owner.env)
+    require(done.returncode == 0, f"{label}: the claim-holder closes: {done.stderr or done.stdout}")
+    authority = re.search(r"^authority: (\S+)$", done.stdout, re.MULTILINE)
+    closed = estate.row(item)
+    require(closed["status"] == "done", f"{label}: closed by its own claim-holder: {closed}")
+    owner.kill()
+    print(f"  ok: {label}: done closed {item} (authority {authority.group(1) if authority else 'unreported'})")
 
 
 def hook_path_variant(estate: fx.Estate, other: fx.Session, base: dict[str, str]) -> None:
-    label = "hook-pairing, anchor died, the SessionEnd hook's own call"
+    label = "worker dead, committed, unreviewed: the SessionEnd hook's own call"
     owner = Owner(base, hook_pairing=True)
     item, row, coord_id = claim_touch_land(estate, owner, label)
     owner.kill()
@@ -358,19 +430,22 @@ def main() -> None:
         # The session whose SessionEnd reconcile closed mn-54fe40: pinned,
         # not the claimant, not the operator.
         other = fx.Session(base, "other-session")
-        print("live claimants (each refused):")
+        print("live claimants (each untouched):")
         live_variant(estate, other, "underscore-label+write-drift", Owner(base, name="owner-owner_alive"), True)
         live_variant(estate, other, "underscore-label", Owner(base, name="owner-other_alive"), False)
         live_variant(estate, other, "plain-label+write-drift", Owner(base, name="owner-plain"), True)
         live_variant(estate, other, "hook-pairing+write-drift", Owner(base, hook_pairing=True), True)
-        print("living claimants coord cannot vouch for (each refused; status and claim kept):")
+        print("living claimants coord cannot vouch for (each untouched; status and claim kept):")
         stale_variant(estate, other, base)
         unbound_variant(estate, other, base)
         ambiguous_variant(estate, other, base)
         absent_variant(estate, other, base)
-        print("positive death (coord verified the process gone):")
+        print("a dead worker's committed but unreviewed item stays unfinished through every cleanup entry point:")
         dead_variant(estate, other, base)
+        serve_apply_variant(estate, other, base)
         hook_path_variant(estate, other, base)
+        print("explicit completion still works:")
+        owner_done_variant(estate, base)
     print("manna reconcile liveness tests passed")
 
 

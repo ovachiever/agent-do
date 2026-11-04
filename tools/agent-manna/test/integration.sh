@@ -931,10 +931,12 @@ cd "$TEST_DIR"
 rm -rf "$GRAMMAR_DIR"
 
 # ----------------------------------------------------------------------------
-# Test G5b: reconcile --fix cures a landed, orphaned-proof claim (mn-ba8db6)
+# Test G5b: landed_open is advisory in every path; --fix never closes a claim
+# (the orphan cure of mn-ba8db6 is retired by mn-880173: a trailer identifies
+# the work a commit advanced, it does not approve completion)
 # ----------------------------------------------------------------------------
 echo ""
-echo "Test G5b: landed_open --fix closes orphaned in_progress claims"
+echo "Test G5b: landed_open --fix closes nothing; explicit done closes"
 WEDGE_DIR=$(mktemp -d)
 cd "$WEDGE_DIR"
 git init -q
@@ -963,15 +965,29 @@ Manna: $WEDGE_ID"
 output=$("$MANNA" reconcile 2>&1) || true
 check_yaml "$output" "landed_open" "reconcile sees the landed evidence"
 
-# The owner cures its own claim by presenting the VERIFIED proof (label
-# alone is spoofable and never bypasses the liveness guard). The verified
-# path needs no coord lookup, so this holds in any environment; the
-# lost-proof path rides coord liveness and is covered at the unit level.
+# Even the owner, presenting the VERIFIED proof, gets no close from
+# reconcile: the finding is advisory in every path and the row stays as it
+# was. Closure is the owner's explicit `done` (or the operator's, or managed
+# acceptance), never a repair that reads a trailer as completion.
 output=$(MANNA_SESSION_ID="ses_wedge_$$" MANNA_SESSION_TOKEN="wedge-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
     "$MANNA" reconcile --fix 2>&1) || true
-check_yaml "$output" "closed on landed evidence" "reconcile --fix closes on the receipt"
+check_yaml "$output" "landed_open" "reconcile --fix still reports the landed evidence"
+if grep -q "closed on landed evidence" <<<"$output"; then
+    fail "reconcile --fix closes nothing on a trailer" "the retired orphan cure closed the row: $output"
+else
+    pass "reconcile --fix closes nothing on a trailer"
+fi
 output=$("$MANNA" show "$WEDGE_ID" 2>&1) || true
-check_yaml "$output" "status: done" "wedged item is done after the cure"
+check_yaml "$output" "status: in_progress" "wedged item stays in_progress under its claim after --fix"
+check_yaml "$output" "claimed_by: ses_wedge_$$" "the claim is untouched by --fix"
+only_exit=0
+output=$("$MANNA" reconcile --fix --only landed_open 2>&1) || only_exit=$?
+check_exit 1 "$only_exit" "--only landed_open is refused: there is no such repair"
+check_yaml "$output" "landed_open is advisory" "the refusal says a trailer does not approve completion"
+MANNA_SESSION_ID="ses_wedge_$$" MANNA_SESSION_TOKEN="wedge-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "$MANNA" done "$WEDGE_ID" >/dev/null 2>&1 || true
+output=$("$MANNA" show "$WEDGE_ID" 2>&1) || true
+check_yaml "$output" "status: done" "the claim-holder's explicit done closes the landed item"
 "$MANNA" sync >/dev/null 2>&1
 
 # Unclaimed landed_open stays advisory — merge judgment stays human.
@@ -1938,10 +1954,15 @@ Manna: $M_ID"
     output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" 2>&1) || true
     check_yaml "$output" "no submission for attempt 1" "the refusal names the missing submission"
 
-    # reconcile --fix sees landed_open on HEAD and refuses to close a managed item.
+    # reconcile --fix sees landed_open on HEAD and closes nothing: the finding
+    # is advisory for every item (mn-880173), managed ones included.
     output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" reconcile --fix 2>&1) || true
     check_yaml "$output" "landed_open" "reconcile sees the landed trailer on the board checkout"
-    check_yaml "$output" "is a managed item" "reconcile --fix refuses to close a managed item on a trailer"
+    if grep -q "closed on landed evidence" <<<"$output"; then
+        fail "reconcile --fix closes nothing on a trailer, managed or not" "$output"
+    else
+        pass "reconcile --fix closes nothing on a trailer, managed or not"
+    fi
     output=$("$MANNA" show "$M_ID" 2>&1) || true
     check_yaml "$output" "status: in_progress" "the managed item is still in progress after reconcile --fix"
 

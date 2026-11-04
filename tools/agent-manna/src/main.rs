@@ -21,7 +21,7 @@ use manna_core::issue::{
     DREAM_INERT_MARKER,
 };
 use manna_core::liveness::{
-    claim_presence, not_gone, parse_peers_strict, BoundPeer, ClaimPresence, CoordPeer,
+    claim_presence, parse_peers_strict, BoundPeer, ClaimPresence, CoordPeer,
 };
 use manna_core::reconcile::{
     check_blocker_desync, check_dangling_track, check_landed_open, check_stale_dream,
@@ -3001,51 +3001,60 @@ fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
 
     if !coord_lookups.is_empty() {
         match coord_peers_all() {
-            Ok(peers) => {
-                for issue in coord_lookups {
-                    let claimed_by = issue.claimed_by.as_ref().unwrap();
-                    match claim_presence(&peers, claimed_by, issue.claim_token_hash.as_deref()) {
-                        ClaimPresence::Gone(bound) => {
-                            let status = bound[0].peer.status.clone();
-                            findings.push(Finding {
-                                kind: FindingKind::DeadClaim,
-                                issue_id: Some(issue.id.clone()),
-                                detail: format!("claimed by {} session {}", status, claimed_by),
-                                evidence: Some(format!(
-                                    "coord status: {}",
-                                    bound
-                                        .iter()
-                                        .map(BoundPeer::describe)
-                                        .collect::<Vec<_>>()
-                                        .join("; ")
-                                )),
-                                proposed_fix: Some("abandon the claim".to_string()),
-                            });
-                        }
-                        ClaimPresence::Ambiguous(reasons) => findings.push(Finding {
-                            kind: FindingKind::Skipped,
-                            issue_id: Some(issue.id.clone()),
-                            detail: format!(
-                                "dead_claim skipped: the identity of claimant {} is ambiguous in coord ({})",
-                                claimed_by,
-                                reasons.join("; ")
-                            ),
-                            evidence: Some("coord peers --all --json".to_string()),
-                            proposed_fix: Some(format!(
-                                "no lifecycle repair acts on an ambiguous identity; the claimant releases or closes {} in its own shell, or the operator does after review",
-                                issue.id
-                            )),
-                        }),
-                        // Present (active, idle, stale, or no verdict) and
-                        // unseen are not death; nothing is reported.
-                        ClaimPresence::Present(_) | ClaimPresence::Unseen => {}
-                    }
-                }
-            }
+            Ok(peers) => findings.extend(dead_claim_findings(&coord_lookups, &peers)),
             Err(reason) => findings.push(Finding::skipped("dead_claim", &reason)),
         }
     }
 
+    findings
+}
+
+/// Rule on each claimed row against coord's complete records. Only `gone`
+/// (every bound record dead or stopped) is a `dead_claim`; an ambiguous
+/// identity is a `skipped` finding on the row, so the drift report says why
+/// nothing was released; present (active, idle, stale, or no verdict) and
+/// unseen are not death and produce nothing.
+fn dead_claim_findings(rows: &[&Issue], peers: &[CoordPeer]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for issue in rows {
+        let Some(claimed_by) = issue.claimed_by.as_deref() else {
+            continue;
+        };
+        match claim_presence(peers, claimed_by, issue.claim_token_hash.as_deref()) {
+            ClaimPresence::Gone(bound) => {
+                let status = bound[0].peer.status.clone();
+                findings.push(Finding {
+                    kind: FindingKind::DeadClaim,
+                    issue_id: Some(issue.id.clone()),
+                    detail: format!("claimed by {} session {}", status, claimed_by),
+                    evidence: Some(format!(
+                        "coord status: {}",
+                        bound
+                            .iter()
+                            .map(BoundPeer::describe)
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    )),
+                    proposed_fix: Some("abandon the claim".to_string()),
+                });
+            }
+            ClaimPresence::Ambiguous(reasons) => findings.push(Finding {
+                kind: FindingKind::Skipped,
+                issue_id: Some(issue.id.clone()),
+                detail: format!(
+                    "dead_claim skipped: the identity of claimant {} is ambiguous in coord ({})",
+                    claimed_by,
+                    reasons.join("; ")
+                ),
+                evidence: Some("coord peers --all --json".to_string()),
+                proposed_fix: Some(format!(
+                    "no lifecycle repair acts on an ambiguous identity; the claimant releases or closes {} in its own shell, or the operator does after review",
+                    issue.id
+                )),
+            }),
+            ClaimPresence::Present(_) | ClaimPresence::Unseen => {}
+        }
+    }
     findings
 }
 
@@ -3647,92 +3656,11 @@ fn write_drift_file(findings: &[Finding]) -> Result<String, String> {
 
 /// Apply --fix for dead_claim and blocker_desync findings through the
 /// existing state machine. Returns (fixed issue ids, failure messages).
-/// Decide whether the landed_open cure may close over the row's claim.
-///
-/// A `Manna:` trailer proves that a commit advanced the item, not that the
-/// item is complete or accepted; the close it authorizes mechanically is the
-/// orphan's: an in_progress row whose claimant coord has positively verified
-/// gone. The claimant is found by exact facts (`liveness::claim_presence`):
-/// a coord record bound to the claim by proof or by label, or carrying the
-/// claimant label as its agent id, read from coord's complete records
-/// (`peers --all`). The cure proceeds only when every bound record is dead
-/// or stopped. Everything else refuses and leaves the row's status and claim
-/// as they are, with the finding and its next step still reported:
-///
-/// - a bound record coord has not called gone (active, idle, stale, or no
-///   verdict): a lane that is or may be alive. Stale is an aged lease past
-///   the idle window on a process coord could not call dead; the review of
-///   ec30858 aged a living claimant's record three days and the old guard,
-///   reading `peers` without `--all`, saw absence and closed its item;
-/// - no bound record at all: coord has said nothing about this claimant, and
-///   absence is not evidence of death (the same review watched a living
-///   claimant that never ran a coord command lose its item). The orphan
-///   whose record coord pruned, or who never bound one, is closed by a hand
-///   with authority (`manna done`: the claimant's own shell, or the
-///   operator after review), never mechanically;
-/// - a record that contradicts the claim's facts: an identity nobody can
-///   vouch for;
-/// - coord unreachable, or a payload with a row this binary cannot read: no
-///   liveness signal at all.
-///
-/// Nothing is respelled from the label to find a record: before mn-4e7229
-/// `claude-<16 hex>` was looked up as `session-claude<10 hex>`, matched
-/// nothing, and a live lane's item was closed by the next SessionEnd
-/// reconcile. A caller presenting the claim's verified ownership proof
-/// bypasses this guard entirely (checked before calling) — a bare label never
-/// does; labels are public and carry no lifecycle authority (mn-880173).
-fn landed_open_close_blocked(
-    issue: &Issue,
-    coord: &Result<Vec<CoordPeer>, String>,
-) -> Option<String> {
-    let owner = issue.claimed_by.as_deref()?;
-    let by_hand = format!(
-        "the claimant closes {} with `manna done` in its own shell, or the operator does after review",
-        issue.id
-    );
-    match coord {
-        Ok(peers) => match claim_presence(peers, owner, issue.claim_token_hash.as_deref()) {
-            ClaimPresence::Gone(_) => None,
-            ClaimPresence::Present(bound) => {
-                let kept = not_gone(&bound);
-                let gloss = if kept.iter().any(|record| record.peer.status == "stale") {
-                    " (a stale record is an aged lease on a process coord could not call dead, not death)"
-                } else {
-                    ""
-                };
-                Some(format!(
-                    "claiming session {} is present in coord [{}]; not closing over live work{}",
-                    owner,
-                    kept.iter()
-                        .map(|record| record.describe())
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                    gloss
-                ))
-            }
-            ClaimPresence::Unseen => Some(format!(
-                "no coord record is bound to claimant {} (by proof, by label, or by agent id); absence is not evidence of death, so nothing closes mechanically — {}",
-                owner, by_hand
-            )),
-            ClaimPresence::Ambiguous(reasons) => Some(format!(
-                "the identity of claimant {} is ambiguous in coord [{}]; no lifecycle repair acts on an ambiguous identity — {}",
-                owner,
-                reasons.join("; "),
-                by_hand
-            )),
-        },
-        Err(error) => Some(format!(
-            "coord liveness unavailable ({}); refusing to close over a possibly live owner — rerun where `agent-do coord` resolves, or rerun with the owner's verified identity",
-            error
-        )),
-    }
-}
-
 /// Narrow --fix to the finding kinds named by --only. An empty --only keeps
-/// every fix (the historical behavior). A name that matches no kind is a
-/// user error naming the offender, never a silent no-op: an operator asking
-/// to release dead claims must not discover afterwards that a typo also let
-/// the landed_open cure close their in-progress lanes.
+/// every repair (the historical behavior). A name that matches no kind, or a
+/// kind that has no repair, is a user error naming the offender, never a
+/// silent no-op: `--only landed_open` names a finding that is advisory in
+/// every path (mn-880173), and the refusal says what closes the item.
 fn select_fix_findings(findings: &[Finding], only: &[String]) -> Result<Vec<Finding>, String> {
     if only.is_empty() {
         return Ok(findings.to_vec());
@@ -3744,7 +3672,21 @@ fn select_fix_findings(findings: &[Finding], only: &[String]) -> Result<Vec<Find
             continue;
         }
         match FindingKind::from_name(name) {
-            Some(kind) => wanted.push(kind),
+            Some(kind) if kind.repairable() => wanted.push(kind),
+            Some(kind) => {
+                return Err(if kind == FindingKind::LandedOpen {
+                    format!(
+                        "landed_open is advisory and has no --fix repair: a `Manna:` trailer identifies the work a commit advanced, it does not approve completion; close the item with `manna done <id>` (claim-holder, operator, or landed evidence) or managed acceptance (repairable kinds: {})",
+                        FindingKind::repairable_names()
+                    )
+                } else {
+                    format!(
+                        "{} is advisory and has no --fix repair (repairable kinds: {})",
+                        kind.name(),
+                        FindingKind::repairable_names()
+                    )
+                })
+            }
             None => {
                 return Err(format!(
                     "unknown finding kind for --only: {} (known: {})",
@@ -3765,20 +3707,24 @@ fn select_fix_findings(findings: &[Finding], only: &[String]) -> Result<Vec<Find
         .collect())
 }
 
+/// Apply --fix through the existing state machine. Two repairs exist:
+/// releasing a claim coord has positively verified gone (`dead_claim`) and
+/// clearing resolved blockers (`blocker_desync`). Every other finding is
+/// advisory here, `landed_open` included: a `Manna:` trailer identifies the
+/// work a commit advanced, it does not approve completion, so no reconcile
+/// path transitions a row to done (mn-880173; the orphan close of mn-ba8db6
+/// is retired). Releasing a claim never marks the work accepted: the row
+/// returns to open or blocked with its landed finding still reported, and
+/// closure stays with `manna done` or managed acceptance. Returns (fixed
+/// issue ids, failure messages).
 fn apply_reconcile_fixes(
     store: &MannaStore,
     issues: &[Issue],
     findings: &[Finding],
-    caller: Option<&SessionIdentity>,
 ) -> (Vec<String>, Vec<String>) {
     let mut fixed = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
-    let mut coord_records: Option<Result<Vec<CoordPeer>, String>> = None;
-    // Rows the landed_open cure closed in this pass: the close released the
-    // claim, so a dead_claim finding for the same row has nothing to release
-    // and must not surface as a stale-evidence failure.
-    let mut closed_by_landed: HashSet<String> = HashSet::new();
 
     for finding in findings {
         let id = match &finding.issue_id {
@@ -3788,13 +3734,9 @@ fn apply_reconcile_fixes(
         if !seen.insert((id.clone(), finding.kind)) {
             continue;
         }
-        // Managed items: closure and claim transfer belong to the
-        // coordinator's recorded acceptance and release, never to a repair
-        // that infers completion from a trailer or a dead pid.
-        if matches!(
-            finding.kind,
-            FindingKind::DeadClaim | FindingKind::LandedOpen
-        ) {
+        // Managed items: claim transfer belongs to the coordinator's
+        // recorded release, never to a repair that infers death from a pid.
+        if finding.kind == FindingKind::DeadClaim {
             if let Some(reason) = managed_cli::managed_guard(&id) {
                 failures.push(format!("{}: {}", id, reason));
                 continue;
@@ -3802,9 +3744,6 @@ fn apply_reconcile_fixes(
         }
         match finding.kind {
             FindingKind::DeadClaim => {
-                if closed_by_landed.contains(&id) {
-                    continue;
-                }
                 let Some(expected) = issues.iter().find(|issue| issue.id == id).cloned() else {
                     failures.push(format!("{}: stale reconcile evidence: row disappeared", id));
                     continue;
@@ -3856,80 +3795,8 @@ fn apply_reconcile_fixes(
                     Err(error) => failures.push(format!("{}: {}", id, error)),
                 }
             }
-            FindingKind::LandedOpen => {
-                let Some(expected) = issues.iter().find(|issue| issue.id == id).cloned() else {
-                    failures.push(format!("{}: stale reconcile evidence: row disappeared", id));
-                    continue;
-                };
-                // Only the orphaned-claim wedge closes mechanically: an
-                // in_progress row whose claimant coord has positively
-                // verified gone (mn-ba8db6, narrowed by mn-880173). Unclaimed
-                // landed_open stays advisory — merge judgment remains with the
-                // human/orchestrator. The landed commit trailers are the
-                // authorizing evidence, never the requester.
-                let Some(owner) = expected.claimed_by.clone() else {
-                    continue;
-                };
-                if expected.status != IssueStatus::InProgress {
-                    continue;
-                }
-                // A track never closes mechanically over open items: a
-                // trailer on the track proves board paperwork, not the work.
-                // This read of the inspection snapshot only saves the coord
-                // round trip; the gate that decides runs inside the locked
-                // write below, against the rows as they are then.
-                if let Some(reason) = track_close_refusal(&expected, &issues) {
-                    failures.push(format!("{}: {}", id, reason));
-                    continue;
-                }
-                // Only a VERIFIED ownership proof bypasses the liveness
-                // guard: the identity must check out against the claim's
-                // stored token hash. A matching public label alone is
-                // spoofable and carries no lifecycle authority.
-                let owner_verified =
-                    caller.is_some_and(|identity| expected.require_owner(identity).is_ok());
-                if !owner_verified {
-                    if coord_records.is_none() {
-                        coord_records = Some(coord_peers_all());
-                    }
-                    if let Some(reason) =
-                        landed_open_close_blocked(&expected, coord_records.as_ref().unwrap())
-                    {
-                        failures.push(format!("{}: {}", id, reason));
-                        continue;
-                    }
-                }
-                let evidence = finding.evidence.clone().unwrap_or_default();
-                match store.repair_issue(&id, move |issue, current| {
-                    if issue != &expected {
-                        return Err(
-                            "stale reconcile evidence: row changed after inspection; nothing was closed"
-                                .to_string(),
-                        );
-                    }
-                    // The track row being unchanged proves nothing about its
-                    // items: one created under it or moved into it since the
-                    // inspection is open work. The gate re-runs here against
-                    // the rows under the lock (review of mn-9b4359), and the
-                    // store refuses the same transition on its own.
-                    if let Some(reason) = track_close_refusal(issue, current) {
-                        return Err(reason);
-                    }
-                    issue.release_dead_claim()?;
-                    issue.status = IssueStatus::Done;
-                    issue.updated_at = Utc::now();
-                    Ok(())
-                }) {
-                    Ok(_) => {
-                        closed_by_landed.insert(id.clone());
-                        fixed.push(format!(
-                            "{}: closed on landed evidence [{}]; orphaned claim {} released",
-                            id, evidence, owner
-                        ));
-                    }
-                    Err(error) => failures.push(format!("{}: {}", id, error)),
-                }
-            }
+            // landed_open and every other kind: advisory. The finding and
+            // its next step ride the report; nothing here closes a row.
             _ => {}
         }
     }
@@ -4040,10 +3907,9 @@ fn cmd_reconcile(
 
     // Findings describe pre-fix drift; `fixed` lists what --fix addressed.
     let (fixed, fix_failures) = if fix {
-        let caller = get_session_identity().ok();
         let selected = select_fix_findings(&findings, only)
             .unwrap_or_else(|error| output_error(&error, EXIT_USER_ERROR));
-        apply_reconcile_fixes(&store, &issues, &selected, caller.as_ref())
+        apply_reconcile_fixes(&store, &issues, &selected)
     } else {
         (Vec::new(), Vec::new())
     };
@@ -5341,7 +5207,7 @@ mod tests {
         let selected = select_fix_findings(&findings, &["dead_claim".to_string()]).unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].kind, FindingKind::DeadClaim);
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &selected, None);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &selected);
         assert_eq!(fixed, vec![issue.id.clone()]);
         assert!(failures.is_empty());
         let current = store.load_issues().unwrap().pop().unwrap();
@@ -5372,7 +5238,7 @@ mod tests {
         store.release_issue(&issue.id, &old).unwrap();
         let new_owner = session("ses_new");
         store.claim_issue(&issue.id, &new_owner).unwrap();
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, None);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
         assert!(fixed.is_empty());
         assert!(failures
             .iter()
@@ -5383,19 +5249,13 @@ mod tests {
     }
 
     #[test]
-    fn landed_open_guard_branches() {
-        let live: Result<Vec<CoordPeer>, String> = Ok(vec![
+    fn dead_claim_findings_rule_by_claim_presence() {
+        let peers = vec![
             coord_peer(
                 "session-31022d9c53c9",
                 "active",
                 Some("claude-31022d9c53c942eb"),
                 Some("sha256:live"),
-            ),
-            coord_peer(
-                "session-idle00000000",
-                "idle",
-                Some("claude-idle000000000000"),
-                Some("sha256:idle"),
             ),
             // The review's aged claimant (mn-880173): the lease is three days
             // old, the process is alive, coord says stale.
@@ -5411,21 +5271,10 @@ mod tests {
                 Some("claude-gone000000000000"),
                 Some("sha256:gone"),
             ),
-            coord_peer(
-                "session-stop00000000",
-                "stopped",
-                Some("claude-stop000000000000"),
-                Some("sha256:stop"),
-            ),
             coord_peer("session-twin-a", "dead", None, Some("sha256:twin")),
-            coord_peer("session-twin-b", "active", None, Some("sha256:twin")),
-            coord_peer("session-aged-twin-a", "dead", None, Some("sha256:agedtwin")),
-            coord_peer(
-                "session-aged-twin-b",
-                "stale",
-                None,
-                Some("sha256:agedtwin"),
-            ),
+            coord_peer("session-twin-b", "stale", None, Some("sha256:twin")),
+            coord_peer("session-stop-a", "stopped", None, Some("sha256:stop")),
+            coord_peer("session-stop-b", "dead", None, Some("sha256:stop")),
             // Another process wearing a claimant's label under its own proof.
             coord_peer(
                 "session-impostor0000",
@@ -5433,115 +5282,71 @@ mod tests {
                 Some("claude-worn000000000000"),
                 Some("sha256:someone-else"),
             ),
-        ]);
-        let down: Result<Vec<CoordPeer>, String> = Err("agent-do unavailable".to_string());
+        ];
+        let rows = vec![
+            claimed_row("mn-dc-live", "claude-31022d9c53c942eb", "sha256:live"),
+            claimed_row("mn-dc-aged", "claude-d9c459ef4559496f", "sha256:aged"),
+            claimed_row("mn-dc-gone", "claude-gone000000000000", "sha256:gone"),
+            claimed_row("mn-dc-twin", "claude-twin0000000000000", "sha256:twin"),
+            claimed_row("mn-dc-stop", "claude-stop0000000000000", "sha256:stop"),
+            claimed_row("mn-dc-worn", "claude-worn000000000000", "sha256:mine"),
+            claimed_row("mn-dc-none", "ses_absent", "sha256:absent"),
+        ];
+        let refs: Vec<&Issue> = rows.iter().collect();
+        let findings = dead_claim_findings(&refs, &peers);
+        let by_id = |id: &str| findings.iter().find(|f| f.issue_id.as_deref() == Some(id));
 
-        // The hook pairing the old derivation missed (mn-4e7229): the active
-        // bound record blocks the cure, and the refusal names it.
-        let reason = landed_open_close_blocked(
-            &claimed_row("mn-guard1", "claude-31022d9c53c942eb", "sha256:live"),
-            &live,
-        )
-        .expect("a live bound record blocks the cure");
+        // Positive evidence: every bound record dead or stopped.
+        let gone = by_id("mn-dc-gone").expect("a dead bound record is a dead claim");
+        assert_eq!(gone.kind, FindingKind::DeadClaim);
         assert!(
-            reason.contains("session-31022d9c53c9") && reason.contains("bound by claim proof"),
-            "{reason}"
+            gone.detail.contains("claude-gone000000000000"),
+            "{}",
+            gone.detail
         );
-        assert!(reason.contains("not closing over live work"));
-        // Idle is an aged lease on a process coord could not call dead: live.
-        assert!(landed_open_close_blocked(
-            &claimed_row("mn-guard2", "claude-idle000000000000", "sha256:idle"),
-            &live
-        )
-        .is_some());
-        // Stale is an older aged lease on the same kind of process: not death.
-        let reason = landed_open_close_blocked(
-            &claimed_row("mn-guard10", "claude-d9c459ef4559496f", "sha256:aged"),
-            &live,
-        )
-        .expect("a stale bound record blocks the cure");
         assert!(
-            reason.contains("session-d9c459ef4559 stale")
-                && reason.contains("not closing over live work")
-                && reason.contains("aged lease"),
-            "{reason}"
+            gone.evidence
+                .as_deref()
+                .unwrap()
+                .contains("session-gone00000000 dead"),
+            "{:?}",
+            gone.evidence
         );
-        // Dead and stopped bound records are coord's positive verdicts: the
-        // cure may proceed.
-        assert!(landed_open_close_blocked(
-            &claimed_row("mn-guard3", "claude-gone000000000000", "sha256:gone"),
-            &live
-        )
-        .is_none());
-        assert!(landed_open_close_blocked(
-            &claimed_row("mn-guard4", "claude-stop000000000000", "sha256:stop"),
-            &live
-        )
-        .is_none());
-        // Absence is not evidence of death: a claimant coord never bound (or
-        // whose record coord pruned) is closed by a hand with authority.
-        let reason = landed_open_close_blocked(
-            &claimed_row("mn-guard5", "ses_absent", "sha256:absent"),
-            &live,
-        )
-        .expect("an unseen claimant blocks the cure");
+        let stop = by_id("mn-dc-stop").expect("dead and stopped twins are gone");
+        assert_eq!(stop.kind, FindingKind::DeadClaim);
+        // Not death: active, stale, a stale twin beside a dead one, absence.
+        assert!(by_id("mn-dc-live").is_none());
+        assert!(by_id("mn-dc-aged").is_none(), "an aged lease is not death");
         assert!(
-            reason.contains("absence is not evidence of death")
-                && reason.contains("manna done")
-                && reason.contains("mn-guard5"),
-            "{reason}"
+            by_id("mn-dc-twin").is_none(),
+            "a stale twin keeps the claim"
         );
-        // One live record among dead twins is enough to block; so is one
-        // stale record among dead twins.
-        assert!(landed_open_close_blocked(
-            &claimed_row("mn-guard6", "claude-twin0000000000000", "sha256:twin"),
-            &live
-        )
-        .is_some());
-        let reason = landed_open_close_blocked(
-            &claimed_row("mn-guard11", "claude-agedtwin000000000", "sha256:agedtwin"),
-            &live,
-        )
-        .expect("a stale twin keeps the claim");
         assert!(
-            reason.contains("session-aged-twin-b stale") && !reason.contains("session-aged-twin-a"),
-            "the refusal names only the records that keep the claim: {reason}"
+            by_id("mn-dc-none").is_none(),
+            "absence is not evidence of death"
         );
-        // A record wearing the claimant's label under a different proof is an
-        // identity nobody can vouch for: refused, named as ambiguous.
-        let reason = landed_open_close_blocked(
-            &claimed_row("mn-guard12", "claude-worn000000000000", "sha256:mine"),
-            &live,
-        )
-        .expect("an ambiguous identity blocks the cure");
+        // Ambiguous identity: reported as skipped, nothing to release.
+        let worn = by_id("mn-dc-worn").expect("an ambiguous identity is reported");
+        assert_eq!(worn.kind, FindingKind::Skipped);
         assert!(
-            reason.contains("ambiguous")
-                && reason.contains("session-impostor0000")
-                && reason.contains("under a different proof"),
-            "{reason}"
+            worn.detail.contains("ambiguous")
+                && worn.detail.contains("session-impostor0000")
+                && worn.detail.contains("under a different proof"),
+            "{}",
+            worn.detail
         );
-        // An unclaimed row has no owner to protect.
-        let unclaimed = Issue::new("mn-guard7".to_string(), "open".to_string()).unwrap();
-        assert!(landed_open_close_blocked(&unclaimed, &live).is_none());
-        // No liveness signal at all fails closed. (A verified ownership
-        // proof bypasses this guard before it is ever consulted; a bare
-        // label match never does.)
-        assert!(landed_open_close_blocked(
-            &claimed_row("mn-guard8", "ses_absent", "sha256:x"),
-            &down
-        )
-        .is_some());
-        assert!(landed_open_close_blocked(
-            &claimed_row("mn-guard9", "claude-31022d9c53c942eb", "sha256:live"),
-            &down
-        )
-        .is_some());
+        assert!(worn.proposed_fix.as_deref().unwrap().contains("mn-dc-worn"));
+        assert_eq!(findings.len(), 3, "{:?}", findings);
     }
 
     #[test]
-    fn landed_open_fix_closes_orphaned_in_progress_claim() {
+    fn landed_open_is_advisory_even_for_the_verified_owner() {
         let (_temp, store) = setup_store();
-        let issue = Issue::new("mn-wedge1".to_string(), "Shipped but wedged".to_string()).unwrap();
+        let issue = Issue::new(
+            "mn-wedge1".to_string(),
+            "Shipped but unreviewed".to_string(),
+        )
+        .unwrap();
         store.append_issue(&issue).unwrap();
         let owner = session("ses_gone");
         store.claim_issue(&issue.id, &owner).unwrap();
@@ -5554,21 +5359,22 @@ mod tests {
             proposed_fix: Some("review the commits".to_string()),
         }];
 
-        // The caller presents the claim's verified ownership proof, so the
-        // self-cure path is deterministic in any environment (no coord).
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, Some(&owner));
-        assert!(failures.is_empty(), "unexpected failures: {:?}", failures);
+        // No caller, no coord: the finding is advisory in every path. The
+        // trailer identifies the work; `manna done` approves it.
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
+        assert!(fixed.is_empty(), "landed_open has no repair: {:?}", fixed);
         assert!(
-            fixed.iter().any(|entry| entry.contains("mn-wedge1")
-                && entry.contains("abc123def456")
-                && entry.contains("ses_gone")),
-            "fixed must carry the evidence and the released owner: {:?}",
-            fixed
+            failures.is_empty(),
+            "an advisory finding is not a failure: {:?}",
+            failures
         );
         let current = store.load_issues().unwrap().pop().unwrap();
-        assert_eq!(current.status, IssueStatus::Done);
-        assert!(current.claimed_by.is_none());
-        assert!(current.claim_token_hash.is_none());
+        assert_eq!(current.status, IssueStatus::InProgress);
+        current.require_owner(&owner).unwrap();
+
+        // Explicit completion still works: the claim-holder closes it.
+        let closed = store.complete_issue(&issue.id, &owner).unwrap();
+        assert_eq!(closed.status, IssueStatus::Done);
     }
 
     #[test]
@@ -5585,7 +5391,7 @@ mod tests {
             proposed_fix: Some("review the commits".to_string()),
         }];
 
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, None);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
         assert!(fixed.is_empty(), "unclaimed landed_open must stay advisory");
         assert!(failures.is_empty());
         let current = store.load_issues().unwrap().pop().unwrap();
@@ -5593,34 +5399,73 @@ mod tests {
     }
 
     #[test]
-    fn landed_open_fix_is_cas_guarded_against_row_changes() {
+    fn dead_claim_release_reopens_a_landed_row_and_never_marks_it_done() {
         let (_temp, store) = setup_store();
-        let issue = Issue::new("mn-wedge2".to_string(), "Changed after scan".to_string()).unwrap();
+        let issue = Issue::new(
+            "mn-wedge2".to_string(),
+            "Committed, unreviewed, worker gone".to_string(),
+        )
+        .unwrap();
         store.append_issue(&issue).unwrap();
         let owner = session("ses_gone");
         store.claim_issue(&issue.id, &owner).unwrap();
         let snapshot = store.load_issues().unwrap();
-        let findings = vec![Finding {
-            kind: FindingKind::LandedOpen,
-            issue_id: Some(issue.id.clone()),
-            detail: "referenced by landed commit trailer but status is in_progress".to_string(),
-            evidence: Some("abc123def456".to_string()),
-            proposed_fix: Some("review the commits".to_string()),
-        }];
-
-        store.release_issue(&issue.id, &owner).unwrap();
-        let new_owner = session("ses_live");
-        store.claim_issue(&issue.id, &new_owner).unwrap();
-        // The stale owner's proof verifies against the SNAPSHOT row, so the
-        // guard is bypassed — and the CAS check must still refuse the write.
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, Some(&owner));
-        assert!(fixed.is_empty());
-        assert!(failures
-            .iter()
-            .any(|failure| failure.contains("stale reconcile evidence")));
+        // Both findings on one row, as a dead worker's landed item reports.
+        let findings = vec![
+            Finding {
+                kind: FindingKind::LandedOpen,
+                issue_id: Some(issue.id.clone()),
+                detail: "referenced by landed commit trailer but status is in_progress".to_string(),
+                evidence: Some("abc123def456".to_string()),
+                proposed_fix: Some("review the commits".to_string()),
+            },
+            Finding {
+                kind: FindingKind::DeadClaim,
+                issue_id: Some(issue.id.clone()),
+                detail: "claimed by dead session ses_gone".to_string(),
+                evidence: Some(
+                    "coord status: session-gone dead (bound by claim proof)".to_string(),
+                ),
+                proposed_fix: Some("abandon the claim".to_string()),
+            },
+        ];
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
+        assert_eq!(
+            fixed,
+            vec![issue.id.clone()],
+            "the release is the only repair"
+        );
+        assert!(failures.is_empty(), "{:?}", failures);
         let current = store.load_issues().unwrap().pop().unwrap();
-        assert_eq!(current.status, IssueStatus::InProgress);
-        current.require_owner(&new_owner).unwrap();
+        assert_eq!(
+            current.status,
+            IssueStatus::Open,
+            "releasing ownership reopens the row; it never marks the work accepted"
+        );
+        assert!(current.claimed_by.is_none());
+        assert!(current.claim_token_hash.is_none());
+    }
+
+    #[test]
+    fn only_refuses_advisory_kinds_by_name() {
+        let findings: Vec<Finding> = Vec::new();
+        let error = select_fix_findings(&findings, &["landed_open".to_string()]).unwrap_err();
+        assert!(
+            error.contains("landed_open is advisory")
+                && error.contains("does not approve completion")
+                && error.contains("manna done")
+                && error.contains("dead_claim, blocker_desync"),
+            "{error}"
+        );
+        let error = select_fix_findings(&findings, &["stale_dream".to_string()]).unwrap_err();
+        assert!(error.contains("stale_dream is advisory"), "{error}");
+        // The two repairs are still selectable, together or alone.
+        assert!(select_fix_findings(
+            &findings,
+            &["dead_claim".to_string(), "blocker_desync".to_string()]
+        )
+        .is_ok());
+        assert!(select_fix_findings(&findings, &["blocker_desync".to_string()]).is_ok());
     }
 
     fn track_row(id: &str) -> Issue {
@@ -5647,96 +5492,7 @@ mod tests {
     }
 
     #[test]
-    fn landed_open_fix_refuses_a_track_whose_item_was_created_after_inspection() {
-        let (_temp, store) = setup_store();
-        store.append_issue(&track_row("mn-trk001")).unwrap();
-        store
-            .append_issue(&item_in_track("mn-kid001", "mn-trk001", IssueStatus::Done))
-            .unwrap();
-        let owner = session("ses_track");
-        store.claim_issue("mn-trk001", &owner).unwrap();
-        // Inspection: every item in the track is done, so the pre-lock read
-        // of the gate passes and the cure proceeds to its write.
-        let snapshot = store.load_issues().unwrap();
-        // Between inspection and the write, an item is created under the track.
-        store
-            .append_issue(&item_in_track("mn-late01", "mn-trk001", IssueStatus::Open))
-            .unwrap();
-
-        let (fixed, failures) = apply_reconcile_fixes(
-            &store,
-            &snapshot,
-            &landed_track_finding("mn-trk001"),
-            Some(&owner),
-        );
-        assert!(
-            fixed.is_empty(),
-            "the track must not close over the late item: {:?}",
-            fixed
-        );
-        assert_eq!(failures.len(), 1, "{:?}", failures);
-        assert!(
-            failures[0].contains("mn-late01 (open)")
-                && failures[0].contains("A track closes only when every item in it is done"),
-            "the refusal names the late item and the rule: {:?}",
-            failures
-        );
-        let rows = store.load_issues().unwrap();
-        let track = rows.iter().find(|row| row.id == "mn-trk001").unwrap();
-        assert_eq!(track.status, IssueStatus::InProgress);
-        track.require_owner(&owner).unwrap();
-        let late = rows.iter().find(|row| row.id == "mn-late01").unwrap();
-        assert_eq!(late.status, IssueStatus::Open);
-        assert_eq!(late.track.as_deref(), Some("mn-trk001"));
-    }
-
-    #[test]
-    fn landed_open_fix_refuses_a_track_whose_item_moved_in_after_inspection() {
-        let (_temp, store) = setup_store();
-        store.append_issue(&track_row("mn-trk002")).unwrap();
-        store.append_issue(&track_row("mn-trk003")).unwrap();
-        store
-            .append_issue(&item_in_track("mn-kid002", "mn-trk002", IssueStatus::Done))
-            .unwrap();
-        store
-            .append_issue(&item_in_track("mn-stray1", "mn-trk003", IssueStatus::Open))
-            .unwrap();
-        let owner = session("ses_track");
-        store.claim_issue("mn-trk002", &owner).unwrap();
-        let snapshot = store.load_issues().unwrap();
-        // Between inspection and the write, the open stray moves into the track.
-        let mover = session("ses_mover");
-        store
-            .mutate_issue_metadata("mn-stray1", &mover, |issue, _| {
-                issue.track = Some("mn-trk002".to_string());
-                Ok(())
-            })
-            .unwrap();
-
-        let (fixed, failures) = apply_reconcile_fixes(
-            &store,
-            &snapshot,
-            &landed_track_finding("mn-trk002"),
-            Some(&owner),
-        );
-        assert!(fixed.is_empty(), "{:?}", fixed);
-        assert_eq!(failures.len(), 1, "{:?}", failures);
-        assert!(
-            failures[0].contains("mn-stray1 (open)"),
-            "the refusal names the moved item: {:?}",
-            failures
-        );
-        let rows = store.load_issues().unwrap();
-        let track = rows.iter().find(|row| row.id == "mn-trk002").unwrap();
-        assert_eq!(track.status, IssueStatus::InProgress);
-        track.require_owner(&owner).unwrap();
-        let stray = rows.iter().find(|row| row.id == "mn-stray1").unwrap();
-        assert_eq!(stray.status, IssueStatus::Open);
-        assert_eq!(stray.track.as_deref(), Some("mn-trk002"));
-    }
-
-    #[test]
-    fn landed_open_fix_closes_a_track_whose_items_are_all_done() {
+    fn reconcile_fix_never_closes_a_track_and_a_released_track_claim_reopens_it() {
         let (_temp, store) = setup_store();
         store.append_issue(&track_row("mn-trk004")).unwrap();
         store
@@ -5746,23 +5502,62 @@ mod tests {
         store.claim_issue("mn-trk004", &owner).unwrap();
         let snapshot = store.load_issues().unwrap();
 
-        let (fixed, failures) = apply_reconcile_fixes(
-            &store,
-            &snapshot,
-            &landed_track_finding("mn-trk004"),
-            Some(&owner),
-        );
+        // Every item done, trailer landed, claim held: before mn-880173 the
+        // cure closed this track. landed_open is advisory now; the track
+        // stays in_progress under its claim and nothing is reported failed.
+        let (fixed, failures) =
+            apply_reconcile_fixes(&store, &snapshot, &landed_track_finding("mn-trk004"));
+        assert!(fixed.is_empty(), "{:?}", fixed);
         assert!(failures.is_empty(), "{:?}", failures);
-        assert_eq!(fixed.len(), 1, "{:?}", fixed);
-        assert!(
-            fixed[0].contains("mn-trk004") && fixed[0].contains("closed on landed evidence"),
-            "{:?}",
-            fixed
-        );
         let rows = store.load_issues().unwrap();
         let track = rows.iter().find(|row| row.id == "mn-trk004").unwrap();
-        assert_eq!(track.status, IssueStatus::Done);
+        assert_eq!(track.status, IssueStatus::InProgress);
+        track.require_owner(&owner).unwrap();
+
+        // An item created under the track since inspection and a dead claim
+        // on the track: the release reopens the track, closes nothing, and
+        // the late item is still open under it.
+        store
+            .append_issue(&item_in_track("mn-late04", "mn-trk004", IssueStatus::Open))
+            .unwrap();
+        let mut findings = landed_track_finding("mn-trk004");
+        findings.push(Finding {
+            kind: FindingKind::DeadClaim,
+            issue_id: Some("mn-trk004".to_string()),
+            detail: "claimed by dead session ses_track".to_string(),
+            evidence: Some("coord status: session-track dead (bound by claim proof)".to_string()),
+            proposed_fix: Some("abandon the claim".to_string()),
+        });
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
+        assert_eq!(fixed, vec!["mn-trk004".to_string()], "{:?}", failures);
+        assert!(failures.is_empty(), "{:?}", failures);
+        let rows = store.load_issues().unwrap();
+        let track = rows.iter().find(|row| row.id == "mn-trk004").unwrap();
+        assert_eq!(track.status, IssueStatus::Open);
         assert!(track.claimed_by.is_none());
-        assert!(track.claim_token_hash.is_none());
+        let late = rows.iter().find(|row| row.id == "mn-late04").unwrap();
+        assert_eq!(late.status, IssueStatus::Open);
+
+        // Explicit completion keeps its gate: `done` refuses over the open
+        // item and closes once the item is done.
+        let closer = session("ses_closer");
+        store.claim_issue("mn-trk004", &closer).unwrap();
+        let error = store
+            .complete_issue("mn-trk004", &closer)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("mn-late04 (open)")
+                && error.contains("A track closes only when every item in it is done"),
+            "{error}"
+        );
+        store
+            .repair_issue("mn-late04", |issue, _| {
+                issue.status = IssueStatus::Done;
+                Ok(())
+            })
+            .unwrap();
+        let closed = store.complete_issue("mn-trk004", &closer).unwrap();
+        assert_eq!(closed.status, IssueStatus::Done);
     }
 }
