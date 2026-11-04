@@ -7,7 +7,7 @@ base_commit: 1ec68d9a044e5465a44459592ec40e98afdf53c2
 scope: 'Manna: stale or unbound living claimants must not be auto-closed by reconcile'
 inputs:
 - Independent review of ec30858 / mn-4e7229; .dev/liveness-review/review.md
-binding: sha256:e53e08e7b695134df61b7a562c701533173c90df8f2caf2140622961244caa92
+binding: sha256:18049e9e802ff09aa665d5db02379e3b501216b512e3a7f90c85915433f9f7d7
 ---
 
 # Handoff: Manna: stale or unbound living claimants must not be auto-closed by reconcile
@@ -137,3 +137,10 @@ Erik's acceptance boundary after the independent liveness check passed all ten s
 - SUBMITTED: in_progress under claude-833d4f4ab80a40cc, not self-closed. Review points: the advisory rule in the explicit `--fix` and in serve's Apply argv; the dead-claim release reopening a landed row (ownership released, work not accepted); the refused `--only landed_open`; the track-gate fixture's new shape beside the untouched store gate.
 - Live board consequence: the next SessionEnd or explicit `--fix` on this board releases mn-88d1ac's claim (claimant dead per coord) and reopens it; nothing closes. mn-9b4359's claimant is present again and is untouched.
 - `.manna/issues.jsonl` carries this claim and both seals in the working tree beside other lanes' uncommitted rows; left for the operator's board commit.
+
+### Board incident during round two (2026-11-04 18:55:38Z): a live lane's claim released by a SessionEnd reconcile
+
+- Observed: while this lane was mid-work, mn-880173 read `open` with no claimant. `.manna/drift.yaml` (generated 2026-11-04T18:55:38Z, session a6751ebc-0cba-4493-8ffb-ebf8182ff06d, the mn-9b4359 lane's SessionEnd) carries `dead_claim mn-880173: claimed by dead session claude-833d4f4ab80a40cc; coord status: session-833d4f4ab80a dead (bound by claim proof)`. That hook run (`--fix --only dead_claim,blocker_desync --write-drift`, binary at 69af762) released the claim; the seal at 19:40:46Z then bumped `updated_at`.
+- Cause: coord classified this live session dead because its record's anchor pid was the Bash shell of one tool call (`.git/agent-do/coord/agents.json`: `pid: 48897`, `pid_start: ''`; `ps -p 48897` finds nothing), and `classify_presence` checks process liveness before the lease. The lane's own `coord peers` reads showed it active because every call re-registers with the current shell pid. This is open defect mn-dd9be1 (coord: a live session reads dead when its anchor pid was transient). It was masked until ec30858 made manna match hook-pinned Claude sessions at all; since then the `dead_claim` path finds them, and from any other process a Claude lane between tool calls reads dead.
+- Consequence for this change: round two bounded the damage to a release (the row reopened, nothing was marked done); on the round-one binary the same run would have closed a landed item over a live lane. The release itself is still wrong, and it will recur: the next SessionEnd of any session may release this claim again while this lane works. Reclaimed at 19:4xZ (the row was unclaimed; not a steal); the digest matched.
+- For the reviewer and Erik: coord's pid-derived `dead` is not positive evidence for hook-anchored Claude lanes. Until mn-dd9be1 lands (a durable anchor, or `pid_start` recorded and honoured), the `dead_claim` release the work order preserves can hit live Claude lanes; `stopped` (an explicit `coord stop`) is the one verdict those lanes never produce by accident. Options, not taken here: fix the anchor in coord (mn-dd9be1); or have manna treat a pid-derived `dead` as positive only when coord also reports a durable anchor (a coord `peers` payload change); or narrow the hook's release to `stopped`. zpc: les-318485.
