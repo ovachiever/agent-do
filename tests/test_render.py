@@ -146,6 +146,25 @@ cmd_logs my-worker --job nonsense || echo "bad-job=$?"
     require("bad-job=2" in result.stdout, f"malformed --job must exit 2: {result.stdout!r}")
     temp_dir.cleanup()
 
+    # No HTTP response (connection refused here) is reported as such, and the
+    # helper leaves no RETURN trap behind to abort its caller under set -u.
+    unreachable = run_bash(f"""
+set -euo pipefail
+source <(awk '/^# --- Main ---/{{exit}} {{print}}' "{ROOT / 'tools/agent-render'}")
+RENDER_API_KEY=test RENDER_API="http://127.0.0.1:9"
+caller() {{ local r; r=$(render_request_checked GET /services/x) || {{ echo "caller-failed"; return 0; }}; }}
+caller
+render_request_checked GET /services/x >/dev/null 2>&1 || true
+later() {{ :; }}
+later
+echo "caller-returned"
+""")
+    require("no HTTP response" in unreachable.stderr and "not a 'not found'" in unreachable.stderr,
+            f"transport failure must say so: {unreachable.stderr!r}")
+    require("caller-failed" in unreachable.stdout and "caller-returned" in unreachable.stdout
+            and "unbound variable" not in unreachable.stderr,
+            f"caller must survive the failed request: {unreachable.stdout!r} {unreachable.stderr!r}")
+
     print("render tests passed")
     return 0
 
