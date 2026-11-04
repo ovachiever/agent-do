@@ -275,7 +275,7 @@ stall_detect() {
         local stall_duration=$((now - stall_start))
 
         if [[ $stall_duration -ge $warn_at && "$warned" == "false" ]]; then
-            echo "Warning: No output for ${stall_duration}s" >&2
+            echo "Warning: still running after ${stall_duration}s (limit ${timeout}s)" >&2
             warned=true
         fi
 
