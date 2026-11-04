@@ -33,8 +33,15 @@ assignment is re-read immediately before the ref update; recovery before the
 ref update re-verifies target, policy digest and assignment from the intent
 and voids the landing otherwise, while recovery after the ref update only
 finishes the record; the intent is retired after the queue row, the receipt,
-the routing record and the audit line; and the integrator resets only a
-candidate worktree carrying its own ownership marker.
+the routing record and the audit line; the integrator resets only a
+candidate worktree carrying its own ownership marker; and a submission
+authorizes under the exact claim it was made from (the worker's proof and
+that claim's own `claimed_at`, never a label) and the work order it answered
+(the sealed handoff digest): a claim released and taken again, even by the
+same worker, or a work order resealed since, blocks it (`claim_changed`,
+`work_order_revised`) before the checks, immediately before the ref update,
+and in recovery before the ref update; a submission or intent that recorded
+no such binding fails closed.
 """
 
 from __future__ import annotations
@@ -115,7 +122,7 @@ EXIT_CONTENDED = 2
 
 # Blocked reasons the worker must act on (routed as action drops) versus
 # reasons the integrator retries on its own once the operator clears them.
-WORKER_REASONS = {"conflict", "checks_failed", "candidate_changed", "board_paths", "stale_submission", "reassigned", "item_closed"}
+WORKER_REASONS = {"conflict", "checks_failed", "candidate_changed", "board_paths", "stale_submission", "reassigned", "claim_changed", "work_order_revised", "item_closed"}
 RETRYABLE_REASONS = {"target_checkout_busy", "config_disabled", "config_invalid", "config_changed"}
 
 
@@ -525,6 +532,36 @@ def managed_state(repo: Repo, item: str) -> dict[str, Any]:
         raise Refusal(f"managed metadata at {source} is unreadable: {exc}")
 
 
+def short_digest(value: Any) -> str:
+    if not value:
+        return "none"
+    return short_hex(str(value).split(":")[-1])
+
+
+def claim_binding(row: dict[str, Any], me: dict[str, Any]) -> dict[str, Any]:
+    """The assignment a workspace or submission is bound to: the caller's proof
+    and the exact claim incarnation (`claimed_at`), the same pair coord pins
+    for an item-addressed drop. A stable session proof names a worker, not one
+    claim; the same worker releasing and reclaiming an item holds a new claim."""
+    claimed_at = row.get("claimed_at")
+    if not claimed_at:
+        raise Refusal(
+            f"{row.get('id')} is claimed by {row.get('claimed_by')} but the canonical row carries no claimed_at, so the claim incarnation cannot be pinned and nothing is bound "
+            "(the board invariant says a claimant has a claim time; `agent-do manna lint`)"
+        )
+    return {"label": me["session"], "proof": me["proof"], "claimed_by": row.get("claimed_by"), "claimed_at": claimed_at, "bound_at": now_iso()}
+
+
+def work_order_binding(row: dict[str, Any]) -> dict[str, Any]:
+    return {"prompt": row.get("prompt"), "digest": row.get("handoff_digest")}
+
+
+def binding_matches(binding: dict[str, Any] | None, row: dict[str, Any]) -> bool:
+    """Does a recorded binding name the claim the board holds now? Missing evidence never matches."""
+    binding = binding or {}
+    return bool(binding.get("proof")) and bool(binding.get("claimed_at")) and binding.get("proof") == row.get("claim_token_hash") and binding.get("claimed_at") == row.get("claimed_at")
+
+
 # ---------------------------------------------------------------------------
 # Durable state under the common git dir
 # ---------------------------------------------------------------------------
@@ -788,6 +825,8 @@ def cmd_workspace_add(repo: Repo, args: argparse.Namespace, out: Out) -> int:
             f"{item} is claimed by {row.get('claimed_by')} and this session is {me['session']}; the claimant registers its own workspace (proof mismatch, no label matching)",
             code=EXIT_CONTENDED,
         )
+    binding = claim_binding(row, me)
+    work_order = work_order_binding(row)
     managed = managed_state(repo, item)
     attempt = int(managed["attempt"])
     store = Store(repo)
@@ -799,6 +838,8 @@ def cmd_workspace_add(repo: Repo, args: argparse.Namespace, out: Out) -> int:
         created = False
         restored = False
         rebound = False
+        claim_changed = False
+        work_order_rebound = False
         if existing:
             record = existing
             path = Path(record["path"])
@@ -811,10 +852,19 @@ def cmd_workspace_add(repo: Repo, args: argparse.Namespace, out: Out) -> int:
                     raise Refusal(f"could not restore the workspace worktree at {path}: {(add.stderr or add.stdout).strip()}")
                 restored = True
                 record.setdefault("history", []).append({"at": now_iso(), "event": "restored", "by": me["session"]})
-            if record.get("worker", {}).get("proof") != me["proof"]:
-                record.setdefault("history", []).append({"at": now_iso(), "event": "rebound", "from": record.get("worker"), "to": {"label": me["session"], "proof": me["proof"]}})
-                record["worker"] = {"label": me["session"], "proof": me["proof"], "bound_at": now_iso(), "claimed_at": row.get("claimed_at")}
+            bound = record.get("worker") or {}
+            if not binding_matches(bound, row):
+                # A new claimant, or the same worker under a new claim: either way
+                # the earlier binding authorizes nothing from here on, and the
+                # record says which it was.
+                claim_changed = bound.get("proof") == me["proof"]
+                record.setdefault("history", []).append({"at": now_iso(), "event": "rebound", "from": bound, "to": binding, "claim_changed": claim_changed})
+                record["worker"] = binding
                 rebound = True
+            if record.get("work_order") != work_order:
+                record.setdefault("history", []).append({"at": now_iso(), "event": "work_order_rebound", "from": record.get("work_order"), "to": work_order})
+                record["work_order"] = work_order
+                work_order_rebound = True
         else:
             branch = f"{BRANCH_PREFIX}{item}-a{attempt}"
             if run(["git", "check-ref-format", "--branch", branch], cwd=repo.canonical_root).returncode != 0:
@@ -853,8 +903,8 @@ def cmd_workspace_add(repo: Repo, args: argparse.Namespace, out: Out) -> int:
                 "inherited_from": inherited_from,
                 "board": {"root": str(repo.canonical_root), "path": str(repo.board_dir), "id": repo.board_id()},
                 "managed": managed["managed"],
-                "worker": {"label": me["session"], "proof": me["proof"], "bound_at": now_iso(), "claimed_at": row.get("claimed_at")},
-                "work_order": {"prompt": row.get("prompt"), "digest": row.get("handoff_digest")},
+                "worker": binding,
+                "work_order": work_order,
                 "created_at": now_iso(),
                 "created_by": me["session"],
                 "status": "building",
@@ -867,16 +917,31 @@ def cmd_workspace_add(repo: Repo, args: argparse.Namespace, out: Out) -> int:
             rows.append(record)
             created = True
         store.save_workspaces(rows)
-        store.event("workspace_add", item=item, attempt=attempt, branch=record["branch"], path=record["path"], created=created, restored=restored, rebound=rebound, by=me["session"])
+        # Pending submissions bound to any other claim (or to none) will not land
+        # under this one; re-registering never revives them, it names them.
+        stale_submissions = [
+            str(other.get("id"))
+            for other in store.queue()
+            if other.get("item") == item and other.get("attempt") == attempt and other.get("status") in {"queued", "blocked", "integrating"} and not binding_matches(other.get("worker"), row)
+        ]
+        store.event(
+            "workspace_add", item=item, attempt=attempt, branch=record["branch"], path=record["path"], created=created, restored=restored, rebound=rebound,
+            claim_changed=claim_changed, work_order_rebound=work_order_rebound, claimed_at=binding["claimed_at"], stale_submissions=stale_submissions, by=me["session"],
+        )
     bindings = [touch_coord(repo, repo.canonical_root, None)]
     if Path(record["path"]).is_dir():
         bindings.append(touch_coord(repo, Path(record["path"]), None))
-    payload = {"ok": True, "created": created, "restored": restored, "rebound": rebound, "workspace": record, "coord": bindings, "canonical_root": str(repo.canonical_root), "via_worktree": repo.via_worktree}
+    payload = {
+        "ok": True, "created": created, "restored": restored, "rebound": rebound, "claim_changed": claim_changed, "work_order_rebound": work_order_rebound,
+        "stale_submissions": stale_submissions, "workspace": record, "coord": bindings, "canonical_root": str(repo.canonical_root), "via_worktree": repo.via_worktree,
+    }
     verb = "Created" if created else ("Restored" if restored else ("Rebound" if rebound else "Existing"))
     lines = [
         f"{verb} workspace for {item} attempt {attempt}: {record['path']}",
         f"  branch: {record['branch']} (from {short_hex(record['start_sha'])}{', inherited from attempt ' + str(record['inherited_from']['attempt']) if record.get('inherited_from') else ', the ' + target + ' tip'})",
-        f"  bound worker: {record['worker']['label']} (claim proof matched exactly)",
+        f"  bound worker: {record['worker']['label']} (claim proof matched exactly; claim of {record['worker']['claimed_at']}; work order {short_digest(record['work_order'].get('digest'))})",
+        *([f"  rebound: {'the same worker holds a new claim' if claim_changed else 'a new claimant'}; the earlier binding stays in the record's history"] if rebound else []),
+        *([f"  pending submission(s) made under an earlier claim will not land and need a fresh submit: {', '.join(stale_submissions)}"] if stale_submissions else []),
         f"  canonical board: {record['board']['path']}",
         f"  coord binding at the canonical root: {'ok' if bindings[0].get('ok') else 'failed: ' + str(bindings[0].get('error'))}",
         "Next: work inside the workspace, commit with a `Manna: " + item + "` trailer, then `agent-do git integration submit " + item + "`.",
@@ -924,6 +989,8 @@ def cmd_submit(repo: Repo, args: argparse.Namespace, out: Out) -> int:
         raise Refusal(f"{item} is {row.get('status')} with claimant {row.get('claimed_by') or 'nobody'}; only the live claimant submits")
     if row.get("claim_token_hash") != me["proof"]:
         raise Refusal(f"{item} is claimed by {row.get('claimed_by')}; this session ({me['session']}) does not hold that claim", code=EXIT_CONTENDED)
+    binding = claim_binding(row, me)
+    work_order = work_order_binding(row)
     managed = managed_state(repo, item)
     attempt = int(managed["attempt"])
     store = Store(repo)
@@ -933,6 +1000,12 @@ def cmd_submit(repo: Repo, args: argparse.Namespace, out: Out) -> int:
         record = find_workspace(rows, item, attempt)
         if record is None:
             raise Refusal(f"no workspace registered for {item} attempt {attempt}; run `agent-do git integration workspace add {item}` first")
+        if not binding_matches(record.get("worker"), row):
+            bound = record.get("worker") or {}
+            raise Refusal(
+                f"the workspace for {item} attempt {attempt} is bound to an earlier claim ({bound.get('label')}, claimed {bound.get('claimed_at') or 'unrecorded'}); the live claim by {row.get('claimed_by')} is from {row.get('claimed_at')}. "
+                f"A submission authorizes under one claim, so re-register the workspace under this one first: `agent-do git integration workspace add {item}`, then submit"
+            )
         intent = store.intent()
         if intent and intent.get("item") == item:
             raise Refusal(f"a landing for {item} (entry {intent.get('entry')}) is in flight; run `agent-do git integration recover` before submitting again")
@@ -1021,8 +1094,8 @@ def cmd_submit(repo: Repo, args: argparse.Namespace, out: Out) -> int:
             "source_sha": source,
             "base_sha": base,
             "target": target,
-            "worker": {"label": me["session"], "proof": me["proof"]},
-            "work_order": {"prompt": row.get("prompt"), "digest": row.get("handoff_digest")},
+            "worker": binding,
+            "work_order": work_order,
             "commits": commits,
             "trailer_commits": trailer_commits,
             "evidence": list(args.evidence or []),
@@ -1043,12 +1116,13 @@ def cmd_submit(repo: Repo, args: argparse.Namespace, out: Out) -> int:
         record["status"] = "queued"
         record["latest_entry"] = entry_id
         store.save_workspaces(rows)
-        store.event("submit", item=item, attempt=attempt, entry=entry_id, source=source, base=base, submission=submission_id, superseded=superseded, by=me["session"])
+        store.event("submit", item=item, attempt=attempt, entry=entry_id, source=source, base=base, submission=submission_id, superseded=superseded, claimed_at=binding["claimed_at"], work_order=work_order.get("digest"), by=me["session"])
     touch_coord(repo, repo.canonical_root, None)
     payload = {"ok": True, "entry": entry, "superseded": superseded, "managed": managed["managed"]}
     lines = [
         f"Queued {entry_id} for {item} attempt {attempt}: {short_hex(source)} on {branch} against {target} at {short_hex(base)}",
         f"  submission: {submission_id} ({'manna submit recorded it; the item stays in_progress' if managed['managed'] else 'local id; the item is not under managed closure'})",
+        f"  bound to: the claim of {binding['claimed_at']} by {row.get('claimed_by')} and work order {short_digest(work_order.get('digest'))} (a release and reclaim, or a reseal, needs a fresh submission)",
         f"  commits: {len(commits)} ({len(trailer_commits)} carry `Manna: {item}`)",
         f"  report: {report_path}",
         *([f"  superseded earlier submission(s): {', '.join(superseded)}"] if superseded else []),
@@ -1234,6 +1308,12 @@ class Integrator:
                 if result.get("candidate_integrity")
                 else "not verified (no checks ran)"
             ),
+            f"- assignment: bound to the claim of {(entry.get('worker') or {}).get('claimed_at') or 'unrecorded'} by {(entry.get('worker') or {}).get('claimed_by') or (entry.get('worker') or {}).get('label')}, work order {short_digest((entry.get('work_order') or {}).get('digest'))}"
+            + (
+                ("; at landing: " + ("unchanged" if not (result.get("assignment_at_landing") or {}).get("changed") else "CHANGED (" + str((result.get("assignment_at_landing") or {}).get("detail")) + ")"))
+                if result.get("assignment_at_landing")
+                else ""
+            ),
             f"- recorded at: {now_iso()} by {self.label}",
             "",
         ]
@@ -1306,6 +1386,7 @@ class Integrator:
             target_after = self.repo.tip(entry["target"])
             result = dict(entry.get("result") or {})
             tested = tested_digest or result.get("policy_digest") or self.cfg.digest
+            assignment = self.assignment_at_landing(entry)
             result.update(
                 {
                     "reason": None,
@@ -1323,6 +1404,8 @@ class Integrator:
                     "config_digest": tested,
                     "policy_digest_at_landing": live.digest,
                     "policy_changed_since_test": live.digest != tested,
+                    "assignment_at_landing": assignment,
+                    "assignment_changed_since_test": assignment.get("changed"),
                     "provenance": {"submission_sha": entry["source_sha"], "integrated_sha": candidate, "submission_id": entry["submission"]["id"], "attempt": entry["attempt"]},
                 }
             )
@@ -1335,6 +1418,12 @@ class Integrator:
         detail = [f"landed via {via}", f"target {entry['target']}: {short_hex(base)} -> {short_hex(candidate)}"]
         if result.get("policy_changed_since_test"):
             detail.append(f"the policy changed after this candidate was validated (tested {result.get('config_digest')}, now {result.get('policy_digest_at_landing')}); the ref had already moved, so the landing is recorded as it happened")
+        if result.get("assignment_changed_since_test"):
+            detail.append(
+                f"the assignment changed after this candidate was validated ({(result.get('assignment_at_landing') or {}).get('detail')}); the ref had already moved, so the landing is recorded as it happened and the item's current claimant decides what follows"
+            )
+        elif result.get("assignment_changed_since_test") is None and (result.get("assignment_at_landing") or {}).get("error"):
+            detail.append(f"the assignment could not be re-read when the landing was recorded: {(result.get('assignment_at_landing') or {}).get('error')}")
         summary = self.write_summary(entry, "landed", None, detail)
         recorded = [row for row in entry.get("routing") or [] if row.get("kind") == "info" and row.get("state") == "recorded"]
         if recorded:
@@ -1362,7 +1451,7 @@ class Integrator:
         self.store.save(
             "intent.json",
             {
-                "version": 2,
+                "version": 3,
                 "entry": entry["id"],
                 "item": entry["item"],
                 "attempt": entry["attempt"],
@@ -1374,6 +1463,7 @@ class Integrator:
                 "holder": str(holder) if holder else None,
                 "config_digest": tested_digest,
                 "worker": entry.get("worker"),
+                "work_order": entry.get("work_order"),
                 "checks": result.get("checks"),
                 "candidate_integrity": result.get("candidate_integrity"),
                 "written_at": now_iso(),
@@ -1402,22 +1492,85 @@ class Integrator:
 
     # -- staleness ----------------------------------------------------------
 
-    def staleness(self, entry: dict[str, Any]) -> tuple[str, list[str]] | None:
+    def staleness(self, entry: dict[str, Any], *, binding: dict[str, Any] | None = None, work_order: dict[str, Any] | None = None) -> tuple[str, list[str]] | None:
+        """Is the submission still authorized by the assignment it was made under?
+
+        The same answers coord gives an item-addressed drop, in the same
+        order: the item closed, the claim proof moved (`reassigned`), the claim
+        released and taken again, even by the same worker (`claim_changed`),
+        the managed attempt or submission moved (`stale_submission`), the work
+        order resealed (`work_order_revised`). A binding that records no claim
+        incarnation or no work order fails closed. `binding` and `work_order`
+        default to the queue row's; recovery passes the intent's."""
+        binding = binding if binding is not None else (entry.get("worker") or {})
+        work_order = work_order if work_order is not None else entry.get("work_order")
         try:
             row = board_row(self.repo, entry["item"])
         except Refusal as refusal:
             return "stale_submission", [f"canonical board unreadable: {refusal.message}"]
         if row.get("status") == "done":
             return "item_closed", [f"{entry['item']} is done on the canonical board; a closed item is not landed automatically"]
-        if row.get("claim_token_hash") != entry["worker"]["proof"]:
-            return "reassigned", [f"the claim moved from {entry['worker']['label']} to {row.get('claimed_by') or 'nobody'}; the submission came from a superseded claim and is not forwarded"]
+        if row.get("claim_token_hash") != binding.get("proof"):
+            return "reassigned", [f"the claim moved from {binding.get('label')} to {row.get('claimed_by') or 'nobody'}; the submission came from a superseded claim and is not forwarded"]
+        if not binding.get("claimed_at"):
+            return "claim_changed", [
+                "the submission recorded no claim incarnation (made before claim binding existed), so nothing proves it was made under the claim now held; a worker's stable identity does not authorize a submission from an unknown claim",
+                f"submit again from the current claim: `agent-do git integration workspace add {entry['item']}`, then `agent-do git integration submit {entry['item']}`",
+            ]
+        if row.get("claimed_at") != binding.get("claimed_at"):
+            return "claim_changed", [
+                f"the claim was released and taken again by {row.get('claimed_by')} (claimed {row.get('claimed_at')}); the submission was made under the claim of {binding.get('claimed_at')}",
+                "a submission authorizes under the claim it was made from and is not forwarded to a later claim, even by the same worker; register the workspace under the new claim and submit again",
+            ]
         managed = managed_state(self.repo, entry["item"])
         if managed["managed"]:
             if int(managed["attempt"]) != int(entry["attempt"]):
                 return "stale_submission", [f"managed attempt is now {managed['attempt']}, this submission was attempt {entry['attempt']}"]
             if managed["submission_id"] != entry["submission"]["id"]:
                 return "stale_submission", [f"the managed record's current submission is {managed['submission_id']}, not {entry['submission']['id']}"]
+        if not isinstance(work_order, dict) or "digest" not in work_order:
+            return "work_order_revised", ["the submission recorded no work-order binding, so nothing proves which revision of the work order it answered; read the current one and submit again"]
+        if row.get("handoff_digest") != work_order.get("digest"):
+            return "work_order_revised", [
+                f"the work order was resealed after this submission ({short_digest(work_order.get('digest'))} -> {short_digest(row.get('handoff_digest'))}); the submission answered the earlier revision and does not extend to this one",
+                "read the revised work order, then submit again (the branch and its commits stay)",
+            ]
         return None
+
+    def intent_binding_ok(self, intent: dict[str, Any], entry: dict[str, Any]) -> bool:
+        """The intent names a claim incarnation, and the same one the queue row was bound to."""
+        binding = intent.get("worker") if isinstance(intent.get("worker"), dict) else None
+        recorded = entry.get("worker") or {}
+        return bool(binding and binding.get("proof") and binding.get("claimed_at") and binding.get("proof") == recorded.get("proof") and binding.get("claimed_at") == recorded.get("claimed_at"))
+
+    def assignment_at_landing(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """What the board says at the moment a landing is recorded, beside what the
+        submission was bound to. Recorded, never a gate here: the ref has moved."""
+        binding = entry.get("worker") or {}
+        work_order = entry.get("work_order") or {}
+        try:
+            row = board_row(self.repo, entry["item"])
+        except Refusal as refusal:
+            return {"read": False, "error": refusal.message, "changed": None, "detail": None}
+        reasons: list[str] = []
+        if row.get("status") == "done":
+            reasons.append("the item is done")
+        if row.get("claim_token_hash") != binding.get("proof"):
+            reasons.append(f"the claim moved to {row.get('claimed_by') or 'nobody'}")
+        elif row.get("claimed_at") != binding.get("claimed_at"):
+            reasons.append(f"the claim was released and taken again ({binding.get('claimed_at') or 'unrecorded'} -> {row.get('claimed_at')})")
+        if row.get("handoff_digest") != work_order.get("digest"):
+            reasons.append(f"the work order was resealed ({short_digest(work_order.get('digest'))} -> {short_digest(row.get('handoff_digest'))})")
+        return {
+            "read": True,
+            "status": row.get("status"),
+            "claimed_by": row.get("claimed_by"),
+            "claimed_at": row.get("claimed_at"),
+            "claim_proof_matches": row.get("claim_token_hash") == binding.get("proof"),
+            "work_order_digest": row.get("handoff_digest"),
+            "changed": bool(reasons),
+            "detail": "; ".join(reasons) or None,
+        }
 
     # -- one entry ----------------------------------------------------------
 
@@ -1434,9 +1587,9 @@ class Integrator:
           under (digest equality); a policy that changed during validation is
           adopted once and the candidate revalidated under it; one that moves
           again during that revalidation blocks (`config_changed`, retryable);
-        - the assignment (claim proof, managed attempt and submission, item not
-          closed) is re-read immediately before the ref update, not only before
-          the checks;
+        - the assignment (claim proof and claim incarnation, managed attempt and
+          submission, item not closed, work-order digest) is re-read
+          immediately before the ref update, not only before the checks;
         - the target must still equal the tested base, else rebuild.
         """
         repo = self.repo
@@ -1599,10 +1752,13 @@ class Integrator:
 
     def recover(self) -> list[dict[str, Any]]:
         """Settle an interrupted landing. A ref that already moved gets its record
-        finished (never a second landing). A ref that did not move is re-landed
-        only when the target, the policy digest and the assignment are exactly
-        what the candidate was validated under; otherwise the intent is voided
-        and the submission requeued (policy) or blocked (assignment)."""
+        finished (never a second landing; the record says when the policy or the
+        assignment changed since the test). A ref that did not move is re-landed
+        only when the target, the policy digest and the assignment (claim proof
+        and incarnation, managed attempt and submission, work order) are exactly
+        what the candidate was validated under, read from the intent; otherwise
+        the intent is voided and the submission requeued (policy, or an intent
+        without a claim binding) or blocked (assignment)."""
         outcomes: list[dict[str, Any]] = []
         intent = self.store.intent()
         if intent:
@@ -1632,17 +1788,24 @@ class Integrator:
                         else f"the policy changed after the candidate was validated (tested {tested_digest}, now {self.cfg.digest}); the interrupted landing is voided and the submission requeued for validation under the current policy; the candidate stays pinned"
                     )
                     outcomes.append(self.void_intent(entry, reason))
+                elif not self.intent_binding_ok(intent, entry):
+                    outcomes.append(
+                        self.void_intent(
+                            entry,
+                            "the interrupted landing recorded no claim binding, or one that differs from the queue row's (written before claim binding existed, or edited); voided, nothing re-landed on an unverified binding; the next run judges the submission against the live claim",
+                        )
+                    )
                 else:
-                    stale = self.staleness(entry)
+                    stale = self.staleness(entry, binding=intent.get("worker"), work_order=intent.get("work_order"))
                     if stale:
                         self.store.remove("intent.json")
                         self.store.event("intent_voided", entry=entry["id"], reason=stale[0])
                         outcomes.append(self.block(entry, stale[0], stale[1] + ["found while recovering an interrupted landing; the landing was voided and nothing moved"]))
                     else:
-                        self.store.event("recover_retry", entry=entry["id"], candidate=candidate, base=base, config_digest=tested_digest)
+                        self.store.event("recover_retry", entry=entry["id"], candidate=candidate, base=base, config_digest=tested_digest, claimed_at=(intent.get("worker") or {}).get("claimed_at"))
                         state, detail = self.land(entry, candidate, base, tested_digest=tested_digest)
                         if state == "landed":
-                            outcomes.append(self.complete(entry, candidate, base, f"recovered: {detail} (interrupted before the ref update; target, policy and assignment unchanged, same tested candidate)", recovered=True, tested_digest=tested_digest))
+                            outcomes.append(self.complete(entry, candidate, base, f"recovered: {detail} (interrupted before the ref update; target, policy, claim and work order unchanged, same tested candidate)", recovered=True, tested_digest=tested_digest))
                         elif state == "moved":
                             entry["status"] = "queued"
                             entry.setdefault("history", []).append({"at": now_iso(), "event": "requeued", "reason": detail})
@@ -1710,6 +1873,10 @@ def next_action_for(entry: dict[str, Any]) -> str:
         return f"worker: the checks changed the candidate tree (see candidate-drift.patch in the receipts); commit what they generate, or fix the check command with the operator, then `agent-do git integration submit {item}`"
     if reason == "board_paths":
         return "worker: drop board-owned paths from the branch (board edits belong to the canonical checkout) and resubmit"
+    if reason == "claim_changed":
+        return f"worker: the claim was released and taken again after this submission; re-register the workspace under the current claim (`agent-do git integration workspace add {item}`), then `agent-do git integration submit {item}`"
+    if reason == "work_order_revised":
+        return f"worker: the work order was resealed after this submission; read the revision, then `agent-do git integration submit {item}`"
     if reason in {"stale_submission", "reassigned", "item_closed"}:
         return "the current claimant submits from the current attempt's workspace; this entry is history"
     if reason == "target_checkout_busy":
@@ -1796,6 +1963,9 @@ def item_status(repo: Repo, store: Store, item: str, workspaces: list[dict[str, 
             "checks": result.get("checks"),
             "candidate_integrity": result.get("candidate_integrity"),
             "policy_digest": result.get("config_digest") or result.get("policy_digest"),
+            "binding": entry.get("worker"),
+            "work_order": entry.get("work_order"),
+            "assignment_at_landing": result.get("assignment_at_landing"),
             "rebuilds": entry.get("rebuilds"),
             "revalidations": entry.get("revalidations"),
             "routing": entry.get("routing"),

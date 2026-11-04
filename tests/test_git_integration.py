@@ -22,6 +22,17 @@ commit that lands); a crash after the landed queue row finished without a
 second landing or a second drop; a foreign detached worktree at the candidate
 path never reset; the assignment re-read immediately before landing; and the
 check environment without the integrator's identity or secrets.
+
+Round three, from the independent re-review of ba76f34: a submission
+authorizes under the exact claim it was made from (proof and `claimed_at`)
+and the work order it answered (sealed digest). The same worker releasing
+and reclaiming the item, or resealing the work order, blocks the old
+submission before the checks, immediately before the ref update, and in
+recovery before the ref update; a submission or intent without that
+binding fails closed; a workspace bound to an earlier claim is rebound (and
+names the submissions that voids) before a fresh submission; a ref that had
+already advanced still gets its record finished, saying the assignment
+changed.
 """
 
 from __future__ import annotations
@@ -1193,6 +1204,197 @@ def test_check_environment(root: Path, base: dict[str, str]) -> None:
     print("  ok: checks run without the integrator's identity or credential-shaped variables")
 
 
+def test_reclaim_voids_queued_submission(root: Path, base: dict[str, str]) -> None:
+    """Re-review blocker (queued path): a submission authorizes under the exact claim it was made from; the same worker releasing and reclaiming the item holds a new claim, so the old submission is refused, never landed."""
+    estate = Estate(root, "reclaim", base)
+    primary = estate.primary
+    item = estate.create("same worker reclaims")
+    worker = Session(base, "worker-reclaim")
+    first = estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/feature.txt", "version A\n", "feat: A")
+    entry = estate.submit(item, worker, ws)["entry"]
+    require(manna(["abandon", item], cwd=primary, env=worker.env).returncode == 0, "the worker releases the item")
+    second = estate.claim(item, worker)
+    require(second["claim_token_hash"] == first["claim_token_hash"] and second["claimed_at"] != first["claimed_at"], f"same proof, new claim: {first['claimed_at']} -> {second['claimed_at']}")
+    count = count_commits(primary)
+    outcome = estate.run_integrator()["processed"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "claim_changed", f"a submission from the earlier claim is refused, not landed: {outcome}")
+    require(estate.tip() != source and count_commits(primary) == count, "nothing landed")
+    require(entry["worker"]["claimed_at"] == first["claimed_at"] and entry["worker"]["proof"] == worker.proof(primary) and entry["work_order"]["digest"] == first["handoff_digest"], f"the submission pinned the claim incarnation and the work order: {entry['worker']} {entry['work_order']}")
+    state = estate.item_state(item)
+    detail = " ".join(state["entry"]["result"]["detail"])
+    require(first["claimed_at"] in detail and second["claimed_at"] in detail and "same worker" in detail, f"the block names both claims: {detail}")
+    require("workspace add" in state["next_action"] and "submit" in state["next_action"], f"the next action is a fresh registration and submission: {state['next_action']}")
+    actions = [d for d in drops_for(estate, worker, item) if d.get("kind") == "action"]
+    require(len(actions) == 1, f"one action drop reaches the worker on the item: {actions}")
+    refused = integ(["submit", item, "--json"], cwd=ws, env=worker.env)
+    error = json.loads(refused.stdout).get("error", "") if refused.stdout.strip() else refused.stderr
+    require(refused.returncode == 1 and "earlier claim" in error and "workspace add" in error, f"a workspace bound to the earlier claim does not submit: {refused.stdout} {refused.stderr}")
+    rebound = estate.workspace(item, worker)
+    require(rebound["rebound"] is True and rebound["claim_changed"] is True and rebound["stale_submissions"] == [entry["id"]], f"re-registering rebinds to the new claim and names the voided submission: {rebound}")
+    record = rebound["workspace"]
+    require(record["worker"]["claimed_at"] == second["claimed_at"] and any(h.get("event") == "rebound" and h.get("claim_changed") for h in record["history"]), f"the record carries the new claim and the rebinding in its history: {record['worker']} {record['history']}")
+    fresh = estate.submit(item, worker, ws)
+    require(fresh["superseded"] == [entry["id"]] and fresh["entry"]["worker"]["claimed_at"] == second["claimed_at"], f"the fresh submission supersedes the old one under the new claim: {fresh['superseded']}")
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source and count_commits(primary) == count + 1, f"submitted again under the live claim, it lands once: {landed}")
+    require(estate.item_state(item)["entry"]["result"]["assignment_changed_since_test"] is False, "the record says the assignment held through the landing")
+
+    # A submission recorded before claim binding existed (no claimed_at) fails closed.
+    item_l = estate.create("legacy submission")
+    worker_l = Session(base, "worker-reclaim-legacy")
+    estate.claim(item_l, worker_l)
+    ws_l = Path(estate.workspace(item_l, worker_l)["workspace"]["path"])
+    source_l = commit(ws_l, item_l, "src/legacy.txt", "legacy\n", "feat: legacy")
+    legacy_id = estate.submit(item_l, worker_l, ws_l)["entry"]["id"]
+    queue_path = estate.state_dir() / "queue.json"
+    queue = json.loads(queue_path.read_text(encoding="utf-8"))
+    for row in queue["entries"]:
+        if row["id"] == legacy_id:
+            row["worker"] = {"label": row["worker"]["label"], "proof": row["worker"]["proof"]}
+    queue_path.write_text(json.dumps(queue), encoding="utf-8")
+    count = count_commits(primary)
+    outcome = estate.run_integrator()["processed"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "claim_changed" and count_commits(primary) == count, f"a submission without a claim incarnation is never landed: {outcome}")
+    require("recorded no claim incarnation" in " ".join(estate.item_state(item_l)["entry"]["result"]["detail"]), "the block says the evidence is missing")
+    again = estate.workspace(item_l, worker_l)
+    require(again["rebound"] is False and again["stale_submissions"] == [legacy_id], f"the workspace is still bound to the live claim; the unbound submission is named: {again}")
+    estate.submit(item_l, worker_l, ws_l)
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source_l and count_commits(primary) == count + 1, "submitted with its binding, it lands")
+    print("  ok: a queued submission from an earlier claim is refused, even by the same worker; a fresh submission under the live claim lands")
+
+
+def test_reclaim_voids_interrupted_landing(root: Path, base: dict[str, str]) -> None:
+    """Re-review blocker (recovery path): a landing interrupted before the ref update is voided when the same worker released and reclaimed the item; after the ref update the record is finished and says the assignment changed."""
+    estate = Estate(root, "reclaim-recover", base)
+    primary = estate.primary
+    fault_before = dict(estate.integrator.env, AGENT_GIT_INTEGRATION_FAULT="after_intent")
+    fault_after = dict(estate.integrator.env, AGENT_GIT_INTEGRATION_FAULT="after_ref_update")
+
+    # (a) Interrupted before the ref update, then released and reclaimed by the same worker.
+    item = estate.create("reclaimed during recovery")
+    worker = Session(base, "worker-rr-a")
+    first = estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/feature.txt", "version A\n", "feat: A")
+    entry_id = estate.submit(item, worker, ws)["entry"]["id"]
+    count = count_commits(primary)
+    require(integ(["run", "--json"], cwd=primary, env=fault_before).returncode == FAULT_EXIT, "fault before the ref update")
+    intent = json.loads((estate.state_dir() / "intent.json").read_text(encoding="utf-8"))
+    require(manna(["abandon", item], cwd=primary, env=worker.env).returncode == 0, "released while the landing is interrupted")
+    second = estate.claim(item, worker)
+    require(second["claimed_at"] != first["claimed_at"], "a new claim by the same worker")
+    outcome = integ_json(["recover"], cwd=primary, env=estate.integrator.env)["recovered"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "claim_changed", f"recovery refuses the unperformed landing: {outcome}")
+    require(estate.tip() != source and count_commits(primary) == count and not (estate.state_dir() / "intent.json").exists(), "nothing landed; intent voided")
+    require(intent["worker"]["claimed_at"] == first["claimed_at"] and intent["work_order"]["digest"] == first["handoff_digest"], f"the intent pinned the claim incarnation and the work order: {intent}")
+    require(git(primary, "rev-parse", f"refs/integration/candidates/{entry_id}") == source, "the candidate stays pinned")
+    detail = " ".join(estate.item_state(item)["entry"]["result"]["detail"])
+    require("recovering" in detail and first["claimed_at"] in detail, f"the block says it was found in recovery and names the claim: {detail}")
+    rebound = estate.workspace(item, worker)
+    require(rebound["rebound"] is True and rebound["claim_changed"] is True, f"rebinding under the new claim: {rebound}")
+    estate.submit(item, worker, ws)
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source and count_commits(primary) == count + 1, f"a fresh submission under the live claim lands once: {landed}")
+
+    # (b) Interrupted after the ref update, then released and reclaimed: the
+    # record is finished, never a second landing, and it says the assignment changed.
+    item_b = estate.create("reclaimed after the ref update")
+    worker_b = Session(base, "worker-rr-b")
+    estate.claim(item_b, worker_b)
+    ws_b = Path(estate.workspace(item_b, worker_b)["workspace"]["path"])
+    commit(ws_b, item_b, "src/b.txt", "b\n", "feat: b")
+    estate.submit(item_b, worker_b, ws_b)
+    count = count_commits(primary)
+    require(integ(["run", "--json"], cwd=primary, env=fault_after).returncode == FAULT_EXIT, "fault after the ref update")
+    candidate = json.loads((estate.state_dir() / "intent.json").read_text(encoding="utf-8"))["candidate"]
+    require(estate.tip() == candidate and count_commits(primary) == count + 1, "the ref advanced before the crash")
+    require(manna(["abandon", item_b], cwd=primary, env=worker_b.env).returncode == 0, "released after the ref moved")
+    second_b = estate.claim(item_b, worker_b)
+    outcome = integ_json(["recover"], cwd=primary, env=estate.integrator.env)["recovered"][0]
+    require(outcome["outcome"] == "landed" and outcome["recovered"] is True and "already contains" in outcome["via"], f"an advanced ref gets its record finished: {outcome}")
+    require(estate.tip() == candidate and count_commits(primary) == count + 1 and not (estate.state_dir() / "intent.json").exists(), "no second landing; intent retired")
+    result = estate.item_state(item_b)["entry"]["result"]
+    require(result["assignment_changed_since_test"] is True and result["assignment_at_landing"]["claimed_at"] == second_b["claimed_at"], f"the record says the claim changed after the test: {result['assignment_at_landing']}")
+    require("assignment changed after this candidate was validated" in Path(estate.item_state(item_b)["evidence"]["receipts"], "summary.md").read_text(encoding="utf-8"), "the summary states it")
+
+    # (c) An intent without a claim binding (written before binding existed) is
+    # voided, never re-landed; the next run judges the submission afresh.
+    item_c = estate.create("legacy intent without claim binding")
+    worker_c = Session(base, "worker-rr-c")
+    estate.claim(item_c, worker_c)
+    ws_c = Path(estate.workspace(item_c, worker_c)["workspace"]["path"])
+    source_c = commit(ws_c, item_c, "src/c.txt", "c\n", "feat: c")
+    estate.submit(item_c, worker_c, ws_c)
+    count = count_commits(primary)
+    require(integ(["run", "--json"], cwd=primary, env=fault_before).returncode == FAULT_EXIT, "fault before the ref update")
+    intent_path = estate.state_dir() / "intent.json"
+    legacy = json.loads(intent_path.read_text(encoding="utf-8"))
+    legacy["worker"] = {"label": legacy["worker"]["label"], "proof": legacy["worker"]["proof"]}
+    legacy.pop("work_order", None)
+    intent_path.write_text(json.dumps(legacy), encoding="utf-8")
+    outcome = integ_json(["recover"], cwd=primary, env=estate.integrator.env)["recovered"][0]
+    require(outcome["outcome"] == "requeued" and "no claim binding" in outcome["reason"] and count_commits(primary) == count, f"an intent without a claim binding is never re-landed: {outcome}")
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source_c and count_commits(primary) == count + 1, "judged afresh against the live claim, it lands")
+    print("  ok: recovery before the ref update refuses a landing whose claim changed; after it, the record is finished and says so")
+
+
+def test_work_order_binding(root: Path, base: dict[str, str]) -> None:
+    """The work-order binding is part of the assignment: a submission answers one sealed revision, and a reseal since blocks it before the checks and immediately before the ref update."""
+    estate = Estate(root, "workorder", base)
+    primary = estate.primary
+    item = estate.create("work order resealed")
+    worker = Session(base, "worker-wo")
+    row = estate.claim(item, worker)
+    ws = Path(estate.workspace(item, worker)["workspace"]["path"])
+    source = commit(ws, item, "src/feature.txt", "feature\n", "feat: wo")
+    entry = estate.submit(item, worker, ws)["entry"]
+    handoff = primary / row["prompt"]
+    handoff.write_text(handoff.read_text(encoding="utf-8") + "\nRevised: also cover the edge case.\n", encoding="utf-8")
+    sealed = manna(["handoff", "seal", item], cwd=primary, env=worker.env)
+    require(sealed.returncode == 0, f"the claim holder reseals the revised work order: {sealed.stderr or sealed.stdout}")
+    revised = estate.row(item)
+    require(row["handoff_digest"] and revised["handoff_digest"] != row["handoff_digest"] and revised["claimed_at"] == row["claimed_at"], "a new digest, the same claim")
+    count = count_commits(primary)
+    outcome = estate.run_integrator()["processed"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "work_order_revised", f"a submission against the earlier work order is refused: {outcome}")
+    require(estate.tip() != source and count_commits(primary) == count, "nothing landed")
+    require(entry["work_order"]["digest"] == row["handoff_digest"], "the submission pinned the sealed work order")
+    state = estate.item_state(item)
+    require("resealed" in " ".join(state["entry"]["result"]["detail"]) and "submit" in state["next_action"], f"the block names the reseal and the next action: {state['entry']['result']['detail']}")
+    require(len([d for d in drops_for(estate, worker, item) if d.get("kind") == "action"]) == 1, "one action drop to the worker")
+    again = estate.workspace(item, worker)
+    require(again["rebound"] is False and again["work_order_rebound"] is True and again["workspace"]["work_order"]["digest"] == revised["handoff_digest"], f"the workspace record follows the work order without rebinding the claim: {again}")
+    fresh = estate.submit(item, worker, ws)
+    require(fresh["entry"]["work_order"]["digest"] == revised["handoff_digest"] and fresh["superseded"] == [entry["id"]], "the fresh submission answers the revised order")
+    landed = estate.run_integrator()["processed"][0]
+    require(landed["outcome"] == "landed" and landed["integrated_sha"] == source and count_commits(primary) == count + 1, f"it lands once: {landed}")
+
+    # Resealed while the checks ran: caught immediately before the ref update.
+    item_b = estate.create("work order resealed during the checks")
+    worker_b = Session(base, "worker-wo-b")
+    row_b = estate.claim(item_b, worker_b)
+    ws_b = Path(estate.workspace(item_b, worker_b)["workspace"]["path"])
+    commit(ws_b, item_b, "src/b.txt", "b\n", "feat: b")
+    reseal = (
+        f"(cd {shlex.quote(str(primary))} && printf '\\nRevised during validation.\\n' >> {shlex.quote(row_b['prompt'])} && "
+        f"MANNA_SESSION_ID={worker_b.name} MANNA_SESSION_TOKEN={worker_b.env['MANNA_SESSION_TOKEN']} {shlex.quote(str(MANNA))} handoff seal {item_b} >/dev/null) && sh ./ci.sh"
+    )
+    estate.enable(checks=[reseal])
+    estate.submit(item_b, worker_b, ws_b)
+    count = count_commits(primary)
+    outcome = estate.run_integrator()["processed"][0]
+    require(outcome["outcome"] == "blocked" and outcome["reason"] == "work_order_revised", f"a reseal during the checks is caught before the ref update: {outcome}")
+    result = estate.item_state(item_b)["entry"]["result"]
+    require(all(check["ok"] for check in result["checks"]) and "immediately before the ref update" in " ".join(result["detail"]) and count_commits(primary) == count, f"the checks passed; the recheck refused: {result['detail']}")
+    require(estate.row(item_b)["handoff_digest"] != row_b["handoff_digest"], "the board shows the reseal")
+    estate.enable()
+    print("  ok: a submission answers one sealed work order; a reseal since blocks it before the checks and before the ref update")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp).resolve()
@@ -1221,6 +1423,9 @@ def main() -> None:
             test_candidate_ownership,
             test_assignment_rechecked_before_landing,
             test_check_environment,
+            test_reclaim_voids_queued_submission,
+            test_reclaim_voids_interrupted_landing,
+            test_work_order_binding,
         ]
         chosen = sys.argv[1:]
         for scenario in scenarios:

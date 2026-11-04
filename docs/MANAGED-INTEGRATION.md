@@ -89,7 +89,12 @@ is what they left behind), `board_paths` (the branch changes `.manna/` or
 `.handoff/`), `stale_submission` (the managed record's attempt or current
 submission moved), `reassigned` (the claim proof changed; a superseded claim's
 work is never forwarded, also when found immediately before the ref update or
-while recovering an interrupted landing), `item_closed` (done on the board).
+while recovering an interrupted landing), `claim_changed` (the claim was
+released and taken again since the submission, by the same worker included:
+a submission authorizes under the exact claim it was made from, `claimed_at`
+beside the proof, and one that recorded no claim incarnation fails closed),
+`work_order_revised` (the handoff was resealed since the submission; the
+submission answered the earlier revision), `item_closed` (done on the board).
 Retryable reasons are re-attempted by the next `run` and post no obligation:
 `target_checkout_busy` (the checkout holding the target has overlapping dirty
 files or an operation in progress), `config_disabled`, `config_invalid`,
@@ -199,9 +204,12 @@ worktree; when a worktree holds the target branch, the landing is
 otherwise it is the compare-and-swap. A target that moved between the test
 and the landing is rebuilt and retested, never forced. Immediately before the
 ref update, after the checks and the policy comparison, the assignment is
-re-read from the canonical board (claim proof, managed attempt and current
-submission, item not closed): a claim that moved while the checks ran blocks
-(`reassigned`) with nothing landed. What remains is the instant between that
+re-read from the canonical board (claim proof and claim incarnation, managed
+attempt and current submission, item not closed, work-order digest): a claim
+that moved while the checks ran blocks (`reassigned`, or `claim_changed` when
+the same worker reclaimed) and a work order resealed meanwhile blocks
+(`work_order_revised`), with nothing landed. What remains is the instant
+between that
 read and the ref write; for a managed item, manna's own acceptance
 (`accept --submission --attempt`, refused when either moved) is the gate that
 keeps a landing nobody reviewed from closing the item. The candidate is the
@@ -214,18 +222,20 @@ records both SHAs either way.
 
 Before any ref write the integrator saves `intent.json` (entry, item,
 attempt, submission id, source, candidate, base, target, holder, the tested
-policy digest, the worker binding, the check results and the candidate-tree
-verification) and pins `refs/integration/candidates/<entry>`. On every `run`
+policy digest, the worker binding with its claim incarnation, the work-order
+binding, the check results and the candidate-tree verification) and pins
+`refs/integration/candidates/<entry>`. On every `run`
 and `recover`, a pending intent is settled first, in this order:
 
 | Observation | Outcome |
 |---|---|
 | the queue row already says landed (crash in the tail) | finish the record: the receipt, one info drop (an existing one is never repeated), the audit line, then retire the intent |
-| the target already contains the candidate | the ref moved before the crash: complete the record (`recovered: true`); if the policy changed since the test the record says so; never land again |
+| the target already contains the candidate | the ref moved before the crash: complete the record (`recovered: true`); if the policy or the assignment (claim, work order) changed since the test the record says so; never land again |
 | the target moved | void the intent, requeue; the candidate stays pinned and the next run rebuilds against the new base |
 | the policy is not enabled for that target any more | void the intent, requeue |
 | the policy digest is not the tested one (or the intent predates digests) | void the intent, requeue for validation under the policy now in force; the candidate stays pinned |
-| the assignment moved (claim proof, managed attempt or submission, closure) | void the intent, block with that reason, route to the worker on the item |
+| the intent records no claim binding, or one that differs from the queue row's (an intent from before claim binding, or an edited one) | void the intent, requeue; nothing is re-landed on an unverified binding, and the next run judges the submission against the live claim |
+| the assignment moved (claim proof, claim incarnation, managed attempt or submission, closure, work-order digest), judged from the intent's own binding | void the intent, block with that reason, route to the worker on the item |
 | target, policy digest and assignment are exactly as tested | retry the same landing with the same candidate; nothing is rebuilt because nothing changed |
 
 The intent is retired last: `complete` writes the queue row (the landing is
@@ -249,14 +259,20 @@ row, receipt and audit were written; the order is now the reverse.)
 `manna identity --json` proof to equal the row's `claim_token_hash` exactly
 (a label is never matched). The attempt comes from `.manna/managed.json`
 (1 when the item is not managed). The record carries the canonical board path
-and id, the base (target tip), the start commit, the worker label and proof,
-and the work-order digest. It then runs `coord touch` at the canonical root
+and id, the base (target tip), the start commit, the worker binding (label,
+proof, claimant and the claim's own `claimed_at`) and the work-order digest.
+It then runs `coord touch` at the canonical root
 in the worker's own process, which binds the worker's coord record to its
 proof there (how `drop add --for-item` finds it), and again inside the
 workspace.
 
-A later `workspace add` by the same proof is idempotent; by a new claimant on
-the same attempt it rebinds the record (history kept); on a new attempt
+A later `workspace add` by the same proof under the same claim is idempotent
+(it follows a resealed work order, history kept). Under a new claim, whether a
+new claimant or the same worker who released and reclaimed the item, it
+rebinds the record (the earlier binding, and whether only the claim changed,
+stay in its history) and names every pending submission bound to another
+claim, or to none, as needing a fresh submit; re-registering never revives
+one. On a new attempt
 (after `manna managed release`) it creates `integration/<mn-id>-a<N+1>`
 starting from the previous attempt's branch tip, so the replacement inherits
 the work, and the previous worktree and branch are retained. A superseded
@@ -266,15 +282,37 @@ A recorded workspace whose directory is gone is restored from its branch.
 ### Submission queue
 
 `submit <mn-id>` requires the live claim (proof equality), the registered
-workspace for the current attempt, commits beyond the target, and no
-board-owned paths. It pins the branch tip at
+workspace for the current attempt bound to that exact claim (one bound under
+an earlier claim refuses and names `workspace add`), commits beyond the
+target, and no board-owned paths. It pins the branch tip at
 `refs/integration/submissions/<entry>`, records base, commits (with which
-carry the item's `Manna:` trailer), the evidence lines, and a report (the
-`--report` file, or a generated one). For a managed item it runs
+carry the item's `Manna:` trailer), the evidence lines, a report (the
+`--report` file, or a generated one), and the binding the submission
+authorizes under: the claim (proof, claimant, `claimed_at`) and the work
+order (prompt path and sealed digest). For a managed item it runs
 `manna submit <id> --report <file> --revision <sha>` at the canonical root and
 records the submission id manna minted; otherwise a local id. An earlier open
 entry for the same attempt becomes `superseded`. A landing in flight for the
 item refuses a new submission until `recover` settles it.
+
+### A submission authorizes under one claim
+
+A stable session proof names a worker, not a claim: the same worker can
+release an item and claim it again, and the board then holds a different
+claim (`claimed_at` moves, the proof does not). The integrator judges every
+submission by the assignment it was made under, the same five answers coord
+gives an item-addressed drop and in the same order: the item closed
+(`item_closed`), the proof moved (`reassigned`), the claim released and
+retaken (`claim_changed`), the managed attempt or submission moved
+(`stale_submission`), the work order resealed (`work_order_revised`). It asks
+before the checks, immediately before the ref update, and in recovery before
+the ref update, where it reads the intent's own binding rather than the queue
+row's. A submission or an intent that recorded no claim incarnation fails
+closed (`claim_changed`, or the intent voided). None of this touches a ref
+that already moved: that landing's record is finished and states what changed
+since the test. (Independent re-review, 2026-11-03: the reviewed engine
+compared the proof only, so a worker who released and reclaimed an item had a
+landing recovered from a submission the new claim never made.)
 
 ### Routing and the hook boundary
 
@@ -336,6 +374,23 @@ another repository is the same `enable` command there, nothing repository
 specific. `disable --reason` stops it without losing anything.
 
 ## Verification receipts
+
+Round three (2026-11-03, after the independent re-review of ba76f34), three
+more scenarios, each run through the real CLI in its own estate and each
+failing on the reviewed engine before passing on the fix: the same worker
+releases and reclaims an item with a submission queued (blocked
+`claim_changed` naming both claims, one action drop, `submit` from the
+still-bound workspace refused, `workspace add` rebinding and naming the voided
+submission, a fresh submission landing once; a submission stripped of its
+claim incarnation blocked, fail closed); the same reclaim with a landing
+interrupted before the ref update (voided, blocked `claim_changed`, the
+candidate pinned, a fresh submission landing once), after the ref update (the
+record finished, no second landing, the summary stating the assignment
+changed), and from an intent without a claim binding (voided, judged afresh);
+and the work order resealed by its holder after a submission (blocked
+`work_order_revised`, the workspace record following the new digest, a fresh
+submission landing) and during the checks (caught immediately before the ref
+update).
 
 Round two (2026-11-03, after the independent review of 90f49ca), seven more
 scenarios in the same file, each run through the real CLI in its own estate
