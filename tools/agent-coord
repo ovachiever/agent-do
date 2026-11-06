@@ -109,11 +109,54 @@ Commands:
                                          a STALE item drop, only its owner).
                                          The record and its audit trail are kept, never deleted
   drop history <drop-id>                 Read one drop's lifecycle (added/updated/acked/resolved)
+  drop wake <drop-id> [--revision <n>] [--after <request-id> --evidence <text>]
+                                         Host adapter (Holy or any other): claim the wake demand an
+                                         open action drop raises for its exact live recipient, under
+                                         this session's own coord identity (one live consumer per
+                                         demand). Refused when another live session holds it, when the
+                                         recipient is pending, ambiguous, stale or not live, when the
+                                         drop is informational, broadcast, acknowledged or resolved,
+                                         and while an earlier request's outcome is unknown. Returns the
+                                         request id (a reservation until --dispatching), the recipient's
+                                         harness facts and the fixed content-free wake instruction. A
+                                         request is a transport fact, never the recipient's acknowledgment
+  drop wake <drop-id> --request <request-id> --waiting <reason>
+                                         Record why the held request is still waiting (session busy,
+                                         needs the user, draft present); the demand reads
+                                         "pending readiness"; refused once dispatch started
+  drop wake <drop-id> --request <request-id> --dispatching <evidence>
+                                         Durable dispatch-started mark, written by the holder immediately
+                                         before it touches the transport (evidence: the terminal and the
+                                         session incarnation it re-checked); send only after it succeeds.
+                                         Until this mark a request is a reservation a dead holder's
+                                         successor may reclaim; after it a missing receipt proves
+                                         nothing, so a holder that dies leaves the outcome unknown until
+                                         a live consumer establishes submitted or failed on that request
+                                         with transport evidence. Refused, nothing written, when the
+                                         caller is not the holder or the demand moved or is no longer
+                                         actionable (do not send); a replay changes nothing
+  drop wake <drop-id> --request <request-id> --outcome submitted|unknown|failed|released --evidence <text>
+                                         Record what the transport did, with what established it (for
+                                         unknown: why it is unknown). A replay is reported duplicate and
+                                         changes nothing; a different state is a correction that keeps
+                                         the earlier outcome in history; unknown blocks every further
+                                         request on the demand until it is resolved to submitted or
+                                         failed; released steps back from a reservation and is refused
+                                         after dispatch started; the delivery stage never moves on a
+                                         receipt
   drops [--for-me] [--all]               List open drops (or just the ones addressed to you);
                                          --all includes resolved ones, each with its delivery stage
                                          (recorded, recipient resolved, bell queued, acknowledged,
-                                         completed). A note is a dated report of the state when
-                                         written, never a verified present fact
+                                         completed) and its host-notification state. A note is a
+                                         dated report of the state when written, never a verified
+                                         present fact
+  drops --wake                           Host adapter read (contract coord-wake/1): the wake demands
+                                         open action drops raise, actionable ones first (unresolved,
+                                         unacknowledged at the current revision, one exact live
+                                         recipient, assignment not stale) and held ones with the
+                                         reason (informational, broadcast, pending, ambiguous, stale,
+                                         acknowledged), each with its notification state (wanted,
+                                         requested, pending readiness, dispatching, submitted, unknown)
   worker <mn-id>                         The worker on an item: exact coord session (bound by claim
                                          proof), board assignment beside the session's declared focus
                                          title, liveness evidence, and its open obligations
@@ -142,6 +185,10 @@ Examples:
   agent-coord drop add .dev/research-drops/report.md --for builder-a --note "ephemeris findings"
   agent-coord drop add .dev/mn-261c29/approval.md --for-item mn-261c29 --allows "write the migration file; local build and test" --excludes "applying it to staging or production" --authorized-by "Erik, 2026-10-30 16:20 CDT, via Claude"
   agent-coord worker mn-261c29
+  agent-coord drops --wake --json
+  agent-coord drop wake drp-1a2b3c4d5e6f
+  agent-coord drop wake drp-1a2b3c4d5e6f --request wrq-0f1e2d3c4b5a --dispatching "tmux pane %5, server epoch 12, worker pid 4242 alive, composer empty"
+  agent-coord drop wake drp-1a2b3c4d5e6f --request wrq-0f1e2d3c4b5a --outcome submitted --evidence "tmux pane %5, server epoch 12, composer was empty"
   agent-coord guard install
   agent-coord stop --note "lane 14 shipped"
   agent-coord interrupts --mark-seen
@@ -166,6 +213,29 @@ FOCUS_PHASES = ("building", "gating", "watching", "quiet", "blocked", "stopped")
 # The bell is a bit, never a letter. All substance lives in needs/drops and
 # is read through coord. A ring confers no authority over a claim or its seal.
 DOORBELL_NUDGE = "The ledger has entries concerning you; read coord."
+
+# Host-driven wakeups (mn-88d1ac). A host such as Holy may read the wake
+# demands open action drops raise, claim one for its exact live recipient
+# under its own coord identity, submit a fixed content-free instruction
+# through whatever transport it owns, and record what that transport did.
+# Every one of those is a transport fact: only the recipient's own ack and
+# resolve move a drop, and nothing here touches approval scope or the claim.
+WAKE_CONTRACT = "coord-wake/1"
+WAKE_INSTRUCTION = (
+    "The ledger has entries concerning you; run `agent-do coord interrupts` "
+    "and `agent-do coord drops --for-me`."
+)
+# A wake request has two phases. A reservation (requested, pending readiness)
+# is a consumer's intent and is safely reclaimable: while no dispatch mark
+# exists nothing can have been sent, so a holder whose presence lapses is
+# superseded by the next request. Dispatch-started (`--dispatching`) is the
+# durable mark the holder writes immediately before it touches the transport;
+# from then on a missing receipt proves nothing, so a holder that dies leaves
+# the outcome unknown until a live consumer establishes it on that same request
+# with transport evidence. Coord promises at most one open request per demand
+# and never exactly-once terminal input: that needs the transport's own support.
+WAKE_OUTCOMES = ("submitted", "unknown", "failed", "released")
+WAKE_STATES = ("wanted", "requested", "pending readiness", "dispatching", "submitted", "unknown")
 
 # Pulse: shared session telemetry (Warp-derived, .dev/warp-recon-2026-08-22).
 # Focus is what an agent SAYS it is doing; pulse is what its harness hooks or
@@ -2109,6 +2179,10 @@ class CoordStore:
         drop.setdefault("resolved", None)
         history = drop.get("history")
         drop["history"] = history if isinstance(history, list) else []
+        # Host-notification receipts, keyed by the demand they answered
+        # (drop id, revision and assignment instance); read as empty when absent.
+        wake = drop.get("wake")
+        drop["wake"] = wake if isinstance(wake, dict) else {}
         return drop
 
     def _load_drops(self) -> list[dict[str, Any]]:
@@ -2433,8 +2507,672 @@ class CoordStore:
             "acknowledged": acknowledged,
             "completed": completed,
             "stale": self._staleness(drop),
-            "note": "a ledger write or a queued bell is not acknowledgment; only the recipient's ack and resolve are",
+            "notification": self._wake_notification(drop, agents),
+            "note": (
+                "a ledger write, a queued bell, or a host's wake request, dispatch mark or transport receipt is not acknowledgment; "
+                "only the recipient's ack and resolve are"
+            ),
         }
+
+    # ------------------------------------------------------------------
+    # Wake demands: what a host adapter may act on, and the receipts it leaves.
+    #
+    # An open action drop with one exact live recipient, unacknowledged at
+    # its current revision and not stale, is a demand for that recipient's
+    # attention. A host reads the demands, claims one by requesting it under
+    # its own coord identity, submits the fixed instruction through the
+    # transport it owns, and records the outcome. One live consumer holds a
+    # demand at a time (its coord presence is the lease); an unknown outcome
+    # blocks any further request until it is resolved; a submitted outcome is
+    # a transport fact and never an acknowledgment. Nothing here changes
+    # acks, resolution, approval scope, or the assignment.
+    # ------------------------------------------------------------------
+
+    def _assignment_key(self, drop: dict[str, Any]) -> str | None:
+        """The assignment instance a demand binds to: the pinned claim for an item drop, the named session for a direct one."""
+        for_item = drop.get("for_item")
+        if isinstance(for_item, dict):
+            material = "|".join(
+                str(for_item.get(key)) for key in ("board", "claim_proof", "claimed_at", "managed", "attempt")
+            ) + "|" + str((for_item.get("work_order") or {}).get("digest"))
+            return hashlib.sha256(material.encode("utf-8")).hexdigest()[:DIGEST_PREFIX_HEX]
+        target_id = drop.get("for_agent_id")
+        return str(target_id) if isinstance(target_id, str) and target_id else None
+
+    def _demand_id(self, drop: dict[str, Any]) -> str | None:
+        """Deduplication identity of a demand: drop id, revision and assignment instance. Any of them moving is a new demand."""
+        key = self._assignment_key(drop)
+        if not key:
+            return None
+        return f"{drop.get('id')}:r{int(drop.get('revision', 1))}:{key}"
+
+    def _session_facts(
+        self,
+        agent_id: str | None,
+        agents: dict[str, dict[str, Any]],
+        pulse_map: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """What a host needs to find a recipient's session: the coord record's own harness facts, never a guess."""
+        if not agent_id:
+            return None
+        record = agents.get(agent_id)
+        if not record:
+            return {"agent_id": agent_id, "presence": "unknown"}
+        verified = process_liveness(record)
+        manna = record.get("manna") if isinstance(record.get("manna"), dict) else None
+        pulses = pulse_map if pulse_map is not None else self.pulse_map()
+        return {
+            "agent_id": agent_id,
+            "alias": record.get("alias"),
+            "presence": classify_presence(record),
+            "last_seen": record.get("last_seen"),
+            "lease_expires_at": record.get("lease_expires_at"),
+            "harness": {
+                "runtime": record.get("runtime"),
+                "identity_source": record.get("identity_source"),
+                "session": record.get("identity_raw") or record.get("session"),
+                "pid": record.get("pid"),
+                "pid_start": record.get("pid_start"),
+                "host": record.get("host"),
+                "pane": record.get("pane"),
+                "process": "alive" if verified is True else "gone" if verified is False else "unverifiable",
+            },
+            "bound": (
+                {"manna_session": manna.get("session"), "proof": manna.get("proof"), "bound_at": manna.get("bound_at")}
+                if manna
+                else None
+            ),
+            "pulse": pulses.get(agent_id),
+            "source": "coord agents.json record; kill -0 and ps lstart on this host",
+        }
+
+    def _wake_requests(self, drop: dict[str, Any], demand_id: str | None) -> list[dict[str, Any]]:
+        bucket = (drop.get("wake") or {}).get(demand_id) if demand_id else None
+        requests = (bucket or {}).get("requests") if isinstance(bucket, dict) else None
+        return [item for item in requests if isinstance(item, dict)] if isinstance(requests, list) else []
+
+    def _find_wake_request(self, drop: dict[str, Any], request_id: str) -> tuple[str | None, dict[str, Any] | None]:
+        for demand_id, bucket in (drop.get("wake") or {}).items():
+            for request in ((bucket or {}).get("requests") or []) if isinstance(bucket, dict) else []:
+                if isinstance(request, dict) and request.get("id") == request_id:
+                    return str(demand_id), request
+        return None, None
+
+    def _consumer_live(self, consumer: str | None, agents: dict[str, dict[str, Any]]) -> tuple[bool, str]:
+        """A consumer holds a demand only while its coord presence is active: its presence is the lease."""
+        record = agents.get(str(consumer)) if consumer else None
+        presence = classify_presence(record) if record else "unknown"
+        return presence == "active", presence
+
+    def _wake_notification(
+        self,
+        drop: dict[str, Any],
+        agents: dict[str, dict[str, Any]],
+        demand_id: str | None = None,
+    ) -> dict[str, Any]:
+        """The host-notification state of this drop's current demand, read from its receipts.
+
+        A request is a reservation until its holder writes the dispatch-started
+        mark. A reservation whose holder lapsed is reclaimable: nothing can have
+        been sent. A dispatch-started request whose holder lapsed reads unknown:
+        a missing receipt proves nothing about what the transport did.
+        """
+        demand_id = demand_id or self._demand_id(drop)
+        requests = self._wake_requests(drop, demand_id)
+        attempts = sum(
+            1
+            for item in requests
+            if isinstance(item.get("dispatch"), dict)
+            or (item.get("outcome") or {}).get("state") in {"submitted", "unknown", "failed"}
+        )
+        current = requests[-1] if requests else None
+        state = "wanted"
+        lapsed: dict[str, Any] | None = None
+        unknown: dict[str, Any] | None = None
+        view_request: dict[str, Any] | None = None
+        if current:
+            outcome = current.get("outcome") if isinstance(current.get("outcome"), dict) else None
+            dispatch = current.get("dispatch") if isinstance(current.get("dispatch"), dict) else None
+            live, presence = self._consumer_live(current.get("consumer"), agents)
+            view_request = {
+                "id": current.get("id"),
+                "consumer": current.get("consumer"),
+                "consumer_label": current.get("consumer_label"),
+                "consumer_presence": presence,
+                "requested_at": current.get("requested_at"),
+                "age": format_age(current.get("requested_at")),
+                "phase": "dispatch-started" if dispatch else "reservation",
+                "waiting": current.get("waiting"),
+                "dispatch": dispatch,
+                "outcome": outcome,
+                "after": current.get("after"),
+            }
+            if outcome is None:
+                if live:
+                    state = "dispatching" if dispatch else "pending readiness" if current.get("waiting") else "requested"
+                elif dispatch:
+                    state = "unknown"
+                    lapsed = {
+                        "request": current.get("id"),
+                        "consumer": current.get("consumer"),
+                        "consumer_presence": presence,
+                        "reclaimable": False,
+                        "dispatch_started_at": dispatch.get("at"),
+                        "detail": (
+                            "the holder entered dispatch and its coord presence is no longer active; transport may have "
+                            "occurred, so the outcome is unknown until a live consumer establishes it on this request "
+                            "with transport evidence"
+                        ),
+                    }
+                    unknown = {
+                        "how": "lapsed after dispatch-started",
+                        "request": current.get("id"),
+                        "dispatch_started_at": dispatch.get("at"),
+                        "detail": "no receipt exists and the holder is gone; a missing receipt does not establish that nothing was sent",
+                    }
+                else:
+                    lapsed = {
+                        "request": current.get("id"),
+                        "consumer": current.get("consumer"),
+                        "consumer_presence": presence,
+                        "reclaimable": True,
+                        "dispatch_started_at": None,
+                        "detail": (
+                            "the holder's coord presence is no longer active and it never entered dispatch; "
+                            "the reservation is open to another request"
+                        ),
+                    }
+            elif outcome.get("state") == "submitted":
+                state = "submitted"
+            elif outcome.get("state") == "unknown":
+                state = "unknown"
+                unknown = {
+                    "how": "recorded",
+                    "request": current.get("id"),
+                    "dispatch_started_at": dispatch.get("at") if dispatch else None,
+                    "detail": outcome.get("evidence"),
+                }
+        return {
+            "state": state,
+            "demand_id": demand_id,
+            "request": view_request,
+            "lapsed": lapsed,
+            "unknown": unknown,
+            "attempts": attempts,
+            "requests": len(requests),
+            "note": "transport facts: a request, a dispatch mark or a submission is never the recipient's acknowledgment",
+        }
+
+    def _wake_demand(
+        self,
+        drop: dict[str, Any],
+        agents: dict[str, dict[str, Any]],
+        pulse_map: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """One drop as a wake demand: actionable now, or held with the reason. Read fresh from the board and the records."""
+        delivery = self._delivery_view(drop, agents)
+        recipient = delivery["recipient"]
+        for_item = drop.get("for_item") if isinstance(drop.get("for_item"), dict) else None
+        addressing = "item" if for_item else "broadcast" if recipient["state"] == "broadcast" else "direct"
+        notification = delivery["notification"]
+        reason: str | None = None
+        if drop.get("status") == "resolved":
+            reason = "resolved: " + str((drop.get("resolved") or {}).get("reason") or "settled")
+        elif drop.get("kind") != "action":
+            reason = "informational: a notice read at the recipient's next boundary, never a wake"
+        elif addressing == "broadcast":
+            reason = f"broadcast ({recipient.get('how')}): a ledger entry with no exact recipient, never a wake"
+        elif delivery.get("stale"):
+            stale = delivery["stale"]
+            reason = f"stale: {stale.get('reason')}: {stale.get('detail')}"
+        elif recipient["state"] != "resolved":
+            reason = f"recipient {recipient['state']}: {recipient.get('reason')}"
+        elif recipient.get("presence") not in {"active", "idle"}:
+            reason = f"recipient {recipient.get('agent_id')} is {recipient.get('presence')}: no live session to wake"
+        elif delivery.get("acknowledged"):
+            ack = delivery["acknowledged"]
+            reason = (
+                f"acknowledged by {ack.get('by')} at r{ack.get('revision')} ({format_age(ack.get('at'))}); "
+                "unresolved work the recipient already knows about"
+            )
+        actionable = reason is None
+        if actionable:
+            next_step = {
+                "wanted": f"a host adapter may claim it: agent-do coord drop wake {drop.get('id')}",
+                "requested": "the holder records --dispatching <evidence> immediately before it touches the transport, then --outcome with evidence",
+                "pending readiness": "the holder is waiting for the session to be input-ready; it records --dispatching <evidence> before it sends and --outcome with evidence after",
+                "dispatching": "the holder entered dispatch; it records --outcome submitted|failed|unknown with evidence, and nobody else requests meanwhile",
+                "submitted": "await the recipient's own ack (drop ack); a further request names --after <request-id> with evidence",
+                "unknown": "establish what happened on the outstanding request: record --outcome submitted or failed with transport evidence (any live consumer may, once the holder is gone); new requests are refused until then",
+            }[notification["state"]]
+        else:
+            next_step = "held: " + str(reason)
+        return {
+            "demand_id": notification.get("demand_id"),
+            "actionable": actionable,
+            "reason": reason,
+            "wake_wanted": actionable and notification["state"] == "wanted",
+            "drop": {
+                "id": drop.get("id"),
+                "revision": drop.get("revision"),
+                "kind": drop.get("kind"),
+                "status": drop.get("status"),
+                "path": drop.get("path"),
+                "note": drop.get("note"),
+                "owner": drop.get("owner"),
+                "owner_label": drop.get("owner_label"),
+                "created_at": drop.get("created_at"),
+                "updated_at": drop.get("updated_at"),
+                "approval": drop.get("approval"),
+            },
+            "addressing": addressing,
+            "assignment": dict(for_item) if for_item else None,
+            "recipient": {**recipient, "session": self._session_facts(recipient.get("agent_id"), agents, pulse_map)},
+            "stage": delivery["stage"],
+            "acknowledged": delivery.get("acknowledged"),
+            "stale": delivery.get("stale"),
+            "bell": delivery.get("bell"),
+            "notification": notification,
+            "next": next_step,
+        }
+
+    def wake_list(self) -> dict[str, Any]:
+        """Every open action drop as a wake demand: the actionable ones first, the held ones with their reasons."""
+        record = self.register_self()
+        agents = self._load_agents()
+        pulse_map = self.pulse_map()
+        demands: list[dict[str, Any]] = []
+        held: list[dict[str, Any]] = []
+        for drop in self._load_drops():
+            if drop.get("status") == "resolved" or drop.get("kind") != "action":
+                continue
+            entry = self._wake_demand(drop, agents, pulse_map)
+            (demands if entry["actionable"] else held).append(entry)
+        order = {"wanted": 0, "unknown": 1, "dispatching": 2, "requested": 3, "pending readiness": 4, "submitted": 5}
+        demands.sort(key=lambda item: (order.get(str(item["notification"]["state"]), len(order)), str(item["drop"].get("updated_at") or "")))
+        held.sort(key=lambda item: str(item["drop"].get("updated_at") or ""), reverse=True)
+        return {
+            "contract": WAKE_CONTRACT,
+            "instruction": WAKE_INSTRUCTION,
+            "observed_at": now_iso(),
+            "consumer": {"agent_id": self.agent_id, "presence": classify_presence(record)},
+            "demands": demands,
+            "held": held,
+            "counts": {
+                "demands": len(demands),
+                "wanted": sum(1 for item in demands if item["wake_wanted"]),
+                "held": len(held),
+            },
+            "note": (
+                "a demand is actionable unresolved work with one exact live recipient; informational drops, broadcasts, "
+                "acknowledged obligations, and stale, pending or ambiguous assignments are held with the reason; "
+                "a request or a transport receipt is never the recipient's acknowledgment"
+            ),
+        }
+
+    def wake_request(
+        self,
+        drop_id: str,
+        revision: int | None,
+        after: str | None,
+        evidence: str | None,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Claim the wake demand a drop raises, for this session as the host consumer. Targeting is re-read, never assumed."""
+        self.register_self()
+        with self.locked():
+            drops = self._load_drops()
+            drop = self._find_drop(drops, drop_id)
+            if drop is None:
+                return False, {"error": f"No drop {drop_id}"}
+            agents = self._load_agents()
+            pulse_map = self.pulse_map()
+            demand = self._wake_demand(drop, agents, pulse_map)
+            group = set(self._identity_group(agents).keys())
+            if (self._exact_recipient_ids(drop, agents) & group) or demand["recipient"].get("agent_id") in group:
+                return False, {
+                    "error": f"this session is the recipient of {drop_id}; acknowledge it with `agent-do coord drop ack {drop_id}`",
+                    "demand": demand,
+                }
+            if not demand["actionable"]:
+                return False, {"error": f"{drop_id} raises no wake demand now: {demand['reason']}", "demand": demand}
+            if revision is not None and int(revision) != int(drop.get("revision", 1)):
+                return False, {
+                    "error": f"{drop_id} is at r{drop.get('revision')}, not r{revision}: re-read the demand before requesting",
+                    "demand": demand,
+                }
+            demand_id = str(demand["demand_id"])
+            notification = demand["notification"]
+            current = notification.get("request") or {}
+            bucket = drop["wake"].setdefault(demand_id, {"requests": []})
+            requests = bucket.setdefault("requests", [])
+            live_request = requests[-1] if requests else None
+            if notification["state"] in {"requested", "pending readiness", "dispatching"}:
+                if current.get("consumer") in group:
+                    return True, {
+                        "request": live_request,
+                        "change": "unchanged",
+                        "duplicate": True,
+                        "supersedes": None,
+                        "demand": demand,
+                        "instruction": WAKE_INSTRUCTION,
+                        "contract": WAKE_CONTRACT,
+                    }
+                return False, {
+                    "error": (
+                        f"{drop_id} is held by {current.get('consumer')} since {current.get('requested_at')} "
+                        f"({current.get('id')}); one live consumer per demand"
+                    ),
+                    "held_by": current,
+                    "demand": demand,
+                }
+            if notification["state"] == "unknown":
+                if (notification.get("unknown") or {}).get("how") == "lapsed after dispatch-started":
+                    why = (
+                        f"{current.get('consumer')} entered dispatch on {current.get('id')} for {drop_id} at "
+                        f"{(current.get('dispatch') or {}).get('at')} and its presence is {current.get('consumer_presence')}: "
+                        "transport may have occurred and no receipt exists, so its outcome is unknown"
+                    )
+                else:
+                    why = f"the outcome of {current.get('id')} on {drop_id} is unknown"
+                return False, {
+                    "error": (
+                        f"{why}; record `agent-do coord drop wake {drop_id} --request {current.get('id')} --outcome submitted|failed "
+                        "--evidence <what established it>` before another request; a missing receipt, a reconnect or a timeout "
+                        "is not grounds to submit again"
+                    ),
+                    "outstanding": current,
+                    "demand": demand,
+                }
+            if notification["state"] == "submitted":
+                if after != current.get("id") or not (evidence or "").strip():
+                    return False, {
+                        "error": (
+                            f"{current.get('id')} was submitted {format_age((current.get('outcome') or {}).get('at'))} and the recipient "
+                            f"has not acknowledged; await the ack, or pass --after {current.get('id')} --evidence <why another wake is warranted>"
+                        ),
+                        "submitted": current,
+                        "demand": demand,
+                    }
+            stamp = now_iso()
+            change = "requested"
+            superseded: dict[str, Any] | None = None
+            lapsed = notification.get("lapsed")
+            if (
+                lapsed
+                and lapsed.get("reclaimable")
+                and live_request is not None
+                and live_request.get("outcome") is None
+                and not live_request.get("dispatch")
+            ):
+                # Only a reservation lapses into supersession: a dispatch-started request reads unknown above and was refused.
+                live_request["lapsed"] = {"at": stamp, "consumer_presence": lapsed.get("consumer_presence"), "superseded_by": None}
+                live_request.setdefault("history", []).append(
+                    {"event": "lapsed", "at": stamp, "by": self.agent_id, "consumer_presence": lapsed.get("consumer_presence")}
+                )
+                superseded = {
+                    "request": live_request.get("id"),
+                    "consumer": live_request.get("consumer"),
+                    "consumer_presence": lapsed.get("consumer_presence"),
+                }
+                change = "superseded"
+            request = {
+                "id": "wrq-" + uuid.uuid4().hex[:DIGEST_PREFIX_HEX],
+                "demand_id": demand_id,
+                "drop_id": drop_id,
+                "revision": int(drop.get("revision", 1)),
+                "consumer": self.agent_id,
+                "consumer_label": self.self_record(refresh=False).get("alias") or self.agent_id,
+                "requested_at": stamp,
+                "recipient": demand["recipient"].get("agent_id"),
+                "after": after if notification["state"] == "submitted" else None,
+                "evidence": (evidence or "").strip() or None,
+                "waiting": None,
+                "dispatch": None,
+                "outcome": None,
+                "supersedes": superseded,
+                "history": [{"event": "requested", "at": stamp, "by": self.agent_id}],
+            }
+            if superseded and live_request is not None:
+                live_request["lapsed"]["superseded_by"] = request["id"]
+            requests.append(request)
+            self._save_drops(drops)
+            self._append_event(
+                kind="wake_request",
+                paths=[str(drop.get("path"))],
+                summary=(
+                    f"{request['consumer_label']} requested a wake for {drop_id} r{request['revision']} "
+                    f"({request['id']}) -> {request['recipient']}"
+                ),
+                extra={
+                    "drop_id": drop_id,
+                    "request_id": request["id"],
+                    "demand_id": demand_id,
+                    "consumer": self.agent_id,
+                    "recipient": request["recipient"],
+                    "change": change,
+                },
+            )
+            refreshed = self._wake_demand(drop, self._load_agents(), pulse_map)
+            return True, {
+                "request": request,
+                "change": change,
+                "duplicate": False,
+                "supersedes": superseded,
+                "demand": refreshed,
+                "instruction": WAKE_INSTRUCTION,
+                "contract": WAKE_CONTRACT,
+            }
+
+    def wake_outcome(
+        self,
+        drop_id: str,
+        request_id: str,
+        outcome: str | None,
+        evidence: str | None,
+        waiting: str | None,
+        dispatching: str | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Record a wake request's progress: why it waits, that dispatch started, or what the transport did. Facts, never acknowledgment.
+
+        `--dispatching` is the fence between a reclaimable reservation and a
+        durable dispatch-started state. The holder writes it, with the terminal
+        and session incarnation it just re-checked, before it touches the
+        transport, and sends only after this call succeeds. It revalidates the
+        demand (same identity, still actionable) and refuses with "do not send"
+        when either moved.
+        """
+        self.register_self()
+        chosen = [
+            flag
+            for flag, given in (
+                ("--outcome", bool(outcome)),
+                ("--waiting", waiting is not None),
+                ("--dispatching", dispatching is not None),
+            )
+            if given
+        ]
+        if len(chosen) != 1:
+            return False, {
+                "error": "pass exactly one of --outcome <state> --evidence <text>, --waiting <reason>, or --dispatching <evidence>"
+            }
+        if outcome and outcome not in WAKE_OUTCOMES:
+            return False, {"error": f"outcome must be one of {', '.join(WAKE_OUTCOMES)}"}
+        if outcome and not (evidence or "").strip():
+            return False, {
+                "error": f"--outcome {outcome} requires --evidence: what established it (for unknown, why it is unknown)"
+            }
+        if waiting is not None and not waiting.strip():
+            return False, {"error": "--waiting requires a reason"}
+        if dispatching is not None and not dispatching.strip():
+            return False, {
+                "error": "--dispatching requires evidence: the terminal and the session incarnation re-checked immediately before sending"
+            }
+        with self.locked():
+            drops = self._load_drops()
+            drop = self._find_drop(drops, drop_id)
+            if drop is None:
+                return False, {"error": f"No drop {drop_id}"}
+            demand_id, request = self._find_wake_request(drop, request_id)
+            if request is None or demand_id is None:
+                return False, {"error": f"No wake request {request_id} on {drop_id}"}
+            agents = self._load_agents()
+            group = set(self._identity_group(agents).keys())
+            holder_live, holder_presence = self._consumer_live(request.get("consumer"), agents)
+            holder = request.get("consumer") in group
+            if dispatching is not None and not holder:
+                return False, {
+                    "error": (
+                        f"dispatch is the holder's own act: {request_id} belongs to {request.get('consumer')} ({holder_presence}); "
+                        "a lapsed reservation is reclaimed by a new request, never dispatched on the holder's behalf"
+                    ),
+                    "held_by": request,
+                }
+            if not holder and holder_live:
+                return False, {
+                    "error": f"{request_id} is held by {request.get('consumer')} (active); the holder records its own outcome",
+                    "held_by": request,
+                }
+            requests = self._wake_requests(drop, demand_id)
+            if requests and requests[-1].get("id") != request_id:
+                return False, {
+                    "error": f"{request_id} was superseded by {requests[-1].get('id')}; its record is frozen, re-read the demand",
+                    "superseded_by": requests[-1],
+                }
+            dispatch = request.get("dispatch") if isinstance(request.get("dispatch"), dict) else None
+            stamp = now_iso()
+            by = self.agent_id
+            change = "recorded"
+            duplicate = False
+            if dispatching is not None:
+                if request.get("outcome") is not None:
+                    return False, {
+                        "error": f"{request_id} already has an outcome ({request['outcome'].get('state')}); dispatch applies before an outcome"
+                    }
+                if dispatch:
+                    change, duplicate = "unchanged", True
+                else:
+                    # The dispatch boundary re-reads the board and the records: the same demand, still actionable, or do not send.
+                    current = self._wake_demand(drop, agents, self.pulse_map())
+                    if current.get("demand_id") != demand_id:
+                        return False, {
+                            "error": (
+                                f"{drop_id} moved since {request_id} was requested ({demand_id} -> {current.get('demand_id')}): "
+                                "do not send; re-read the demand and request it again"
+                            ),
+                            "demand_moved": {"from": demand_id, "to": current.get("demand_id")},
+                            "demand": current,
+                        }
+                    if not current["actionable"]:
+                        return False, {
+                            "error": f"{drop_id} raises no wake demand now: {current['reason']}; do not send",
+                            "demand": current,
+                        }
+                    recipient = current["recipient"]
+                    harness = (recipient.get("session") or {}).get("harness") or {}
+                    request["dispatch"] = {
+                        "at": stamp,
+                        "by": by,
+                        "evidence": dispatching.strip(),
+                        "instruction": WAKE_INSTRUCTION,
+                        "recipient": {
+                            "agent_id": recipient.get("agent_id"),
+                            "presence": recipient.get("presence"),
+                            "session": harness.get("session"),
+                            "pid": harness.get("pid"),
+                            "pid_start": harness.get("pid_start"),
+                            "pane": harness.get("pane"),
+                            "process": harness.get("process"),
+                        },
+                    }
+                    request.setdefault("history", []).append(
+                        {"event": "dispatching", "at": stamp, "by": by, "evidence": dispatching.strip()}
+                    )
+            elif waiting is not None:
+                if request.get("outcome") is not None:
+                    return False, {
+                        "error": f"{request_id} already has an outcome ({request['outcome'].get('state')}); waiting applies before an outcome"
+                    }
+                if dispatch:
+                    return False, {
+                        "error": (
+                            f"{request_id} entered dispatch at {dispatch.get('at')}; waiting applies before dispatch, "
+                            "record --outcome submitted|failed|unknown with evidence"
+                        ),
+                        "dispatch": dispatch,
+                    }
+                reason = waiting.strip()
+                previous = request.get("waiting") or {}
+                if previous.get("reason") == reason:
+                    change, duplicate = "unchanged", True
+                else:
+                    request["waiting"] = {"reason": reason, "at": stamp, "by": by}
+                    request.setdefault("history", []).append({"event": "waiting", "at": stamp, "by": by, "reason": reason})
+            else:
+                if dispatch and outcome == "released":
+                    return False, {
+                        "error": (
+                            f"{request_id} entered dispatch at {dispatch.get('at')}; released steps back from a reservation only, "
+                            "record --outcome submitted|failed|unknown with transport evidence"
+                        ),
+                        "dispatch": dispatch,
+                    }
+                previous_outcome = request.get("outcome") if isinstance(request.get("outcome"), dict) else None
+                if previous_outcome and previous_outcome.get("state") == outcome:
+                    change, duplicate = "unchanged", True
+                else:
+                    recorded: dict[str, Any] = {"state": outcome, "evidence": (evidence or "").strip(), "at": stamp, "by": by}
+                    entry: dict[str, Any] = {"event": f"outcome:{outcome}", "at": stamp, "by": by, "evidence": recorded["evidence"]}
+                    if previous_outcome:
+                        recorded["corrects"] = {key: value for key, value in previous_outcome.items() if key != "corrects"}
+                        entry["corrects"] = previous_outcome.get("state")
+                        change = "corrected"
+                    request["outcome"] = recorded
+                    request.setdefault("history", []).append(entry)
+            if change != "unchanged":
+                self._save_drops(drops)
+                label = self.self_record(refresh=False).get("alias") or by
+                if dispatching is not None:
+                    kind, what = "wake_dispatch", f"entered dispatch: {dispatching.strip()}"
+                elif outcome:
+                    kind, what = "wake_outcome", f"outcome {outcome}"
+                else:
+                    kind, what = "wake_waiting", f"waiting: {str(waiting).strip()}"
+                self._append_event(
+                    kind=kind,
+                    paths=[str(drop.get("path"))],
+                    summary=f"{label} recorded {request_id} on {drop_id}: {what}" + (" (correction)" if change == "corrected" else ""),
+                    extra={
+                        "drop_id": drop_id,
+                        "request_id": request_id,
+                        "demand_id": demand_id,
+                        "consumer": request.get("consumer"),
+                        "outcome": outcome,
+                        "change": change,
+                    },
+                )
+            demand = self._wake_demand(drop, self._load_agents(), self.pulse_map())
+            moved = demand.get("demand_id") != demand_id
+            return True, {
+                "request": request,
+                "phase": "dispatch-started" if isinstance(request.get("dispatch"), dict) else "reservation",
+                "change": change,
+                "duplicate": duplicate,
+                "holder_presence": holder_presence,
+                "demand": demand,
+                "demand_moved": (
+                    {
+                        "from": demand_id,
+                        "to": demand.get("demand_id"),
+                        "detail": "the drop's revision or assignment changed after this request; the current demand needs fresh attention",
+                    }
+                    if moved
+                    else None
+                ),
+                "demand_actionable": demand["actionable"],
+                "delivery_stage": demand["stage"],
+                "contract": WAKE_CONTRACT,
+                "note": "a transport receipt is never the recipient's acknowledgment; the delivery stage moves only on the recipient's ack or resolve",
+            }
 
     def _deliver_pending_item_drops(self) -> list[dict[str, Any]]:
         """Resolve item-addressed drops that were waiting for this session's proof; ring once each."""
@@ -3535,6 +4273,12 @@ class CoordStore:
             else:
                 detail = f"{recipient['state']}: {recipient.get('reason')}"
             stale = delivery.get("stale")
+            notification = delivery.get("notification") or {}
+            if notification.get("state") and notification["state"] != "wanted":
+                request = notification.get("request") or {}
+                detail += f"; wake {notification['state']}" + (
+                    f" ({request.get('consumer')}, {request.get('age')}; a transport fact, not an ack)" if request else ""
+                )
             noun = "approval" if drop.get("approval") else "action"
             if for_item and stale:
                 # Nobody can acknowledge a stale assignment drop. The owner's
@@ -3815,10 +4559,20 @@ def parser() -> argparse.ArgumentParser:
     drop_resolve.add_argument("--for-everyone", action="store_true", dest="for_everyone")
     drop_history = drop_sub.add_parser("history")
     drop_history.add_argument("drop_id")
+    drop_wake = drop_sub.add_parser("wake")
+    drop_wake.add_argument("drop_id")
+    drop_wake.add_argument("--revision", type=int, default=None)
+    drop_wake.add_argument("--after", default=None)
+    drop_wake.add_argument("--request", dest="request_id", default=None)
+    drop_wake.add_argument("--waiting", default=None)
+    drop_wake.add_argument("--dispatching", default=None)
+    drop_wake.add_argument("--outcome", choices=list(WAKE_OUTCOMES), default=None)
+    drop_wake.add_argument("--evidence", default=None)
 
     drops_p = sub.add_parser("drops")
     drops_p.add_argument("--for-me", action="store_true", dest="for_me")
     drops_p.add_argument("--all", action="store_true", dest="include_resolved")
+    drops_p.add_argument("--wake", action="store_true", dest="wake")
 
     worker_p = sub.add_parser("worker")
     worker_p.add_argument("item")
@@ -4298,7 +5052,79 @@ def main(argv: list[str]) -> int:
                 detail = entry.get("reason") or entry.get("note") or ""
                 print(f'  {entry.get("at")} {entry.get("event")} by {entry.get("by")} r{entry.get("revision")}{": " + detail if detail else ""}')
             return 0
-        return error("drop requires add|ack|resolve|history", args.json, code=2)
+        if args.drop_command == "wake":
+            if args.request_id:
+                ok, payload = store.wake_outcome(
+                    args.drop_id, args.request_id, args.outcome, args.evidence, args.waiting, args.dispatching
+                )
+            else:
+                if args.waiting is not None or args.outcome or args.dispatching is not None:
+                    return error(
+                        "--waiting, --dispatching and --outcome record against a request: pass --request <request-id>",
+                        args.json,
+                        code=2,
+                    )
+                ok, payload = store.wake_request(args.drop_id, args.revision, args.after, args.evidence)
+            if not ok:
+                extra = {k: v for k, v in payload.items() if k != "error"}
+                return error(str(payload.get("error")), args.json, code=2, **extra)
+            if args.json:
+                return print_payload({"success": True, "tool": "coord", **payload}, True)
+            request = payload["request"]
+            demand = payload["demand"]
+            notification = demand["notification"]
+            print(
+                f'{request["id"]} {payload["change"]}: {args.drop_id} r{request.get("revision")} -> {request.get("recipient") or "none"} '
+                f'[{notification["state"]}]' + (" (duplicate)" if payload.get("duplicate") else "")
+            )
+            if payload.get("supersedes"):
+                lapsed = payload["supersedes"]
+                print(f'  supersedes: {lapsed.get("request")} held by {lapsed.get("consumer")} ({lapsed.get("consumer_presence")})')
+            outcome = request.get("outcome") or {}
+            if outcome:
+                print(f'  outcome: {outcome.get("state")} at {outcome.get("at")}: {outcome.get("evidence")}')
+            if request.get("waiting"):
+                print(f'  waiting: {request["waiting"].get("reason")} ({format_age(request["waiting"].get("at"))})')
+            if request.get("dispatch"):
+                dispatch = request["dispatch"]
+                print(f'  dispatch started: {dispatch.get("at")} ({format_age(dispatch.get("at"))}): {dispatch.get("evidence")}')
+            print(
+                f'  delivery: stage {demand["stage"]}; acknowledged {"yes" if demand.get("acknowledged") else "no"}; '
+                f'actionable {"yes" if demand["actionable"] else "no: " + str(demand.get("reason"))}'
+            )
+            if payload.get("demand_moved"):
+                print(f'  demand moved: {payload["demand_moved"]["from"]} -> {payload["demand_moved"]["to"]}')
+            if payload.get("instruction"):
+                print(f'  instruction: {payload["instruction"]}')
+            return 0
+        return error("drop requires add|ack|resolve|history|wake", args.json, code=2)
+
+    if args.command == "drops" and args.wake:
+        payload = store.wake_list()
+        if args.json:
+            return print_payload({"success": True, "tool": "coord", **payload}, True)
+        counts = payload["counts"]
+        print(f'wake demands: {counts["demands"]} (wanted {counts["wanted"]}); held: {counts["held"]} [{payload["contract"]}]')
+        for entry in payload["demands"]:
+            drop = entry["drop"]
+            recipient = entry["recipient"]
+            session = recipient.get("session") or {}
+            harness = session.get("harness") or {}
+            print(
+                f'  {drop["id"]} r{drop["revision"]} {drop["path"]} (from {drop["owner_label"]}, {entry["addressing"]}'
+                + (f' {entry["assignment"]["id"]}' if entry.get("assignment") else "")
+                + f') -> {recipient.get("agent_id")} ({recipient.get("presence")}'
+                + (f', {harness.get("runtime")}' if harness.get("runtime") else "")
+                + (f', pane {harness.get("pane")}' if harness.get("pane") else "")
+                + f') [{entry["notification"]["state"]}] stage {entry["stage"]}'
+            )
+            print(f'    next: {entry["next"]}')
+        if payload["held"]:
+            print("held:")
+            for entry in payload["held"]:
+                drop = entry["drop"]
+                print(f'  {drop["id"]} r{drop["revision"]} {drop["path"]} (from {drop["owner_label"]}, {entry["addressing"]}): {entry["reason"]}')
+        return 0
 
     if args.command == "drops":
         payload = store.drops(for_me=args.for_me, include_resolved=args.include_resolved)
@@ -4323,6 +5149,9 @@ def main(argv: list[str]) -> int:
                 marks.append(f'stage {delivery["stage"]}')
             if delivery.get("stale"):
                 marks.append(f'STALE {delivery["stale"].get("reason")}')
+            notification = delivery.get("notification") or {}
+            if notification.get("state") and notification["state"] != "wanted":
+                marks.append(f'wake {notification["state"]}')
             print(
                 f'{item.get("id")} {item.get("path")} (from {item.get("owner_label")}, for {target}; '
                 f'{", ".join(marks)}; reported {item.get("reported_age")}){note}'
