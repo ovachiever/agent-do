@@ -4,13 +4,13 @@ manna: mn-336a16
 track: mn-b7a0cc
 source: 'Erik 2026-11-11: agreed Roadmap / Track / Ticket semantics, Dream as planning status, and requested one worker to modernize every repository board'
 base_commit: b06fc38cea3a308a4b66f2af334c4b6656b64abd
-scope: 'Manna: modernize every board with Roadmaps, executable Tracks and Tickets'
+scope: 'Manna: roll out reviewed Roadmap/Track/Ticket modernization across canonical boards'
 inputs:
 - 'Erik 2026-11-11: agreed Roadmap / Track / Ticket semantics, Dream as planning status, and requested one worker to modernize every repository board'
-binding: sha256:8cae520980a67112a4b274a7d294c43b1ad7fea9d895de8fdf77d030cd33977c
+binding: sha256:297afae2830ea2092909ed9585c8f908b0e49cd82177cf8e782d5d83c2aee359
 ---
 
-# Handoff: Manna: modernize every board with Roadmaps, executable Tracks and Tickets
+# Handoff: Manna: roll out reviewed Roadmap/Track/Ticket modernization across canonical boards
 
 Board state is canonical in `.manna/`. This file is the work order for one item only.
 
@@ -22,7 +22,7 @@ agent-do manna claim mn-336a16
 
 ## Scope
 
-Manna: modernize every board with Roadmaps, executable Tracks and Tickets
+Manna: roll out reviewed Roadmap/Track/Ticket modernization across canonical boards
 
 ## Inputs
 
@@ -30,7 +30,11 @@ Manna: modernize every board with Roadmaps, executable Tracks and Tickets
 
 ## Work order
 
-One worker owns the complete change: implement the shared semantics in agent-do and Holy, then modernize existing canonical boards and work orders. This is implementation plus a verified migration, not an inventory-only return. Use the checkpoints below within this assignment. Do not launch other workers or turn every repository into another implementation lane.
+**Scope revision, Erik 2026-11-11:** implementation and proof on isolated copies now belong to prerequisite **mn-f568d0**. This item owns only the subsequent reviewed rollout. It must remain blocked until an independent reviewer accepts that proof and closes the prerequisite. The builder must not close its own proof, and a passing test run or a done row without the required pinned acceptance receipt does not authorize migration.
+
+One worker owns the staged rollout across canonical boards. Before any real conversion, verify the reviewer-approved source revisions, receipt hashes, preservation findings and reader/writer compatibility prerequisites from mn-f568d0. If the candidate changes or installed tools cannot safely read/write the migrated model, stop the affected rollout and return that concrete prerequisite. Do not merge or install code under this work order. Start with one suitable board identified in the accepted proof; inspect the full before/after result and repeat-pass no-op before progressing through small, recorded groups. Stop a group on unexpected changes. Do not launch other workers or turn every repository into another implementation lane.
+
+The product requirements and checkpoints below remain the shared specification. Checkpoints 2 and 3 are delivered and independently reviewed under mn-f568d0; consume their accepted results here rather than implementing them again. Capture fresh inventory and board state for checkpoints 1 and 4 so a rehearsal snapshot cannot authorize overwriting intervening work.
 
 ### Agreed product model
 
@@ -53,7 +57,7 @@ Examples, to be checked against their actual work orders: Holy's `mn-eb7a80` rel
 3. Resolve one authoritative board per project using federation identity and repo/worktree evidence. Replicas, clones and worktrees are not independent projects to migrate repeatedly. Refuse ambiguous or divergent replica writes; record the precise conflict and continue independent boards. Do not delete registrations, fork board identities or select the newest-looking file as a substitute for resolution.
 4. Capture a complete per-board inventory and baseline: paths, identities, kinds, states, memberships, blockers, claims/attempts, submissions, acceptance records, handoff pointers/digests and current reader versions. Identify affected records and the intended disposition before applying changes. Keep this manifest in `.dev/`; Manna remains the canonical work ledger.
 
-### Checkpoint 2: implement the model and safe conversion in agent-do
+### Checkpoint 2: required model and conversion evidence from mn-f568d0
 
 1. The inspected CLI currently exposes `type: track|item|dream`; Roadmap and Dream-as-status are new behavior. Implement them in the canonical model, readers/writers, CLI, derived state and human board, using explicit version/compatibility handling. Do not simulate the change with title prefixes or raw JSONL edits. Preserve existing fields and unknown metadata where required by the compatibility contract.
 2. Add or extend the supported conversion/migration commands. They must provide a reviewable preview, protect concurrent changes, journal recoverable writes and resume idempotently. Rerunning a completed conversion must not create duplicate rows, documents, memberships or new claims. Snapshot the board and owned documents before each apply; demonstrate recovery in isolated fixtures.
@@ -62,7 +66,7 @@ Examples, to be checked against their actual work orders: Holy's `mn-eb7a80` rel
 5. Preserve the distinction between kind, planning status, execution readiness, ownership and acceptance. A Dream remains unclaimable until deliberately activated. A sealed Track with blocked children remains blocked. A commit or submission alone must not become acceptance. Retain work-order and submission revision bindings.
 6. Update creation templates, contracts, documentation, bootstrap guidance and tests so new records stay modern. This is not a one-time cosmetic rewrite followed by tools recreating the old ambiguity.
 
-### Checkpoint 3: make Holy and standalone Manna agree
+### Checkpoint 3: required Holy/standalone compatibility evidence from mn-f568d0
 
 1. Update Holy's decoding, presentation, filters and existing claim/launch guards for the same canonical meanings. Keep the CLI/serve experience usable without Holy.
 2. In unfiltered Live/All Board views, all matching Tracks appear exactly once under Tracks, regardless of whether ready, active or blocked. Roadmaps have their own clearly labeled organizational section. Preserve existing status filters: Live excludes completed work, All includes it, and Done still finds completed records. Tickets retain their normal workflow sections. Remove the misleading split represented by “2 more in the sections below.”
@@ -88,7 +92,7 @@ Return exact source revisions, executed test counts, per-board receipts, remaini
 
 ### Authorization and boundaries
 
-Claiming this item authorizes the implementation and safe board/work-order migrations described above. Filing it does not start them. Do not implement product features in the other repositories; their scope here is board records, execution work orders and directly relevant workflow guidance.
+Claiming this item after the recorded independent acceptance of mn-f568d0 authorizes only the reviewed, staged board/work-order migrations described above. This revision supersedes the previous combined implementation-and-migration authorization. Filing does not start work. New migration logic requires new copy-based proof and review before application. Do not implement product features in other repositories; their scope here is board records, execution work orders and directly relevant workflow guidance.
 
 No worker launches, automatic model API processing jobs, publishing, pushes, PRs, deployment, app install/restart, live wake delivery, Clear/Attach/Restore actions, or tmux server/session/pane changes. No deletion of history, board registrations or remote refs. Use existing tool paths and preserve the user's active work. When migration impact is genuinely uncertain, isolate the affected record/cohort and ask with the concrete evidence rather than blocking unrelated safe progress.
 
