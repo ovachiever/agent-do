@@ -940,3 +940,21 @@ cargo build --release
 ## License
 
 See repository root for license information.
+
+### Locate an item across registered boards
+
+`agent-do manna locate mn-abcdef --json` reads the machine registry at
+`${AGENT_DO_HOME:-$HOME/.agent-do}/manna/serve/boards.json` and each registered
+board's `issues.jsonl` directly. It does not derive board state or write files,
+works from directories without a board, and needs no session identity.
+
+The reply contains `success`, `id`, `matches` (name, slug, root, type, status,
+title), `unreadable` (root and reason), `absent` (roots with no issue ledger),
+and `examined` (distinct board roots inspected). Registry aliases of the same
+canonical root count once. Results follow registry slug order. Malformed rows
+make their board unreadable; unrelated holders still appear. An unreadable
+board is a warning, so a no-match result with warnings is not proof of absence.
+
+Zero, one and multiple matches all exit 0. Invalid ids and unreadable or malformed
+registries exit nonzero, with a structured error under `--json`. Without the flag,
+the same data is YAML. The existing wrong-board `show` pointer uses this lookup.

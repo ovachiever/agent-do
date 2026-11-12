@@ -314,6 +314,15 @@ enum Commands {
         json: bool,
     },
 
+    /// Locate an id on all registered boards without deriving board state
+    Locate {
+        /// Issue ID (mn- followed by at least six lowercase hex digits)
+        id: String,
+        /// Emit matches, unreadable boards, absent roots and examined count as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show issue details
     Show {
         /// Issue ID (e.g., mn-abc123)
@@ -1031,55 +1040,37 @@ fn issue_not_found_message(id: &str) -> String {
     }
 }
 
-/// Search every registered board except the current one for an issue id.
-/// Returns the first (board name, root) that holds it. Read-only, and a
-/// missing or unreadable registry is simply no answer.
+/// The human pointer and machine lookup share the same direct row scan.
 fn locate_issue_on_registered_boards(id: &str) -> Option<(String, String)> {
-    let home = std::env::var_os("AGENT_DO_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".agent-do")))?;
-    let text = std::fs::read_to_string(home.join("manna/serve/boards.json")).ok()?;
-    let registry: serde_json::Value = serde_json::from_str(&text).ok()?;
     let here = Path::new(".").canonicalize().ok();
-    let mut boards = registry
-        .get("boards")?
-        .as_object()?
-        .iter()
-        .filter_map(|(name, entry)| {
-            entry
-                .get("path")
-                .and_then(serde_json::Value::as_str)
-                .map(|root| (name.clone(), root.to_string()))
+    manna_core::locate::locate(id)
+        .ok()?
+        .matches
+        .into_iter()
+        .find(|board| {
+            here.as_ref()
+                .zip(Path::new(&board.root).canonicalize().ok())
+                .is_none_or(|(here, there)| here != &there)
         })
-        .collect::<Vec<_>>();
-    boards.sort();
-    for (name, root) in boards {
-        let root_path = Path::new(&root);
-        if here
-            .as_ref()
-            .zip(root_path.canonicalize().ok())
-            .is_some_and(|(here, there)| here == &there)
-        {
-            continue;
-        }
-        let Ok(rows) = std::fs::read_to_string(root_path.join(".manna/issues.jsonl")) else {
-            continue;
-        };
-        let held = rows.lines().any(|line| {
-            serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .and_then(|row| {
-                    row.get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                })
-                .is_some_and(|row_id| row_id == id)
-        });
-        if held {
-            return Some((name, root));
+        .map(|board| (board.name, board.root))
+}
+
+fn cmd_locate(id: String, json: bool) -> ! {
+    match manna_core::locate::locate(&id) {
+        Ok(result) => output_with_exit(result, json, EXIT_SUCCESS),
+        Err(error) => {
+            let code = if manna_core::locate::valid_id(&id) {
+                EXIT_SYSTEM_ERROR
+            } else {
+                EXIT_USER_ERROR
+            };
+            if json {
+                output_error_json(&error, code)
+            } else {
+                output_error(&error, code)
+            }
         }
     }
-    None
 }
 
 fn load_board_workflow(store: &MannaStore) -> (Vec<Issue>, Option<WorkflowConfig>) {
@@ -4043,6 +4034,7 @@ fn main() {
             json,
         } => cmd_list(status, issue_type, track, json),
         Commands::Show { id, json } => cmd_show(id, json),
+        Commands::Locate { id, json } => cmd_locate(id, json),
         Commands::Update {
             id,
             title,

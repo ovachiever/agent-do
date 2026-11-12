@@ -5074,6 +5074,7 @@ tools:
       block: Add a blocker dependency
       unblock: Remove a blocker dependency
       list: List issues (--status, --type, --track filters)
+      locate: Locate an id across registered boards from issue rows; returns matches, unreadable boards, absent roots and examined count (--json), without deriving state or writing files
       show: Show issue details; a track also reports its children (what is done, the next eligible item in dispatch order, what is held or waiting and why)
       update: Update issue metadata; lifecycle state changes require claim, done, abandon, block, or unblock
       delete: Delete issue
@@ -5095,6 +5096,8 @@ tools:
       command: agent-manna state --json
     - intent: read every registered manna board
       command: agent-manna estate --json
+    - intent: locate an item across registered boards
+      command: agent-manna locate mn-abc123 --json
     - intent: show issue details
       command: agent-manna show 1
     - intent: capture an idea for later
@@ -5134,6 +5137,7 @@ tools:
       snapshot:
       - list
       - show
+      - locate
       - context
       - status
       - state

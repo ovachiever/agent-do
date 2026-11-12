@@ -77,7 +77,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [linear](#linear) | Control Linear | mixed | 3 |
 | [logs](#logs) | Control log aggregation | read | 3 |
 | [macos](#macos) | Control native macOS desktop applications via accessibility APIs | mixed | 6 |
-| [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 33 |
+| [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 34 |
 | [meet](#meet) | Google Meet control | mixed | 4 |
 | [meetings](#meetings) | Unified enterprise meeting orchestration across Zoom, Google Meet, and Microsoft Teams | mixed | 14 |
 | [memory](#memory) | Persistent memory and context | mixed | 4 |
@@ -2762,6 +2762,7 @@ Concurrency: `write`
 - `block`: Add a blocker dependency
 - `unblock`: Remove a blocker dependency
 - `list`: List issues (--status, --type, --track filters)
+- `locate`: Locate an id across registered boards from issue rows; returns matches, unreadable boards, absent roots and examined count (--json), without deriving state or writing files
 - `show`: Show issue details; a track also reports its children (what is done, the next eligible item in dispatch order, what is held or waiting and why)
 - `update`: Update issue metadata; lifecycle state changes require claim, done, abandon, block, or unblock
 - `delete`: Delete issue
@@ -2786,6 +2787,8 @@ agent-do manna list
 agent-do manna state --json
 # read every registered manna board
 agent-do manna estate --json
+# locate an item across registered boards
+agent-do manna locate mn-abc123 --json
 # show issue details
 agent-do manna show 1
 # capture an idea for later
@@ -2826,7 +2829,7 @@ agent-do manna relations --resolve --check
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `assess`, `context`, `estate`, `identity`, `lint`, `list`, `relations`, `show`, `state`, `status`
+- Read-only (snapshot/verify; safe to parallelize): `assess`, `context`, `estate`, `identity`, `lint`, `list`, `locate`, `relations`, `show`, `state`, `status`
 - Write (connect/interact/save): `abandon`, `accept`, `block`, `claim`, `coordinator`, `create`, `delete`, `done`, `dream`, `federation`, `handoff`, `init`, `managed`, `migrate`, `order`, `reconcile`, `relate`, `submit`, `sync`, `unblock`, `unrelate`, `update`
 - destructive (irreversible data loss; confirm before auto-running): `delete`, `federation`, `migrate`, `unrelate`
 - sensitive (emits or persists secret material; guard output): `coordinator`
