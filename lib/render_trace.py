@@ -9,7 +9,7 @@ import re
 import sys
 from typing import Any
 
-TOKEN = re.compile(r"(?i)\b(token|secret|password|api[_-]?key|authorization)([=:]\s*)\S+")
+TOKEN = re.compile(r"(?i)\b(token|secret|password|api[_-]?key|authorization)([=:]\s*)(?:bearer\s+)?\S+")
 MAX_LOG_RESPONSE_BYTES = 1_048_576
 
 
@@ -70,7 +70,7 @@ def main() -> int:
         for entry in raw_logs:
             labels = {label.get("name"): label.get("value") for label in entry.get("labels", []) if isinstance(label, dict)}
             logs.append({"timestamp": entry.get("timestamp"), "message": redact(entry.get("message", "")),
-                         "type": labels.get("type"), "level": labels.get("level")})
+                         "type": redact(labels.get("type")), "level": redact(labels.get("level"))})
         encoded = json.dumps(logs, separators=(",", ":")).encode()
         truncated_bytes = len(encoded) > args.max_bytes
         while logs and len(encoded) > args.max_bytes:
