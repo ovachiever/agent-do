@@ -46,6 +46,6 @@ PY
 git_first="$($ROOT/tools/agent-git --help | head -1)"
 gh_first="$($ROOT/tools/agent-gh --help | head -1)"
 [[ "$git_first" == "Local repository operations. For GitHub PRs/reviews use: agent-do gh" ]]
-[[ "$gh_first" == "GitHub PR/review operations. For local repository work use: agent-do git" ]]
+[[ "$gh_first" == "GitHub issue and PR/review operations. For local repository work use: agent-do git" ]]
 
 echo "index generation tests passed"
