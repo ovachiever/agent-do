@@ -45,7 +45,7 @@ CRON
   cron cancel <cron>            Cancel running cron
 
 ENV VARS / SECRET FILES
-  env <svc>                     List env vars (values masked)
+  env <svc> [--reveal]          List env vars (every value masked unless --reveal; --json honoured)
   env-set <svc> <KEY> <VAL>     Upsert env var
   env-del <svc> <KEY>           Delete env var
   secret {list|get|set|del} <svc> [name] [file|-]   Per-service secret files
@@ -58,12 +58,12 @@ ENV GROUPS (shared vars/secrets across services)
 
 POSTGRES
   db list                       List instances
-  db show <db>                  Details + connection info
+  db show <db> [--reveal]       Details + connection info (passwords masked unless --reveal)
   db create <name> [--plan --version --region --database --user --ha --disk-size]
   db update <db> [--plan --disk-size --name]
   db delete <db> --yes
   db {suspend|resume|restart|failover} <db>
-  db connect-info <db>          Internal + external DSN
+  db connect-info <db> [--reveal]   Internal + external DSN (masked unless --reveal; --json honoured)
   db backup <db>                Trigger export
   db backups <db>               List exports
   db recover <db> [--target-time ISO]   Point-in-time recovery (or window check)
@@ -71,6 +71,7 @@ POSTGRES
 
 KEY VALUE (Redis-compatible)
   kv {list|show|create|update|delete|connect-info|suspend|resume}
+  kv connect-info <kv> [--reveal]   Connection strings (passwords masked unless --reveal)
 
 CUSTOM DOMAINS
   domains <svc>                 List
@@ -139,6 +140,38 @@ EOF
 }
 
 # --- Helpers ---
+
+# Mask secrets in connection-info output. Applied to both text and JSON
+# passthrough unless the caller passed --reveal. Covers the shapes Render
+# actually emits: URI userinfo passwords (postgresql://, redis://, rediss://),
+# PGPASSWORD=… in psqlCommand, REDISCLI_AUTH=… in cliCommand, and any
+# "password":"…" JSON field as defense in depth.
+render_mask_secrets() {
+    python3 -c '
+import re, sys
+text = sys.stdin.read()
+text = re.sub(r"(://[^:/@\s\"]+:)[^@\s\"]+(@)", r"\1***\2", text)
+text = re.sub(r"\b(PGPASSWORD|REDISCLI_AUTH)=[^\s\"]+", r"\1=***", text)
+text = re.sub(r"(\"password\"\s*:\s*\")[^\"]*(\")", r"\1***\2", text)
+sys.stdout.write(text)
+'
+}
+
+# Strip a bare --reveal from "$@" and report whether it was present.
+# Usage: _render_parse_reveal "$@"; then use $RENDER_REVEAL and "${_render_rest[@]}".
+_render_parse_reveal() {
+    RENDER_REVEAL=0
+    _render_rest=()
+    local a
+    for a in "$@"; do
+        if [[ "$a" == "--reveal" ]]; then RENDER_REVEAL=1; else _render_rest+=("$a"); fi
+    done
+}
+
+# Emit output through the mask unless --reveal was parsed.
+render_secret_output() {
+    if [[ "${RENDER_REVEAL:-0}" == "1" ]]; then cat; else render_mask_secrets; fi
+}
 
 render_request() {
     local method="$1"
@@ -734,9 +767,24 @@ cmd_scale() {
 }
 
 cmd_env() {
-    local name_or_id="${1:-}"
+    _render_parse_reveal "$@"
+    local name_or_id=""
+    local a
+    for a in ${_render_rest[@]+"${_render_rest[@]}"}; do
+        if [[ "$a" == -* ]]; then
+            echo "Error: unknown option '$a'" >&2
+            echo "Usage: agent-render env <service> [--json] [--reveal]" >&2
+            return 2
+        fi
+        if [[ -n "$name_or_id" ]]; then
+            echo "Error: unexpected argument '$a'" >&2
+            echo "Usage: agent-render env <service> [--json] [--reveal]" >&2
+            return 2
+        fi
+        name_or_id="$a"
+    done
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render env <service>"
+        echo "Usage: agent-render env <service> [--json] [--reveal]"
         return 1
     fi
 
@@ -747,22 +795,35 @@ cmd_env() {
     local result
     result=$(render_request GET "/services/$sid/env-vars?limit=100")
 
-    echo "$result" | python3 -c "
-import sys, json
+    # Values are masked in full by default: Render does not say which vars are
+    # secrets, so neither length nor a prefix can be shown safely. --reveal
+    # prints values; --json emits {key, value, generateValue} under the same rule
+    # and never passes the raw API body through.
+    echo "$result" | RENDER_REVEAL="${RENDER_REVEAL:-0}" RENDER_JSON="${RENDER_JSON:-0}" python3 -c "
+import json, os, sys
 items = json.load(sys.stdin)
-if not items:
+reveal = os.environ['RENDER_REVEAL'] == '1'
+rows = []
+for item in items or []:
+    ev = item.get('envVar', item)
+    val = ev.get('value') or ''
+    rows.append({
+        'key': ev.get('key', ''),
+        'value': (val if reveal else '***') if val else '',
+        'generateValue': bool(ev.get('generateValue')),
+    })
+if os.environ['RENDER_JSON'] == '1':
+    print(json.dumps(rows, indent=2))
+    sys.exit(0)
+if not rows:
     print('No env vars')
     sys.exit(0)
-for item in items:
-    ev = item.get('envVar', item)
-    key = ev.get('key', '')
-    val = ev.get('value', '')
-    if val:
-        # Mask values longer than 8 chars
-        display = val[:4] + '****' if len(val) > 8 else val
+for row in rows:
+    if row['value']:
+        display = row['value']
     else:
-        display = '(generateValue)' if ev.get('generateValue') else '(empty)'
-    print(f'{key}={display}')
+        display = '(generateValue)' if row['generateValue'] else '(empty)'
+    print(f\"{row['key']}={display}\")
 "
 }
 
@@ -836,9 +897,10 @@ for item in items:
 "
             ;;
         show|get)
-            local name_or_id="${1:-}"
+            _render_parse_reveal "$@"
+            local name_or_id="${_render_rest[0]:-}"
             if [[ -z "$name_or_id" ]]; then
-                echo "Usage: agent-render db show <database>"
+                echo "Usage: agent-render db show <database> [--json] [--reveal]"
                 return 1
             fi
 
@@ -850,11 +912,20 @@ for item in items:
             local conn
             conn=$(render_request GET "/postgres/$dbid/connection-info")
 
-            python3 -c "
-import sys, json
+            if [[ "${RENDER_JSON:-0}" == "1" ]]; then
+                RENDER_INFO="$info" RENDER_CONN="$conn" python3 -c '
+import json, os
+print(json.dumps({"postgres": json.loads(os.environ["RENDER_INFO"]),
+                  "connectionInfo": json.loads(os.environ["RENDER_CONN"])}, indent=2))
+' | render_secret_output
+                return 0
+            fi
 
-info = json.loads('''$(echo "$info")''')
-conn = json.loads('''$(echo "$conn")''')
+            RENDER_INFO="$info" RENDER_CONN="$conn" python3 -c "
+import sys, json, os
+
+info = json.loads(os.environ['RENDER_INFO'])
+conn = json.loads(os.environ['RENDER_CONN'])
 
 print(f\"ID:       {info.get('id', '')}\")
 print(f\"Name:     {info.get('name', '')}\")
@@ -868,10 +939,10 @@ print('Connection Info:')
 print(f\"  Internal: {conn.get('internalConnectionString', 'N/A')}\")
 print(f\"  External: {conn.get('externalConnectionString', 'N/A')}\")
 print(f\"  PSQL:     {conn.get('psqlCommand', 'N/A')}\")
-"
+" | render_secret_output
             ;;
         *)
-            echo "Usage: agent-render db [list|show <database>]"
+            echo "Usage: agent-render db [list|show <database> [--json] [--reveal]]"
             return 1
             ;;
     esac
@@ -1916,16 +1987,22 @@ cmd_db_lifecycle() {
 }
 
 cmd_db_connect_info() {
-    local id="${1:-}"
-    [[ -z "$id" ]] && { echo "Usage: agent-render db connect-info <db>"; return 1; }
+    _render_parse_reveal "$@"
+    local id="${_render_rest[0]:-}"
+    [[ -z "$id" ]] && { echo "Usage: agent-render db connect-info <db> [--json] [--reveal]"; return 1; }
     local dbid; dbid=$(resolve_postgres "$id") || return 1
-    render_request GET "/postgres/$dbid/connection-info" | python3 -c "
+    local conn; conn=$(render_request GET "/postgres/$dbid/connection-info") || return 1
+    if [[ "${RENDER_JSON:-0}" == "1" ]]; then
+        printf '%s\n' "$conn" | render_secret_output
+        return 0
+    fi
+    printf '%s\n' "$conn" | python3 -c "
 import sys, json
 c = json.load(sys.stdin)
 print(f\"Internal: {c.get('internalConnectionString', '')}\")
 print(f\"External: {c.get('externalConnectionString', '')}\")
 print(f\"PSQL:     {c.get('psqlCommand', '')}\")
-"
+" | render_secret_output
 }
 
 cmd_db_backups() {
@@ -2105,8 +2182,9 @@ print(json.dumps(out))
             render_request_checked DELETE "/key-value/$kvid" > /dev/null && echo "Deleted $id"
             ;;
         connect-info|conn)
-            local kvid; kvid=$(resolve_kv "${1:-}") || return 1
-            render_request GET "/key-value/$kvid/connection-info" | python3 -m json.tool
+            _render_parse_reveal "$@"
+            local kvid; kvid=$(resolve_kv "${_render_rest[0]:-}") || return 1
+            render_request GET "/key-value/$kvid/connection-info" | python3 -m json.tool | render_secret_output
             ;;
         suspend|resume)
             local kvid; kvid=$(resolve_kv "${1:-}") || return 1

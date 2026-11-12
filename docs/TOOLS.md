@@ -3672,7 +3672,7 @@ Concurrency: `write`
 - `jobs`: List one-off jobs
 - `job`: One-off job ops: run|show|cancel
 - `cron`: Cron job ops: run|cancel
-- `env`: List env vars
+- `env`: List env vars (every value masked unless --reveal; --json emits key, masked value, generateValue)
 - `env-set`: Upsert env var
 - `env-del`: Delete env var
 - `secret`: Per-service secret files: list|get|set|del
@@ -3747,7 +3747,7 @@ agent-do render snapshot
 - Read-only (snapshot/verify; safe to parallelize): `audit`, `autoscaling show`, `blueprint list`, `blueprint show`, `blueprint syncs`, `blueprint validate`, `dedicated-ip list`, `dedicated-ip show`, `deploys`, `disk list`, `disk show`, `disk snapshots`, `domain`, `domains`, `env`, `env-group get`, `env-group list`, `env-group secret`, `env-group show`, `environment list`, `environment show`, `events`, `header list`, `instances`, `job show`, `jobs`, `kv connect-info`, `kv list`, `kv show`, `logs`, `maintenance list`, `maintenance show`, `metrics`, `notify override`, `notify overrides`, `notify show`, `owners`, `project`, `projects`, `registry list`, `registry show`, `route list`, `secret get`, `secret list`, `services`, `show`, `snapshot`, `webhook events`, `webhook list`, `webhook show`, `whoami`
 - Write (connect/interact/save): `autoscaling disable`, `autoscaling enable`, `blueprint delete`, `blueprint update`, `cache-purge`, `create`, `cron cancel`, `cron run`, `db`, `dedicated-ip create`, `dedicated-ip delete`, `delete`, `deploy`, `disk create`, `disk delete`, `disk restore`, `disk update`, `env-del`, `env-group create`, `env-group del-var`, `env-group delete`, `env-group link`, `env-group rename`, `env-group set`, `env-group unlink`, `env-set`, `environment create`, `environment delete`, `environment link`, `environment unlink`, `header add`, `header del`, `job cancel`, `job run`, `kv create`, `kv delete`, `kv resume`, `kv suspend`, `kv update`, `maintenance reschedule`, `maintenance trigger`, `notify update`, `registry add`, `registry delete`, `restart`, `resume`, `rollback`, `route add`, `route del`, `scale`, `secret del`, `secret set`, `suspend`, `update`, `webhook create`, `webhook delete`, `webhook update`
 - destructive (irreversible data loss; confirm before auto-running): `blueprint delete`, `cache-purge`, `dedicated-ip delete`, `delete`, `disk delete`, `env-del`, `env-group del-var`, `env-group delete`, `environment delete`, `header del`, `kv delete`, `registry delete`, `route del`, `secret del`, `webhook delete`
-- sensitive (emits or persists secret material; guard output): `db`, `env-group secret`, `kv connect-info`, `secret get`
+- sensitive (emits or persists secret material; guard output): `db`, `env`, `env-group secret`, `kv connect-info`, `secret get`
 - polymorphic (beat decided by payload or flag at call time): `db`
 
 ### repl
