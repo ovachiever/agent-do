@@ -18,7 +18,9 @@ SERVICES (web, worker, static, private, cron)
   services / ls                 List all services
   show <svc>                    Detailed service info
   create <type> <name> [opts]   Create a new service (`create --help` for opts)
-  update <svc> [opts]           Update service settings
+  update <svc> [opts]           Update settings: --name --branch --root-dir --auto-deploy --schedule
+                                --start --build --docker-command --pre-deploy --health-check [--dry-run]
+                                (reads back; restores buildFilter if Render clears it; does not deploy)
   delete <svc> --yes            Delete a service (destructive)
   cache-purge <svc>             Purge build cache
   events <svc>                  Recent service events
@@ -1428,45 +1430,156 @@ print(d.get('service', d).get('id', ''))
 }
 
 cmd_update() {
-    local name_or_id="${1:-}"
-    if [[ -z "$name_or_id" || ! "$name_or_id" =~ ^(srv-|crn-) ]] && [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render update <service> [--name X] [--branch Y] [--root-dir Z] [--auto-deploy yes|no]"
-        return 1
-    fi
-    shift
+    local usage="Usage: agent-render update <service> [--name X] [--branch Y] [--root-dir Z] [--auto-deploy yes|no] [--schedule CRON] [--start CMD] [--build CMD] [--docker-command CMD] [--pre-deploy CMD] [--health-check PATH] [--dry-run] [--json]"
+    if [[ $# -lt 1 || "$1" == -* ]]; then echo "$usage" >&2; return 2; fi
+    local name_or_id="$1"; shift
 
-    local sid
-    sid=$(resolve_service "$name_or_id") || return 1
-
-    local new_name="" branch="" root_dir="" auto_deploy=""
+    local -a opts=()
+    local dry_run=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --name) new_name="$2"; shift 2 ;;
-            --branch) branch="$2"; shift 2 ;;
-            --root-dir) root_dir="$2"; shift 2 ;;
-            --auto-deploy) auto_deploy="$2"; shift 2 ;;
-            *) echo "Error: unknown option '$1'" >&2; return 1 ;;
+            --name|--branch|--root-dir|--auto-deploy|--schedule|--start|--build|--docker-command|--pre-deploy|--health-check)
+                [[ $# -ge 2 ]] || { echo "Error: $1 needs a value" >&2; return 2; }
+                opts+=("$1=$2"); shift 2 ;;
+            --dry-run) dry_run=1; shift ;;
+            *) echo "Error: unknown option '$1'" >&2; echo "$usage" >&2; return 2 ;;
         esac
     done
+    if [[ ${#opts[@]} -eq 0 ]]; then echo "Error: nothing to update" >&2; echo "$usage" >&2; return 2; fi
 
-    local body
-    body=$(python3 -c "
-import sys, json
-out = {}
-if sys.argv[1]: out['name'] = sys.argv[1]
-if sys.argv[2]: out['branch'] = sys.argv[2]
-if sys.argv[3]: out['rootDir'] = sys.argv[3]
-if sys.argv[4]: out['autoDeploy'] = sys.argv[4]
-print(json.dumps(out))
-" "$new_name" "$branch" "$root_dir" "$auto_deploy")
+    local sid before
+    sid=$(resolve_service "$name_or_id") || return 1
+    # $(...) keeps render_request_checked's RETURN trap out of this function.
+    before=$(render_request_checked GET "/services/$sid") || return 1
 
-    if [[ "$body" == "{}" ]]; then
-        echo "Error: nothing to update" >&2
-        return 1
+    # Build the PATCH body from the options, refusing any option the service
+    # type or runtime does not support (field paths per Render's OpenAPI).
+    local body body_rc=0
+    body=$(printf '%s' "$before" | python3 -c '
+import json, sys
+svc = json.load(sys.stdin)
+kind = svc.get("type", "")
+details = svc.get("serviceDetails") or {}
+runtime = details.get("runtime") or details.get("env") or ""
+docker = runtime in ("docker", "image")
+body, sd, env = {}, {}, {}
+def refuse(msg):
+    print(f"Error: {msg}", file=sys.stderr); sys.exit(2)
+for raw in sys.argv[1:]:
+    flag, value = raw.split("=", 1)
+    if flag == "--name": body["name"] = value
+    elif flag == "--branch": body["branch"] = value
+    elif flag == "--root-dir": body["rootDir"] = value
+    elif flag == "--auto-deploy":
+        if value not in ("yes", "no"): refuse("--auto-deploy takes yes or no")
+        body["autoDeploy"] = value
+    elif flag == "--schedule":
+        if kind != "cron_job": refuse(f"--schedule applies to cron jobs; this service is a {kind}")
+        sd["schedule"] = value
+    elif flag == "--health-check":
+        if kind != "web_service": refuse(f"--health-check applies to web services; this service is a {kind}")
+        sd["healthCheckPath"] = value
+    elif flag == "--pre-deploy":
+        if kind not in ("web_service", "private_service", "background_worker"):
+            refuse(f"--pre-deploy applies to web, private and worker services; this service is a {kind}")
+        sd["preDeployCommand"] = value
+    elif flag in ("--start", "--build"):
+        if kind == "static_site": refuse(f"{flag} does not apply to static sites")
+        if docker: refuse(f"{flag} applies to native runtimes; this service runs {runtime} — use --docker-command")
+        env["startCommand" if flag == "--start" else "buildCommand"] = value
+    elif flag == "--docker-command":
+        if not docker: refuse(f"--docker-command applies to Docker services; this service runs {runtime or kind}")
+        env["dockerCommand"] = value
+if env: sd["envSpecificDetails"] = env
+if sd: body["serviceDetails"] = sd
+print(json.dumps(body))
+' "${opts[@]}") || body_rc=$?
+    [[ $body_rc -eq 0 ]] || return "$body_rc"
+
+    local after="" restored_after="" restore_note=""
+    if [[ "$dry_run" -eq 0 ]]; then
+        local patch_out
+        patch_out=$(render_request_checked PATCH "/services/$sid" "$body" 2>&1) || {
+            echo "Error: Render rejected the update; nothing was changed:" >&2
+            printf '%s\n' "$patch_out" >&2
+            return 1
+        }
+        after=$(render_request_checked GET "/services/$sid") || return 1
+        # Render clears buildFilter on PATCHes that carry serviceDetails
+        # (reproduced 2026-09-30 on two services). Put the previous value back.
+        local restore_body
+        restore_body=$(BEFORE="$before" AFTER="$after" BODY="$body" python3 -c '
+import json, os
+b, a, body = json.loads(os.environ["BEFORE"]), json.loads(os.environ["AFTER"]), json.loads(os.environ["BODY"])
+if "buildFilter" not in body and b.get("buildFilter") != a.get("buildFilter") and b.get("buildFilter") is not None:
+    print(json.dumps({"buildFilter": b["buildFilter"]}))
+')
+        if [[ -n "$restore_body" ]]; then
+            patch_out=$(render_request_checked PATCH "/services/$sid" "$restore_body" 2>&1) || {
+                echo "Error: Render cleared buildFilter and restoring it failed — set it back by hand:" >&2
+                printf '%s\n%s\n' "$restore_body" "$patch_out" >&2
+                return 1
+            }
+            after=$(render_request_checked GET "/services/$sid") || return 1
+            restore_note="buildFilter"
+        fi
     fi
 
-    render_request_checked PATCH "/services/$sid" "$body" > /dev/null && \
-        echo "Updated: $name_or_id ($sid)"
+    BEFORE="$before" AFTER="$after" BODY="$body" DRY="$dry_run" RESTORED="$restore_note" \
+        OUT_JSON="${RENDER_JSON:-0}" python3 -c '
+import json, os, sys
+before, body = json.loads(os.environ["BEFORE"]), json.loads(os.environ["BODY"])
+dry = os.environ["DRY"] == "1"
+after = json.loads(os.environ["AFTER"]) if not dry else None
+restored = [os.environ["RESTORED"]] if os.environ["RESTORED"] else []
+VOLATILE = {"updatedAt", "serviceDetails.lastSuccessfulRunAt", "suspenders", "suspended"}
+def flat(o, p=""):
+    out = {}
+    if isinstance(o, dict):
+        for k, v in o.items():
+            out.update(flat(v, f"{p}.{k}" if p else k))
+    else:
+        out[p] = o
+    return out
+fb, freq = flat(before), flat(body)
+name = before.get("name", "")
+if dry:
+    plan = {k: {"before": fb.get(k), "after": v} for k, v in freq.items()}
+    if os.environ["OUT_JSON"] == "1":
+        print(json.dumps({"id": before.get("id"), "name": name, "dry_run": True, "would_change": plan, "body": body}, indent=2))
+    else:
+        print(f"Dry run — would update {name}:")
+        for k, v in plan.items():
+            b, a = v["before"], v["after"]
+            print(f"  {k}: {b!r} -> {a!r}")
+    sys.exit(0)
+fa = flat(after)
+missing = {k: {"requested": v, "now": fa.get(k)} for k, v in freq.items() if fa.get(k) != v}
+changed = {k: {"before": fb.get(k), "after": fa.get(k)} for k in freq if fb.get(k) != fa.get(k)}
+unexpected = {k: {"before": fb.get(k), "after": fa.get(k)}
+              for k in sorted(set(fb) | set(fa))
+              if k not in freq and k not in VOLATILE and fb.get(k) != fa.get(k)}
+ok = not missing and not unexpected
+if os.environ["OUT_JSON"] == "1":
+    print(json.dumps({"id": before.get("id"), "name": name, "ok": ok, "changed": changed, "restored": restored,
+                      "not_applied": missing, "unexpected": unexpected, "deployed": False}, indent=2))
+else:
+    sid = before.get("id", "")
+    print(f"Updated {name} ({sid}) and read it back:")
+    for k, v in changed.items():
+        b, a = v["before"], v["after"]
+        print(f"  {k}: {b!r} -> {a!r}")
+    for k in restored:
+        print(f"  restored {k} — Render cleared it on this update; previous value put back and verified")
+    for k, v in missing.items():
+        req, now = v["requested"], v["now"]
+        print(f"  NOT APPLIED {k}: requested {req!r}, Render has {now!r}")
+    for k, v in unexpected.items():
+        b, a = v["before"], v["after"]
+        print(f"  UNEXPECTED {k}: {b!r} -> {a!r} (not requested; left as is — review it)")
+    print(f"  Not deployed: Render applies this on the next deploy — run: agent-render deploy {name}")
+sys.exit(0 if ok else 1)
+'
 }
 
 cmd_delete() {
