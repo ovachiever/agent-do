@@ -10,6 +10,8 @@ use chrono::{SecondsFormat, Utc};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
+mod managed_cli;
+
 use manna_core::age::{age_of, dated};
 use manna_core::error::MannaError;
 use manna_core::federation::{self, MannaUri, Relation, RelationKind};
@@ -17,6 +19,9 @@ use manna_core::id::generate_unique_id;
 use manna_core::issue::{
     dream_claim_refusal, is_default_type, Issue, IssueStatus, IssueType, SessionIdentity,
     DREAM_INERT_MARKER,
+};
+use manna_core::liveness::{
+    claim_presence, parse_peers_strict, BoundPeer, ClaimPresence, CoordPeer,
 };
 use manna_core::reconcile::{
     check_blocker_desync, check_dangling_track, check_landed_open, check_stale_dream,
@@ -27,14 +32,15 @@ use manna_core::state::{
     derive_board_state, direct_coord_program, StateOptions, DEFAULT_DECISION_MARKERS,
 };
 use manna_core::store::MannaStore;
+use manna_core::track::{is_paired, pairable, track_children, track_close_refusal, TrackChildren};
 use manna_core::workflow::{
-    attach_handoff, canonical_handoff_path, create_paired_issue, delete_paired_issue,
-    detach_handoff, find_orphan_handoffs, handoff_manna_id, handoff_presentation_drift,
-    initialize_workflow, load_workflow_for_board, migrate_legacy_board, rebind_handoff_metadata,
-    recover_legacy_migration, recover_pair_transactions, runtime_session_identity,
-    runtime_session_label, seal_handoff, set_handoff_priority, sync_handoff_presentation,
-    untracked_durable_paths, validate_handoff, validate_scaffold, HandoffSyncResult,
-    WorkflowConfig, HANDOFF_DIR,
+    adopt_handoff, attach_handoff, canonical_handoff_path, create_paired_issue,
+    delete_paired_issue, detach_handoff, find_orphan_handoffs, handoff_manna_id, handoff_order_ids,
+    handoff_presentation_drift, initialize_workflow, load_workflow_for_board, migrate_legacy_board,
+    rebind_handoff_metadata, recover_legacy_migration, recover_pair_transactions,
+    regenerate_handoff, runtime_session_identity, runtime_session_label, seal_handoff,
+    set_handoff_priority, sync_handoff_presentation, untracked_durable_paths, validate_handoff,
+    validate_scaffold, HandoffSyncResult, WorkflowConfig, HANDOFF_DIR,
 };
 
 /// Exit codes
@@ -115,6 +121,80 @@ enum Commands {
     Done {
         /// Issue ID (e.g., mn-abc123)
         id: String,
+
+        /// The `assessment` digest from `manna assess`; the close refuses
+        /// when the item's acceptance state moved since that look
+        #[arg(long)]
+        assessment: Option<String>,
+    },
+
+    /// Print this session's public label and ownership proof (never the token)
+    Identity {
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Grant, revoke, or list scoped coordinator authority
+    Coordinator {
+        #[command(subcommand)]
+        command: managed_cli::CoordinatorCommands,
+    },
+
+    /// Coordinator-owned closure: require checks, correct, release, history, doctor
+    Managed {
+        #[command(subcommand)]
+        command: managed_cli::ManagedCommands,
+    },
+
+    /// Submit the claim-holder's result for the current attempt (not acceptance)
+    Submit {
+        id: String,
+        /// Report file, or `-` for stdin
+        #[arg(long)]
+        report: std::path::PathBuf,
+        /// The source revision the report describes
+        #[arg(long)]
+        revision: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Record one required check as accepted at a pinned integration target
+    Accept {
+        id: String,
+        #[arg(long)]
+        check: String,
+        /// Integration target reference (branch, remote-tracking ref, tag, or sha); pinned on first acceptance
+        #[arg(long)]
+        target: String,
+        /// What was verified (a merge, a deploy id, a test run)
+        #[arg(long)]
+        evidence: String,
+        /// The submission id you reviewed (`manna assess` prints submission_key); a
+        /// submission that moved since your look is refused under the lock
+        #[arg(long)]
+        submission: String,
+        /// The attempt you reviewed; a moved attempt is refused under the lock
+        #[arg(long)]
+        attempt: u32,
+        /// Move the pinned target; earlier acceptances at the old target stop counting
+        #[arg(long)]
+        repin: bool,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Read-only closure assessment: target, evidence, outstanding acceptance, authority, next action
+    Assess {
+        id: String,
+        /// Integration target reference to compare against the pinned one
+        #[arg(long)]
+        target: Option<String>,
+        /// A deployed revision the caller asserts; manna does not observe deployments
+        #[arg(long)]
+        deployed: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 
     /// Move a paired item to a one-based handoff priority and synchronize presentation
@@ -238,6 +318,9 @@ enum Commands {
     Show {
         /// Issue ID (e.g., mn-abc123)
         id: String,
+        /// Emit JSON instead of YAML
+        #[arg(long)]
+        json: bool,
     },
 
     /// Update issue metadata; lifecycle state changes use dedicated verbs
@@ -333,6 +416,12 @@ enum Commands {
         /// Emit JSON instead of YAML
         #[arg(long)]
         json: bool,
+
+        /// With --fix: apply fixes only for these finding kinds
+        /// (comma-separated snake_case names, e.g. dead_claim,blocker_desync).
+        /// Other findings stay advisory. Unknown names are refused.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
     },
 }
 
@@ -341,6 +430,11 @@ enum HandoffCommands {
     /// Seal the complete handoff contents to its Manna item
     Seal {
         /// Issue ID (e.g., mn-abc123)
+        id: String,
+    },
+    /// Give an existing track its dispatch work order (idempotent; adopts a document already at the canonical path)
+    Attach {
+        /// Track ID (e.g., mn-abc123)
         id: String,
     },
 }
@@ -403,6 +497,68 @@ struct IssueData {
     /// inside them would break every parser to save a reader one line. The
     /// exact timestamps stay exact, and the distance sits next to them.
     age: IssueAge,
+}
+
+/// `show`: the row, its age, and for a track the board's answer to what it
+/// still owes. Items serialize exactly as before; `children` is absent.
+#[derive(Serialize)]
+struct ShowData {
+    issue: Issue,
+    age: IssueAge,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<TrackChildren>,
+}
+
+/// `handoff attach`: whether the pair changed and whether a document already
+/// at the canonical path was adopted rather than generated.
+#[derive(Serialize)]
+struct HandoffAttachData {
+    changed: bool,
+    adopted: bool,
+    issue: Issue,
+    age: IssueAge,
+}
+
+/// A managed close whose row write landed but whose audit transaction did
+/// not: the row is done and its dependents released, yet the command fails
+/// (nonzero) so no caller reads a clean close. `manna managed recover <id>`
+/// finishes the transaction.
+#[derive(Serialize)]
+struct IncompleteCloseData {
+    success: bool,
+    error: String,
+    #[serde(flatten)]
+    closed: IssueData,
+    released: Vec<String>,
+    authority: &'static str,
+    transaction: String,
+    next_action: String,
+}
+
+#[derive(Serialize)]
+struct DoneData {
+    #[serde(flatten)]
+    completed: IssueData,
+    released: Vec<String>,
+    /// What authorized the close: `owner` (the claim-holder's proof),
+    /// `evidence` (landed trailer commits), or `operator` (the human's word).
+    authority: &'static str,
+    /// Landed commits that carried this item's trailer and touched source.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    evidence: Vec<String>,
+    /// Paperwork drift observed while closing. Advisory: lint and reconcile
+    /// carry the same findings; a close never waits on them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ClaimData {
+    #[serde(flatten)]
+    issue: IssueData,
+    /// Shadow work orders seen at claim time. Advisory, never a refusal.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 /// The two distances a reader of one issue actually asks about: how long ago
@@ -612,10 +768,43 @@ fn get_session_identity() -> Result<SessionIdentity, String> {
         }
     }
 
+    // The human at the keyboard. No agent runtime pinned anything and stdin
+    // is a terminal, so this is the operator's own shell: derive a proof under
+    // the same machine-local key, labelled by login name. Agent hosts run
+    // their shells on pipes and never reach this branch. `MANNA_OPERATOR=0`
+    // opts a terminal out (a script that must act as a pinned lane).
+    if operator_fallback_enabled() {
+        if let Some(user) = operator_user() {
+            return runtime_session_identity("operator", &user).map(SessionIdentity::into_operator);
+        }
+    }
+
     Err(
-        "Manna session identity is not pinned; start through an agent-do session hook or export both MANNA_SESSION_ID and a secret MANNA_SESSION_TOKEN"
+        "Manna session identity is not pinned; start through an agent-do session hook, run from your own terminal (operator identity), or export both MANNA_SESSION_ID and a secret MANNA_SESSION_TOKEN"
             .to_string(),
     )
+}
+
+/// True when the operator derivation may run: stdin is a terminal and the
+/// operator has not opted out with `MANNA_OPERATOR=0`.
+fn operator_fallback_enabled() -> bool {
+    use std::io::IsTerminal;
+    if std::env::var("MANNA_OPERATOR")
+        .ok()
+        .is_some_and(|value| value.trim() == "0")
+    {
+        return false;
+    }
+    std::io::stdin().is_terminal()
+}
+
+/// The login name the operator identity is labelled by.
+fn operator_user() -> Option<String> {
+    ["USER", "LOGNAME"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .map(|value| value.trim().to_string())
+        .find(|value| !value.is_empty())
 }
 
 fn require_session_identity() -> SessionIdentity {
@@ -638,6 +827,13 @@ fn current_session_label() -> Option<String> {
             if let Ok(label) = runtime_session_label(runtime, &opaque_id) {
                 return Some(label);
             }
+        }
+    }
+    if operator_fallback_enabled() {
+        if let Some(label) =
+            operator_user().and_then(|user| runtime_session_label("operator", &user).ok())
+        {
+            return Some(label);
         }
     }
     None
@@ -715,6 +911,18 @@ fn output_error(error: &str, exit_code: i32) -> ! {
     println!(
         "{}",
         serde_yaml::to_string(&response).unwrap_or_else(|e| {
+            format!("success: false\nerror: \"YAML serialization error: {}\"", e)
+        })
+    );
+    std::process::exit(exit_code);
+}
+
+/// A failed command whose partial outcome the caller must still see: the
+/// payload carries `success: false` and the error beside what did land.
+fn output_failure<T: Serialize>(data: T, exit_code: i32) -> ! {
+    println!(
+        "{}",
+        serde_yaml::to_string(&data).unwrap_or_else(|e| {
             format!("success: false\nerror: \"YAML serialization error: {}\"", e)
         })
     );
@@ -807,8 +1015,71 @@ fn find_issue(issues: &[Issue], id: &str) -> Issue {
         .find(|i| i.id == id)
         .cloned()
         .unwrap_or_else(|| {
-            output_error(&format!("Issue {} not found", id), EXIT_USER_ERROR);
+            output_error(&issue_not_found_message(id), EXIT_USER_ERROR);
         })
+}
+
+/// "Not found" that names where the id actually lives. The wrong checkout is
+/// the common cause, and the estate registry already knows every board.
+fn issue_not_found_message(id: &str) -> String {
+    match locate_issue_on_registered_boards(id) {
+        Some((board, root)) => format!(
+            "Issue {} not found on this board; it lives on {} ({}). Run the command from that checkout.",
+            id, board, root
+        ),
+        None => format!("Issue {} not found", id),
+    }
+}
+
+/// Search every registered board except the current one for an issue id.
+/// Returns the first (board name, root) that holds it. Read-only, and a
+/// missing or unreadable registry is simply no answer.
+fn locate_issue_on_registered_boards(id: &str) -> Option<(String, String)> {
+    let home = std::env::var_os("AGENT_DO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".agent-do")))?;
+    let text = std::fs::read_to_string(home.join("manna/serve/boards.json")).ok()?;
+    let registry: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let here = Path::new(".").canonicalize().ok();
+    let mut boards = registry
+        .get("boards")?
+        .as_object()?
+        .iter()
+        .filter_map(|(name, entry)| {
+            entry
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .map(|root| (name.clone(), root.to_string()))
+        })
+        .collect::<Vec<_>>();
+    boards.sort();
+    for (name, root) in boards {
+        let root_path = Path::new(&root);
+        if here
+            .as_ref()
+            .zip(root_path.canonicalize().ok())
+            .is_some_and(|(here, there)| here == &there)
+        {
+            continue;
+        }
+        let Ok(rows) = std::fs::read_to_string(root_path.join(".manna/issues.jsonl")) else {
+            continue;
+        };
+        let held = rows.lines().any(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|row| {
+                    row.get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .is_some_and(|row_id| row_id == id)
+        });
+        if held {
+            return Some((name, root));
+        }
+    }
+    None
 }
 
 fn load_board_workflow(store: &MannaStore) -> (Vec<Issue>, Option<WorkflowConfig>) {
@@ -1120,9 +1391,9 @@ fn cmd_create(
     }
 
     let (existing_issues, workflow) = load_board_workflow(&store);
-    if workflow.is_some() && parsed_type != IssueType::Item && prompt.is_some() {
+    if workflow.is_some() && parsed_type == IssueType::Dream && prompt.is_some() {
         output_error(
-            "Strict workflow boards pair handoffs only with actionable items",
+            "Strict workflow boards pair handoffs with items and tracks, never dreams",
             EXIT_USER_ERROR,
         );
     }
@@ -1149,7 +1420,9 @@ fn cmd_create(
     issue.issue_type = parsed_type;
     issue.track = track;
     issue.source = source;
-    if let Some(config) = workflow.as_ref().filter(|_| parsed_type == IssueType::Item) {
+    // Items and tracks pair at creation: an item's work order, or a track's
+    // dispatch order that lets one agent work the whole track. Dreams never.
+    if let Some(config) = workflow.as_ref().filter(|_| pairable(parsed_type)) {
         if let Err(error) =
             canonical_handoff_path(Path::new("."), config, &issue, prompt.as_deref())
         {
@@ -1179,6 +1452,14 @@ fn cmd_create(
     });
 }
 
+/// The refusal `claim` prints for a track that has no dispatch work order.
+fn track_unpaired_claim_refusal(id: &str) -> String {
+    format!(
+        "{} is a track without a dispatch work order: an organizational container, not an assignment. Give it one with `agent-do manna handoff attach {}` to dispatch the whole track, or claim its items individually",
+        id, id
+    )
+}
+
 fn cmd_claim(id: String) -> ! {
     let store = MannaStore::new(Path::new("."));
 
@@ -1189,11 +1470,10 @@ fn cmd_claim(id: String) -> ! {
         );
     }
 
-    let session = require_session_identity();
+    let (issues, workflow) = load_board_workflow(&store);
 
-    let (issues, _) = load_board_workflow(&store);
-
-    // Find issue
+    // Find the issue before demanding an identity: the wrong checkout is the
+    // common failure, and its answer names the right board.
     let issue = find_issue(&issues, &id);
 
     // Dreams are visible but inert: refuse before the store is ever touched,
@@ -1201,26 +1481,32 @@ fn cmd_claim(id: String) -> ! {
     if issue.issue_type == IssueType::Dream {
         output_error(&dream_claim_refusal(&issue.id), EXIT_NEEDS_AUTHORIZATION);
     }
+    // A track is claimable only once it carries a dispatch work order; a
+    // container track is organization, not an assignment. Same exit 2, same
+    // "escalate" reading, and the remedy is named.
+    if workflow.is_some() && issue.issue_type == IssueType::Track && !is_paired(&issue) {
+        output_error(
+            &track_unpaired_claim_refusal(&issue.id),
+            EXIT_NEEDS_AUTHORIZATION,
+        );
+    }
+
+    let session = require_session_identity();
 
     let claimed = match store.claim_issue_checked(&id, &session, |current, current_board| {
         if current.issue_type == IssueType::Dream {
             return Err(dream_claim_refusal(&current.id));
         }
         let current_workflow = load_workflow_for_board(Path::new("."), current_board)?;
-        if let Some(config) = current_workflow
-            .as_ref()
-            .filter(|_| current.issue_type == IssueType::Item)
-        {
-            validate_handoff(Path::new("."), config, current)?;
-            let shadows =
-                check_workflow_sprawl_for_issue(Path::new("."), current_board, config, &current.id);
-            if !shadows.is_empty() {
-                return Err(format!(
-                    "shadow handoff workflow detected for {}: {}",
-                    current.id,
-                    shadows.join(", ")
-                ));
+        if let Some(config) = current_workflow.as_ref() {
+            if current.issue_type == IssueType::Track && !is_paired(current) {
+                return Err(track_unpaired_claim_refusal(&current.id));
             }
+            // The exact gate: this row's own work order (an item's, or a
+            // dispatchable track's) must resolve inside the canonical root.
+            // Shadow-workflow detection is a text heuristic and reports
+            // below as a warning, never a refusal.
+            validate_handoff(Path::new("."), config, current)?;
         }
         Ok(())
     }) {
@@ -1235,13 +1521,24 @@ fn cmd_claim(id: String) -> ! {
         Err(error) => handle_manna_error(error),
     };
 
-    output_success(IssueData {
-        age: (&claimed).into(),
-        issue: claimed,
+    managed_cli::note_claim(&claimed.id, &session);
+
+    let warnings = workflow
+        .as_ref()
+        .filter(|_| pairable(claimed.issue_type))
+        .map(|config| check_workflow_sprawl_for_issue(Path::new("."), &issues, config, &claimed.id))
+        .unwrap_or_default();
+
+    output_success(ClaimData {
+        issue: IssueData {
+            age: (&claimed).into(),
+            issue: claimed,
+        },
+        warnings,
     });
 }
 
-fn cmd_done(id: String) -> ! {
+fn cmd_done(id: String, assessment: Option<String>) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -1251,35 +1548,153 @@ fn cmd_done(id: String) -> ! {
         );
     }
 
-    let _ = load_board_workflow(&store);
+    let (issues, workflow) = load_board_workflow(&store);
+    let issue = find_issue(&issues, &id);
     let session = require_session_identity();
-    let issue = match store.complete_issue_checked(&id, &session, |current, current_board| {
-        let current_workflow = load_workflow_for_board(Path::new("."), current_board)?;
-        if let Some(config) = current_workflow
-            .as_ref()
-            .filter(|_| current.issue_type == IssueType::Item)
-        {
-            validate_handoff(Path::new("."), config, current)?;
-            let shadows =
-                check_workflow_sprawl_for_issue(Path::new("."), current_board, config, &current.id);
-            if !shadows.is_empty() {
-                return Err(format!(
-                    "shadow handoff workflow detected for {}: {}",
-                    current.id,
-                    shadows.join(", ")
-                ));
+
+    // A track closes only over finished items. Refuse before any store
+    // write, exit 2, and name what is open; the store re-checks under the
+    // lock on every close path as the backstop against a race.
+    if let Some(reason) = track_close_refusal(&issue, &issues) {
+        output_error(&reason, EXIT_NEEDS_AUTHORIZATION);
+    }
+
+    // A managed item closes only on recorded acceptance by an authorized
+    // coordinator (or the operator, or the claim-holder once acceptance is
+    // complete). Trailer evidence is a receipt, never acceptance, so the
+    // evidence path below never runs for a managed item. Unmanaged items
+    // keep every documented path.
+    let evidence = if issue.issue_type == IssueType::Dream {
+        Vec::new()
+    } else {
+        landed_evidence_for(&id)
+    };
+    let managed_close = managed_cli::close_managed(&store, &issue, &session, assessment.as_deref());
+    let mut managed_warnings = Vec::new();
+    let mut managed_incomplete = None;
+    let (authority, result) = if let Some(managed) = managed_close {
+        match managed {
+            Ok((completed, close)) => {
+                managed_warnings = close.warnings;
+                managed_incomplete = close.incomplete;
+                (close.authority, Ok(completed))
             }
+            Err(MannaError::MutationRejected(error)) => {
+                output_error(&error, EXIT_NEEDS_AUTHORIZATION)
+            }
+            Err(error) => handle_manna_error(error),
         }
-        Ok(())
-    }) {
+    } else if !evidence.is_empty() {
+        ("evidence", store.complete_issue_on_evidence(&id, &evidence))
+    } else if session.is_operator() {
+        ("operator", store.complete_issue_as_operator(&id, &session))
+    } else {
+        (
+            "owner",
+            store.complete_issue_checked(&id, &session, |_, _| Ok(())),
+        )
+    };
+    let completed = match result {
         Ok(issue) => issue,
         Err(error) => handle_manna_error(error),
     };
+    if let Some(incomplete) = managed_incomplete {
+        // The row is done; the command is not. A caller that reads exit 0
+        // as "closed cleanly" must not, and the output says what did land.
+        output_failure(
+            IncompleteCloseData {
+                success: false,
+                error: incomplete.error,
+                closed: IssueData {
+                    age: (&completed.issue).into(),
+                    issue: completed.issue,
+                },
+                released: completed.released,
+                authority,
+                transaction: incomplete.transaction,
+                next_action: format!("agent-do manna managed recover {}", id),
+            },
+            EXIT_SYSTEM_ERROR,
+        );
+    }
 
-    output_success(IssueData {
-        age: (&issue).into(),
-        issue,
+    let mut warnings = managed_warnings;
+    if let Some(config) = workflow
+        .as_ref()
+        .filter(|_| pairable(completed.issue.issue_type) && is_paired(&completed.issue))
+    {
+        if let Err(error) = validate_handoff(Path::new("."), config, &completed.issue) {
+            warnings.push(format!("handoff pairing: {}", error));
+        }
+        warnings.extend(check_workflow_sprawl_for_issue(
+            Path::new("."),
+            &issues,
+            config,
+            &completed.issue.id,
+        ));
+    }
+
+    output_success(DoneData {
+        completed: IssueData {
+            age: (&completed.issue).into(),
+            issue: completed.issue,
+        },
+        released: completed.released,
+        authority,
+        evidence,
+        warnings,
     });
+}
+
+/// Commits that carry `Manna: <id>` and touched a path outside the board's
+/// own files. A filing chore commits `.manna/` and `.handoff/` with a trailer
+/// and proves nothing about the work; a commit that changed anything else is
+/// the receipt the close needs.
+fn landed_evidence_for(id: &str) -> Vec<String> {
+    let Ok(landed) = collect_landed_trailers() else {
+        return Vec::new();
+    };
+    let Some(shas) = landed.get(id) else {
+        return Vec::new();
+    };
+    shas.iter()
+        .filter(|sha| commit_touches_source(sha))
+        .cloned()
+        .collect()
+}
+
+fn commit_touches_source(sha: &str) -> bool {
+    let Ok(out) = std::process::Command::new("git")
+        .args([
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--root",
+            sha,
+        ])
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .any(|path| !board_owned_path(path))
+}
+
+/// Paths the board itself writes: the store and the canonical work orders.
+fn board_owned_path(path: &str) -> bool {
+    let mut components = Path::new(path).components();
+    let Some(std::path::Component::Normal(first)) = components.next() else {
+        return false;
+    };
+    matches!(first.to_str(), Some(".manna") | Some(HANDOFF_DIR))
 }
 
 fn cmd_order(id: String, position: usize) -> ! {
@@ -1340,7 +1755,11 @@ fn cmd_abandon(id: String) -> ! {
 
     let _ = load_board_workflow(&store);
     let session = require_session_identity();
-    let issue = match store.release_issue(&id, &session) {
+    // A managed item's abandon ends its attempt in the same locked write
+    // that releases the claim; unmanaged items keep the ordinary path.
+    let issue = match managed_cli::abandon_managed(&store, &id, &session)
+        .unwrap_or_else(|| store.release_issue(&id, &session))
+    {
         Ok(issue) => issue,
         Err(error) => handle_manna_error(error),
     };
@@ -1368,9 +1787,18 @@ fn cmd_handoff_seal(id: String) -> ! {
         )
     });
     let issue = find_issue(&issues, &id);
-    if issue.issue_type != IssueType::Item {
+    if !pairable(issue.issue_type) {
         output_error(
-            "Only actionable items own canonical handoffs",
+            "Only items and dispatchable tracks own canonical handoffs",
+            EXIT_USER_ERROR,
+        );
+    }
+    if issue.issue_type == IssueType::Track && !is_paired(&issue) {
+        output_error(
+            &format!(
+                "{} has no handoff to seal; give the track one with `agent-do manna handoff attach {}`",
+                issue.id, issue.id
+            ),
             EXIT_USER_ERROR,
         );
     }
@@ -1385,6 +1813,101 @@ fn cmd_handoff_seal(id: String) -> ! {
         age: (&sealed).into(),
         issue: sealed,
     });
+}
+
+/// `handoff attach <track-id>`: give an existing track its dispatch work
+/// order, idempotently. A track already carrying a valid pair reports
+/// `changed: false`; a document already at the canonical path is adopted
+/// (body kept, frontmatter normalized, binding computed) rather than
+/// overwritten; otherwise the generated order is created. Claims, status,
+/// dependencies and children are never touched: the attach transaction
+/// carries the lifecycle unchanged, and only the owner may run it on a
+/// claimed track.
+fn cmd_handoff_attach(id: String) -> ! {
+    let store = MannaStore::new(Path::new("."));
+    if !store.is_initialized() {
+        output_error(
+            "Storage not initialized. Run 'manna-core init' first.",
+            EXIT_USER_ERROR,
+        );
+    }
+    let (issues, workflow) = load_board_workflow(&store);
+    let config = workflow.as_ref().unwrap_or_else(|| {
+        output_error(
+            "Legacy boards do not pair handoffs; admit the board with `agent-do manna migrate` first",
+            EXIT_USER_ERROR,
+        )
+    });
+    let issue = find_issue(&issues, &id);
+    match issue.issue_type {
+        IssueType::Dream => output_error(
+            &format!(
+                "{} is a dream and never carries a work order; convert it first with `agent-do manna update {} --type track` (or --type item)",
+                issue.id, issue.id
+            ),
+            EXIT_NEEDS_AUTHORIZATION,
+        ),
+        IssueType::Item if is_paired(&issue) => output_error(
+            &format!(
+                "{} is an item and was paired at creation ({}); edit that file and run `agent-do manna handoff seal {}`",
+                issue.id,
+                issue.prompt.as_deref().unwrap_or(""),
+                issue.id
+            ),
+            EXIT_USER_ERROR,
+        ),
+        IssueType::Item => output_error(
+            &format!(
+                "{} is a strict item missing its pair; that is board drift, not a track: run `agent-do manna reconcile`",
+                issue.id
+            ),
+            EXIT_USER_ERROR,
+        ),
+        IssueType::Track => {}
+    }
+    let session = require_session_identity();
+    if let Err(error) = issue.require_owner(&session) {
+        output_error(&error, EXIT_USER_ERROR);
+    }
+    if is_paired(&issue) {
+        match validate_handoff(Path::new("."), config, &issue) {
+            Ok(_) => output_success(HandoffAttachData {
+                changed: false,
+                adopted: false,
+                age: (&issue).into(),
+                issue,
+            }),
+            Err(error) => output_error(
+                &format!(
+                    "{} already carries {} but it does not validate: {}. Edit it and run `agent-do manna handoff seal {}`",
+                    issue.id,
+                    issue.prompt.as_deref().unwrap_or(""),
+                    error,
+                    issue.id
+                ),
+                EXIT_USER_ERROR,
+            ),
+        }
+    }
+    let relative = match canonical_handoff_path(Path::new("."), config, &issue, None) {
+        Ok(path) => path,
+        Err(error) => output_error(&error, EXIT_USER_ERROR),
+    };
+    let adopted = Path::new(".").join(&relative).is_file();
+    let attached = if adopted {
+        adopt_handoff(Path::new("."), &store, config, &issue)
+    } else {
+        attach_handoff(Path::new("."), &store, config, &issue, &issue, None)
+    };
+    match attached {
+        Ok(attached) => output_success(HandoffAttachData {
+            changed: true,
+            adopted,
+            age: (&attached).into(),
+            issue: attached,
+        }),
+        Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
+    }
 }
 
 fn cmd_block(id: String, blocker_id: String) -> ! {
@@ -1549,7 +2072,7 @@ fn cmd_state(json: bool, decision_markers: Vec<String>, cached_drift: bool) -> !
     output_success(state);
 }
 
-fn cmd_show(id: String) -> ! {
+fn cmd_show(id: String, json: bool) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -1568,10 +2091,29 @@ fn cmd_show(id: String) -> ! {
     // Find issue
     let issue = find_issue(&issues, &id);
 
-    output_success(IssueData {
+    // A track answers with its children: what is done, what is claimable
+    // now and in which order, what is held or waiting and why. The dispatch
+    // protocol reads this before every claim; nothing else is a ledger.
+    let children = (issue.issue_type == IssueType::Track).then(|| {
+        track_children(
+            &issues,
+            &issue,
+            &handoff_order_ids(Path::new(".")),
+            &DEFAULT_DECISION_MARKERS
+                .iter()
+                .map(|marker| marker.to_string())
+                .collect::<Vec<_>>(),
+        )
+    });
+    let data = ShowData {
         age: (&issue).into(),
         issue,
-    });
+        children,
+    };
+    if json {
+        output_success_json(data);
+    }
+    output_success(data);
 }
 
 fn cmd_update(request: UpdateRequest) -> ! {
@@ -1659,9 +2201,13 @@ fn cmd_update(request: UpdateRequest) -> ! {
     }
     if let Some(new_prompt) = prompt {
         let trimmed = new_prompt.trim();
-        if workflow.is_some() && trimmed.is_empty() && issue.issue_type == IssueType::Item {
+        if workflow.is_some()
+            && trimmed.is_empty()
+            && pairable(issue.issue_type)
+            && (issue.issue_type == IssueType::Item || is_paired(&before))
+        {
             output_error(
-                "Strict workflow items cannot clear their handoff pointer",
+                "Strict workflow rows cannot clear their handoff pointer",
                 EXIT_USER_ERROR,
             );
         }
@@ -1687,16 +2233,16 @@ fn cmd_update(request: UpdateRequest) -> ! {
     let authorization = conversion_authorization(&issue.id, type_before, issue.issue_type);
 
     let updated = if let Some(config) = workflow.as_ref() {
-        match (
-            type_before == IssueType::Item,
-            issue.issue_type == IssueType::Item,
-        ) {
+        let prompt_requested = prompt_request
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        // Pairing follows the row, not only its type: every strict item is
+        // paired, a track is paired once it has a dispatch work order, and a
+        // dream never is. The arms are (paired before, pairable after).
+        match (is_paired(&before), pairable(issue.issue_type)) {
             (true, true) => {
-                if let Some(requested) = prompt_request
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                {
+                if let Some(requested) = prompt_requested {
                     if prompt_before.as_deref() != Some(requested) {
                         output_error(
                             "Strict workflow handoff pointers are stable; edit and seal the linked file instead of repointing the item",
@@ -1705,7 +2251,14 @@ fn cmd_update(request: UpdateRequest) -> ! {
                     }
                 }
                 issue.prompt = prompt_before.clone();
-                match rebind_handoff_metadata(Path::new("."), &store, config, &before, &issue) {
+                let rebound = if type_before == issue.issue_type {
+                    rebind_handoff_metadata(Path::new("."), &store, config, &before, &issue)
+                } else {
+                    // Item <-> track: the body's protocol differs by kind, so
+                    // the document is regenerated under the same pointer.
+                    regenerate_handoff(Path::new("."), &store, config, &before, &issue)
+                };
+                match rebound {
                     Ok(issue) => issue,
                     Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
                 }
@@ -1713,26 +2266,37 @@ fn cmd_update(request: UpdateRequest) -> ! {
             (false, true) => {
                 issue.prompt = None;
                 issue.handoff_digest = None;
-                match attach_handoff(
-                    Path::new("."),
-                    &store,
-                    config,
-                    &before,
-                    &issue,
-                    prompt_request.as_deref(),
-                ) {
-                    Ok(issue) => issue,
-                    Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
+                if type_before == IssueType::Track && issue.issue_type == IssueType::Track {
+                    // A container track's metadata changes without acquiring
+                    // a work order; `handoff attach` is the explicit act.
+                    if prompt_requested.is_some() {
+                        output_error(
+                            &format!(
+                                "A track takes its dispatch work order through `agent-do manna handoff attach {}`, not through update --prompt",
+                                issue.id
+                            ),
+                            EXIT_USER_ERROR,
+                        );
+                    }
+                    replace_metadata_atomically(&store, &before, &issue, &session)
+                } else {
+                    match attach_handoff(
+                        Path::new("."),
+                        &store,
+                        config,
+                        &before,
+                        &issue,
+                        prompt_request.as_deref(),
+                    ) {
+                        Ok(issue) => issue,
+                        Err(error) => output_error(&error, EXIT_SYSTEM_ERROR),
+                    }
                 }
             }
             (true, false) => {
-                if prompt_request
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty())
-                {
+                if prompt_requested.is_some() {
                     output_error(
-                        "Non-item rows cannot retain a strict handoff pointer",
+                        "Dreams cannot retain a strict handoff pointer",
                         EXIT_USER_ERROR,
                     );
                 }
@@ -1742,13 +2306,9 @@ fn cmd_update(request: UpdateRequest) -> ! {
                 }
             }
             (false, false) => {
-                if prompt_request
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty())
-                {
+                if prompt_requested.is_some() {
                     output_error(
-                        "Strict workflow boards pair handoffs only with actionable items",
+                        "Strict workflow boards pair handoffs with items and tracks, never dreams",
                         EXIT_USER_ERROR,
                     );
                 }
@@ -1831,7 +2391,7 @@ fn cmd_delete(id: String) -> ! {
     }
     if let Some(config) = workflow
         .as_ref()
-        .filter(|_| issue.issue_type == IssueType::Item)
+        .filter(|_| pairable(issue.issue_type) && is_paired(&issue))
     {
         if let Err(error) = delete_paired_issue(Path::new("."), &store, config, &issue) {
             output_error(&error, EXIT_SYSTEM_ERROR);
@@ -2220,7 +2780,12 @@ fn lint_strict_workflow(issues: &[Issue], config: &WorkflowConfig) -> Vec<LintFi
         });
     }
     for issue in issues {
-        if issue.status == IssueStatus::Done || issue.issue_type != IssueType::Item {
+        if issue.status == IssueStatus::Done || !pairable(issue.issue_type) {
+            continue;
+        }
+        // A track without a pair is a container, not a defect; one with a
+        // pair is held to the same contract as an item.
+        if issue.issue_type == IssueType::Track && !is_paired(issue) {
             continue;
         }
         if issue
@@ -2326,13 +2891,28 @@ fn pid_alive(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-/// Read coord peers bounded to ~2s; map agent_id -> status.
-fn coord_peer_statuses() -> Result<HashMap<String, String>, String> {
+/// Read coord's complete presence records (`peers --all --json`) bounded to
+/// ~2s: each record with coord's classification and the Manna binding coord
+/// stored on it (`manna.session`, `manna.proof`). Every lifecycle reader
+/// takes this read. The default `coord peers` leaves stale records out, and
+/// a reader that took it saw absence where coord had said "aged": the review
+/// of ec30858 (mn-880173) aged a living claimant's record three days and the
+/// landed_open cure closed its item. A payload with a row this binary cannot
+/// read is an error, not a shorter list (`parse_peers_strict`).
+fn coord_peers_all() -> Result<Vec<CoordPeer>, String> {
+    coord_peers_with(&["peers", "--all", "--json"])
+}
+
+fn coord_peers_with(verb: &[&str]) -> Result<Vec<CoordPeer>, String> {
     use std::io::Read;
 
     let (program, args) = match direct_coord_program(Path::new("agent-do")) {
-        Some(agent_coord) => (agent_coord, vec!["peers", "--json"]),
-        None => (PathBuf::from("agent-do"), vec!["coord", "peers", "--json"]),
+        Some(agent_coord) => (agent_coord, verb.to_vec()),
+        None => {
+            let mut routed = vec!["coord"];
+            routed.extend_from_slice(verb);
+            (PathBuf::from("agent-do"), routed)
+        }
     };
     let mut child = std::process::Command::new(program)
         .args(args)
@@ -2376,42 +2956,24 @@ fn coord_peer_statuses() -> Result<HashMap<String, String>, String> {
         .map_err(|_| "coord peers produced no output".to_string())?;
     let value: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("coord peers JSON invalid: {}", e))?;
-    let mut statuses = HashMap::new();
-    if let Some(peers) = value.get("peers").and_then(|p| p.as_array()) {
-        for peer in peers {
-            if let (Some(agent_id), Some(status)) = (
-                peer.get("agent_id").and_then(|v| v.as_str()),
-                peer.get("status").and_then(|v| v.as_str()),
-            ) {
-                statuses.insert(agent_id.to_string(), status.to_string());
-            }
-        }
-    }
-    Ok(statuses)
-}
-
-fn coord_status_for_owner<'a>(
-    statuses: &'a HashMap<String, String>,
-    claimed_by: &str,
-) -> Option<&'a String> {
-    statuses.get(claimed_by).or_else(|| {
-        let compact = claimed_by
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .take(16)
-            .collect::<String>();
-        (!compact.is_empty())
-            .then(|| format!("session-{}", compact))
-            .and_then(|label| statuses.get(&label))
-    })
+    parse_peers_strict(&value)
 }
 
 /// dead_claim: claims held by sessions that are provably gone.
 ///
-/// Legacy pid-format sessions are probed by pid; other formats are matched
-/// against coord peer statuses (finding only when coord reports the agent
-/// dead/stale/stopped — absent from coord is inconclusive, not dead).
+/// Legacy pid-format sessions are probed by pid. Every other claimant is
+/// matched to coord's complete records (`peers --all`) by exact facts only
+/// (`liveness::claim_presence`): the record's bound Manna proof equals the
+/// row's `claim_token_hash`, its bound label equals `claimed_by`, or its
+/// agent id is the claimant label verbatim. The claim is dead only on
+/// positive evidence: every record bound to it dead or stopped. A stale
+/// record is an aged lease on a process coord could not call dead and keeps
+/// the claim; one such record among dead twins keeps it; a claimant coord
+/// never bound is unseen, not dead; a record that contradicts the claim's
+/// facts (the claimant's label under another proof, or its proof under
+/// another label) is an ambiguous identity, reported as a skipped repair and
+/// never released. Nothing is respelled from the label to find a record
+/// (mn-4e7229, mn-880173).
 fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut coord_lookups: Vec<&Issue> = Vec::new();
@@ -2438,27 +3000,61 @@ fn check_dead_claims(issues: &[Issue]) -> Vec<Finding> {
     }
 
     if !coord_lookups.is_empty() {
-        match coord_peer_statuses() {
-            Ok(statuses) => {
-                for issue in coord_lookups {
-                    let claimed_by = issue.claimed_by.as_ref().unwrap();
-                    if let Some(status) = coord_status_for_owner(&statuses, claimed_by) {
-                        if matches!(status.as_str(), "dead" | "stale" | "stopped") {
-                            findings.push(Finding {
-                                kind: FindingKind::DeadClaim,
-                                issue_id: Some(issue.id.clone()),
-                                detail: format!("claimed by {} session {}", status, claimed_by),
-                                evidence: Some(format!("coord status: {}", status)),
-                                proposed_fix: Some("abandon the claim".to_string()),
-                            });
-                        }
-                    }
-                }
-            }
+        match coord_peers_all() {
+            Ok(peers) => findings.extend(dead_claim_findings(&coord_lookups, &peers)),
             Err(reason) => findings.push(Finding::skipped("dead_claim", &reason)),
         }
     }
 
+    findings
+}
+
+/// Rule on each claimed row against coord's complete records. Only `gone`
+/// (every bound record dead or stopped) is a `dead_claim`; an ambiguous
+/// identity is a `skipped` finding on the row, so the drift report says why
+/// nothing was released; present (active, idle, stale, or no verdict) and
+/// unseen are not death and produce nothing.
+fn dead_claim_findings(rows: &[&Issue], peers: &[CoordPeer]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for issue in rows {
+        let Some(claimed_by) = issue.claimed_by.as_deref() else {
+            continue;
+        };
+        match claim_presence(peers, claimed_by, issue.claim_token_hash.as_deref()) {
+            ClaimPresence::Gone(bound) => {
+                let status = bound[0].peer.status.clone();
+                findings.push(Finding {
+                    kind: FindingKind::DeadClaim,
+                    issue_id: Some(issue.id.clone()),
+                    detail: format!("claimed by {} session {}", status, claimed_by),
+                    evidence: Some(format!(
+                        "coord status: {}",
+                        bound
+                            .iter()
+                            .map(BoundPeer::describe)
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    )),
+                    proposed_fix: Some("abandon the claim".to_string()),
+                });
+            }
+            ClaimPresence::Ambiguous(reasons) => findings.push(Finding {
+                kind: FindingKind::Skipped,
+                issue_id: Some(issue.id.clone()),
+                detail: format!(
+                    "dead_claim skipped: the identity of claimant {} is ambiguous in coord ({})",
+                    claimed_by,
+                    reasons.join("; ")
+                ),
+                evidence: Some("coord peers --all --json".to_string()),
+                proposed_fix: Some(format!(
+                    "no lifecycle repair acts on an ambiguous identity; the claimant releases or closes {} in its own shell, or the operator does after review",
+                    issue.id
+                )),
+            }),
+            ClaimPresence::Present(_) | ClaimPresence::Unseen => {}
+        }
+    }
     findings
 }
 
@@ -2744,9 +3340,37 @@ fn path_is_legacy_handoff_root(path: &Path) -> bool {
         .any(|name| matches!(*name, ".handoffs" | "handoff-prompts" | "session-prompts"))
 }
 
+/// Every Markdown file that could be a shadow work order, and every symlink
+/// that aliases a handoff root.
+///
+/// Inside a Git checkout the walk is `git ls-files` (tracked plus untracked,
+/// minus ignored): a shadow root that matters is one Git would carry, and
+/// ignored state (`.zpc/.state`, `.dev/`, dependency stores) is never a work
+/// order. Outside Git the filesystem walk applies with the same pruning.
+/// A symlink is never followed: an internal alias points at files the walk
+/// already sees by their real path, and an external alias cannot be a tracked
+/// work-order surface. Only a handoff-shaped alias is reported, without an
+/// item, so it informs the board and never holds one item's claim.
 fn collect_shadow_handoffs(root: &Path, files: &mut Vec<PathBuf>, unsafe_links: &mut Vec<PathBuf>) {
-    let canonical_project = root.canonicalize().ok();
     let canonical_handoff = root.join(HANDOFF_DIR).canonicalize().ok();
+    if let Some(relative_paths) = git_visible_paths(root) {
+        for relative in relative_paths {
+            if shadow_walk_prunes(&relative) {
+                continue;
+            }
+            let path = root.join(&relative);
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                note_handoff_alias(&path, canonical_handoff.as_deref(), unsafe_links);
+            } else if metadata.is_file() && is_markdown(&path) {
+                files.push(path);
+            }
+        }
+        return;
+    }
+
     let mut pending = vec![root.to_path_buf()];
     let mut visited_directories = HashSet::new();
     while let Some(dir) = pending.pop() {
@@ -2765,61 +3389,101 @@ fn collect_shadow_handoffs(root: &Path, files: &mut Vec<PathBuf>, unsafe_links: 
                 Ok(file_type) => file_type,
                 Err(_) => continue,
             };
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
             if file_type.is_symlink() {
-                let target = path.canonicalize().ok();
-                let targets_canonical_handoff = target
-                    .as_ref()
-                    .zip(canonical_handoff.as_ref())
-                    .is_some_and(|(target, handoff)| target.starts_with(handoff));
-                if path.extension().and_then(|extension| extension.to_str()) == Some("md")
-                    && std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file())
-                {
-                    // Reading the logical path follows exactly one file link;
-                    // structured frontmatter, not the link name, decides
-                    // whether it is a shadow work order.
-                    files.push(path);
-                } else if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
-                    if target
-                        .as_ref()
-                        .zip(canonical_project.as_ref())
-                        .is_none_or(|(target, project)| !target.starts_with(project))
-                    {
-                        // External directory aliases can hide an arbitrarily
-                        // named second prompt tree and cannot be bounded by
-                        // the repository walk. Strict workflow rejects them.
-                        unsafe_links.push(path);
-                    } else if path_is_legacy_handoff_root(&path)
-                        || name.contains("handoff")
-                        || targets_canonical_handoff
-                    {
-                        unsafe_links.push(path);
-                    } else {
-                        // A neutral internal alias is safe to inspect, but it
-                        // is not safe to skip: claim-bearing Markdown behind
-                        // it is still a second work-order surface.
-                        pending.push(path);
-                    }
-                } else if path_is_legacy_handoff_root(&path)
-                    || name.contains("handoff")
-                    || targets_canonical_handoff
-                {
-                    unsafe_links.push(path);
-                }
+                note_handoff_alias(&path, canonical_handoff.as_deref(), unsafe_links);
                 continue;
             }
-            if matches!(name.as_ref(), ".git" | ".manna" | ".handoff")
-                || is_reconcile_generated_dir(&path)
-            {
+            if shadow_walk_prunes(&path) {
                 continue;
             }
             if file_type.is_dir() {
                 pending.push(path);
-            } else if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
+            } else if is_markdown(&path) {
                 files.push(path);
             }
         }
+    }
+}
+
+/// Tracked plus untracked-not-ignored paths, relative to `root`, when `root`
+/// is inside a Git work tree. `None` outside Git or when Git cannot answer.
+fn git_visible_paths(root: &Path) -> Option<Vec<PathBuf>> {
+    let inside = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !inside.status.success() || String::from_utf8_lossy(&inside.stdout).trim() != "true" {
+        return None;
+    }
+    let listing = std::process::Command::new("git")
+        .current_dir(root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !listing.status.success() {
+        return None;
+    }
+    Some(
+        listing
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| PathBuf::from(String::from_utf8_lossy(entry).into_owned()))
+            .collect(),
+    )
+}
+
+/// The board's own roots and generated artifact directories, at any depth.
+fn shadow_walk_prunes(path: &Path) -> bool {
+    let mut prefix = PathBuf::new();
+    for component in path.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        prefix.push(name);
+        if matches!(
+            name.to_str(),
+            Some(".git") | Some(".manna") | Some(HANDOFF_DIR)
+        ) || is_reconcile_generated_dir(&prefix)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some("md")
+}
+
+/// A symlink is reported only when it is shaped like a handoff root: named
+/// like one, a legacy root name, or resolving into the canonical `.handoff/`.
+/// Any other symlink is skipped without a finding.
+fn note_handoff_alias(
+    path: &Path,
+    canonical_handoff: Option<&Path>,
+    unsafe_links: &mut Vec<PathBuf>,
+) {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let targets_canonical_handoff = path
+        .canonicalize()
+        .ok()
+        .zip(canonical_handoff)
+        .is_some_and(|(target, handoff)| target.starts_with(handoff));
+    if path_is_legacy_handoff_root(path) || name.contains("handoff") || targets_canonical_handoff {
+        unsafe_links.push(path.to_path_buf());
     }
 }
 
@@ -2887,7 +3551,7 @@ fn check_workflow_sprawl(base: &Path, issues: &[Issue], config: &WorkflowConfig)
     }
 
     for issue in issues {
-        if issue.status == IssueStatus::Done || issue.issue_type != IssueType::Item {
+        if issue.status == IssueStatus::Done || !pairable(issue.issue_type) {
             continue;
         }
         let pointer = match issue.prompt.as_deref() {
@@ -2921,13 +3585,21 @@ fn check_workflow_sprawl_for_issue(
 ) -> Vec<String> {
     check_workflow_sprawl(base, issues, config)
         .into_iter()
+        // An id-less finding (a symlinked handoff-like root) belongs to the
+        // board, not to this item: it never attaches to one item's warnings.
         .filter(|finding| {
             finding
                 .issue_id
                 .as_deref()
-                .is_none_or(|candidate| candidate == issue_id)
+                .is_some_and(|candidate| candidate == issue_id)
         })
         .filter_map(|finding| finding.evidence)
+        .map(|evidence| {
+            format!(
+                "shadow work order outside {}/: {}",
+                config.handoff_dir, evidence
+            )
+        })
         .collect()
 }
 
@@ -2984,46 +3656,75 @@ fn write_drift_file(findings: &[Finding]) -> Result<String, String> {
 
 /// Apply --fix for dead_claim and blocker_desync findings through the
 /// existing state machine. Returns (fixed issue ids, failure messages).
-/// Decide whether the landed_open cure may close over `owner`'s claim.
-///
-/// The landed commit trailers are the authorizing evidence for the closure;
-/// this guard exists only to avoid closing over a session that is verifiably
-/// mid-work. Coord transport failure means no liveness signal at all, so it
-/// fails closed. Absent-from-coord does NOT block: an orphaned claim's owner
-/// label routinely has no coord record (that absence is the wedge itself),
-/// and demanding positive death evidence would recreate the deadlock this
-/// cure exists to break. A caller presenting the claim's verified ownership
-/// proof bypasses this guard entirely (checked before calling) — a bare
-/// label never does; labels are public and carry no lifecycle authority.
-fn landed_open_close_blocked(
-    owner: &str,
-    coord: &Result<HashMap<String, String>, String>,
-) -> Option<String> {
-    match coord {
-        Ok(statuses) => match coord_status_for_owner(statuses, owner) {
-            Some(status) if status == "active" => Some(format!(
-                "claiming session {} is active; not closing over live work",
-                owner
-            )),
-            _ => None,
-        },
-        Err(error) => Some(format!(
-            "coord liveness unavailable ({}); refusing to close over a possibly live owner — rerun where `agent-do coord` resolves, or rerun with the owner's verified identity",
-            error
-        )),
+/// Narrow --fix to the finding kinds named by --only. An empty --only keeps
+/// every repair (the historical behavior). A name that matches no kind, or a
+/// kind that has no repair, is a user error naming the offender, never a
+/// silent no-op: `--only landed_open` names a finding that is advisory in
+/// every path (mn-880173), and the refusal says what closes the item.
+fn select_fix_findings(findings: &[Finding], only: &[String]) -> Result<Vec<Finding>, String> {
+    if only.is_empty() {
+        return Ok(findings.to_vec());
     }
+    let mut wanted = Vec::new();
+    for name in only {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match FindingKind::from_name(name) {
+            Some(kind) if kind.repairable() => wanted.push(kind),
+            Some(kind) => {
+                return Err(if kind == FindingKind::LandedOpen {
+                    format!(
+                        "landed_open is advisory and has no --fix repair: a `Manna:` trailer identifies the work a commit advanced, it does not approve completion; close the item with `manna done <id>` (claim-holder, operator, or landed evidence) or managed acceptance (repairable kinds: {})",
+                        FindingKind::repairable_names()
+                    )
+                } else {
+                    format!(
+                        "{} is advisory and has no --fix repair (repairable kinds: {})",
+                        kind.name(),
+                        FindingKind::repairable_names()
+                    )
+                })
+            }
+            None => {
+                return Err(format!(
+                    "unknown finding kind for --only: {} (known: {})",
+                    name,
+                    FindingKind::ALL
+                        .iter()
+                        .map(|kind| kind.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }
+        }
+    }
+    Ok(findings
+        .iter()
+        .filter(|finding| wanted.contains(&finding.kind))
+        .cloned()
+        .collect())
 }
 
+/// Apply --fix through the existing state machine. Two repairs exist:
+/// releasing a claim coord has positively verified gone (`dead_claim`) and
+/// clearing resolved blockers (`blocker_desync`). Every other finding is
+/// advisory here, `landed_open` included: a `Manna:` trailer identifies the
+/// work a commit advanced, it does not approve completion, so no reconcile
+/// path transitions a row to done (mn-880173; the orphan close of mn-ba8db6
+/// is retired). Releasing a claim never marks the work accepted: the row
+/// returns to open or blocked with its landed finding still reported, and
+/// closure stays with `manna done` or managed acceptance. Returns (fixed
+/// issue ids, failure messages).
 fn apply_reconcile_fixes(
     store: &MannaStore,
     issues: &[Issue],
     findings: &[Finding],
-    caller: Option<&SessionIdentity>,
 ) -> (Vec<String>, Vec<String>) {
     let mut fixed = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
-    let mut coord_statuses: Option<Result<HashMap<String, String>, String>> = None;
 
     for finding in findings {
         let id = match &finding.issue_id {
@@ -3032,6 +3733,14 @@ fn apply_reconcile_fixes(
         };
         if !seen.insert((id.clone(), finding.kind)) {
             continue;
+        }
+        // Managed items: claim transfer belongs to the coordinator's
+        // recorded release, never to a repair that infers death from a pid.
+        if finding.kind == FindingKind::DeadClaim {
+            if let Some(reason) = managed_cli::managed_guard(&id) {
+                failures.push(format!("{}: {}", id, reason));
+                continue;
+            }
         }
         match finding.kind {
             FindingKind::DeadClaim => {
@@ -3086,60 +3795,8 @@ fn apply_reconcile_fixes(
                     Err(error) => failures.push(format!("{}: {}", id, error)),
                 }
             }
-            FindingKind::LandedOpen => {
-                let Some(expected) = issues.iter().find(|issue| issue.id == id).cloned() else {
-                    failures.push(format!("{}: stale reconcile evidence: row disappeared", id));
-                    continue;
-                };
-                // Only the orphaned-claim wedge closes mechanically: an
-                // in_progress row whose owner can no longer present its proof
-                // (mn-ba8db6). Unclaimed landed_open stays advisory — merge
-                // judgment remains with the human/orchestrator. The landed
-                // commit trailers are the authorizing evidence, never the
-                // requester.
-                let Some(owner) = expected.claimed_by.clone() else {
-                    continue;
-                };
-                if expected.status != IssueStatus::InProgress {
-                    continue;
-                }
-                // Only a VERIFIED ownership proof bypasses the liveness
-                // guard: the identity must check out against the claim's
-                // stored token hash. A matching public label alone is
-                // spoofable and carries no lifecycle authority.
-                let owner_verified =
-                    caller.is_some_and(|identity| expected.require_owner(identity).is_ok());
-                if !owner_verified {
-                    if coord_statuses.is_none() {
-                        coord_statuses = Some(coord_peer_statuses());
-                    }
-                    if let Some(reason) =
-                        landed_open_close_blocked(&owner, coord_statuses.as_ref().unwrap())
-                    {
-                        failures.push(format!("{}: {}", id, reason));
-                        continue;
-                    }
-                }
-                let evidence = finding.evidence.clone().unwrap_or_default();
-                match store.repair_issue(&id, move |issue, _| {
-                    if issue != &expected {
-                        return Err(
-                            "stale reconcile evidence: row changed after inspection; nothing was closed"
-                                .to_string(),
-                        );
-                    }
-                    issue.release_dead_claim()?;
-                    issue.status = IssueStatus::Done;
-                    issue.updated_at = Utc::now();
-                    Ok(())
-                }) {
-                    Ok(_) => fixed.push(format!(
-                        "{}: closed on landed evidence [{}]; orphaned claim {} released",
-                        id, evidence, owner
-                    )),
-                    Err(error) => failures.push(format!("{}: {}", id, error)),
-                }
-            }
+            // landed_open and every other kind: advisory. The finding and
+            // its next step ride the report; nothing here closes a row.
             _ => {}
         }
     }
@@ -3148,7 +3805,13 @@ fn apply_reconcile_fixes(
     (fixed, failures)
 }
 
-fn cmd_reconcile(fix: bool, write_drift: bool, dream_age_days: i64, json: bool) -> ! {
+fn cmd_reconcile(
+    fix: bool,
+    write_drift: bool,
+    dream_age_days: i64,
+    json: bool,
+    only: &[String],
+) -> ! {
     let store = MannaStore::new(Path::new("."));
 
     if !store.is_initialized() {
@@ -3244,8 +3907,9 @@ fn cmd_reconcile(fix: bool, write_drift: bool, dream_age_days: i64, json: bool) 
 
     // Findings describe pre-fix drift; `fixed` lists what --fix addressed.
     let (fixed, fix_failures) = if fix {
-        let caller = get_session_identity().ok();
-        apply_reconcile_fixes(&store, &issues, &findings, caller.as_ref())
+        let selected = select_fix_findings(&findings, only)
+            .unwrap_or_else(|error| output_error(&error, EXIT_USER_ERROR));
+        apply_reconcile_fixes(&store, &issues, &selected)
     } else {
         (Vec::new(), Vec::new())
     };
@@ -3317,12 +3981,40 @@ fn main() {
             prompt,
         } => cmd_create(title, description, issue_type, track, source, prompt),
         Commands::Claim { id } => cmd_claim(id),
-        Commands::Done { id } => cmd_done(id),
+        Commands::Done { id, assessment } => cmd_done(id, assessment),
+        Commands::Identity { json } => managed_cli::cmd_identity(json),
+        Commands::Coordinator { command } => managed_cli::cmd_coordinator(command),
+        Commands::Managed { command } => managed_cli::cmd_managed(command),
+        Commands::Submit {
+            id,
+            report,
+            revision,
+            json,
+        } => managed_cli::cmd_submit(id, report, revision, json),
+        Commands::Accept {
+            id,
+            check,
+            target,
+            evidence,
+            submission,
+            attempt,
+            repin,
+            json,
+        } => managed_cli::cmd_accept(
+            id, check, target, evidence, submission, attempt, repin, json,
+        ),
+        Commands::Assess {
+            id,
+            target,
+            deployed,
+            json,
+        } => managed_cli::cmd_assess(id, target, deployed, json),
         Commands::Order { id, position } => cmd_order(id, position),
         Commands::Sync => cmd_sync(),
         Commands::Abandon { id } => cmd_abandon(id),
         Commands::Handoff { command } => match command {
             HandoffCommands::Seal { id } => cmd_handoff_seal(id),
+            HandoffCommands::Attach { id } => cmd_handoff_attach(id),
         },
         Commands::Federation { command } => match command {
             FederationCommands::Init => cmd_federation_init(),
@@ -3350,7 +4042,7 @@ fn main() {
             track,
             json,
         } => cmd_list(status, issue_type, track, json),
-        Commands::Show { id } => cmd_show(id),
+        Commands::Show { id, json } => cmd_show(id, json),
         Commands::Update {
             id,
             title,
@@ -3384,7 +4076,8 @@ fn main() {
             write_drift,
             dream_age_days,
             json,
-        } => cmd_reconcile(fix, write_drift, dream_age_days, json),
+            only,
+        } => cmd_reconcile(fix, write_drift, dream_age_days, json, &only),
     }
 }
 
@@ -3395,6 +4088,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use manna_core::liveness::{all_gone, peers_bound_to_claim};
     use std::sync::Mutex;
     use tempfile::TempDir;
 
@@ -3495,12 +4189,20 @@ mod tests {
             "CLAUDE_AGENT_ID",
         ];
         let saved = runtime_variables.map(|name| (name, std::env::var(name).ok()));
+        let saved_operator = std::env::var("MANNA_OPERATOR").ok();
         std::env::remove_var("MANNA_SESSION_ID");
         std::env::remove_var("MANNA_SESSION_TOKEN");
         for variable in runtime_variables {
             std::env::remove_var(variable);
         }
+        // The test process may hold a terminal; the opt-out keeps this the
+        // no-identity path rather than the operator's.
+        std::env::set_var("MANNA_OPERATOR", "0");
         assert!(get_session_identity().is_err());
+        match saved_operator {
+            Some(value) => std::env::set_var("MANNA_OPERATOR", value),
+            None => std::env::remove_var("MANNA_OPERATOR"),
+        }
         for (variable, value) in saved {
             if let Some(value) = value {
                 std::env::set_var(variable, value);
@@ -3522,21 +4224,68 @@ mod tests {
         std::env::remove_var("MANNA_SESSION_TOKEN");
     }
 
+    fn coord_peer(
+        agent_id: &str,
+        status: &str,
+        manna_session: Option<&str>,
+        manna_proof: Option<&str>,
+    ) -> CoordPeer {
+        CoordPeer {
+            agent_id: agent_id.to_string(),
+            status: status.to_string(),
+            manna_session: manna_session.map(str::to_string),
+            manna_proof: manna_proof.map(str::to_string),
+        }
+    }
+
+    /// An in_progress row claimed by `claimed_by` under `proof`, as the board
+    /// stores it (label public, proof a digest).
+    fn claimed_row(id: &str, claimed_by: &str, proof: &str) -> Issue {
+        let mut issue = Issue::new(id.to_string(), format!("claimed by {}", claimed_by)).unwrap();
+        issue.status = IssueStatus::InProgress;
+        issue.claimed_by = Some(claimed_by.to_string());
+        issue.claimed_at = Some(Utc::now());
+        issue.claim_token_hash = Some(proof.to_string());
+        issue
+    }
+
     #[test]
-    fn coord_status_matches_raw_explicit_session_labels() {
-        let statuses = HashMap::from([
-            ("session-019d79125a477c01".to_string(), "dead".to_string()),
-            ("codex-aaaaaaaa11114222".to_string(), "active".to_string()),
-        ]);
-        assert_eq!(
-            coord_status_for_owner(&statuses, "019d7912-5a47-7c01-b9ae-90ac2060a27e")
-                .map(String::as_str),
-            Some("dead")
+    fn claimant_is_matched_by_binding_never_by_respelling_the_label() {
+        // The record coord keeps for a hook-pinned Claude session: the agent
+        // id is `session-` plus twelve hex of the session uuid, and the
+        // binding is what `manna identity` said in that session's own shell.
+        let peers = vec![
+            coord_peer(
+                "session-31022d9c53c9",
+                "active",
+                Some("claude-31022d9c53c942eb"),
+                Some("sha256:live"),
+            ),
+            coord_peer("codex-aaaaaaaa11114222", "active", None, None),
+            coord_peer("session-019d79125a477c01", "dead", None, None),
+        ];
+        let row = claimed_row("mn-bind01", "claude-31022d9c53c942eb", "sha256:live");
+        let bound = peers_bound_to_claim(
+            &peers,
+            "claude-31022d9c53c942eb",
+            row.claim_token_hash.as_deref(),
         );
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].peer.agent_id, "session-31022d9c53c9");
+        assert_eq!(bound[0].binding.describe(), "bound by claim proof");
+        // Thread-derived identities spell one label in both tools.
         assert_eq!(
-            coord_status_for_owner(&statuses, "codex-aaaaaaaa11114222").map(String::as_str),
-            Some("active")
+            peers_bound_to_claim(&peers, "codex-aaaaaaaa11114222", None)[0]
+                .peer
+                .status,
+            "active"
         );
+        // A raw session uuid is no longer respelled into `session-<16 hex>`:
+        // that derivation named nothing coord uses. The record is unbound, so
+        // the claim is inconclusive, not dead.
+        let bound = peers_bound_to_claim(&peers, "019d7912-5a47-7c01-b9ae-90ac2060a27e", None);
+        assert!(bound.is_empty());
+        assert!(!all_gone(&bound));
     }
 
     #[test]
@@ -4275,7 +5024,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn neutral_external_symlink_directory_is_detected_as_shadow_root() {
+    fn neutral_external_symlink_directory_is_skipped() {
         use std::os::unix::fs::symlink;
 
         let project = TempDir::new().unwrap();
@@ -4285,40 +5034,189 @@ mod tests {
             "agent-do manna claim mn-abc123\n",
         )
         .unwrap();
+        // A pnpm store, a CocoaPods plugin link, a OneDrive alias: none of
+        // them is a work-order surface, and none may hold a board's claims.
+        symlink(outside.path(), project.path().join("node_modules")).unwrap();
         symlink(outside.path(), project.path().join("notes")).unwrap();
         let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
         let findings = check_workflow_sprawl(project.path(), &[issue], &WorkflowConfig::default());
-        assert!(findings.iter().any(|finding| {
-            finding.kind == FindingKind::WorkflowSprawl
-                && finding
-                    .evidence
-                    .as_deref()
-                    .is_some_and(|path| path.ends_with("notes"))
-        }));
+        assert!(findings.is_empty(), "{:?}", findings);
     }
 
     #[test]
     #[cfg(unix)]
-    fn neutral_internal_symlink_directory_is_scanned_for_claims() {
+    fn neutral_internal_symlink_directory_is_not_followed() {
         use std::os::unix::fs::symlink;
 
         let project = TempDir::new().unwrap();
         std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
-        // The real target sits under a normally skipped build directory, so
-        // the only way to see the claim is to follow the neutral alias.
+        // The real target sits under a pruned build directory. An alias to it
+        // is not followed: the walk sees files by their real path or not at all.
         let hidden = project.path().join("target");
         std::fs::create_dir(&hidden).unwrap();
         std::fs::write(hidden.join("work.md"), "agent-do manna claim mn-abc123\n").unwrap();
         symlink(&hidden, project.path().join("notes")).unwrap();
         let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
         let findings = check_workflow_sprawl(project.path(), &[issue], &WorkflowConfig::default());
+        assert!(findings.is_empty(), "{:?}", findings);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn handoff_shaped_symlink_root_is_reported_without_an_item() {
+        use std::os::unix::fs::symlink;
+
+        let project = TempDir::new().unwrap();
+        std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
+        let outside = TempDir::new().unwrap();
+        symlink(outside.path(), project.path().join("handoff-notes")).unwrap();
+        let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
+        let config = WorkflowConfig::default();
+        let findings = check_workflow_sprawl(project.path(), &[issue], &config);
         assert!(findings.iter().any(|finding| {
-            finding.issue_id.as_deref() == Some("mn-abc123")
+            finding.kind == FindingKind::WorkflowSprawl
+                && finding.issue_id.is_none()
                 && finding
                     .evidence
                     .as_deref()
-                    .is_some_and(|path| path.ends_with("notes/work.md"))
+                    .is_some_and(|path| path.ends_with("handoff-notes"))
         }));
+        // Board-level, not item-level: it never attaches to one item's claim.
+        let issue = Issue::new("mn-abc123".to_string(), "Live work".to_string()).unwrap();
+        let per_item =
+            check_workflow_sprawl_for_issue(project.path(), &[issue], &config, "mn-abc123");
+        assert!(per_item.is_empty(), "{:?}", per_item);
+    }
+
+    #[test]
+    fn git_ignored_state_is_never_a_shadow_workflow() {
+        let project = TempDir::new().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(project.path())
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {:?}", args);
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir(project.path().join(HANDOFF_DIR)).unwrap();
+        std::fs::write(project.path().join(".gitignore"), ".zpc/\n").unwrap();
+        // A zpc counsel brief quotes the board context, claim commands and all.
+        let counsel = project.path().join(".zpc/.state/counsel/relit-1");
+        std::fs::create_dir_all(&counsel).unwrap();
+        std::fs::write(
+            counsel.join("brief-les-1.md"),
+            "-agent-do manna claim mn-abc123\n-agent-do manna claim mn-def456\n",
+        )
+        .unwrap();
+        // An untracked but visible note is still a shadow work order.
+        std::fs::write(
+            project.path().join("innocent-notes.md"),
+            "agent-do manna claim mn-def456\n",
+        )
+        .unwrap();
+        let issues = vec![
+            Issue::new("mn-abc123".to_string(), "Counsel only".to_string()).unwrap(),
+            Issue::new("mn-def456".to_string(), "Noted".to_string()).unwrap(),
+        ];
+        let findings = check_workflow_sprawl(project.path(), &issues, &WorkflowConfig::default());
+        assert!(
+            findings.iter().all(|finding| finding
+                .evidence
+                .as_deref()
+                .is_some_and(|path| !path.contains(".zpc"))),
+            "{:?}",
+            findings
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.issue_id.as_deref() == Some("mn-def456")));
+        assert!(!findings
+            .iter()
+            .any(|finding| finding.issue_id.as_deref() == Some("mn-abc123")));
+    }
+
+    #[test]
+    fn board_owned_paths_are_not_evidence() {
+        assert!(board_owned_path(".manna/issues.jsonl"));
+        assert!(board_owned_path(&format!(
+            "{}/01-mn-abc123-work.md",
+            HANDOFF_DIR
+        )));
+        assert!(!board_owned_path("src/main.rs"));
+        assert!(!board_owned_path("docs/handoff-notes.md"));
+        assert!(!board_owned_path(".mannafest"));
+    }
+
+    #[test]
+    fn operator_fallback_honours_the_opt_out() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let saved = std::env::var("MANNA_OPERATOR").ok();
+        std::env::set_var("MANNA_OPERATOR", "0");
+        assert!(!operator_fallback_enabled());
+        match saved {
+            Some(value) => std::env::set_var("MANNA_OPERATOR", value),
+            None => std::env::remove_var("MANNA_OPERATOR"),
+        }
+    }
+
+    #[test]
+    fn operator_user_reads_the_login_name() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let saved = ["USER", "LOGNAME"].map(|name| (name, std::env::var(name).ok()));
+        std::env::set_var("USER", "  ");
+        std::env::set_var("LOGNAME", "erik");
+        assert_eq!(operator_user().as_deref(), Some("erik"));
+        std::env::set_var("USER", "operator-one");
+        assert_eq!(operator_user().as_deref(), Some("operator-one"));
+        for (name, value) in saved {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    #[test]
+    fn only_dead_claim_releases_without_closing_landed_open() {
+        let (_temp, store) = setup_store();
+        let issue = Issue::new("mn-wedge1".to_string(), "Partial lane".to_string()).unwrap();
+        store.append_issue(&issue).unwrap();
+        let dead = session("ses_dead");
+        store.claim_issue(&issue.id, &dead).unwrap();
+        let snapshot = store.load_issues().unwrap();
+        let findings = vec![
+            Finding {
+                kind: FindingKind::LandedOpen,
+                issue_id: Some(issue.id.clone()),
+                detail: "trailer landed but in_progress".to_string(),
+                evidence: Some("abc1234".to_string()),
+                proposed_fix: Some("close".to_string()),
+            },
+            Finding {
+                kind: FindingKind::DeadClaim,
+                issue_id: Some(issue.id.clone()),
+                detail: "owner stopped".to_string(),
+                evidence: Some("ses_dead".to_string()),
+                proposed_fix: Some("release dead claim".to_string()),
+            },
+        ];
+        let selected = select_fix_findings(&findings, &["dead_claim".to_string()]).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].kind, FindingKind::DeadClaim);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &selected);
+        assert_eq!(fixed, vec![issue.id.clone()]);
+        assert!(failures.is_empty());
+        let current = store.load_issues().unwrap().pop().unwrap();
+        assert_eq!(current.claimed_by, None);
+        assert_eq!(current.status, IssueStatus::Open);
+        // Empty --only keeps every fix; an unknown name is refused by name.
+        assert_eq!(select_fix_findings(&findings, &[]).unwrap().len(), 2);
+        let error = select_fix_findings(&findings, &["dead_clam".to_string()]).unwrap_err();
+        assert!(error.contains("dead_clam") && error.contains("dead_claim"));
     }
 
     #[test]
@@ -4340,7 +5238,7 @@ mod tests {
         store.release_issue(&issue.id, &old).unwrap();
         let new_owner = session("ses_new");
         store.claim_issue(&issue.id, &new_owner).unwrap();
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, None);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
         assert!(fixed.is_empty());
         assert!(failures
             .iter()
@@ -4351,29 +5249,104 @@ mod tests {
     }
 
     #[test]
-    fn landed_open_guard_branches() {
-        let live: Result<HashMap<String, String>, String> = Ok(HashMap::from([
-            ("ses_active".to_string(), "active".to_string()),
-            ("ses_idle".to_string(), "idle".to_string()),
-        ]));
-        let down: Result<HashMap<String, String>, String> = Err("agent-do unavailable".to_string());
+    fn dead_claim_findings_rule_by_claim_presence() {
+        let peers = vec![
+            coord_peer(
+                "session-31022d9c53c9",
+                "active",
+                Some("claude-31022d9c53c942eb"),
+                Some("sha256:live"),
+            ),
+            // The review's aged claimant (mn-880173): the lease is three days
+            // old, the process is alive, coord says stale.
+            coord_peer(
+                "session-d9c459ef4559",
+                "stale",
+                Some("claude-d9c459ef4559496f"),
+                Some("sha256:aged"),
+            ),
+            coord_peer(
+                "session-gone00000000",
+                "dead",
+                Some("claude-gone000000000000"),
+                Some("sha256:gone"),
+            ),
+            coord_peer("session-twin-a", "dead", None, Some("sha256:twin")),
+            coord_peer("session-twin-b", "stale", None, Some("sha256:twin")),
+            coord_peer("session-stop-a", "stopped", None, Some("sha256:stop")),
+            coord_peer("session-stop-b", "dead", None, Some("sha256:stop")),
+            // Another process wearing a claimant's label under its own proof.
+            coord_peer(
+                "session-impostor0000",
+                "active",
+                Some("claude-worn000000000000"),
+                Some("sha256:someone-else"),
+            ),
+        ];
+        let rows = vec![
+            claimed_row("mn-dc-live", "claude-31022d9c53c942eb", "sha256:live"),
+            claimed_row("mn-dc-aged", "claude-d9c459ef4559496f", "sha256:aged"),
+            claimed_row("mn-dc-gone", "claude-gone000000000000", "sha256:gone"),
+            claimed_row("mn-dc-twin", "claude-twin0000000000000", "sha256:twin"),
+            claimed_row("mn-dc-stop", "claude-stop0000000000000", "sha256:stop"),
+            claimed_row("mn-dc-worn", "claude-worn000000000000", "sha256:mine"),
+            claimed_row("mn-dc-none", "ses_absent", "sha256:absent"),
+        ];
+        let refs: Vec<&Issue> = rows.iter().collect();
+        let findings = dead_claim_findings(&refs, &peers);
+        let by_id = |id: &str| findings.iter().find(|f| f.issue_id.as_deref() == Some(id));
 
-        // An actively working owner blocks the cure.
-        assert!(landed_open_close_blocked("ses_active", &live).is_some());
-        // Idle and absent owners do not: absence is the wedge's normal state.
-        assert!(landed_open_close_blocked("ses_idle", &live).is_none());
-        assert!(landed_open_close_blocked("ses_absent", &live).is_none());
-        // No liveness signal at all fails closed. (A verified ownership
-        // proof bypasses this guard before it is ever consulted; a bare
-        // label match never does.)
-        assert!(landed_open_close_blocked("ses_absent", &down).is_some());
-        assert!(landed_open_close_blocked("ses_active", &down).is_some());
+        // Positive evidence: every bound record dead or stopped.
+        let gone = by_id("mn-dc-gone").expect("a dead bound record is a dead claim");
+        assert_eq!(gone.kind, FindingKind::DeadClaim);
+        assert!(
+            gone.detail.contains("claude-gone000000000000"),
+            "{}",
+            gone.detail
+        );
+        assert!(
+            gone.evidence
+                .as_deref()
+                .unwrap()
+                .contains("session-gone00000000 dead"),
+            "{:?}",
+            gone.evidence
+        );
+        let stop = by_id("mn-dc-stop").expect("dead and stopped twins are gone");
+        assert_eq!(stop.kind, FindingKind::DeadClaim);
+        // Not death: active, stale, a stale twin beside a dead one, absence.
+        assert!(by_id("mn-dc-live").is_none());
+        assert!(by_id("mn-dc-aged").is_none(), "an aged lease is not death");
+        assert!(
+            by_id("mn-dc-twin").is_none(),
+            "a stale twin keeps the claim"
+        );
+        assert!(
+            by_id("mn-dc-none").is_none(),
+            "absence is not evidence of death"
+        );
+        // Ambiguous identity: reported as skipped, nothing to release.
+        let worn = by_id("mn-dc-worn").expect("an ambiguous identity is reported");
+        assert_eq!(worn.kind, FindingKind::Skipped);
+        assert!(
+            worn.detail.contains("ambiguous")
+                && worn.detail.contains("session-impostor0000")
+                && worn.detail.contains("under a different proof"),
+            "{}",
+            worn.detail
+        );
+        assert!(worn.proposed_fix.as_deref().unwrap().contains("mn-dc-worn"));
+        assert_eq!(findings.len(), 3, "{:?}", findings);
     }
 
     #[test]
-    fn landed_open_fix_closes_orphaned_in_progress_claim() {
+    fn landed_open_is_advisory_even_for_the_verified_owner() {
         let (_temp, store) = setup_store();
-        let issue = Issue::new("mn-wedge1".to_string(), "Shipped but wedged".to_string()).unwrap();
+        let issue = Issue::new(
+            "mn-wedge1".to_string(),
+            "Shipped but unreviewed".to_string(),
+        )
+        .unwrap();
         store.append_issue(&issue).unwrap();
         let owner = session("ses_gone");
         store.claim_issue(&issue.id, &owner).unwrap();
@@ -4386,21 +5359,22 @@ mod tests {
             proposed_fix: Some("review the commits".to_string()),
         }];
 
-        // The caller presents the claim's verified ownership proof, so the
-        // self-cure path is deterministic in any environment (no coord).
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, Some(&owner));
-        assert!(failures.is_empty(), "unexpected failures: {:?}", failures);
+        // No caller, no coord: the finding is advisory in every path. The
+        // trailer identifies the work; `manna done` approves it.
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
+        assert!(fixed.is_empty(), "landed_open has no repair: {:?}", fixed);
         assert!(
-            fixed.iter().any(|entry| entry.contains("mn-wedge1")
-                && entry.contains("abc123def456")
-                && entry.contains("ses_gone")),
-            "fixed must carry the evidence and the released owner: {:?}",
-            fixed
+            failures.is_empty(),
+            "an advisory finding is not a failure: {:?}",
+            failures
         );
         let current = store.load_issues().unwrap().pop().unwrap();
-        assert_eq!(current.status, IssueStatus::Done);
-        assert!(current.claimed_by.is_none());
-        assert!(current.claim_token_hash.is_none());
+        assert_eq!(current.status, IssueStatus::InProgress);
+        current.require_owner(&owner).unwrap();
+
+        // Explicit completion still works: the claim-holder closes it.
+        let closed = store.complete_issue(&issue.id, &owner).unwrap();
+        assert_eq!(closed.status, IssueStatus::Done);
     }
 
     #[test]
@@ -4417,7 +5391,7 @@ mod tests {
             proposed_fix: Some("review the commits".to_string()),
         }];
 
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, None);
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
         assert!(fixed.is_empty(), "unclaimed landed_open must stay advisory");
         assert!(failures.is_empty());
         let current = store.load_issues().unwrap().pop().unwrap();
@@ -4425,33 +5399,165 @@ mod tests {
     }
 
     #[test]
-    fn landed_open_fix_is_cas_guarded_against_row_changes() {
+    fn dead_claim_release_reopens_a_landed_row_and_never_marks_it_done() {
         let (_temp, store) = setup_store();
-        let issue = Issue::new("mn-wedge2".to_string(), "Changed after scan".to_string()).unwrap();
+        let issue = Issue::new(
+            "mn-wedge2".to_string(),
+            "Committed, unreviewed, worker gone".to_string(),
+        )
+        .unwrap();
         store.append_issue(&issue).unwrap();
         let owner = session("ses_gone");
         store.claim_issue(&issue.id, &owner).unwrap();
         let snapshot = store.load_issues().unwrap();
-        let findings = vec![Finding {
+        // Both findings on one row, as a dead worker's landed item reports.
+        let findings = vec![
+            Finding {
+                kind: FindingKind::LandedOpen,
+                issue_id: Some(issue.id.clone()),
+                detail: "referenced by landed commit trailer but status is in_progress".to_string(),
+                evidence: Some("abc123def456".to_string()),
+                proposed_fix: Some("review the commits".to_string()),
+            },
+            Finding {
+                kind: FindingKind::DeadClaim,
+                issue_id: Some(issue.id.clone()),
+                detail: "claimed by dead session ses_gone".to_string(),
+                evidence: Some(
+                    "coord status: session-gone dead (bound by claim proof)".to_string(),
+                ),
+                proposed_fix: Some("abandon the claim".to_string()),
+            },
+        ];
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
+        assert_eq!(
+            fixed,
+            vec![issue.id.clone()],
+            "the release is the only repair"
+        );
+        assert!(failures.is_empty(), "{:?}", failures);
+        let current = store.load_issues().unwrap().pop().unwrap();
+        assert_eq!(
+            current.status,
+            IssueStatus::Open,
+            "releasing ownership reopens the row; it never marks the work accepted"
+        );
+        assert!(current.claimed_by.is_none());
+        assert!(current.claim_token_hash.is_none());
+    }
+
+    #[test]
+    fn only_refuses_advisory_kinds_by_name() {
+        let findings: Vec<Finding> = Vec::new();
+        let error = select_fix_findings(&findings, &["landed_open".to_string()]).unwrap_err();
+        assert!(
+            error.contains("landed_open is advisory")
+                && error.contains("does not approve completion")
+                && error.contains("manna done")
+                && error.contains("dead_claim, blocker_desync"),
+            "{error}"
+        );
+        let error = select_fix_findings(&findings, &["stale_dream".to_string()]).unwrap_err();
+        assert!(error.contains("stale_dream is advisory"), "{error}");
+        // The two repairs are still selectable, together or alone.
+        assert!(select_fix_findings(
+            &findings,
+            &["dead_claim".to_string(), "blocker_desync".to_string()]
+        )
+        .is_ok());
+        assert!(select_fix_findings(&findings, &["blocker_desync".to_string()]).is_ok());
+    }
+
+    fn track_row(id: &str) -> Issue {
+        let mut issue = Issue::new(id.to_string(), format!("track {}", id)).unwrap();
+        issue.issue_type = IssueType::Track;
+        issue
+    }
+
+    fn item_in_track(id: &str, track: &str, status: IssueStatus) -> Issue {
+        let mut issue = Issue::new(id.to_string(), format!("item {}", id)).unwrap();
+        issue.track = Some(track.to_string());
+        issue.status = status;
+        issue
+    }
+
+    fn landed_track_finding(id: &str) -> Vec<Finding> {
+        vec![Finding {
             kind: FindingKind::LandedOpen,
-            issue_id: Some(issue.id.clone()),
+            issue_id: Some(id.to_string()),
             detail: "referenced by landed commit trailer but status is in_progress".to_string(),
             evidence: Some("abc123def456".to_string()),
             proposed_fix: Some("review the commits".to_string()),
-        }];
+        }]
+    }
 
-        store.release_issue(&issue.id, &owner).unwrap();
-        let new_owner = session("ses_live");
-        store.claim_issue(&issue.id, &new_owner).unwrap();
-        // The stale owner's proof verifies against the SNAPSHOT row, so the
-        // guard is bypassed — and the CAS check must still refuse the write.
-        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings, Some(&owner));
-        assert!(fixed.is_empty());
-        assert!(failures
-            .iter()
-            .any(|failure| failure.contains("stale reconcile evidence")));
-        let current = store.load_issues().unwrap().pop().unwrap();
-        assert_eq!(current.status, IssueStatus::InProgress);
-        current.require_owner(&new_owner).unwrap();
+    #[test]
+    fn reconcile_fix_never_closes_a_track_and_a_released_track_claim_reopens_it() {
+        let (_temp, store) = setup_store();
+        store.append_issue(&track_row("mn-trk004")).unwrap();
+        store
+            .append_issue(&item_in_track("mn-kid004", "mn-trk004", IssueStatus::Done))
+            .unwrap();
+        let owner = session("ses_track");
+        store.claim_issue("mn-trk004", &owner).unwrap();
+        let snapshot = store.load_issues().unwrap();
+
+        // Every item done, trailer landed, claim held: before mn-880173 the
+        // cure closed this track. landed_open is advisory now; the track
+        // stays in_progress under its claim and nothing is reported failed.
+        let (fixed, failures) =
+            apply_reconcile_fixes(&store, &snapshot, &landed_track_finding("mn-trk004"));
+        assert!(fixed.is_empty(), "{:?}", fixed);
+        assert!(failures.is_empty(), "{:?}", failures);
+        let rows = store.load_issues().unwrap();
+        let track = rows.iter().find(|row| row.id == "mn-trk004").unwrap();
+        assert_eq!(track.status, IssueStatus::InProgress);
+        track.require_owner(&owner).unwrap();
+
+        // An item created under the track since inspection and a dead claim
+        // on the track: the release reopens the track, closes nothing, and
+        // the late item is still open under it.
+        store
+            .append_issue(&item_in_track("mn-late04", "mn-trk004", IssueStatus::Open))
+            .unwrap();
+        let mut findings = landed_track_finding("mn-trk004");
+        findings.push(Finding {
+            kind: FindingKind::DeadClaim,
+            issue_id: Some("mn-trk004".to_string()),
+            detail: "claimed by dead session ses_track".to_string(),
+            evidence: Some("coord status: session-track dead (bound by claim proof)".to_string()),
+            proposed_fix: Some("abandon the claim".to_string()),
+        });
+        let (fixed, failures) = apply_reconcile_fixes(&store, &snapshot, &findings);
+        assert_eq!(fixed, vec!["mn-trk004".to_string()], "{:?}", failures);
+        assert!(failures.is_empty(), "{:?}", failures);
+        let rows = store.load_issues().unwrap();
+        let track = rows.iter().find(|row| row.id == "mn-trk004").unwrap();
+        assert_eq!(track.status, IssueStatus::Open);
+        assert!(track.claimed_by.is_none());
+        let late = rows.iter().find(|row| row.id == "mn-late04").unwrap();
+        assert_eq!(late.status, IssueStatus::Open);
+
+        // Explicit completion keeps its gate: `done` refuses over the open
+        // item and closes once the item is done.
+        let closer = session("ses_closer");
+        store.claim_issue("mn-trk004", &closer).unwrap();
+        let error = store
+            .complete_issue("mn-trk004", &closer)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("mn-late04 (open)")
+                && error.contains("A track closes only when every item in it is done"),
+            "{error}"
+        );
+        store
+            .repair_issue("mn-late04", |issue, _| {
+                issue.status = IssueStatus::Done;
+                Ok(())
+            })
+            .unwrap();
+        let closed = store.complete_issue("mn-trk004", &closer).unwrap();
+        assert_eq!(closed.status, IssueStatus::Done);
     }
 }

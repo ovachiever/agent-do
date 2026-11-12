@@ -77,9 +77,9 @@ later cleanup finds them.
 
 1. Open items with landed trailer commits (the mn-e6c7bd class).
 2. Claims held by dead coord sessions.
-3. Blocked issues whose blockers are all done. `manna done` requires a prior claim and does NOT
-   auto-unblock dependents (tools/agent-manna/src/main.rs:411-441, tools/agent-manna/src/issue.rs:157-169),
-   so this state is routine residue that reconcile clears, not an anomaly.
+3. Blocked issues whose blockers are all resolved. `manna done` releases dependents inline
+   in the same atomic board write (tools/agent-manna/src/store.rs). Reconcile remains the
+   backstop for deleted blockers and stale boards written by older binaries or manual edits.
 4. Dreams older than N days, unconverted.
 5. Track edges naming rows that do not exist or are not tracks; tracks with no live items
    (retire or refill).

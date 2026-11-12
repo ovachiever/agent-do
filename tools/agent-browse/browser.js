@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { getEnhancedSnapshot, parseRef } from './snapshot-enhanced.js';
+import { createRestoredContext } from './storage-restore.js';
 /**
  * Manages the Playwright browser lifecycle with multiple tabs/windows
  */
@@ -1115,29 +1116,7 @@ export class BrowserManager {
             });
         }
         const viewport = { width: 1920, height: 1080 };
-        // Try storageState at creation first; if it fails (invalid cookie fields),
-        // fall back to creating a clean context then injecting cookies via addCookies
-        let context;
-        try {
-            context = await this.browser.newContext({
-                viewport,
-                storageState,
-            });
-        } catch (err) {
-            // Fallback: create clean context, add cookies individually
-            context = await this.browser.newContext({ viewport });
-            if (storageState?.cookies?.length) {
-                await context.addCookies(storageState.cookies).catch(() => {
-                    // Some cookies may be invalid — add one-by-one, skip bad ones
-                    const addOne = async (cookies) => {
-                        for (const c of cookies) {
-                            await context.addCookies([c]).catch(() => {});
-                        }
-                    };
-                    return addOne(storageState.cookies);
-                });
-            }
-        }
+        const context = await createRestoredContext(this.browser, storageState, viewport);
         context.setDefaultTimeout(60000);
         this.contexts = [context];
         this.pages = [];
