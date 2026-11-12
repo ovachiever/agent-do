@@ -343,6 +343,26 @@ def check_registry_context_safety() -> None:
         f"catalog grew past budget: {len(catalog)} chars (was ~29.6k pre-safety)",
     )
 
+    synthetic = {"tools": {
+        "alpha": {"description": "a" * 18000,
+                  "commands": {"read": "read"},
+                  "contracts": {"snapshot": ["read"]},
+                  "examples": [{"intent": "example", "command": "x" * 6000}]},
+        "zulu": {"description": "z" * 17000,
+                 "commands": {"delete": "delete"},
+                 "contracts": {"interact": ["delete"], "attributes": {"delete": ["destructive"]}}},
+    }}
+    bounded = build_registry_context(synthetic)
+    require(len(bounded) <= 39000, "examples consumed space needed by later tools")
+    require("## zulu" in bounded and "destructive=[delete]" in bounded,
+            "late tool or its safety marker was dropped")
+    require("x" * 6000 not in bounded, "oversized optional example was retained")
+
+    synthetic["tools"]["zulu"]["description"] = "z" * 23000
+    required_over_budget = build_registry_context(synthetic)
+    require(len(required_over_budget) > 39000 and "destructive=[delete]" in required_over_budget,
+            "mandatory content must remain complete even when it exceeds the example budget")
+
 
 def check_lexicon_merge(tmp_dir: Path) -> None:
     """Learned classifications merge under the hand lexicon; hand overrides win."""

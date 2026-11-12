@@ -109,8 +109,9 @@ def build_registry_context(registry: dict) -> str:
     # two examples per tool only while they fit the context budget.  Otherwise
     # a perfectly valid registry addition can make the contracts gate fail.
     max_context_chars = 39_000
-    lines = []
+    sections = []
     for tool, info in sorted(registry.get('tools', {}).items()):
+        lines = []
         lines.append(f"## {tool}")
         lines.append(f"{info.get('description', 'No description')}")
 
@@ -143,19 +144,25 @@ def build_registry_context(registry: dict) -> str:
             lines.append("Safety: " + (" ".join(parts) if parts else "read-only"))
 
         examples = info.get('examples', [])
-        if examples:
-            example_lines = ["Examples:"]
-            for ex in examples[:2]:
-                example_lines.append(f"  \"{ex.get('intent', '')}\" → `{ex.get('command', '')}`")
-            # Account for the separating newline added by join() as well as
-            # this tool's trailing blank line.
-            prospective = "\n".join([*lines, *example_lines, ""])
-            if len(prospective) <= max_context_chars:
-                lines.extend(example_lines)
+        example_lines = ["Examples:"] if examples else []
+        for ex in examples[:2]:
+            example_lines.append(f"  \"{ex.get('intent', '')}\" → `{ex.get('command', '')}`")
+        sections.append((lines, example_lines))
 
-        lines.append("")
-
-    return "\n".join(lines)
+    # Reserve every tool's mandatory description, commands and safety markers
+    # before spending the remaining budget on examples. If the mandatory
+    # content alone exceeds the budget, retain it all and omit examples.
+    mandatory = [line for section, _ in sections for line in (*section, "")]
+    remaining = max_context_chars - len("\n".join(mandatory))
+    output = []
+    for section, examples in sections:
+        output.extend(section)
+        cost = sum(len(line) + 1 for line in examples)
+        if examples and cost <= remaining:
+            output.extend(examples)
+            remaining -= cost
+        output.append("")
+    return "\n".join(output)
 
 
 def get_tool_info(registry: dict, tool_name: str) -> Optional[dict]:
