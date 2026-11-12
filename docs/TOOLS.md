@@ -470,6 +470,7 @@ Concurrency: `mixed`
 - pause and resume monitors
 - list and manage incidents (acknowledge, resolve)
 - list heartbeats
+- pause and resume heartbeats
 - list status pages
 - view on-call schedules
 - full account snapshot as JSON
@@ -480,8 +481,8 @@ Concurrency: `mixed`
 - `show`: Detailed monitor info
 - `availability`: Monitor availability summary
 - `response-times`: Monitor response time data
-- `pause`: Pause a monitor
-- `resume`: Resume a monitor
+- `pause`: Pause a monitor (--heartbeat for a heartbeat)
+- `resume`: Resume a monitor (--heartbeat for a heartbeat)
 - `incidents`: List incidents (--active for unresolved)
 - `incident`: Detailed incident info
 - `ack`: Acknowledge an incident
@@ -504,6 +505,8 @@ agent-do betterstack incidents --active
 agent-do betterstack availability versova-chat
 # pause a betterstack monitor
 agent-do betterstack pause vms-web
+# resume a betterstack heartbeat
+agent-do betterstack resume --heartbeat vms-worker
 # acknowledge a betterstack incident
 agent-do betterstack ack 12345
 # get betterstack account snapshot

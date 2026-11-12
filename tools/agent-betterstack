@@ -49,6 +49,8 @@ INCIDENTS
 
 HEARTBEATS
   heartbeats                    List all heartbeats with status
+  pause --heartbeat <hb>        Pause a heartbeat (by exact name or ID)
+  resume --heartbeat <hb>       Resume a heartbeat
 
 STATUS PAGES
   status-pages                  List all status pages
@@ -72,6 +74,7 @@ Examples:
   agent-betterstack incidents --active
   agent-betterstack availability versova-chat
   agent-betterstack pause vms-web
+  agent-betterstack resume --heartbeat vms-worker
   agent-betterstack snapshot
 EOF
 }
@@ -412,45 +415,109 @@ for item in items:
 "
 }
 
-cmd_pause() {
-    _pop_json_flag "$@"
-    local name_or_id="${_JSON_ARGS[0]:?Usage: agent-betterstack pause <monitor>}"
-    local monitor_id
-    monitor_id=$(resolve_monitor "$name_or_id") || return 1
+resolve_heartbeat() {
+    local name_or_id="$1"
 
-    local result
-    result=$(bs_patch "${BETTERSTACK_API_V2}/monitors/${monitor_id}" '{"paused":true}') || return 1
-    if $_json_mode; then _emit_json "$result"; return; fi
-    echo "$result" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-mid = d.get('data', {}).get('id', '')
-a = d.get('data', {}).get('attributes', {})
-name = a.get('pronounceable_name', '')
-status = a.get('status', '')
-print(f'Monitor \"{name}\" (id: {mid}): status now {status}')
-"
+    if [[ "$name_or_id" =~ ^[0-9]+$ ]]; then
+        echo "$name_or_id"
+        return 0
+    fi
+
+    # The heartbeats API has no name filter: page through the list and require
+    # exactly one heartbeat with this exact name.
+    local token
+    token=$(bs_token) || return 1
+    local heartbeat_id
+    heartbeat_id=$(BS_TOKEN="$token" python3 - "${BETTERSTACK_API_V2}/heartbeats" "$name_or_id" <<'PY'
+import json, os, sys, urllib.request
+url, wanted = sys.argv[1], sys.argv[2]
+matches = []
+while url:
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + os.environ["BS_TOKEN"],
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        page = json.load(resp)
+    for item in page.get("data", []):
+        if item.get("attributes", {}).get("name") == wanted:
+            matches.append(str(item.get("id", "")))
+    url = (page.get("pagination") or {}).get("next")
+if len(matches) == 1:
+    print(matches[0])
+elif len(matches) > 1:
+    print("Error: more than one heartbeat is named '%s' (ids %s); use the id" % (wanted, ", ".join(matches)), file=sys.stderr)
+PY
+) || return 1
+
+    if [[ -z "$heartbeat_id" ]]; then
+        echo "Error: Heartbeat '$name_or_id' not found (or ambiguous)" >&2
+        return 1
+    fi
+    echo "$heartbeat_id"
 }
 
-cmd_resume() {
+# Pause or resume one monitor, or one heartbeat with --heartbeat.
+_set_paused() {
+    local paused="$1"; shift
+    local verb="pause"; [[ "$paused" == "false" ]] && verb="resume"
     _pop_json_flag "$@"
-    local name_or_id="${_JSON_ARGS[0]:?Usage: agent-betterstack resume <monitor>}"
-    local monitor_id
-    monitor_id=$(resolve_monitor "$name_or_id") || return 1
 
-    local result
-    result=$(bs_patch "${BETTERSTACK_API_V2}/monitors/${monitor_id}" '{"paused":false}') || return 1
-    if $_json_mode; then _emit_json "$result"; return; fi
-    echo "$result" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-mid = d.get('data', {}).get('id', '')
-a = d.get('data', {}).get('attributes', {})
-name = a.get('pronounceable_name', '')
-status = a.get('status', '')
-print(f'Monitor \"{name}\" (id: {mid}): status now {status}')
-"
+    local kind="monitor"
+    local -a rest=()
+    local arg
+    for arg in "${_JSON_ARGS[@]+"${_JSON_ARGS[@]}"}"; do
+        if [[ "$arg" == "--heartbeat" ]]; then kind="heartbeat"; else rest+=("$arg"); fi
+    done
+    local name_or_id="${rest[0]:-}"
+    if [[ -z "$name_or_id" || ${#rest[@]} -gt 1 ]]; then
+        echo "Usage: agent-betterstack $verb <monitor> | $verb --heartbeat <heartbeat>" >&2
+        return 1
+    fi
+
+    local id result
+    if [[ "$kind" == "heartbeat" ]]; then
+        id=$(resolve_heartbeat "$name_or_id") || return 1
+        result=$(bs_patch "${BETTERSTACK_API_V2}/heartbeats/${id}" "{\"paused\":${paused}}") || return 1
+    else
+        id=$(resolve_monitor "$name_or_id") || return 1
+        result=$(bs_patch "${BETTERSTACK_API_V2}/monitors/${id}" "{\"paused\":${paused}}") || return 1
+    fi
+
+    # A heartbeat's attributes carry its ping URL, which is a credential
+    # (anyone holding it can report the job healthy): never print it.
+    printf '%s' "$result" | KIND="$kind" JSON_MODE="$_json_mode" WANT="$paused" python3 -c '
+import json, os, sys
+kind, want = os.environ["KIND"], os.environ["WANT"] == "true"
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Error: Better Stack returned a non-JSON reply", file=sys.stderr)
+    sys.exit(1)
+data = d.get("data")
+if not isinstance(data, dict):
+    print("Error: " + json.dumps(d.get("errors", d))[:300], file=sys.stderr)
+    sys.exit(1)
+a = data.setdefault("attributes", {})
+if kind == "heartbeat" and a.get("url"):
+    a["url"] = "<redacted>"
+paused_at = a.get("paused_at")
+# Read back: when the reply carries paused_at, it must match what was asked.
+if "paused_at" in a and want != bool(paused_at):
+    print("Error: %s %s did not change state (paused_at=%r)" % (kind, data.get("id"), paused_at), file=sys.stderr)
+    sys.exit(1)
+if os.environ["JSON_MODE"] == "true":
+    print(json.dumps(d, indent=4))
+else:
+    name = a.get("pronounceable_name") or a.get("name") or ""
+    state = "paused since %s" % paused_at if paused_at else "resumed"
+    print("%s \"%s\" (id: %s): %s" % (kind.capitalize(), name, data.get("id", ""), state))
+'
 }
+
+cmd_pause() { _set_paused true "$@"; }
+
+cmd_resume() { _set_paused false "$@"; }
 
 cmd_ack() {
     _pop_json_flag "$@"
