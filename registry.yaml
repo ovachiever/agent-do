@@ -3235,24 +3235,29 @@ tools:
       - auth org
     concurrency: mixed
   ci:
-    description: Control CI/CD pipelines
+    description: Control CI/CD pipelines and inspect GitHub Actions deployment evidence
     capabilities:
     - trigger builds
     - view status
     - manage pipelines
+    - inspect a workflow run's commit, timing, jobs, and bounded log evidence
     commands:
       trigger: Trigger build
       status: View status
-      logs: View build logs
+      details: Show normalized workflow-run and job facts for tracing
+      logs: View bounded, redacted build-log excerpts
       triage: Classify a failed run and draft a triage summary (dry-run)
     examples:
     - intent: trigger deploy pipeline
       command: agent-ci trigger deploy
     - intent: triage a failed CI run
       command: agent-ci triage 12345 --repo owner/repo
+    - intent: inspect the commit and jobs for a deployment workflow run
+      command: agent-ci details 48201933 --repo owner/repo --json
     contracts:
       snapshot:
       - status
+      - details
       - logs
       - triage
       interact:

@@ -36,7 +36,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [burp](#burp) | Burp Suite automation | mixed | 4 |
 | [cad](#cad) | CAD file operations | mixed | 4 |
 | [calendar](#calendar) | Control calendar | mixed | 3 |
-| [ci](#ci) | Control CI/CD pipelines | write | 4 |
+| [ci](#ci) | Control CI/CD pipelines and inspect GitHub Actions deployment evidence | write | 5 |
 | [clerk](#clerk) | Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates, roles | mixed | 14 |
 | [clipboard](#clipboard) | Cross-app clipboard management | mixed | 4 |
 | [cloud](#cloud) | Control cloud providers (AWS, GCP, Azure) | mixed | 3 |
@@ -794,7 +794,7 @@ agent-do calendar create 'Meeting' --time 15:00
 
 ### ci
 
-Control CI/CD pipelines
+Control CI/CD pipelines and inspect GitHub Actions deployment evidence
 
 Concurrency: `write`
 
@@ -803,12 +803,14 @@ Concurrency: `write`
 - trigger builds
 - view status
 - manage pipelines
+- inspect a workflow run's commit, timing, jobs, and bounded log evidence
 
 **Commands**
 
 - `trigger`: Trigger build
 - `status`: View status
-- `logs`: View build logs
+- `details`: Show normalized workflow-run and job facts for tracing
+- `logs`: View bounded, redacted build-log excerpts
 - `triage`: Classify a failed run and draft a triage summary (dry-run)
 
 **Examples**
@@ -818,11 +820,13 @@ Concurrency: `write`
 agent-do ci trigger deploy
 # triage a failed CI run
 agent-do ci triage 12345 --repo owner/repo
+# inspect the commit and jobs for a deployment workflow run
+agent-do ci details 48201933 --repo owner/repo --json
 ```
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `logs`, `status`, `triage`
+- Read-only (snapshot/verify; safe to parallelize): `details`, `logs`, `status`, `triage`
 - Write (connect/interact/save): `trigger`
 
 ### clerk
