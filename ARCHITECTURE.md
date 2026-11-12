@@ -142,7 +142,7 @@ agent-do                    # Main entry (bash): mode selection + tool dispatch
 ├── hooks/
 │   ├── claude/             # Canonical Claude Code hooks (SessionStart through SessionEnd)
 │   └── codex/              # Canonical Codex hooks + Stop quality gate
-├── tools/agent-*           # 102 tools (standalone scripts + directory-based tools)
+├── tools/agent-*           # 103 tools (standalone scripts + directory-based tools)
 ├── models.yaml             # Internal model roles: chains, capabilities, retired list
 ├── registry.yaml           # Master tool catalog with contracts
 └── test.sh                 # Test suite (gate inventory below)
@@ -173,7 +173,7 @@ Registries merge with higher priority overwriting lower:
 
 ## Contracts Layer
 
-The five-beat mental model (Connect → Snapshot → Interact → Verify → Save) is machine-readable. All 102 tools declare `contracts:` blocks (`./agent-do harness contracts validate` prints `Tools: 102 Declared: 102` with zero errors and zero warnings). Snapshot/verify verbs are reads; connect/interact/save verbs are writes. Seven orthogonal attributes cover the shapes beats cannot express (`lib/registry.py:CONTRACT_ATTRIBUTES`):
+The five-beat mental model (Connect → Snapshot → Interact → Verify → Save) is machine-readable. All 103 tools declare `contracts:` blocks (`./agent-do harness contracts validate` prints `Tools: 103 Declared: 103` with zero errors and zero warnings). Snapshot/verify verbs are reads; connect/interact/save verbs are writes. Seven orthogonal attributes cover the shapes beats cannot express (`lib/registry.py:CONTRACT_ATTRIBUTES`):
 
 | Attribute | Meaning |
 |-----------|---------|
@@ -214,7 +214,7 @@ No tool merges without a contracts declaration: the gate runs in `./test.sh` and
 
 ### Bounds: the second property the machine holds (`lib/bounds.py`)
 
-Contracts hold "which beats does this verb perform" across 102 tools without anyone remembering to. Bounds hold the next one: **a command that caps its output declares where the cap came from.** Same registry, same gate, same run — a doc line fixes nothing, and this repo measured what instructions are worth (518 lessons, zero structural readers).
+Contracts hold "which beats does this verb perform" across 103 tools without anyone remembering to. Bounds hold the next one: **a command that caps its output declares where the cap came from.** Same registry, same gate, same run — a doc line fixes nothing, and this repo measured what instructions are worth (518 lessons, zero structural readers).
 
 **Declaration** (`bounds:` beside `contracts:`), keyed by verb, or `*` for caps in shared library code that belong to no single verb. Four sources, and the source picks which enforcement applies:
 
