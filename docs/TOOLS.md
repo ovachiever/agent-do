@@ -96,7 +96,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [printer](#printer) | Printer control | write | 3 |
 | [prompt](#prompt) | Prompt management and templating | read | 4 |
 | [psql](#psql) | PostgreSQL CLI wrapper for AI agents over the native psql binary | mixed | 24 |
-| [render](#render) | Full-surface Render.com control — services (create/update/delete/lifecycle), deploys (trigger/show/cancel/rollback), one-off jobs, cron runs, env vars + secret files, env groups, postgres lifecycle + creds + recovery, key value, blueprints, custom domains + headers + routes, persistent disks + snapshots, dedicated IPs, registry credentials, projects + environments, webhooks, notifications, maintenance, audit logs, owners, observability (logs + metrics) | write | 46 |
+| [render](#render) | Full-surface Render.com control — services (create/update/delete/lifecycle), deploys (trigger/show/cancel/rollback), one-off jobs, cron runs, env vars + secret files, env groups, postgres lifecycle + creds + recovery, key value, blueprints, custom domains + headers + routes, persistent disks + snapshots, dedicated IPs, registry credentials, projects + environments, webhooks, notifications, maintenance, audit logs, owners, observability (logs + metrics) | write | 47 |
 | [repl](#repl) | Control interactive REPLs (Python, Node, psql, etc.) | mixed | 5 |
 | [resend](#resend) | Resend domain management and DNS verification — exact records, verification state, and public DNS checks | mixed | 7 |
 | [screen](#screen) | Vision-based screen perception and control (macOS) | mixed | 9 |
@@ -3687,6 +3687,7 @@ Concurrency: `write`
 - notification settings and per-service overrides
 - audit log retrieval and maintenance windows
 - structured logs and metrics with filters
+- bounded, redacted deployment evidence for incident tracing
 - cross-account snapshot
 
 **Commands**
@@ -3696,6 +3697,7 @@ Concurrency: `write`
 - `audit`: Audit log entries
 - `services`: List services
 - `show`: Service details
+- `trace`: Read-only service, deploy, event, and bounded-log incident evidence
 - `create`: Create service: create \<web|worker|static|private|cron> \<name> [opts]
 - `update`: Update service settings
 - `delete`: Delete a service (--yes required)
@@ -3771,6 +3773,8 @@ agent-do render deploy my-api
 agent-do render show my-api
 # view render service logs
 agent-do render logs my-api
+# collect render evidence for an incident
+agent-do render trace my-api --since 30m --json
 # set env var on render
 agent-do render env-set my-api DATABASE_URL postgres://...
 # list render databases
@@ -3785,7 +3789,7 @@ agent-do render snapshot
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `audit`, `autoscaling show`, `blueprint list`, `blueprint show`, `blueprint syncs`, `blueprint validate`, `dedicated-ip list`, `dedicated-ip show`, `deploys`, `disk list`, `disk show`, `disk snapshots`, `domain`, `domains`, `env`, `env-group get`, `env-group list`, `env-group secret`, `env-group show`, `environment list`, `environment show`, `events`, `header list`, `instances`, `job show`, `jobs`, `kv connect-info`, `kv list`, `kv show`, `logs`, `maintenance list`, `maintenance show`, `metrics`, `notify override`, `notify overrides`, `notify show`, `owners`, `project`, `projects`, `registry list`, `registry show`, `route list`, `secret get`, `secret list`, `services`, `show`, `snapshot`, `webhook events`, `webhook list`, `webhook show`, `whoami`
+- Read-only (snapshot/verify; safe to parallelize): `audit`, `autoscaling show`, `blueprint list`, `blueprint show`, `blueprint syncs`, `blueprint validate`, `dedicated-ip list`, `dedicated-ip show`, `deploys`, `disk list`, `disk show`, `disk snapshots`, `domain`, `domains`, `env`, `env-group get`, `env-group list`, `env-group secret`, `env-group show`, `environment list`, `environment show`, `events`, `header list`, `instances`, `job show`, `jobs`, `kv connect-info`, `kv list`, `kv show`, `logs`, `maintenance list`, `maintenance show`, `metrics`, `notify override`, `notify overrides`, `notify show`, `owners`, `project`, `projects`, `registry list`, `registry show`, `route list`, `secret get`, `secret list`, `services`, `show`, `snapshot`, `trace`, `webhook events`, `webhook list`, `webhook show`, `whoami`
 - Write (connect/interact/save): `autoscaling disable`, `autoscaling enable`, `blueprint delete`, `blueprint update`, `cache-purge`, `create`, `cron cancel`, `cron run`, `db`, `dedicated-ip create`, `dedicated-ip delete`, `delete`, `deploy`, `disk create`, `disk delete`, `disk restore`, `disk update`, `env-del`, `env-group create`, `env-group del-var`, `env-group delete`, `env-group link`, `env-group rename`, `env-group set`, `env-group unlink`, `env-set`, `environment create`, `environment delete`, `environment link`, `environment unlink`, `header add`, `header del`, `job cancel`, `job run`, `kv create`, `kv delete`, `kv resume`, `kv suspend`, `kv update`, `maintenance reschedule`, `maintenance trigger`, `notify update`, `registry add`, `registry delete`, `restart`, `resume`, `rollback`, `route add`, `route del`, `scale`, `secret del`, `secret set`, `suspend`, `update`, `webhook create`, `webhook delete`, `webhook update`
 - destructive (irreversible data loss; confirm before auto-running): `blueprint delete`, `cache-purge`, `dedicated-ip delete`, `delete`, `disk delete`, `env-del`, `env-group del-var`, `env-group delete`, `environment delete`, `header del`, `kv delete`, `registry delete`, `route del`, `secret del`, `webhook delete`
 - sensitive (emits or persists secret material; guard output): `db`, `env-group secret`, `kv connect-info`, `secret get`
