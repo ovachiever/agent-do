@@ -7,6 +7,104 @@ agent-do works with any coding agent that can execute shell commands. Two integr
 
 Everything below is presence-gated: repos without a `.manna/` board or a coord board see none of the board machinery, and the hooks degrade to the plain tooling reminder.
 
+## Coordination doorbell
+
+Coord remains a public ledger, not a mailbox. An addressed dependency
+(`coord need add <key> --why <text> --from <agent>`, also spelled `--for`) or
+file drop (`coord drop add <path> --for <agent>`) sets a pending bit for a live
+named session. Exact IDs and existing aliases route the bell; role/`any` drops
+remain ordinary ledger entries, and a direct `--for` that names no registered
+session, alias, or role is refused rather than written to nobody. A drop for
+the worker on an item (`coord drop add <path> --for-item <mn-id>`) rings the
+session whose bound Manna proof equals the board's claim proof, exactly; with
+no such live session the drop is recorded as pending, no bell is set, and the
+worker's next `coord touch` resolves and rings it. The drop's `delivery` view
+says which of these happened; a queued bell is never an acknowledgment.
+Repeated rings coalesce. An explicit
+`agent-do coord bell ring --for <agent>` can repeat the nudge after a ledger
+write, but accepts no content, message, note, or file payload.
+
+`bells.json` in the existing project-local coord store contains only recipient
+IDs mapped to `true`. The shared coord lock serializes ledger writes, rings,
+and consumption. Dead, stopped, stale, or unknown targets do not ring. Bell
+I/O failure cannot fail a committed need/drop; a busy or unavailable hook
+degrades silently to ordinary polling. Hook work has a two-second local
+deadline inside the five-second harness timeout. A ring never renews target presence,
+revives a session, changes a Manna claim, or edits a sealed work order.
+
+The shared `hooks/claude/agent-do-coord-doorbell.py` hook is included in both
+Claude and Codex install bundles. Register it on `UserPromptSubmit` and `Stop`:
+
+- `UserPromptSubmit` adds the fixed context: "The ledger has entries concerning you; read coord."
+- `Stop` requests one continuation with that same fixed sentence, only when
+  `stop_hook_active` is explicitly false. Already-continuing turns retain any
+  new ring for the next prompt, preventing a stop-hook loop.
+- Other events produce no output and leave the pending bit untouched.
+
+The hook resolves the payload's exact `session_id` and `cwd`, including legacy
+thread identities, without trusting an inherited foreign session pin. It
+never reads a transcript or forwards the prompt, need, drop, or bell sender.
+Recipients read `agent-do coord interrupts`, `agent-do coord need list --all`,
+and `agent-do coord drops --for-me`; observers can read the same ledger. An
+informational drop is a notice: it leaves a reader's interrupts once that reader
+acknowledges it (`agent-do coord drop ack <id>`, per reader, per revision) and
+never blocks the prompt router. An action drop (`drop add --action`) is an
+obligation: acknowledging it means "read", it stays listed as a dependency and
+the router keeps reminding at work boundaries until an authorized party resolves
+it (`agent-do coord drop resolve <id> --reason ...`). Both leave the record and
+its history in place, and a changed drop resurfaces. The session-start and
+prompt-router hooks read coord under the session id the shell was given, so an
+acknowledgment from the shell quiets the hook.
+Workers may request contract changes there, but cannot self-amend acceptance.
+A bell exchange never closes an item: `done` still requires executed receipts.
+
+Runtime capability check, 2026-09-22: current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)
+defines `hookSpecificOutput.additionalContext` for prompt submission and
+[one-shot Stop continuation](https://learn.chatgpt.com/docs/hooks#stop) via
+`decision: "block"` and `reason`. [Claude's hook reference](https://code.claude.com/docs/en/hooks#stop)
+documents the same continuation fields and loop guard. This implementation
+uses those lifecycle hooks, not Codex's separate `notify` command, so existing
+notification chains are unchanged. Features/hooks and the registrations must
+be enabled in the host; editing this repo does not install or enable them.
+
+This checkout has no OpenCode hook/plugin installer. OpenCode and other
+unintegrated harnesses therefore retain poll-at-pause behavior; no automatic
+delivery is claimed for them. A notification-only host can surface only the
+same fixed nudge through its supported adapter; no alternative message path
+is part of this implementation. The bell does not launch, resume, or wake an
+idle agent process. A ring after its last hook waits for its next supported
+boundary.
+
+Focused verification is `python3 tests/test_coord_v2.py` (offline ledger,
+hook-protocol, failure, concurrency, and registration fixtures), alongside
+`python3 tests/test_coord.py` and `python3 tests/test_install_specs.py`.
+These are executed CLI/hook tests, not live harness acceptance. Closing this
+lane additionally requires a coordinated worker/coordinator exchange on a
+real mid-claim blocker with a third session able to read all substance on
+Coord, without human relay.
+
+## Host-driven wakeups
+
+The bell reaches a worker only at its next hook boundary, so an idle worker
+sitting at an empty composer never hears it. A host that owns the worker's
+terminal (Holy, or any other) can close that gap through the `coord-wake/1`
+contract in [COORD-WAKE.md](COORD-WAKE.md): `agent-do coord drops --wake`
+lists the wake demands open action drops raise, `agent-do coord drop wake
+<drop-id>` reserves one under the host's own coord identity (its presence is
+the lease, so two hosts never duplicate one demand, and a host that dies
+holding only a reservation lapses), `drop wake <drop-id> --request <id>
+--dispatching <evidence>` is the durable dispatch-started mark the host writes
+immediately before it touches the transport, and `--waiting|--outcome …
+--evidence …` records what the transport did. The host submits only the fixed
+content-free instruction the contract hands it; the substance stays on the
+ledger. A request, a dispatch mark or a submission is a transport fact: the
+delivery stage, the acknowledgment and the resolution still move only on the
+recipient's own `drop ack` and `drop resolve`. A missing receipt proves
+nothing: a host that dies after dispatch-started leaves the outcome unknown,
+nobody may request or send again until a live consumer establishes it from
+transport evidence, and a new revision or a changed assignment is a fresh
+demand. With no host present nothing changes.
+
 ## Installation (install.sh)
 
 GNU Bash 4.4 or newer is a runtime requirement. On macOS, install it with
@@ -33,14 +131,18 @@ What the installer actually does, in order:
 1. Symlinks `agent-do` into `~/.local/bin` (warns if that directory is not on `PATH`)
 2. Writes the repo path to `~/.agent-do/install-path` (the breadcrumb wrappers and hooks resolve)
 3. Generates the discovery index from `registry.yaml` via `bin/gen-index`
-4. Writes the Claude hook **wrappers** to `~/.claude/hooks/` (ten today): `agent-do-session-start.sh`, `agent-do-prompt-router.py`, `agent-do-correction-keys.py`, `agent-do-now-stamp.py`, `agent-do-pretooluse-check.py`, `agent-do-zpc-trigger.py`, `agent-do-quantity-check.py`, `agent-do-zpc-position-nudge.sh`, `agent-do-zpc-write-nudge.sh`, `agent-do-coord-stop.sh`
+4. Writes the Claude hook **wrappers** to `~/.claude/hooks/`; `CLAUDE_HOOK_SPECS` in `install.sh` lists the sources, including `agent-do-quantity-check.py` and `agent-do-prose-lint.py`
 5. Optionally writes five Codex wrappers to `~/.codex/hooks/` (the three event hooks plus `stop-quality-gate.sh`/`.py`)
 6. Installs Python dependencies through one Python 3.10+ interpreter and records that exact runtime at `~/.agent-do/python-path`
 7. Interactively offers `npm install` for browse/unbrowse and `cargo build --release` for manna
 8. Runs `agent-do --health`
 9. Prints the Claude `settings.json` snippet, the Codex `hooks.json` template when Codex install ran, and a project CLAUDE.md snippet
 
-The installer never edits `settings.json` or `hooks.json` itself. Registration is manual, and required: **Claude Code does not auto-discover hooks**; a wrapper sitting in `~/.claude/hooks/` does nothing until it is registered.
+Claude registration is required: **Claude Code does not auto-discover hooks**.
+The installer asks before merging `settings.json` in an interactive terminal;
+`--register-hooks` authorizes that merge and `--print-only` leaves settings
+untouched while printing the complete snippet. Both options still install
+wrappers and dependencies. A wrapper does nothing until it is registered.
 
 ## Registering the Claude hooks (settings.json)
 
@@ -85,6 +187,18 @@ Merge into `~/.claude/settings.json` (into the existing arrays if you already ha
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agent-do-prose-lint.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "matcher": "",
@@ -101,9 +215,43 @@ Merge into `~/.claude/settings.json` (into the existing arrays if you already ha
 }
 ```
 
-The snippet install.sh prints covers the first three events; the SessionEnd entry above completes the set (the installer writes the `agent-do-coord-stop.sh` wrapper either way). The timeouts are part of the design, not suggestions: SessionStart's subprocess calls are individually bounded (2-3s each) under a 10s registration, the prompt router works against a 4.2s internal safety line under its 5s registration, and SessionEnd budgets coord retirement (5s) plus the manna reconcile advisory (4s) inside its 10s.
+The example above shows selected registrations; `CLAUDE_SETTINGS_SPECS` in
+`install.sh` generates the complete set. The prose hook allows three seconds
+for the linter inside its five-second registration, leaving time to report a
+failure before the host deadline.
 
 agent-do registers nothing at `Stop`. Claude Code fires `Stop` every turn; session retirement belongs on `SessionEnd`. Auto-commit, formatters, notifications, and other turn-end behavior are personal workflow for your own dotfiles.
+
+## Prose feedback after writing
+
+`agent-do-prose-lint.py` runs after Claude `Write`, `Edit`, and `MultiEdit`
+calls. The installer registers one `PostToolUse` matcher (`Edit|Write|MultiEdit`)
+with a five-second timeout and installs its Python wrapper alongside the
+quantity hook. Existing installations need the new wrapper and registration;
+adding source code alone does not activate a new hook.
+
+The hook calls `agent-do deai lint <saved-file> --register <pack> --json`.
+It checks `.md`, `.markdown`, `.txt`, and `.rst` files, skips source code and
+dependency/build directories, and uses the closest named directory to select
+a pack: `drafts/` or `essays/` selects `essay`, `email/` or `emails/` selects
+`email`, and `product-answers/` or `product_answers/` selects `product-answer`.
+Other prose uses `default`. Relative paths resolve from the tool event's
+working directory, including sessions started inside `drafts/`.
+The entire saved file is checked so rates, frontmatter,
+and code fences retain their context.
+
+Findings arrive as advisory `additionalContext` with rule IDs and file
+locations. The hook reports up to six rules, explicitly counts omitted rules
+and repeated occurrences, and includes the command for the complete report.
+Every edit is checked again; a clean result is silent. A timeout or linter
+failure reports an unchecked file. Nothing rewrites text or blocks the edit.
+`AGENT_DO_PROSE_LINT=0` disables the hook. The hook writes no prose or receipt
+files; the dispatcher retains its normal invocation telemetry.
+
+Focused checks: `python3 tests/test_prose_lint_hook.py`,
+`python3 tests/test_deai.py`, and `python3 tests/test_install_specs.py`.
+These exercise local CLI fixtures and registration coherence without
+installing hooks or opening a host session.
 
 ## The wrapper upgrade model
 
@@ -149,7 +297,7 @@ The hooks decide what to inject by looking at the repo, not configuration:
 
 | Signal | Effect |
 |--------|--------|
-| `$CWD/.manna/` exists | SessionStart injects the Manna board (`manna context --max-tokens 1500`) and, when `.manna/drift.yaml` contains findings, the drift greeting; SessionEnd runs `manna reconcile --fix --write-drift` (`--fix` applies only the two safe repairs: dead claims abandoned, resolved blockers cleared) |
+| `$CWD/.manna/` exists | SessionStart injects the Manna board (`manna context --max-tokens 1500`) and, when `.manna/drift.yaml` contains findings, the drift greeting; SessionEnd runs `manna reconcile --fix --only dead_claim,blocker_desync --write-drift` (the only two repairs `--fix` has: claims coord positively verified dead or stopped abandoned, resolved blockers cleared; `landed_open` is advisory in every path, so a landed row is only ever reported with its next step; mn-880173) |
 | `<git-dir>/agent-do/coord/` exists | SessionEnd runs `coord stop`; SessionStart injects coord interrupts or a focus reminder when active peers exist |
 | `$CWD/.zpc/` exists | SessionStart mentions the experience journal and its status commands |
 | Frontend markers (package.json frameworks, `.tsx`/`.vue`/`.svelte` files, Flutter) | SessionStart injects the design-toolkit workflow |
@@ -228,9 +376,10 @@ session ids; Codex supplies its opaque thread id. Manna derives ownership from
 those ids plus a machine-local secret. Scripted lanes set both explicit values,
 for example:
 `MANNA_SESSION_ID=lane6-internals MANNA_SESSION_TOKEN=<32+-character-secret> agent-do manna claim mn-133ad6`.
-Claims made under an identity that coord later reports dead, stale, or stopped
-surface as `dead_claim` findings, and `reconcile --fix` releases only when the
-complete inspected row still matches.
+Claims made under an identity that coord later reports dead or stopped
+surface as `dead_claim` findings (a stale record is an aged lease, not death;
+an unbound claimant is unseen, not dead), and `reconcile --fix` releases only
+when the complete inspected row still matches.
 
 **Generated handoff pairing.** `agent-do bootstrap` runs `manna init` for new
 boards and strict-scaffold repair, and `manna migrate` for a detected nonempty

@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "kind": "native-design-relations",
+  "intent": "The verdict and the model's own standing counterweigh each other in the opening view; the standing row's five figures share one presence that also sets their label binding and cell rhythm; the hindcast ledger's row rhythm and its inside/outside bracket accent move together as one instrument.",
+  "inputs": {
+    "titlePresence": {"value": 1, "range": [0.7, 1.6], "why": "Relative prominence of the room title 'Simulation' against this composition's baseline."},
+    "titleBase": {"value": 3.25, "why": "Authored room-title size in rem for this composition's baseline."},
+    "verdictGapBase": {"value": 1.1, "why": "Authored gap in rem between the room title and the verdict line at baseline presence."},
+    "titleVerdictElasticity": {"value": -0.6, "why": "Counterbalance: as the title looms larger it should read as one fused statement with the verdict, so the gap contracts."},
+    "standingGapBase": {"value": 3.2, "why": "Authored gap in rem between the opening block and the standing instrument row at baseline presence."},
+    "titleStandingElasticity": {"value": 0.35, "why": "Counterweight: as the title looms larger, the standing row needs a touch more separation to keep its own register (instrument, not prose) so the two sides hold each other apart."},
+    "figurePresence": {"value": 1, "range": [0.7, 1.5], "why": "Relative size of the five standing instrument figures (Tier, Skill, Coverage, Calibrated, Parameters) against baseline."},
+    "figureBase": {"value": 2.6, "why": "Authored standing-figure size in rem at baseline presence."},
+    "labelGapBase": {"value": 0.5, "why": "Authored gap in rem between a standing figure and its caption label at baseline presence."},
+    "figureLabelElasticity": {"value": -0.5, "why": "Counterbalance: a larger figure binds tighter to its own caption so the pair still reads as one instrument, not two."},
+    "rowIntervalBase": {"value": 2.4, "why": "Authored gap in rem between adjacent standing-row cells at baseline presence."},
+    "rowPresence": {"value": 1, "range": [0.8, 1.3], "why": "Relative density of the eight hindcast ledger rows against baseline."},
+    "hindcastIntervalBase": {"value": 0.85, "why": "Authored vertical rhythm in rem for hindcast ledger rows at baseline presence."},
+    "bracketBase": {"value": 3, "why": "Authored width in px of each hindcast row's inside/outside bracket accent at baseline presence."}
+  },
+  "relations": {
+    "titleSize": {"expr": {"op": "multiply", "args": ["titleBase", "titlePresence"]}, "why": "The room title follows its own presence directly."},
+    "verdictGap": {"expr": {"op": "multiply", "args": ["verdictGapBase", {"op": "power", "args": ["titlePresence", "titleVerdictElasticity"]}]}, "why": "Counterbalance: the verdict line draws closer to the title as the title grows."},
+    "standingGap": {"expr": {"op": "multiply", "args": ["standingGapBase", {"op": "power", "args": ["titlePresence", "titleStandingElasticity"]}]}, "why": "Counterweight: the standing row holds a touch more distance as the title grows, so verdict and standing stay legible as two different kinds of claim sharing one view."},
+    "figureSize": {"expr": {"op": "multiply", "args": ["figureBase", "figurePresence"]}, "why": "Each standing figure follows the row's shared presence (shared ancestry: one origin, five members)."},
+    "labelGap": {"expr": {"op": "multiply", "args": ["labelGapBase", {"op": "power", "args": ["figurePresence", "figureLabelElasticity"]}]}, "why": "Counterbalance: a larger figure binds tighter to its caption so growth reads as emphasis, not drift."},
+    "rowInterval": {"expr": {"op": "multiply", "args": ["rowIntervalBase", "figurePresence"]}, "why": "Shared ancestry: the gap between instrument cells grows with the figures it separates, so five instruments never collide."},
+    "hindcastInterval": {"expr": {"op": "multiply", "args": ["hindcastIntervalBase", "rowPresence"]}, "why": "Rhythm: the ledger's eight rows keep one interval that loosens or tightens as a whole, never row by row."},
+    "hindcastBracket": {"expr": {"op": "multiply", "args": ["bracketBase", "rowPresence"]}, "why": "The inside/outside bracket accent belongs to the same rhythm family as the row interval it marks, so a denser ledger gets a quieter mark and a looser one a firmer mark."}
+  },
+  "bindings": {
+    "--title-size": {"node": "titleSize", "unit": "rem"},
+    "--verdict-gap": {"node": "verdictGap", "unit": "rem"},
+    "--standing-gap": {"node": "standingGap", "unit": "rem"},
+    "--figure-size": {"node": "figureSize", "unit": "rem"},
+    "--label-gap": {"node": "labelGap", "unit": "rem"},
+    "--row-interval": {"node": "rowInterval", "unit": "rem"},
+    "--hindcast-interval": {"node": "hindcastInterval", "unit": "rem"},
+    "--hindcast-bracket": {"node": "hindcastBracket", "unit": "px"}
+  }
+}

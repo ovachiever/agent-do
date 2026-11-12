@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --lift:#211E1B;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --sage:hsl(158,30%,55%);
+    --sage-dn:hsl(158,30%,47%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:13px;
+    line-height:1.45;
+    font-variant-numeric:tabular-nums;
+    min-width:1280px;
+  }
+  ::selection{background:var(--sage);color:var(--bg)}
+  .pad{padding-left:36px;padding-right:36px}
+  .label{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)}
+  .mono{font-family:var(--mono)}
+
+  /* ── nav ─────────────────────────────── */
+  nav{display:flex;align-items:center;height:52px;border-bottom:1px solid var(--hair)}
+  .wordmark{font-family:var(--serif);font-size:18px;letter-spacing:.03em;color:var(--ink)}
+  .navlinks{display:flex;margin-left:40px;height:100%}
+  .navlinks a{
+    display:flex;align-items:center;height:100%;
+    padding:0 2px;margin-right:28px;
+    font-size:13px;color:var(--mut);text-decoration:none;
+    border-bottom:2px solid transparent;border-top:2px solid transparent;
+  }
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.active{color:var(--ink);border-bottom-color:var(--sage)}
+  .navlinks a:focus-visible{outline:2px solid var(--sage);outline-offset:-2px}
+  .nav-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .livedot{display:inline-block;width:6px;height:6px;background:var(--sage)}
+  .livelbl{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--sage)}
+  .clock{font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ── ticker ──────────────────────────── */
+  .ticker{
+    display:flex;justify-content:space-between;align-items:baseline;
+    padding-top:9px;padding-bottom:9px;
+    border-bottom:1px solid var(--hair);
+    white-space:nowrap;overflow:hidden;
+  }
+  .ti{display:flex;align-items:baseline;gap:7px}
+  .ti .tv{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .ti .tv .up{color:var(--ink)}
+
+  /* ── header ──────────────────────────── */
+  header{display:flex;justify-content:space-between;align-items:flex-end;padding-top:22px;padding-bottom:16px}
+  h1{font-family:var(--serif);font-weight:400;font-size:30px;line-height:1.1;letter-spacing:.01em}
+  .h-meta{margin-top:7px;font-size:14px;color:var(--fnt)}
+  .askwrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+  .ask{display:flex}
+  .ask input{
+    width:400px;height:36px;
+    background:var(--lift);
+    border:1px solid var(--hair);border-right:none;
+    color:var(--ink);font-family:var(--sans);font-size:13px;
+    padding:0 12px;border-radius:0;
+  }
+  .ask input::placeholder{color:var(--mut);opacity:1}
+  .ask input:focus{outline:none;border-color:var(--sage)}
+  .ask button{
+    height:36px;padding:0 18px;
+    background:var(--sage);color:var(--bg);
+    border:1px solid var(--sage);
+    font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.02em;
+    cursor:pointer;border-radius:0;
+  }
+  .ask button:hover{background:var(--sage-dn);border-color:var(--sage-dn)}
+  .ask button:focus-visible{outline:2px solid var(--ink);outline-offset:-3px}
+  .askhint{font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ── topic band ──────────────────────── */
+  .band{display:flex;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+  .band .cell{flex:1;padding:9px 16px 10px 0;border-left:1px solid var(--hair)}
+  .band .cell:first-child{border-left:none}
+  .band .cell + .cell{padding-left:16px}
+  .band .bv{margin-top:4px;font-family:var(--mono);font-size:15px;color:var(--ink)}
+
+  /* ── chips row ───────────────────────── */
+  .chiprow{display:flex;align-items:center;padding-top:10px;padding-bottom:14px}
+  .chips{display:flex;gap:8px}
+  .chip{
+    display:inline-flex;align-items:center;height:26px;padding:0 12px;
+    background:transparent;border:1px solid var(--hair);
+    color:var(--mut);
+    font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+    cursor:pointer;border-radius:0;
+  }
+  .chip:hover{color:var(--ink);border-color:rgba(231,227,218,0.34)}
+  .chip:focus-visible{outline:2px solid var(--sage);outline-offset:1px}
+  .chiprow .rt{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ── main grid ───────────────────────── */
+  .grid{display:grid;grid-template-columns:1fr 470px;column-gap:44px;padding-bottom:30px}
+  .sechead{
+    display:flex;justify-content:space-between;align-items:baseline;
+    padding:9px 0 7px;border-bottom:1px solid var(--hair);
+  }
+  .sechead .meta{font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ledger table */
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  th{
+    font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--mut);text-align:left;
+    padding:8px 10px 6px 0;border-bottom:1px solid var(--hair);
+  }
+  td{padding:5px 10px 5px 0;border-bottom:1px solid var(--hair);vertical-align:baseline}
+  tr:hover td{background:rgba(231,227,218,0.03)}
+  th.num,td.num{text-align:right;padding-right:0}
+  th.numg,td.numg{text-align:right}
+  .t-time,.t-id{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .t-ttl{font-size:13px;color:var(--ink)}
+  .t-fld{font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.05em}
+  .t-src{font-size:12px;color:var(--mut)}
+  .t-yr{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .t-rel,.t-cost{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .t-disp{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .xref{color:var(--sage)}
+  .tablefoot{padding-top:9px;font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* rail */
+  .r-sec{margin-bottom:20px}
+  .r-row{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid var(--hair)}
+  .r-row:hover{background:rgba(231,227,218,0.03)}
+  .r-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--ink)}
+  .r-last{width:62px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .r-dlt{width:52px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .r-dlt.q{color:var(--mut)}
+  .r-src{width:122px;text-align:right;font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .r-id{width:60px;font-family:var(--mono);font-size:12px;color:var(--sage)}
+  .r-ref{width:132px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap}
+  .r-st{width:70px;font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .r-st .live{color:var(--sage)}
+  .r-est{width:98px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap}
+  .r-vs{width:70px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap}
+  .r-foot{padding-top:8px;font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .c-name{width:170px;flex:none;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .c-bar{flex:1;height:3px;background:var(--hair);align-self:center}
+  .c-bar i{display:block;height:3px;background:var(--sage)}
+  .c-ct{width:52px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+  /* ── footer ──────────────────────────── */
+  footer{
+    display:flex;justify-content:space-between;align-items:baseline;
+    border-top:1px solid var(--hair);
+    padding-top:14px;padding-bottom:22px;
+  }
+  .motto{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)}
+  .fright{font-family:var(--mono);font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+
+<nav class="pad">
+  <span class="wordmark">Palingenesis</span>
+  <div class="navlinks">
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#" class="active" aria-current="page">Library</a>
+    <a href="#">Engine Room</a>
+  </div>
+  <div class="nav-right">
+    <span class="livedot"></span><span class="livelbl">Reading</span>
+    <span class="clock">FRI 22 AUG 2026 · 06:52 CT</span>
+  </div>
+</nav>
+
+<div class="ticker pad">
+  <span class="ti"><span class="label">Corpus</span><span class="tv">12,847</span></span>
+  <span class="ti"><span class="label">Today</span><span class="tv">+96 · $8.14</span></span>
+  <span class="ti"><span class="label">MTD</span><span class="tv">+2,214 · $186.90</span></span>
+  <span class="ti"><span class="label">Avg</span><span class="tv">$0.085/paper</span></span>
+  <span class="ti"><span class="label">Signals</span><span class="tv">214</span></span>
+  <span class="ti"><span class="label">Evidence</span><span class="tv">1,204 <span class="xref">+18</span></span></span>
+  <span class="ti"><span class="label">Contradictions</span><span class="tv">7 open</span></span>
+  <span class="ti"><span class="label">Sweeps</span><span class="tv">1 live · 3 qd</span></span>
+  <span class="ti"><span class="label">Dossiers fed</span><span class="tv">6</span></span>
+  <span class="ti"><span class="label">Uptime</span><span class="tv">214 d</span></span>
+</div>
+
+<header class="pad">
+  <div>
+    <h1>Library</h1>
+    <div class="h-meta">12,847 works · reading unbroken since 20 Jan 2026 · 214 days</div>
+  </div>
+  <div class="askwrap">
+    <form class="ask" action="#" method="get">
+      <input type="text" name="q" aria-label="Ask the Library" placeholder="Ask anything the Library has read&hellip;">
+      <button type="submit">Ask the Library</button>
+    </form>
+    <span class="askhint">$0.02 / question · answers cite P- &amp; EV- ids</span>
+  </div>
+</header>
+
+<div class="band pad">
+  <div class="cell"><div class="label">Today total</div><div class="bv">96 · $8.14</div></div>
+  <div class="cell"><div class="label">Manure valorization</div><div class="bv">43 · $4.12</div></div>
+  <div class="cell"><div class="label">Layer nutrition</div><div class="bv">21 · $1.87</div></div>
+  <div class="cell"><div class="label">Flock health</div><div class="bv">14 · $1.22</div></div>
+  <div class="cell"><div class="label">Genetics &amp; breeding</div><div class="bv">9 · $0.61</div></div>
+  <div class="cell"><div class="label">Markets &amp; policy</div><div class="bv">9 · $0.32</div></div>
+</div>
+
+<div class="chiprow pad">
+  <div class="chips">
+    <button class="chip" type="button">Kinship map</button>
+    <button class="chip" type="button">Germinating</button>
+    <button class="chip" type="button">Shelf list</button>
+    <button class="chip" type="button">Retraction watch</button>
+  </div>
+  <span class="rt">last acquisition 06:41:22 · <span class="xref">SW-121</span> reporting ~07:05</span>
+</div>
+
+<div class="grid pad">
+
+  <!-- ── reading ledger ── -->
+  <section>
+    <div class="sechead">
+      <span class="label">Reading ledger · last 3½ h</span>
+      <span class="meta">26 shown of 96 today · metered $8.14</span>
+    </div>
+    <table>
+      <colgroup>
+        <col style="width:46px"><col style="width:66px"><col><col style="width:56px">
+        <col style="width:142px"><col style="width:40px"><col style="width:42px"><col style="width:48px"><col style="width:114px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Time</th><th>ID</th><th>Title</th><th>Fld</th><th>Source</th>
+          <th class="numg">Yr</th><th class="numg">Rel</th><th class="numg">Cost</th><th style="padding-left:14px">Disp</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="t-time">06:41</td><td class="t-id">P-12847</td><td class="t-ttl trunc">Pyrolysis temperature and phosphorus availability in layer-litter biochar</td><td class="t-fld">MANR</td><td class="t-src trunc">Bioresour. Technol.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.93</td><td class="t-cost numg">0.11</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4491</span></td></tr>
+        <tr><td class="t-time">06:37</td><td class="t-id">P-12846</td><td class="t-ttl trunc">Struvite precipitation from egg-wash effluent: pilot-scale economics</td><td class="t-fld">MANR</td><td class="t-src trunc">Water Res.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.91</td><td class="t-cost numg">0.09</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4489</span></td></tr>
+        <tr><td class="t-time">06:28</td><td class="t-id">P-12845</td><td class="t-ttl trunc">Digestible valine:lysine ratio in W-36 layers, 32–45 wk</td><td class="t-fld">NUTR</td><td class="t-src trunc">Poult. Sci.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.88</td><td class="t-cost numg">0.07</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">06:19</td><td class="t-id">P-12844</td><td class="t-ttl trunc">Keel-bone deviation and aviary tier height: four-flock cohort</td><td class="t-fld">WELF</td><td class="t-src trunc">Animal</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.86</td><td class="t-cost numg">0.08</td><td class="t-disp" style="padding-left:14px">⚑ <span class="xref">C-047</span></td></tr>
+        <tr><td class="t-time">06:11</td><td class="t-id">P-12843</td><td class="t-ttl trunc">Anaerobic co-digestion of layer manure with spent mushroom substrate</td><td class="t-fld">MANR</td><td class="t-src trunc">Waste Manag.</td><td class="t-yr numg">2024</td><td class="t-rel numg">0.84</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">06:02</td><td class="t-id">P-12842</td><td class="t-ttl trunc">Ammonia volatilization under belt-drying regimes, commercial aviaries</td><td class="t-fld">ENV</td><td class="t-src trunc">Atmos. Environ.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.89</td><td class="t-cost numg">0.08</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4490</span></td></tr>
+        <tr><td class="t-time">05:54</td><td class="t-id">P-12841</td><td class="t-ttl trunc">HPAI H5N1 vaccination and trade-ban exposure: partial-equilibrium model</td><td class="t-fld">HLTH</td><td class="t-src trunc">Prev. Vet. Med.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.92</td><td class="t-cost numg">0.10</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4488</span></td></tr>
+        <tr><td class="t-time">05:47</td><td class="t-id">P-12840</td><td class="t-ttl trunc">Black soldier fly larvae meal at 4–12% inclusion: egg-quality meta-analysis</td><td class="t-fld">NUTR</td><td class="t-src trunc">Anim. Feed Sci. Technol.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.90</td><td class="t-cost numg">0.09</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4486</span></td></tr>
+        <tr><td class="t-time">05:39</td><td class="t-id">P-12839</td><td class="t-ttl trunc">Phytase superdosing and phytate-P release kinetics in corn-soy diets</td><td class="t-fld">NUTR</td><td class="t-src trunc">Br. Poult. Sci.</td><td class="t-yr numg">2024</td><td class="t-rel numg">0.83</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">⚑ <span class="xref">C-041</span></td></tr>
+        <tr><td class="t-time">05:31</td><td class="t-id">P-12838</td><td class="t-ttl trunc">Manure-derived struvite as starter fertilizer: maize response trials</td><td class="t-fld">MANR</td><td class="t-src trunc">Field Crops Res.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.81</td><td class="t-cost numg">0.07</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">05:22</td><td class="t-id">P-12837</td><td class="t-ttl trunc">Consumer willingness-to-pay for carbon-labeled eggs: DE/NL scanner panel</td><td class="t-fld">ECON</td><td class="t-src trunc">Food Policy</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.87</td><td class="t-cost numg">0.08</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4487</span></td></tr>
+        <tr><td class="t-time">05:14</td><td class="t-id">P-12836</td><td class="t-ttl trunc">Dim-to-red LED spectra and injurious pecking in enriched colonies</td><td class="t-fld">WELF</td><td class="t-src trunc">Appl. Anim. Behav. Sci.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.85</td><td class="t-cost numg">0.07</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4485</span></td></tr>
+        <tr><td class="t-time">05:05</td><td class="t-id">P-12835</td><td class="t-ttl trunc">On-farm hydrolysis of feather waste: keratinase economics</td><td class="t-fld">MANR</td><td class="t-src trunc">J. Clean. Prod.</td><td class="t-yr numg">2024</td><td class="t-rel numg">0.78</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">04:57</td><td class="t-id">P-12834</td><td class="t-ttl trunc">In-ovo sexing by hyperspectral imaging: throughput at day 9</td><td class="t-fld">GENE</td><td class="t-src trunc">Sens. Actuators B</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.88</td><td class="t-cost numg">0.09</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">04:48</td><td class="t-id">P-12833</td><td class="t-ttl trunc">Layer-litter biochar as broiler bedding amendment: NH₃ and pH</td><td class="t-fld">MANR</td><td class="t-src trunc">Poult. Sci.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.82</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4483</span></td></tr>
+        <tr><td class="t-time">04:40</td><td class="t-id">P-12832</td><td class="t-ttl trunc">Precision amino-acid feeding under heat stress: three-strain trial</td><td class="t-fld">NUTR</td><td class="t-src trunc">Poult. Sci.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.86</td><td class="t-cost numg">0.08</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">04:31</td><td class="t-id">P-12831</td><td class="t-ttl trunc">Salmonella Enteritidis phage cocktails in cage-free litter systems</td><td class="t-fld">HLTH</td><td class="t-src trunc">Front. Microbiol.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.84</td><td class="t-cost numg">0.07</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">04:22</td><td class="t-id">P-12830</td><td class="t-ttl trunc">Manure ammonia scrubbers: retrofit CAPEX in NL/DE houses</td><td class="t-fld">ENV</td><td class="t-src trunc">Biosyst. Eng.</td><td class="t-yr numg">2024</td><td class="t-rel numg">0.80</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">queued <span class="xref">SW-123</span></td></tr>
+        <tr><td class="t-time">04:14</td><td class="t-id">P-12829</td><td class="t-ttl trunc">Eggshell translucency and cuticle deposition: genome-wide scan</td><td class="t-fld">GENE</td><td class="t-src trunc">Genet. Sel. Evol.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.79</td><td class="t-cost numg">0.08</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">04:05</td><td class="t-id">P-12828</td><td class="t-ttl trunc">Solar-thermal manure drying: energy balance at 120k-hen scale</td><td class="t-fld">MANR</td><td class="t-src trunc">Renew. Energy</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.77</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">03:57</td><td class="t-id">P-12827</td><td class="t-ttl trunc">Fipronil residue screening false-negative rates, EU 2017–24</td><td class="t-fld">HLTH</td><td class="t-src trunc">Food Control</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.81</td><td class="t-cost numg">0.05</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">03:48</td><td class="t-id">P-12826</td><td class="t-ttl trunc">Vertical integration and layer margins: US panel 2008–2024</td><td class="t-fld">ECON</td><td class="t-src trunc">Am. J. Agric. Econ.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.85</td><td class="t-cost numg">0.09</td><td class="t-disp" style="padding-left:14px">cited <span class="xref">EV-4482</span></td></tr>
+        <tr><td class="t-time">03:40</td><td class="t-id">P-12825</td><td class="t-ttl trunc">Perch material and keel impact loading: accelerometry study</td><td class="t-fld">WELF</td><td class="t-src trunc">Br. Poult. Sci.</td><td class="t-yr numg">2024</td><td class="t-rel numg">0.76</td><td class="t-cost numg">0.05</td><td class="t-disp" style="padding-left:14px">⚑ <span class="xref">C-047</span></td></tr>
+        <tr><td class="t-time">03:31</td><td class="t-id">P-12824</td><td class="t-ttl trunc">Microbial protein from manure-derived VFAs: bench feasibility</td><td class="t-fld">MANR</td><td class="t-src trunc">Bioresour. Technol.</td><td class="t-yr numg">2026</td><td class="t-rel numg">0.83</td><td class="t-cost numg">0.07</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">03:23</td><td class="t-id">P-12823</td><td class="t-ttl trunc">Windrow turning frequency and Salmonella die-off in layer manure</td><td class="t-fld">MANR</td><td class="t-src trunc">Compost Sci. Util.</td><td class="t-yr numg">2024</td><td class="t-rel numg">0.74</td><td class="t-cost numg">0.05</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+        <tr><td class="t-time">03:14</td><td class="t-id">P-12822</td><td class="t-ttl trunc">Feed-mill NIR calibration transfer across soybean-meal origins</td><td class="t-fld">NUTR</td><td class="t-src trunc">Anim. Feed Sci. Technol.</td><td class="t-yr numg">2025</td><td class="t-rel numg">0.80</td><td class="t-cost numg">0.06</td><td class="t-disp" style="padding-left:14px">filed</td></tr>
+      </tbody>
+    </table>
+    <div class="tablefoot">70 earlier today · 12,751 held before · every read metered · REL = relevance to live dossiers</div>
+  </section>
+
+  <!-- ── rail ── -->
+  <aside>
+
+    <div class="r-sec">
+      <div class="sechead">
+        <span class="label">Market signals</span>
+        <span class="meta">12 refreshed · 214 tracked</span>
+      </div>
+      <div class="r-row"><span class="r-name">Shell eggs NY lg white, $/dz</span><span class="r-last">2.41</span><span class="r-dlt">+0.07</span><span class="r-src">USDA ERS · 08-21</span></div>
+      <div class="r-row"><span class="r-name">Eggs MW lg loose, $/dz</span><span class="r-last">2.18</span><span class="r-dlt">+0.04</span><span class="r-src">USDA AMS · 08-22</span></div>
+      <div class="r-row"><span class="r-name">Soybean meal Dec, $/st</span><span class="r-last">341.60</span><span class="r-dlt">+2.10</span><span class="r-src">CME · 08-21</span></div>
+      <div class="r-row"><span class="r-name">Corn Dec, ¢/bu</span><span class="r-last">412¼</span><span class="r-dlt">−3½</span><span class="r-src">CME · 08-21</span></div>
+      <div class="r-row"><span class="r-name">L-Lysine HCl FOB CN, $/kg</span><span class="r-last">1.62</span><span class="r-dlt">−0.04</span><span class="r-src">Feedinfo · 08-20</span></div>
+      <div class="r-row"><span class="r-name">DL-Methionine EU, $/kg</span><span class="r-last">2.38</span><span class="r-dlt q">unch</span><span class="r-src">Feedinfo · 08-20</span></div>
+      <div class="r-row"><span class="r-name">Pullet placements Jul, M hd</span><span class="r-last">28.4</span><span class="r-dlt">+1.9%</span><span class="r-src">USDA NASS · 08-19</span></div>
+      <div class="r-row"><span class="r-name">Nat gas Henry Hub, $/MMBtu</span><span class="r-last">2.87</span><span class="r-dlt">+0.05</span><span class="r-src">EIA · 08-21</span></div>
+      <div class="r-foot">202 unchanged · next refresh 15:00 CT</div>
+    </div>
+
+    <div class="r-sec">
+      <div class="sechead">
+        <span class="label">Evidence records</span>
+        <span class="meta">+18 today · 1,204 held</span>
+      </div>
+      <div class="r-row"><span class="r-id">EV-4491</span><span class="r-name">Litter biochar at 450 °C keeps 71% plant-avail. P</span><span class="r-ref">6 src → <span class="xref">DSR-031</span> c4</span></div>
+      <div class="r-row"><span class="r-id">EV-4489</span><span class="r-name">Struvite from wash effluent breaks even ≥180k hens</span><span class="r-ref">4 src → <span class="xref">DSR-031</span> c7</span></div>
+      <div class="r-row"><span class="r-id">EV-4488</span><span class="r-name">HPAI vax cuts trade-ban exposure 31–44%</span><span class="r-ref">5 src → <span class="xref">DSR-029</span> c2</span></div>
+      <div class="r-row"><span class="r-id">EV-4486</span><span class="r-name">BSF meal to 8%: no Haugh-unit effect</span><span class="r-ref">9 src → <span class="xref">DSR-027</span> c2</span></div>
+      <div class="r-foot">+14 more today · every dossier claim resolves to an EV id</div>
+    </div>
+
+    <div class="r-sec">
+      <div class="sechead">
+        <span class="label">Research sweeps</span>
+        <span class="meta">1 commissioned · 3 queued</span>
+      </div>
+      <div class="r-row"><span class="r-id">SW-121</span><span class="r-name">Struvite unit economics, EU plants 2019–26</span><span class="r-st"><span class="live">live</span> · 62%</span><span class="r-est">118 p · $6.40</span></div>
+      <div class="r-row"><span class="r-id">SW-122</span><span class="r-name">Keel fracture × perch geometry, meta</span><span class="r-st">queued</span><span class="r-est">74 p · $3.90</span></div>
+      <div class="r-row"><span class="r-id">SW-123</span><span class="r-name">NH₃ scrubber CAPEX, NL/DE retrofits</span><span class="r-st">queued</span><span class="r-est">66 p · $3.10</span></div>
+      <div class="r-row"><span class="r-id">SW-124</span><span class="r-name">In-ovo sexing throughput claims audit</span><span class="r-st">queued</span><span class="r-est">41 p · $2.20</span></div>
+      <div class="r-foot">commissioned 05:12 by Pipeline · est. total $15.60</div>
+    </div>
+
+    <div class="r-sec">
+      <div class="sechead">
+        <span class="label">Contradictions</span>
+        <span class="meta">7 open</span>
+      </div>
+      <div class="r-row"><span class="r-id">C-047</span><span class="r-name">Keel deviation × aviary tier height</span><span class="r-vs">6 v 4 src</span></div>
+      <div class="r-row"><span class="r-id">C-041</span><span class="r-name">Phytase superdosing FCR: +2.1% v null</span><span class="r-vs">9 v 7 src</span></div>
+      <div class="r-row"><span class="r-id">C-039</span><span class="r-name">Biochar NH₃ capture: 34% lab v 9% field</span><span class="r-vs">5 v 5 src</span></div>
+      <div class="r-foot">+4 dormant · C-047 → <span class="xref">SW-122</span> on resolution path</div>
+    </div>
+
+    <div class="r-sec">
+      <div class="sechead">
+        <span class="label">Corpus by domain</span>
+        <span class="meta">12,847 works</span>
+      </div>
+      <div class="r-row"><span class="c-name">Nutrition &amp; feed</span><span class="c-bar"><i style="width:100%"></i></span><span class="c-ct">3,912</span></div>
+      <div class="r-row"><span class="c-name">Manure &amp; environment</span><span class="c-bar"><i style="width:73%"></i></span><span class="c-ct">2,847</span></div>
+      <div class="r-row"><span class="c-name">Flock health</span><span class="c-bar"><i style="width:56%"></i></span><span class="c-ct">2,206</span></div>
+      <div class="r-row"><span class="c-name">Genetics &amp; breeding</span><span class="c-bar"><i style="width:38%"></i></span><span class="c-ct">1,489</span></div>
+      <div class="r-row"><span class="c-name">Housing &amp; welfare</span><span class="c-bar"><i style="width:28%"></i></span><span class="c-ct">1,105</span></div>
+      <div class="r-row"><span class="c-name">Markets &amp; policy</span><span class="c-bar"><i style="width:19%"></i></span><span class="c-ct">744</span></div>
+      <div class="r-row"><span class="c-name">Cross-domain</span><span class="c-bar"><i style="width:14%"></i></span><span class="c-ct">544</span></div>
+      <div class="r-foot">acquisition 96/d today · 7-d avg 91/d</div>
+    </div>
+
+  </aside>
+</div>
+
+<footer class="pad">
+  <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+  <span class="fright">ledger audited 2026-08-21 · avg $0.085/paper</span>
+</footer>
+
+</body>
+</html>
