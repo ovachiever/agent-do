@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2369,6 +2370,125 @@ def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
     print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
 
 
+# ── Dependabot alert census ────────────────────────────────────────────────
+# One call per repository, never the org-wide endpoint: that endpoint needs
+# owner/security-manager rights and silently leaves out repositories with
+# alerts turned off, and "off" is exactly what a census has to show. Each repo
+# ends in one of three outcomes — ok (with a count, possibly 0), disabled
+# (alerts off: count unknown, never 0), or error — and an error on one repo
+# does not stop the others.
+ALERT_STATES = ("open", "fixed", "dismissed", "auto_dismissed")
+ALERT_SEVERITIES = ("critical", "high", "medium", "low")
+REPO_REF_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def alerts_query(args: argparse.Namespace) -> str:
+    params: list[tuple[str, str]] = []
+    if args.state != "all":
+        params.append(("state", args.state))
+    if args.severity:
+        params.append(("severity", args.severity))
+    if args.scope:
+        params.append(("scope", args.scope))
+    params.append(("per_page", "100"))
+    return urllib.parse.urlencode(params)
+
+
+def alert_row(item: dict[str, Any]) -> dict[str, Any]:
+    dep = item.get("dependency") or {}
+    vuln = item.get("security_vulnerability") or {}
+    adv = item.get("security_advisory") or {}
+    patched = vuln.get("first_patched_version") or {}
+    return {
+        "number": item.get("number"),
+        "state": item.get("state"),
+        "severity": vuln.get("severity") or adv.get("severity"),
+        "scope": dep.get("scope"),
+        "package": (dep.get("package") or {}).get("name"),
+        "ecosystem": (dep.get("package") or {}).get("ecosystem"),
+        "manifest": dep.get("manifest_path"),
+        "advisory": adv.get("ghsa_id"),
+        "summary": adv.get("summary"),
+        "fixed_in": patched.get("identifier"),
+        "url": item.get("html_url"),
+        "created_at": item.get("created_at"),
+    }
+
+
+def repo_alert_census(repo: str, query: str, *, details: bool) -> dict[str, Any]:
+    row: dict[str, Any] = {"repo": repo, "status": "ok", "count": None, "by_severity": {}, "by_scope": {}, "error": None}
+    try:
+        items = gh_json_pages(f"repos/{repo}/dependabot/alerts?{query}")
+    except GhError as exc:
+        text = str(exc)
+        if "alerts are disabled" in text.lower():
+            row["status"] = "disabled"
+        else:
+            row["status"] = "error"
+            row["error"] = text
+        return row
+    alerts = [alert_row(item) for item in items]
+    row["count"] = len(alerts)
+    for a in alerts:
+        sev = a["severity"] or "unknown"
+        scope = a["scope"] or "unknown"
+        row["by_severity"][sev] = row["by_severity"].get(sev, 0) + 1
+        row["by_scope"][scope] = row["by_scope"].get(scope, 0) + 1
+    if details:
+        row["alerts"] = alerts
+    return row
+
+
+def cmd_alerts(args: argparse.Namespace) -> None:
+    if args.severity:
+        bad = [v for v in args.severity.split(",") if v.strip() not in ALERT_SEVERITIES]
+        if bad:
+            print(f"Error: --severity accepts {','.join(ALERT_SEVERITIES)}; got {','.join(bad)}", file=sys.stderr)
+            raise SystemExit(2)
+    repos = list(args.repos or [])
+    for repo in repos:
+        if not REPO_REF_RE.match(repo):
+            print(f"Error: expected owner/repo, got {repo!r}", file=sys.stderr)
+            raise SystemExit(2)
+    if args.org:
+        listed = gh_json_pages(f"orgs/{args.org}/repos?per_page=100&type=all")
+        for item in sorted(listed, key=lambda r: str(r.get("full_name", "")).lower()):
+            name = item.get("full_name")
+            if name and (args.include_archived or not item.get("archived")) and name not in repos:
+                repos.append(name)
+    if not repos:
+        print("Error: give one or more owner/repo, or --org ORG", file=sys.stderr)
+        raise SystemExit(2)
+    query = alerts_query(args)
+    rows = [repo_alert_census(repo, query, details=args.details) for repo in repos]
+    totals: dict[str, Any] = {"count": 0, "by_severity": {}, "repos_ok": 0, "repos_disabled": 0, "repos_error": 0}
+    for row in rows:
+        totals[f"repos_{row['status']}"] += 1
+        if row["status"] == "ok":
+            totals["count"] += row["count"]
+            for sev, n in row["by_severity"].items():
+                totals["by_severity"][sev] = totals["by_severity"].get(sev, 0) + n
+    payload = {"state": args.state, "severity": args.severity, "scope": args.scope, "totals": totals, "repos": rows}
+    if args.json:
+        print_json(payload)
+    else:
+        table = []
+        for row in rows:
+            if row["status"] == "ok":
+                sev = " ".join(f"{s}:{row['by_severity'][s]}" for s in (*ALERT_SEVERITIES, "unknown") if s in row["by_severity"])
+                scope = " ".join(f"{k}:{v}" for k, v in sorted(row["by_scope"].items()))
+                table.append({"repo": row["repo"], "alerts": str(row["count"]), "severity": sev, "scope": scope})
+            elif row["status"] == "disabled":
+                table.append({"repo": row["repo"], "alerts": "off", "severity": "alerts turned off — not counted", "scope": ""})
+            else:
+                table.append({"repo": row["repo"], "alerts": "ERROR", "severity": row["error"] or "", "scope": ""})
+        print_table(table, ["repo", "alerts", "severity", "scope"])
+        print(f"\nTotal {args.state} alerts: {totals['count']} across {totals['repos_ok']} repos counted; "
+              f"{totals['repos_disabled']} with alerts off; {totals['repos_error']} errored")
+    if totals["repos_error"]:
+        raise SystemExit(1)
+
+
 DECLARATION_START = "<!-- agent-do:declaration:v1 -->"
 DECLARATION_END = "<!-- /agent-do:declaration -->"
 
@@ -2565,6 +2685,17 @@ def build_parser() -> argparse.ArgumentParser:
     repos.add_argument("--limit", type=int)
     repos.set_defaults(func=cmd_repos)
 
+    alerts = sub.add_parser("alerts", help="Dependabot alert census per repository (alerts-off repos reported, never counted as 0)")
+    alerts.add_argument("repos", nargs="*", metavar="owner/repo")
+    alerts.add_argument("--org", help="census every repository in this org (archived skipped unless --include-archived)")
+    alerts.add_argument("--include-archived", action="store_true")
+    alerts.add_argument("--state", choices=[*ALERT_STATES, "all"], default="open")
+    alerts.add_argument("--severity", help="comma-separated: critical,high,medium,low")
+    alerts.add_argument("--scope", choices=["runtime", "development"])
+    alerts.add_argument("--details", action="store_true", help="list each alert (package, advisory, severity, scope, manifest, fixed-in)")
+    alerts.add_argument("--json", action="store_true")
+    alerts.set_defaults(func=cmd_alerts)
+
     prs = sub.add_parser("prs", help="Search pull requests")
     prs.add_argument("query", nargs="?")
     prs.add_argument("--json", action="store_true")
@@ -2738,6 +2869,8 @@ def show_help() -> None:
 Commands:
   whoami                         Show authenticated GitHub user
   repos [sync]                   List or sync accessible repositories
+  alerts [owner/repo ...] [--org O] [--state S] [--severity a,b] [--scope runtime|development] [--details]
+                                 Dependabot alert census; alerts-off repos shown as off, never 0
   inbox [--ceremony-only]        Show actionable PR work: maintainer + portfolio sweep + review ceremony
   portfolio [add|remove|list]    Manage the declared portfolio of swept repos (owner/repo or owner/*)
   awaiting                       Show open PRs likely awaiting your review

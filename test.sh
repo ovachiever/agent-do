@@ -143,6 +143,7 @@ check_cmd "prose lint hook tests" python3 "$SCRIPT_DIR/tests/test_prose_lint_hoo
 check_cmd "record age rendering tests" python3 "$SCRIPT_DIR/tests/test_record_ages.py"
 check_cmd "context retrieve authority tests" python3 "$SCRIPT_DIR/tests/test_context_retrieve_authority.py"
 check_cmd "api template tests" python3 "$SCRIPT_DIR/tests/test_api_templates.py"
+check_cmd "gh alerts tests" python3 "$SCRIPT_DIR/tests/test_gh_alerts.py"
 check_cmd "supabase management tests" python3 "$SCRIPT_DIR/tests/test_supabase_management.py"
 check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
 check_cmd "notion tests" python3 "$SCRIPT_DIR/tests/test_notion.py"
