@@ -43,12 +43,51 @@ Commands:
   conflicts        List unmerged files and conflict-marker counts
   recover          Read-only reflog and unreachable-commit report
   sweep [--apply]  Preview safe local branch cleanup; apply explicitly
+  integration enable --target <branch> --check <cmd> [--check <cmd>...] --authorized-by <who>
+                     [--workspace-root <dir>] [--candidate-path <dir>]
+    Opt this repository into Managed Integration. The policy lives in the
+    common git dir's config ([agent-do "integration"]), shared by every
+    worktree and never carried by a branch. Checks are the repository's own
+    validation commands, run in the integrator's private candidate tree.
+  integration disable [--reason <text>]
+    Stop new dispatch and automatic landing; status, recovery, pending
+    submissions and worktrees are retained.
+  integration config
+    Show the policy and whether it is off, enabled, disabled or invalid
+    (invalid refuses every managed operation and exits 1).
+  integration workspace add <mn-id> [--path <dir>]
+    One worktree + branch (integration/<mn-id>-a<N>) per assignment attempt,
+    registered with the canonical board, the base, and the exact claimant
+    (claim proof equality). A replacement attempt inherits the previous
+    branch. Board commands still run at the canonical checkout.
+  integration workspace list
+  integration submit <mn-id> [--report <file>] [--evidence <text>...]
+    Queue the workspace branch tip: pins the commit, the submission id
+    (manna submit when the item is managed), the attempt and the evidence.
+    A commit saves progress; a submission requests integration; manna done
+    records closure. Board-owned paths in the branch are refused.
+  integration run [--once]
+    The one integrator per repository: builds each queued submission
+    against the current target in a detached candidate worktree, runs the
+    checks on that exact tree, and advances the target only while it still
+    equals the tested base (fast-forward in the checkout holding it, else
+    compare-and-swap). Conflicts and failed checks become action drops for
+    the worker on the item; a dirty overlapping checkout blocks, retryable.
+  integration recover
+    Finish or void a landing interrupted before or after the ref update,
+    without landing anything twice.
+  integration status [<mn-id>]
+    building | queued | integrating | landed | blocked, with the reason,
+    the receipts, the open drops and the exact next action.
 
 Examples:
   agent-git status
   agent-git log 5
   agent-git commit "fix: resolve login issue"
   agent-git branch feature/new-thing
+  agent-git integration workspace add mn-abc123
+  agent-git integration submit mn-abc123 --evidence "python3 tests/test_x.py passed"
+  agent-git integration run
 EOF
 }
 
@@ -1021,6 +1060,17 @@ raise SystemExit(0 if payload["ok"] else 1)
 PYEOF
 }
 
+# Managed Integration (mn-54fe40) lives in lib/git_integration.py so the
+# integrator's state machine stays one readable module; this verb only
+# forwards the arguments and the --json flag it already parsed.
+cmd_integration() {
+    local args=("$@")
+    if [[ "$JSON_MODE" == "1" ]]; then
+        args+=(--json)
+    fi
+    exec python3 "$ROOT_DIR/lib/git_integration.py" "${args[@]+"${args[@]}"}"
+}
+
 # Main
 # Strip a --json flag from anywhere in the args. JSON_MODE/JSON_ARGS drive the
 # structured output path; plain text behavior is unchanged when --json is absent.
@@ -1110,6 +1160,10 @@ case "${1:-help}" in
     sweep)
         shift
         cmd_sweep "$@"
+        ;;
+    integration)
+        shift
+        cmd_integration "$@"
         ;;
     help|--help|-h)
         show_help

@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#1B1917; --panel:#211E1B; --cream:#E7E3DA; --muted:#A69D90; --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14); --hair2:rgba(231,227,218,0.08); --track:rgba(231,227,218,0.09);
+    --sage:#6AAF96; --clay:#BF8369;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --serif:Georgia,"Times New Roman",Times,serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  html,body{ background:var(--bg); color:var(--cream); font:13px/1.5 var(--sans); font-variant-numeric:tabular-nums; }
+  .m{ font-family:var(--mono); }
+  a.d{ color:inherit; text-decoration:none; border-bottom:1px dotted rgba(231,227,218,0.38); cursor:pointer; }
+  a.d:hover{ color:var(--sage); border-bottom-color:var(--sage); }
+  a.d.clay{ color:var(--clay); border-bottom-color:rgba(191,131,105,0.5); }
+  .clay{ color:var(--clay); }
+  .sage{ color:var(--sage); }
+
+  header{ border-bottom:1px solid var(--hair); }
+  header .in{ max-width:1392px; margin:0 auto; padding:15px 24px 13px; display:flex; align-items:baseline; gap:22px; }
+  .mark{ font-family:var(--serif); font-size:16px; letter-spacing:0.02em; margin-right:10px; }
+  .tab{ font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); padding-bottom:5px; }
+  .tab.on{ color:var(--cream); border-bottom:2px solid var(--sage); }
+  .clock{ margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--muted); }
+
+  main{ max-width:1392px; margin:0 auto; padding:0 24px 30px; }
+  .lede{ font-family:var(--serif); font-weight:400; font-size:21px; line-height:1.5; margin:22px 0 7px; max-width:1230px; }
+  .drillnote{ font-size:12px; color:var(--muted); margin-bottom:4px; }
+
+  .secrow{ display:flex; align-items:baseline; gap:14px; margin:24px 0 10px; }
+  .secrow h2{ font-size:12px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+  .secrow .rule{ flex:1; border-top:1px solid var(--hair); position:relative; top:-3px; }
+  .secrow .note{ font-size:12px; color:var(--muted); white-space:nowrap; }
+
+  /* ---- the line ---- */
+  svg{ display:block; width:100%; height:auto; }
+  .cnt{ font-family:var(--mono); font-size:12px; fill:var(--cream); }
+  .nname{ font-family:var(--sans); font-size:12px; fill:var(--cream); }
+  .endlbl{ font-family:var(--sans); font-size:12px; fill:var(--muted); }
+  svg a{ cursor:pointer; }
+  svg a:hover .cnt, svg a:hover .endlbl{ fill:var(--sage); }
+
+  /* ---- station cards ---- */
+  .grid6{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .card{ background:var(--panel); border:1px solid var(--hair); border-radius:6px; padding:13px 15px 11px; scroll-margin-top:16px; }
+  .chead{ display:flex; align-items:baseline; gap:9px; }
+  .cid{ font-family:var(--mono); font-size:12px; color:var(--muted); }
+  .cname{ font-size:14px; font-weight:650; letter-spacing:0.01em; }
+  .state{ margin-left:auto; font-size:12px; letter-spacing:0.07em; text-transform:uppercase; white-space:nowrap; }
+  .state i{ display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; vertical-align:1px; }
+  .state.run{ color:var(--sage); } .state.run i{ background:var(--sage); }
+  .state.dim{ color:var(--muted); } .state.dim i{ background:var(--muted); }
+  .job{ font-size:12.5px; color:var(--muted); line-height:1.45; margin:4px 0 7px; }
+  .since{ font-family:var(--mono); font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .since .t{ color:var(--cream); }
+  .acts{ list-style:none; border-top:1px solid var(--hair); padding-top:7px; margin-bottom:9px; }
+  .acts li{ display:flex; gap:9px; padding:2.5px 0; font-size:12.5px; line-height:1.45; }
+  .acts time{ font-family:var(--mono); font-size:12px; color:var(--muted); flex:0 0 60px; }
+  .stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; border-top:1px solid var(--hair); padding-top:9px; margin-bottom:9px; }
+  .stat b{ display:block; font-size:15px; font-weight:650; line-height:1.25; }
+  .stat span{ display:block; font-size:12px; color:var(--muted); margin-top:1px; line-height:1.35; }
+  .cost{ border-top:1px solid var(--hair); padding-top:8px; font-size:12.5px; color:var(--muted); }
+  .cost a.d{ color:var(--cream); }
+
+  /* ---- ledger strip ---- */
+  .ledger{ display:grid; grid-template-columns:330px repeat(6,1fr); gap:18px; background:var(--panel); border:1px solid var(--hair); border-radius:6px; padding:14px 16px 13px; scroll-margin-top:16px; }
+  .cap{ border-right:1px solid var(--hair); padding-right:18px; }
+  .capnum{ font-size:20px; font-weight:650; }
+  .capnum small{ font-size:13px; font-weight:400; color:var(--muted); }
+  .bar{ position:relative; height:8px; background:var(--track); border-radius:2px; margin:9px 0 7px; }
+  .bar i{ position:absolute; top:0; bottom:0; left:0; background:var(--sage); border-radius:2px; }
+  .tick{ position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--cream); }
+  .tick.even{ background:var(--muted); }
+  .capline{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .capline a.d{ color:var(--cream); }
+  .lcol .lbl{ font-size:12px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); }
+  .lcol .lmtd{ font-size:15px; font-weight:650; margin-top:3px; }
+  .lcol .lmtd small{ font-size:12px; font-weight:400; color:var(--muted); }
+  .lcol .bar{ height:6px; margin:7px 0 6px; }
+  .lcol .mini{ font-size:12px; color:var(--muted); margin-top:1px; }
+  .lcol .mini a.d{ color:var(--cream); }
+
+  /* ---- tables ---- */
+  .duo{ display:grid; grid-template-columns:1.12fr 1fr; gap:26px; align-items:start; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  th{ font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); text-align:left; padding:0 12px 6px 0; border-bottom:1px solid var(--hair); white-space:nowrap; }
+  td{ padding:5.5px 12px 5.5px 0; border-bottom:1px solid var(--hair2); vertical-align:top; line-height:1.45; }
+  tr:last-child td{ border-bottom:none; }
+  td.t{ font-family:var(--mono); font-size:12px; white-space:nowrap; }
+  td.svc{ font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap; }
+  .ok{ color:var(--sage); }
+  .footnote{ font-size:12px; color:var(--muted); margin-top:7px; }
+
+  .chip{ display:inline-block; font-size:12px; letter-spacing:0.06em; text-transform:uppercase; border:1px solid var(--hair); border-radius:3px; padding:1.5px 7px; color:var(--muted); white-space:nowrap; }
+  .chip.watch{ color:var(--clay); border-color:rgba(191,131,105,0.5); }
+
+  /* ---- owner control ---- */
+  .ownerctl{ display:flex; align-items:center; gap:26px; background:var(--panel); border:1px solid var(--hair); border-radius:6px; padding:16px 18px; margin-top:26px; }
+  .ownerctl .lbl{ font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .ownerctl p{ font-size:13px; color:var(--muted); line-height:1.55; max-width:940px; }
+  .ownerctl p b{ color:var(--cream); font-weight:600; }
+  .suspend{ margin-left:auto; min-height:44px; padding:12px 22px; background:transparent; border:1px solid rgba(191,131,105,0.65); border-radius:4px; color:var(--clay); font:600 13px var(--sans); letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; white-space:nowrap; }
+  .suspend:hover{ background:rgba(191,131,105,0.08); }
+
+  footer{ border-top:1px solid var(--hair); margin-top:26px; padding-top:12px; display:flex; justify-content:space-between; gap:20px; font-size:12.5px; color:var(--muted); }
+  footer .m{ font-size:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="in">
+    <span class="mark">Palingenesis</span>
+    <span class="tab">Today</span><span class="tab">Pipeline</span><span class="tab">Library</span><span class="tab">Portfolio</span><span class="tab">Simulation</span><span class="tab on">Engine Room</span>
+    <span class="clock">Sat 22 Aug 2026 · 14:53:07 MDT</span>
+  </div>
+</header>
+
+<main>
+
+  <h1 class="lede">Six services up — <a class="d" href="#incidents">one source benched</a>, nothing blocking — with <a class="d" href="#ledger">$222.18</a> of the <a class="d" href="#ledger">$500.00</a> August cap spent, pace <a class="d" href="#ledger">$10.10</a>/day against a <a class="d" href="#ledger">$16.13</a>/day allowance, close projected <a class="d" href="#ledger">$313.07</a>; next cycle is Scout sweep <a class="d m" href="#scheduler">#1,313</a> at <a class="d m" href="#scheduler">15:00:00</a>.</h1>
+  <p class="drillnote">Every figure on this page is a door — a dotted mark drills to the receipt behind the number.</p>
+
+  <section id="line">
+    <div class="secrow"><h2>Line</h2><div class="rule"></div><span class="note">today's flow, counts live as of 14:53:07</span></div>
+    <svg viewBox="0 0 1392 58" role="img" aria-label="Flow line: sources to Reader to Scout to Council to Simulator to Archivist to Courier to owner, with today's counts">
+      <g stroke="rgba(231,227,218,0.25)" stroke-width="1">
+        <line x1="84"   y1="36" x2="165"  y2="36"/>
+        <line x1="265"  y1="36" x2="358"  y2="36"/>
+        <line x1="458"  y1="36" x2="551"  y2="36"/>
+        <line x1="651"  y1="36" x2="744"  y2="36"/>
+        <line x1="844"  y1="36" x2="937"  y2="36"/>
+        <line x1="1037" y1="36" x2="1130" y2="36"/>
+        <line x1="1230" y1="36" x2="1316" y2="36"/>
+      </g>
+      <a href="#incidents"><title>8 of 9 feeds answering — AgWeb benched 11:38</title><text class="endlbl" x="78" y="40" text-anchor="end">8/9 sources</text></a>
+      <g>
+        <rect x="165" y="22" width="100" height="28" rx="4" fill="#211E1B" stroke="rgba(231,227,218,0.16)"/><circle cx="179" cy="36" r="3" fill="#6AAF96"/><text class="nname" x="191" y="40">Reader</text>
+        <rect x="358" y="22" width="100" height="28" rx="4" fill="#211E1B" stroke="rgba(231,227,218,0.16)"/><circle cx="372" cy="36" r="3" fill="#6AAF96"/><text class="nname" x="384" y="40">Scout</text>
+        <rect x="551" y="22" width="100" height="28" rx="4" fill="#211E1B" stroke="rgba(231,227,218,0.16)"/><circle cx="565" cy="36" r="3" fill="#6AAF96"/><text class="nname" x="577" y="40">Council</text>
+        <rect x="744" y="22" width="100" height="28" rx="4" fill="#211E1B" stroke="rgba(231,227,218,0.16)"/><circle cx="758" cy="36" r="3" fill="#6AAF96"/><text class="nname" x="770" y="40">Simulator</text>
+        <rect x="937" y="22" width="100" height="28" rx="4" fill="#211E1B" stroke="rgba(231,227,218,0.16)"/><circle cx="951" cy="36" r="3" fill="#A69D90"/><text class="nname" x="963" y="40">Archivist</text>
+        <rect x="1130" y="22" width="100" height="28" rx="4" fill="#211E1B" stroke="rgba(231,227,218,0.16)"/><circle cx="1144" cy="36" r="3" fill="#A69D90"/><text class="nname" x="1156" y="40">Courier</text>
+      </g>
+      <a href="#svc-reader"><text class="cnt" x="124"  y="14" text-anchor="middle">1,412 items</text></a>
+      <a href="#svc-reader"><text class="cnt" x="311"  y="14" text-anchor="middle">214 claims</text></a>
+      <a href="#svc-scout"><text class="cnt" x="504"  y="14" text-anchor="middle">38 leads</text></a>
+      <a href="#svc-council"><text class="cnt" x="697"  y="14" text-anchor="middle">7 advanced</text></a>
+      <a href="#svc-simulator"><text class="cnt" x="890"  y="14" text-anchor="middle">9 runs</text></a>
+      <a href="#svc-courier"><text class="cnt" x="1083" y="14" text-anchor="middle">12 picks</text></a>
+      <a href="#svc-courier"><text class="cnt" x="1273" y="14" text-anchor="middle">3 briefs</text></a>
+      <text class="endlbl" x="1322" y="40">owner</text>
+    </svg>
+  </section>
+
+  <section id="stations">
+    <div class="secrow"><h2>Stations — daily dossiers</h2><div class="rule"></div><span class="note">plain job · state · last three acts · today's numbers · today's cost</span></div>
+    <div class="grid6">
+
+      <article class="card" id="svc-reader">
+        <div class="chead"><span class="cid">svc-01</span><span class="cname">Reader</span><span class="state run"><i></i>running</span></div>
+        <p class="job">Reads journals, patents and extension bulletins; pulls claims worth testing into the library.</p>
+        <div class="since">since <span class="t">05:00:04</span> · up 9 h 53 m · poll every 30 min</div>
+        <ul class="acts">
+          <li><time>14:52:11</time><span>Extracted 12 claims, batch <a class="d m" href="#data">47</a></span></li>
+          <li><time>14:31:02</time><span>Deduped patent family <span class="m">US-2026/0142</span></span></li>
+          <li><time>11:38:09</time><span>Benched AgWeb feed — <a class="d clay" href="#incidents">403</a></span></li>
+        </ul>
+        <div class="stats">
+          <div class="stat"><b><a class="d" href="#data">1,412</a></b><span>items scanned</span></div>
+          <div class="stat"><b><a class="d" href="#data">214</a></b><span>claims extracted</span></div>
+          <div class="stat"><b><a class="d" href="#incidents">8/9</a></b><span>sources up</span></div>
+        </div>
+        <div class="cost">today <a class="d" href="#ledger">$1.94</a> · August <a class="d" href="#ledger">$38.71</a> of <a class="d" href="#ledger">$80.00</a></div>
+      </article>
+
+      <article class="card" id="svc-scout">
+        <div class="chead"><span class="cid">svc-02</span><span class="cname">Scout</span><span class="state run"><i></i>running</span></div>
+        <p class="job">Hunts markets, weather and field reports for openings that match library claims.</p>
+        <div class="since">since <span class="t">05:10:22</span> · up 9 h 42 m · sweep every 2 h</div>
+        <ul class="acts">
+          <li><time>14:49:58</time><span>Re-priced sorghum basis, <span class="m">KC</span></span></li>
+          <li><time>14:33:41</time><span>Raised lead <a class="d m" href="#svc-council">L-0912</a> from <span class="m">c-2213</span></span></li>
+          <li><time>14:12:27</time><span>Expired stale lead <span class="m">L-0871</span></span></li>
+        </ul>
+        <div class="stats">
+          <div class="stat"><b><a class="d" href="#svc-reader">214</a></b><span>claims screened</span></div>
+          <div class="stat"><b><a class="d" href="#svc-council">38</a></b><span>leads raised</span></div>
+          <div class="stat"><b><a class="d" href="#data">6</a></b><span>regions watched</span></div>
+        </div>
+        <div class="cost">today <a class="d" href="#ledger">$0.87</a> · August <a class="d" href="#ledger">$19.42</a> of <a class="d" href="#ledger">$45.00</a></div>
+      </article>
+
+      <article class="card" id="svc-council">
+        <div class="chead"><span class="cid">svc-03</span><span class="cname">Council</span><span class="state run"><i></i>deliberating</span></div>
+        <p class="job">Five model seats argue every lead; majority verdict, dissent kept on record.</p>
+        <div class="since">since <span class="t">14:40:19</span> · session <span class="t">L-0912</span> · 12 m in</div>
+        <ul class="acts">
+          <li><time>14:40:19</time><span>Opened session, lead <span class="m">L-0912</span></span></li>
+          <li><time>13:58:02</time><span>Advanced <a class="d m" href="#svc-simulator">L-0904</a>, vote 4–1</span></li>
+          <li><time>13:21:45</time><span>Rejected <span class="m">L-0899</span>, vote 5–0</span></li>
+        </ul>
+        <div class="stats">
+          <div class="stat"><b><a class="d" href="#data">11</a></b><span>verdicts today</span></div>
+          <div class="stat"><b><a class="d" href="#svc-simulator">7</a>–<a class="d" href="#data">4</a></b><span>advance – reject</span></div>
+          <div class="stat"><b><a class="d" href="#data">2</a></b><span>dissents logged</span></div>
+        </div>
+        <div class="cost">today <a class="d" href="#ledger">$3.42</a> · August <a class="d" href="#ledger">$101.87</a> of <a class="d" href="#ledger">$190.00</a></div>
+      </article>
+
+      <article class="card" id="svc-simulator">
+        <div class="chead"><span class="cid">svc-04</span><span class="cname">Simulator</span><span class="state run"><i></i>running</span></div>
+        <p class="job">Runs each advanced lead through a 90-day virtual field trial across 120 plots.</p>
+        <div class="since">since <span class="t">13:59:33</span> · run <span class="t">r-1129</span> at <a class="d" href="#scheduler">62%</a></div>
+        <ul class="acts">
+          <li><time>14:41:07</time><span>Finished <span class="m">r-1129</span> season 2</span></li>
+          <li><time>13:59:33</time><span>Started <span class="m">r-1129</span> on <span class="m">L-0904</span></span></li>
+          <li><time>12:44:19</time><span>Passed <a class="d m" href="#incidents">r-1128</a>, CI ±4.2%</span></li>
+        </ul>
+        <div class="stats">
+          <div class="stat"><b><a class="d" href="#data">9</a></b><span>runs today</span></div>
+          <div class="stat"><b><a class="d" href="#data">7</a>/<a class="d" href="#incidents">1</a></b><span>pass / void</span></div>
+          <div class="stat"><b><a class="d" href="#data">1,080</a></b><span>plot-seasons</span></div>
+        </div>
+        <div class="cost">today <a class="d" href="#ledger">$1.31</a> · August <a class="d" href="#ledger">$52.06</a> of <a class="d" href="#ledger">$120.00</a></div>
+      </article>
+
+      <article class="card" id="svc-archivist">
+        <div class="chead"><span class="cid">svc-05</span><span class="cname">Archivist</span><span class="state dim"><i></i>idle</span></div>
+        <p class="job">Files every claim, verdict and run; keeps each citation chain whole.</p>
+        <div class="since">since <span class="t">14:52:40</span> · queue 0 · 27 s quiet</div>
+        <ul class="acts">
+          <li><time>14:52:40</time><span>Filed batch <span class="m">47</span>, 12 claims</span></li>
+          <li><time>14:41:12</time><span>Indexed <span class="m">r-1129</span> midpoint state</span></li>
+          <li><time>13:58:20</time><span>Chained verdict <a class="d m" href="#data">v-0466</a> citations</span></li>
+        </ul>
+        <div class="stats">
+          <div class="stat"><b><a class="d" href="#data">126</a></b><span>records filed</span></div>
+          <div class="stat"><b><a class="d" href="#data">0</a></b><span>orphan citations</span></div>
+          <div class="stat"><b><a class="d" href="#data">412&nbsp;MB</a></b><span>library size</span></div>
+        </div>
+        <div class="cost">today <a class="d" href="#ledger">$0.22</a> · August <a class="d" href="#ledger">$6.14</a> of <a class="d" href="#ledger">$25.00</a></div>
+      </article>
+
+      <article class="card" id="svc-courier">
+        <div class="chead"><span class="cid">svc-06</span><span class="cname">Courier</span><span class="state dim"><i></i>scheduled</span></div>
+        <p class="job">Packs verdicts and finished runs into the owner's twice-daily brief.</p>
+        <div class="since">since <span class="t">14:30:12</span> · next <span class="t">d-0289</span> at <a class="d" href="#scheduler">17:00</a></div>
+        <ul class="acts">
+          <li><time>14:30:12</time><span>Staged 12 evening picks</span></li>
+          <li><time>06:02:11</time><span>Sent morning brief <a class="d m" href="#data">d-0288</a></span></li>
+          <li><time>06:00:07</time><span>Assembled <span class="m">d-0288</span>, 3 items</span></li>
+        </ul>
+        <div class="stats">
+          <div class="stat"><b><a class="d" href="#data">12</a></b><span>picks staged</span></div>
+          <div class="stat"><b><a class="d" href="#data">1</a>+<a class="d" href="#scheduler">2</a></b><span>sent + staged</span></div>
+          <div class="stat"><b><a class="d" href="#scheduler">17:00</a></b><span>next dispatch</span></div>
+        </div>
+        <div class="cost">today <a class="d" href="#ledger">$0.09</a> · August <a class="d" href="#ledger">$3.98</a> of <a class="d" href="#ledger">$40.00</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="ledger">
+    <div class="secrow"><h2>Ledger — August</h2><div class="rule"></div><span class="note">day 22 of 31 · every cost computed from metered calls, reconciled nightly 02:30</span></div>
+    <div class="ledger">
+      <div class="cap">
+        <div class="capnum"><a class="d" href="#data">$222.18</a> <small>of $500.00 cap</small></div>
+        <div class="bar">
+          <i style="width:44.4%"></i>
+          <span class="tick" style="left:62.6%" title="projected close $313.07"></span>
+          <span class="tick even" style="left:71.0%" title="even-pace mark $354.84"></span>
+        </div>
+        <div class="capline">today <a class="d" href="#data">$7.85</a> · pace <a class="d" href="#data">$10.10</a>/day · allowance <a class="d" href="#data">$16.13</a>/day</div>
+        <div class="capline">projected close <a class="d" href="#data">$313.07</a> · headroom <a class="d" href="#data">$186.93</a></div>
+        <div class="capline">ticks — cream: projected · grey: even-pace <a class="d" href="#data">$354.84</a></div>
+      </div>
+
+      <div class="lcol">
+        <div class="lbl">Reader</div>
+        <div class="lmtd"><a class="d" href="#svc-reader">$38.71</a> <small>/ $80.00</small></div>
+        <div class="bar"><i style="width:48.4%"></i><span class="tick" style="left:68.2%" title="projected $54.55"></span></div>
+        <div class="mini">today <a class="d" href="#svc-reader">$1.94</a></div>
+        <div class="mini">pace <a class="d" href="#data">$1.76</a>/d · close <a class="d" href="#data">$54.55</a></div>
+      </div>
+      <div class="lcol">
+        <div class="lbl">Scout</div>
+        <div class="lmtd"><a class="d" href="#svc-scout">$19.42</a> <small>/ $45.00</small></div>
+        <div class="bar"><i style="width:43.2%"></i><span class="tick" style="left:60.8%" title="projected $27.36"></span></div>
+        <div class="mini">today <a class="d" href="#svc-scout">$0.87</a></div>
+        <div class="mini">pace <a class="d" href="#data">$0.88</a>/d · close <a class="d" href="#data">$27.36</a></div>
+      </div>
+      <div class="lcol">
+        <div class="lbl">Council</div>
+        <div class="lmtd"><a class="d" href="#svc-council">$101.87</a> <small>/ $190.00</small></div>
+        <div class="bar"><i style="width:53.6%"></i><span class="tick" style="left:75.5%" title="projected $143.54"></span></div>
+        <div class="mini">today <a class="d" href="#svc-council">$3.42</a></div>
+        <div class="mini">pace <a class="d" href="#data">$4.63</a>/d · close <a class="d" href="#data">$143.54</a></div>
+      </div>
+      <div class="lcol">
+        <div class="lbl">Simulator</div>
+        <div class="lmtd"><a class="d" href="#svc-simulator">$52.06</a> <small>/ $120.00</small></div>
+        <div class="bar"><i style="width:43.4%"></i><span class="tick" style="left:61.1%" title="projected $73.36"></span></div>
+        <div class="mini">today <a class="d" href="#svc-simulator">$1.31</a></div>
+        <div class="mini">pace <a class="d" href="#data">$2.37</a>/d · close <a class="d" href="#data">$73.36</a></div>
+      </div>
+      <div class="lcol">
+        <div class="lbl">Archivist</div>
+        <div class="lmtd"><a class="d" href="#svc-archivist">$6.14</a> <small>/ $25.00</small></div>
+        <div class="bar"><i style="width:24.6%"></i><span class="tick" style="left:34.6%" title="projected $8.65"></span></div>
+        <div class="mini">today <a class="d" href="#svc-archivist">$0.22</a></div>
+        <div class="mini">pace <a class="d" href="#data">$0.28</a>/d · close <a class="d" href="#data">$8.65</a></div>
+      </div>
+      <div class="lcol">
+        <div class="lbl">Courier</div>
+        <div class="lmtd"><a class="d" href="#svc-courier">$3.98</a> <small>/ $40.00</small></div>
+        <div class="bar"><i style="width:10.0%"></i><span class="tick" style="left:14.0%" title="projected $5.61"></span></div>
+        <div class="mini">today <a class="d" href="#svc-courier">$0.09</a></div>
+        <div class="mini">pace <a class="d" href="#data">$0.18</a>/d · close <a class="d" href="#data">$5.61</a></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="duo">
+    <section id="scheduler" style="scroll-margin-top:16px">
+      <div class="secrow"><h2>Scheduler</h2><div class="rule"></div><span class="note">8 entries · all times MDT</span></div>
+      <table>
+        <thead><tr><th>Next</th><th>Job</th><th>Station</th><th>Cadence</th><th>Last</th></tr></thead>
+        <tbody>
+          <tr><td class="t">15:00:00</td><td>Market sweep <a class="d m" href="#svc-scout">#1,313</a></td><td class="svc">svc-02</td><td>every 2 h</td><td class="t">13:00:02 <span class="ok">OK</span></td></tr>
+          <tr><td class="t">15:00:09</td><td>Feed poll <a class="d m" href="#svc-reader">#4,187</a></td><td class="svc">svc-01</td><td>every 30 min</td><td class="t">14:30:09 <span class="ok">OK</span></td></tr>
+          <tr><td class="t">15:38:09</td><td>AgWeb re-probe (<a class="d clay" href="#incidents">benched</a>)</td><td class="svc">svc-01</td><td>once</td><td class="t">11:38:09 <span class="clay">403</span></td></tr>
+          <tr><td class="t">16:10:00</td><td>Session — <span class="m">L-0907</span>, queue <a class="d" href="#svc-council">3</a></td><td class="svc">svc-03</td><td>on queue</td><td class="t">14:40:19 open</td></tr>
+          <tr><td class="t">17:00:00</td><td>Evening dispatch <a class="d m" href="#svc-courier">d-0289</a></td><td class="svc">svc-06</td><td>2× daily</td><td class="t">06:02:11 <span class="ok">OK</span></td></tr>
+          <tr><td class="t">on verdict</td><td>Trial start — <a class="d" href="#svc-council">1</a> waiting</td><td class="svc">svc-04</td><td>event</td><td class="t">13:59:33 running</td></tr>
+          <tr><td class="t">02:00:00 +1</td><td>Library integrity pass</td><td class="svc">svc-05</td><td>nightly</td><td class="t">02:00:41 <span class="ok">OK</span></td></tr>
+          <tr><td class="t">02:30:00 +1</td><td>Ledger reconcile + cap check</td><td class="svc">ledger</td><td>nightly</td><td class="t">02:30:11 drift <a class="d" href="#data">$0.00</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="data" style="scroll-margin-top:16px">
+      <div class="secrow"><h2>Data</h2><div class="rule"></div><span class="note">5 stores</span></div>
+      <table>
+        <thead><tr><th>Store</th><th>Size</th><th>Holds</th><th>Last write</th><th>Integrity</th></tr></thead>
+        <tbody>
+          <tr><td class="t">library.db</td><td>412 MB</td><td><a class="d" href="#svc-archivist">18,206</a> claims · <a class="d" href="#svc-council">466</a> verdicts</td><td class="t">14:52:40</td><td class="t">fsck <span class="ok">OK</span> 02:00:41</td></tr>
+          <tr><td class="t">runs/</td><td>1.9 GB</td><td><a class="d" href="#svc-simulator">1,129</a> trials, <span class="m">r-1129</span> open</td><td class="t">14:41:07</td><td class="t">checksums <span class="ok">OK</span></td></tr>
+          <tr><td class="t">ledger.jsonl</td><td>8.4 MB</td><td><a class="d" href="#ledger">41,882</a> entries</td><td class="t">14:52:41</td><td class="t">drift <span class="ok">$0.00</span></td></tr>
+          <tr><td class="t">dispatches/</td><td>96 MB</td><td><a class="d" href="#svc-courier">288</a> briefs</td><td class="t">06:02:11</td><td class="t">receipts 288/288</td></tr>
+          <tr><td class="t">offsite mirror</td><td>full estate</td><td>nightly 02:45 copy</td><td class="t">02:47:19</td><td class="t">restore drill 17 Aug <span class="ok">PASS</span></td></tr>
+        </tbody>
+      </table>
+      <p class="footnote">retention — raw feeds 90 d · runs 365 d · library and ledger permanent</p>
+    </section>
+  </div>
+
+  <section id="incidents" style="scroll-margin-top:16px">
+    <div class="secrow"><h2>Incidents — 7 days</h2><div class="rule"></div><span class="note">4 logged · 1 open · median clear 41 min</span></div>
+    <table>
+      <thead><tr><th>When</th><th>Station</th><th>What</th><th>Action taken</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="t">13:12:44</td><td class="svc">svc-03</td>
+          <td>Seat-4 timed out twice, session <span class="m">L-0899</span></td>
+          <td>Seat retried and rejoined; verdict re-signed by all five seats, <a class="d" href="#svc-council">5–0</a></td>
+          <td><span class="chip">resolved 13:14:05</span></td>
+        </tr>
+        <tr>
+          <td class="t">11:38:09</td><td class="svc">svc-01</td>
+          <td>AgWeb RSS answered <span class="clay">403</span> on three polls</td>
+          <td>Source benched 4 h; re-probe <a class="d m" href="#scheduler">15:38:09</a>; eight remaining sources cover the beat</td>
+          <td><span class="chip watch">watch</span></td>
+        </tr>
+        <tr>
+          <td class="t">09:04:31</td><td class="svc">svc-04</td>
+          <td><span class="m">r-1127</span> returned NaN yield, season 3</td>
+          <td>Run voided; RNG seed pinned; clean re-run <a class="d m" href="#svc-simulator">r-1128</a> passed 12:44:19</td>
+          <td><span class="chip">resolved 12:44:19</span></td>
+        </tr>
+        <tr>
+          <td class="t">19 Aug 06:02</td><td class="svc">svc-06</td>
+          <td>SMTP deferred brief <span class="m">d-0282</span> by 41 min</td>
+          <td>Retry ladder cleared it; secondary mail provider armed</td>
+          <td><span class="chip">resolved 06:43:12</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="ownerctl">
+    <div>
+      <div class="lbl">Owner control</div>
+      <p>Halts Reader, Scout, Council and Simulator at their next checkpoint — <b>90 seconds</b> at most; in-flight calls settle for at most <b><a class="d" href="#ledger">$0.40</a></b> further spend; Archivist and Courier drain their queues, then hold; the library, ledger and this page stay readable; nothing restarts without the owner.</p>
+    </div>
+    <button class="suspend" type="button">Suspend generation</button>
+  </div>
+
+  <footer>
+    <span>Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="m">engine room v2.4.1 · ledger reconciled 02:30:11 · rendered 14:53:07 MDT</span>
+  </footer>
+
+</main>
+</body>
+</html>
