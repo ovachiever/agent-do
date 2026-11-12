@@ -1,0 +1,913 @@
+{
+  "schema": "deai-rules-v1",
+  "provenance": {
+    "repository": "substack-writings",
+    "commit": "71c1c20b768dfbaa921fdcedf6b2620959dd1c98",
+    "files": {
+      "scripts/lint-ai-speak.py": "5db8e758046e98dbbf18e1038c9a99b3024dc4879ff1805940b52fec10e7cb34",
+      "voice/ai-speak-lexicon.md": "74a231e635aeab415fdacd8c6a07650b8c38756fbfc5ddf742c4f047899b8335"
+    },
+    "imported_on": "2026-09-18"
+  },
+  "rate_basis_words": 10000,
+  "test": {
+    "alpha": 0.05,
+    "source": "Inherited source-linter per-rule Poisson policy (conventional 5%); not a document-wide false-alarm guarantee or authorship probability."
+  },
+  "measurements": {
+    "human-2026-09-08": {
+      "kind": "reported",
+      "words": 110977,
+      "measured_on": "2026-09-08",
+      "source": "substack-writings/scripts/lint-ai-speak.py + voice/ai-speak-lexicon.md (pinned in provenance)",
+      "method": "Maximum of certified-Erik session (60129 words) and pre-2022 Paul Graham essay (50848 words) rates, rounded as published. Raw per-rule counts were not retained in the rulebook.",
+      "ceilings": {
+        "moreover": 0.09,
+        "furthermore": 0.0,
+        "additionally": 0.0,
+        "ultimately": 0.17,
+        "notably": 0.0,
+        "particularly": 0.81,
+        "essentially": 0.2,
+        "increasingly": 0.39,
+        "remarkable": 0.59,
+        "remarkably": 0.09,
+        "fascinating": 0.2,
+        "profound": 0.0,
+        "profoundly": 0.0,
+        "insights": 0.2,
+        "journey": 0.17,
+        "evolving": 0.0,
+        "akin": 0.0,
+        "vital": 0.0,
+        "significant": 0.09,
+        "comprehensive": 0.67,
+        "various": 0.81,
+        "numerous": 0.18,
+        "overall": 0.36,
+        "valuable": 1.26,
+        "ensure": 3.42,
+        "ensuring": 0.36,
+        "highlight": 0.17,
+        "highlighting": 0.17,
+        "highlights": 0.09,
+        "emphasize": 0.18,
+        "emphasizing": 0.2,
+        "enhance": 0.0,
+        "enhancing": 0.0,
+        "fundamentally": 0.2,
+        "arguably": 0.2,
+        "compelling": 0.0,
+        "innovative": 0.18,
+        "undoubtedly": 0.09,
+        "aligns": 0.17,
+        "realm": 0.0,
+        "landscape": 0.0,
+        "interplay": 0.0,
+        "navigate": 0.0,
+        "navigating": 0.0,
+        "vibrant": 0.0,
+        "invaluable": 0.0,
+        "not-only-but": 0.72,
+        "not-just-but": 1.89,
+        "not-x-its-y": 0.81,
+        "serves-as": 0.18,
+        "triad": 1.98,
+        "from-to": 1.53,
+        "whether-or": 1.17,
+        "instant-answer": 1.08,
+        "bold-lead-bullet": 0.0
+      },
+      "patterns": {
+        "moreover": "\\bmoreover\\b",
+        "furthermore": "\\bfurthermore\\b",
+        "additionally": "\\badditionally\\b",
+        "ultimately": "\\bultimately\\b",
+        "notably": "\\bnotably\\b",
+        "particularly": "\\bparticularly\\b",
+        "essentially": "\\bessentially\\b",
+        "increasingly": "\\bincreasingly\\b",
+        "remarkable": "\\bremarkable\\b",
+        "remarkably": "\\bremarkably\\b",
+        "fascinating": "\\bfascinating\\b",
+        "profound": "\\bprofound\\b",
+        "profoundly": "\\bprofoundly\\b",
+        "insights": "\\binsights\\b",
+        "journey": "\\bjourney\\b",
+        "evolving": "\\bevolving\\b",
+        "akin": "\\bakin\\b",
+        "vital": "\\bvital\\b",
+        "significant": "\\bsignificant\\b",
+        "comprehensive": "\\bcomprehensive\\b",
+        "various": "\\bvarious\\b",
+        "numerous": "\\bnumerous\\b",
+        "overall": "\\boverall\\b",
+        "valuable": "\\bvaluable\\b",
+        "ensure": "\\bensure\\b",
+        "ensuring": "\\bensuring\\b",
+        "highlight": "\\bhighlight\\b",
+        "highlighting": "\\bhighlighting\\b",
+        "highlights": "\\bhighlights\\b",
+        "emphasize": "\\bemphasize\\b",
+        "emphasizing": "\\bemphasizing\\b",
+        "enhance": "\\benhance\\b",
+        "enhancing": "\\benhancing\\b",
+        "fundamentally": "\\bfundamentally\\b",
+        "arguably": "\\barguably\\b",
+        "compelling": "\\bcompelling\\b",
+        "innovative": "\\binnovative\\b",
+        "undoubtedly": "\\bundoubtedly\\b",
+        "aligns": "\\baligns\\b",
+        "realm": "\\brealm\\b",
+        "landscape": "\\blandscape\\b",
+        "interplay": "\\binterplay\\b",
+        "navigate": "\\bnavigate\\b",
+        "navigating": "\\bnavigating\\b",
+        "vibrant": "\\bvibrant\\b",
+        "invaluable": "\\binvaluable\\b",
+        "not-only-but": "\\bnot only\\b[^.?!]{0,80}?\\bbut\\b",
+        "not-just-but": "\\bnot (?:just|merely|simply)\\b[^.?!]{0,80}?\\bbut\\b",
+        "not-x-its-y": "\\b(?:it is|it's|this is|that's) not (?:about |just |merely )?[^.?!]{3,60}?[;,] (?:it is|it's|but)\\b",
+        "serves-as": "\\b(?:serves|stands|functions|acts) as\\b",
+        "triad": "\\b[A-Za-z']+, [a-z']+, and [a-z']+\\b",
+        "from-to": "\\bfrom [a-z' ]{2,25} to [a-z' ]{2,25}\\b",
+        "whether-or": "\\bwhether\\b[^.?!]{3,60}\\bor\\b[^.?!]{3,60}[,.]",
+        "instant-answer": "\\?\\s+(?:It's|It is|The answer|Yes[,.]|No[,.]|Because|Simple[,.:])",
+        "bold-lead-bullet": "(?m)^\\s*[-*]\\s+\\*\\*[^*\\n]+\\*\\*[:.]"
+      }
+    },
+    "erik-2026-09-11": {
+      "kind": "reported",
+      "words": 120102,
+      "measured_on": "2026-09-11",
+      "source": "substack-writings/scripts/lint-ai-speak.py comments for tour-guide, personified-labor, knowing-wink",
+      "method": "Certified-Erik corpus. Published rates rounded to two decimals; resolution floor uses this corpus denominator.",
+      "counts": {
+        "tour-guide": 1,
+        "personified-labor": 1,
+        "knowing-wink": 0
+      },
+      "ceilings": {
+        "tour-guide": 0.08,
+        "personified-labor": 0.08,
+        "knowing-wink": 0.0
+      },
+      "patterns": {
+        "tour-guide": "\\b(?:I want to|let me|allow me to|I'm going to)\\s+(?:walk|explain|show|take you|talk you|break)\\b",
+        "personified-labor": "\\b(?:doing (?:quiet |the |heavy |real )?work|(?:does|doing) the (?:heavy )?lifting|pulling (?:its|their) weight|earning (?:its|their) keep)\\b",
+        "knowing-wink": "\\b(?:and I would know|if I'?m (?:being )?honest|trust me on this|believe me,)"
+      }
+    }
+  },
+  "rules": [
+    {
+      "id": "delve",
+      "tier": 1,
+      "label": "delve",
+      "pattern": "\\bdelv\\w+",
+      "evidence": "house; J&W focal; Kobak r=28; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "tapestry",
+      "tier": 1,
+      "label": "tapestry",
+      "pattern": "\\btapestr\\w+",
+      "evidence": "house; Pangram 'complex tapestry' 82x; WP; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "underscore",
+      "tier": 1,
+      "label": "underscore",
+      "pattern": "\\bunderscor\\w+",
+      "evidence": "J&W focal; Kobak r=13.8; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "showcase",
+      "tier": 1,
+      "label": "showcase",
+      "pattern": "\\bshowcas\\w+",
+      "evidence": "J&W focal; Kobak r=10.7; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "intricate",
+      "tier": 1,
+      "label": "intricate",
+      "pattern": "\\bintricate?\\w*",
+      "evidence": "J&W focal; Liang 11.2-fold; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "meticulous",
+      "tier": 1,
+      "label": "meticulous",
+      "pattern": "\\bmeticulous\\w*",
+      "evidence": "Liang 34.7-fold; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "commendable",
+      "tier": 1,
+      "label": "commendable",
+      "pattern": "\\bcommendabl\\w+",
+      "evidence": "Liang 9.8-fold; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "boast",
+      "tier": 1,
+      "label": "boast",
+      "pattern": "\\bboast(?:s|ed|ing)\\b",
+      "evidence": "J&W focal; WP copula-avoidance; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "garner",
+      "tier": 1,
+      "label": "garner",
+      "pattern": "\\bgarner\\w+",
+      "evidence": "J&W focal; WP; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "groundbreaking",
+      "tier": 1,
+      "label": "groundbreaking",
+      "pattern": "\\bgroundbreaking\\b",
+      "evidence": "J&W focal; WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "surpass",
+      "tier": 1,
+      "label": "surpass",
+      "pattern": "\\bsurpass\\w+",
+      "evidence": "J&W focal; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "advancements",
+      "tier": 1,
+      "label": "advancements",
+      "pattern": "\\badvancements\\b",
+      "evidence": "J&W focal; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "comprehending",
+      "tier": 1,
+      "label": "comprehending",
+      "pattern": "\\bcomprehending\\b",
+      "evidence": "J&W focal; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "myriad",
+      "tier": 1,
+      "label": "myriad",
+      "pattern": "\\bmyriad\\b",
+      "evidence": "WP AI vocabulary; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "plethora",
+      "tier": 1,
+      "label": "plethora",
+      "pattern": "\\bplethora\\b",
+      "evidence": "WP AI vocabulary; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "nestled",
+      "tier": 1,
+      "label": "nestled",
+      "pattern": "\\bnestled\\b",
+      "evidence": "WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "crucial",
+      "tier": 1,
+      "label": "crucial",
+      "pattern": "\\bcrucial\\w*",
+      "evidence": "house; Kobak gap word; WP; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "pivotal",
+      "tier": 1,
+      "label": "pivotal",
+      "pattern": "\\bpivotal\\w*",
+      "evidence": "house; WP; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "robust",
+      "tier": 1,
+      "label": "robust",
+      "pattern": "\\brobust\\w*",
+      "evidence": "house; J&W ChatGPT favorite; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "leverage",
+      "tier": 1,
+      "label": "leverage",
+      "pattern": "\\bleverag\\w+",
+      "evidence": "house; J&W ChatGPT favorite; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "nuanced",
+      "tier": 1,
+      "label": "nuanced",
+      "pattern": "\\bnuanced\\b",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "seamless",
+      "tier": 1,
+      "label": "seamless",
+      "pattern": "\\bseamless\\w*",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "holistic",
+      "tier": 1,
+      "label": "holistic",
+      "pattern": "\\bholistic\\w*",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "paradigm",
+      "tier": 1,
+      "label": "paradigm",
+      "pattern": "\\bparadigm\\w*",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "foundational",
+      "tier": 1,
+      "label": "foundational",
+      "pattern": "\\bfoundational\\b",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "load-bearing",
+      "tier": 1,
+      "label": "load bearing",
+      "pattern": "\\bload-bearing\\b",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "transformative",
+      "tier": 1,
+      "label": "transformative",
+      "pattern": "\\btransformative\\b",
+      "evidence": "WP AI vocabulary; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "unwavering",
+      "tier": 1,
+      "label": "unwavering",
+      "pattern": "\\bunwavering\\b",
+      "evidence": "WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "indelible",
+      "tier": 1,
+      "label": "indelible",
+      "pattern": "\\bindelible\\b",
+      "evidence": "WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "deep-dive",
+      "tier": 1,
+      "label": "deep dive",
+      "pattern": "\\bdeep dive\\b",
+      "evidence": "house; WP; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "at-its-core",
+      "tier": 1,
+      "label": "at its core",
+      "pattern": "\\bat its core\\b",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "unpack",
+      "tier": 1,
+      "label": "unpack",
+      "pattern": "\\bunpack(?:s|ed|ing)?\\b",
+      "evidence": "house; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "testament",
+      "tier": 1,
+      "label": "testament",
+      "pattern": "\\b(?:a|the) testament to\\b",
+      "evidence": "Pangram AI phrase; WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "stands-as",
+      "tier": 1,
+      "label": "stands as",
+      "pattern": "\\bstands as a\\b",
+      "evidence": "WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "plays-a-role",
+      "tier": 1,
+      "label": "plays a role",
+      "pattern": "\\bplays? a (?:crucial|vital|key|pivotal|significant) role\\b",
+      "evidence": "WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "todays-world",
+      "tier": 1,
+      "label": "todays world",
+      "pattern": "\\bin today's [a-z-]+(?: [a-z-]+){0,2} (?:world|landscape|society|era)\\b",
+      "evidence": "Pangram AI phrase; WP; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "rapidly-evolving",
+      "tier": 1,
+      "label": "rapidly evolving",
+      "pattern": "\\brapidly evolving\\b",
+      "evidence": "WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "ever-evolving",
+      "tier": 1,
+      "label": "ever evolving",
+      "pattern": "\\bever-evolving\\b",
+      "evidence": "WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "fast-paced",
+      "tier": 1,
+      "label": "fast paced",
+      "pattern": "\\bfast-paced\\b",
+      "evidence": "Pangram AI phrase; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "worth-noting",
+      "tier": 1,
+      "label": "worth noting",
+      "pattern": "\\bit(?: i|')s (?:important|worth) (?:to note|noting)\\b",
+      "evidence": "WP hedged-note formula; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "in-conclusion",
+      "tier": 1,
+      "label": "in conclusion",
+      "pattern": "\\bin conclusion\\b",
+      "evidence": "0 hits in human corpus; generic-AI sample 9.5/10k; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "diverse-array",
+      "tier": 1,
+      "label": "diverse array",
+      "pattern": "\\bdiverse array\\b",
+      "evidence": "WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "in-the-heart",
+      "tier": 1,
+      "label": "in the heart",
+      "pattern": "\\bin the heart of\\b",
+      "evidence": "WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "enduring-legacy",
+      "tier": 1,
+      "label": "enduring legacy",
+      "pattern": "\\benduring legacy\\b",
+      "evidence": "WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "deeply-rooted",
+      "tier": 1,
+      "label": "deeply rooted",
+      "pattern": "\\bdeeply rooted\\b",
+      "evidence": "WP puffery; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "rich-history",
+      "tier": 1,
+      "label": "rich history",
+      "pattern": "\\brich (?:history|heritage|cultural)\\b",
+      "evidence": "WP buzzspeak; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "em-dash",
+      "tier": 1,
+      "label": "em dash",
+      "pattern": "—",
+      "evidence": "house em-dash ban; Pangram 10x AI multiplier; ai-speak-lexicon.md, Tier 1"
+    },
+    {
+      "id": "structural",
+      "tier": 1,
+      "label": "structural",
+      "pattern": "\\bstructural\\w*",
+      "evidence": "House ruling 2026-08-31; ai-speak-lexicon.md Tier 1 and substack-writings/CLAUDE.md voice stack. Strict essay policy; other registers whitelist literal usage."
+    },
+    {
+      "id": "architecture",
+      "tier": 1,
+      "label": "architecture",
+      "pattern": "\\barchitecture\\w*",
+      "evidence": "House ruling 2026-08-31; ai-speak-lexicon.md Tier 1 and substack-writings/CLAUDE.md voice stack. Strict essay policy; other registers whitelist literal usage."
+    },
+    {
+      "id": "moreover",
+      "tier": 2,
+      "label": "moreover",
+      "pattern": "\\bmoreover\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "furthermore",
+      "tier": 2,
+      "label": "furthermore",
+      "pattern": "\\bfurthermore\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "additionally",
+      "tier": 2,
+      "label": "additionally",
+      "pattern": "\\badditionally\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "ultimately",
+      "tier": 2,
+      "label": "ultimately",
+      "pattern": "\\bultimately\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "notably",
+      "tier": 2,
+      "label": "notably",
+      "pattern": "\\bnotably\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "particularly",
+      "tier": 2,
+      "label": "particularly",
+      "pattern": "\\bparticularly\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "essentially",
+      "tier": 2,
+      "label": "essentially",
+      "pattern": "\\bessentially\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "increasingly",
+      "tier": 2,
+      "label": "increasingly",
+      "pattern": "\\bincreasingly\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "remarkable",
+      "tier": 2,
+      "label": "remarkable",
+      "pattern": "\\bremarkable\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "remarkably",
+      "tier": 2,
+      "label": "remarkably",
+      "pattern": "\\bremarkably\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "fascinating",
+      "tier": 2,
+      "label": "fascinating",
+      "pattern": "\\bfascinating\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "profound",
+      "tier": 2,
+      "label": "profound",
+      "pattern": "\\bprofound\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "profoundly",
+      "tier": 2,
+      "label": "profoundly",
+      "pattern": "\\bprofoundly\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "insights",
+      "tier": 2,
+      "label": "insights",
+      "pattern": "\\binsights\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "journey",
+      "tier": 2,
+      "label": "journey",
+      "pattern": "\\bjourney\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "evolving",
+      "tier": 2,
+      "label": "evolving",
+      "pattern": "\\bevolving\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "akin",
+      "tier": 2,
+      "label": "akin",
+      "pattern": "\\bakin\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "vital",
+      "tier": 2,
+      "label": "vital",
+      "pattern": "\\bvital\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "significant",
+      "tier": 2,
+      "label": "significant",
+      "pattern": "\\bsignificant\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "comprehensive",
+      "tier": 2,
+      "label": "comprehensive",
+      "pattern": "\\bcomprehensive\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "various",
+      "tier": 2,
+      "label": "various",
+      "pattern": "\\bvarious\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "numerous",
+      "tier": 2,
+      "label": "numerous",
+      "pattern": "\\bnumerous\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "overall",
+      "tier": 2,
+      "label": "overall",
+      "pattern": "\\boverall\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "valuable",
+      "tier": 2,
+      "label": "valuable",
+      "pattern": "\\bvaluable\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "ensure",
+      "tier": 2,
+      "label": "ensure",
+      "pattern": "\\bensure\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "ensuring",
+      "tier": 2,
+      "label": "ensuring",
+      "pattern": "\\bensuring\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "highlight",
+      "tier": 2,
+      "label": "highlight",
+      "pattern": "\\bhighlight\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "highlighting",
+      "tier": 2,
+      "label": "highlighting",
+      "pattern": "\\bhighlighting\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "highlights",
+      "tier": 2,
+      "label": "highlights",
+      "pattern": "\\bhighlights\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "emphasize",
+      "tier": 2,
+      "label": "emphasize",
+      "pattern": "\\bemphasize\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "emphasizing",
+      "tier": 2,
+      "label": "emphasizing",
+      "pattern": "\\bemphasizing\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "enhance",
+      "tier": 2,
+      "label": "enhance",
+      "pattern": "\\benhance\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "enhancing",
+      "tier": 2,
+      "label": "enhancing",
+      "pattern": "\\benhancing\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "fundamentally",
+      "tier": 2,
+      "label": "fundamentally",
+      "pattern": "\\bfundamentally\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "arguably",
+      "tier": 2,
+      "label": "arguably",
+      "pattern": "\\barguably\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "compelling",
+      "tier": 2,
+      "label": "compelling",
+      "pattern": "\\bcompelling\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "innovative",
+      "tier": 2,
+      "label": "innovative",
+      "pattern": "\\binnovative\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "undoubtedly",
+      "tier": 2,
+      "label": "undoubtedly",
+      "pattern": "\\bundoubtedly\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "aligns",
+      "tier": 2,
+      "label": "aligns",
+      "pattern": "\\baligns\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "realm",
+      "tier": 2,
+      "label": "realm",
+      "pattern": "\\brealm\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "landscape",
+      "tier": 2,
+      "label": "landscape",
+      "pattern": "\\blandscape\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "interplay",
+      "tier": 2,
+      "label": "interplay",
+      "pattern": "\\binterplay\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "navigate",
+      "tier": 2,
+      "label": "navigate",
+      "pattern": "\\bnavigate\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "navigating",
+      "tier": 2,
+      "label": "navigating",
+      "pattern": "\\bnavigating\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "vibrant",
+      "tier": 2,
+      "label": "vibrant",
+      "pattern": "\\bvibrant\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "invaluable",
+      "tier": 2,
+      "label": "invaluable",
+      "pattern": "\\binvaluable\\b",
+      "evidence": "ai-speak-lexicon.md Tier 2; measured 2026-09-08"
+    },
+    {
+      "id": "not-only-but",
+      "tier": 3,
+      "label": "not only ... but",
+      "pattern": "\\bnot only\\b[^.?!]{0,80}?\\bbut\\b",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "not-just-but",
+      "tier": 3,
+      "label": "not just/merely X but Y",
+      "pattern": "\\bnot (?:just|merely|simply)\\b[^.?!]{0,80}?\\bbut\\b",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "not-x-its-y",
+      "tier": 3,
+      "label": "it's not X, it's Y",
+      "pattern": "\\b(?:it is|it's|this is|that's) not (?:about |just |merely )?[^.?!]{3,60}?[;,] (?:it is|it's|but)\\b",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "serves-as",
+      "tier": 3,
+      "label": "serves/stands/functions/acts as",
+      "pattern": "\\b(?:serves|stands|functions|acts) as\\b",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "triad",
+      "tier": 3,
+      "label": "triad: A, B, and C",
+      "pattern": "\\b[A-Za-z']+, [a-z']+, and [a-z']+\\b",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "from-to",
+      "tier": 3,
+      "label": "from X to Y sweep",
+      "pattern": "\\bfrom [a-z' ]{2,25} to [a-z' ]{2,25}\\b",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "whether-or",
+      "tier": 3,
+      "label": "whether X or Y",
+      "pattern": "\\bwhether\\b[^.?!]{3,60}\\bor\\b[^.?!]{3,60}[,.]",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "instant-answer",
+      "tier": 3,
+      "label": "question then instant answer",
+      "pattern": "\\?\\s+(?:It's|It is|The answer|Yes[,.]|No[,.]|Because|Simple[,.:])",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "bold-lead-bullet",
+      "tier": 3,
+      "label": "bold-lead bullet",
+      "pattern": "(?m)^\\s*[-*]\\s+\\*\\*[^*\\n]+\\*\\*[:.]",
+      "evidence": "ai-speak-lexicon.md Tier 3; measured 2026-09-08"
+    },
+    {
+      "id": "tour-guide",
+      "tier": 3,
+      "label": "tour-guide announcement",
+      "pattern": "\\b(?:I want to|let me|allow me to|I'm going to)\\s+(?:walk|explain|show|take you|talk you|break)\\b",
+      "evidence": "House ruling 2026-09-10/11; certified corpus counts in source linter"
+    },
+    {
+      "id": "personified-labor",
+      "tier": 3,
+      "label": "personified labor (doing quiet work etc.)",
+      "pattern": "\\b(?:doing (?:quiet |the |heavy |real )?work|(?:does|doing) the (?:heavy )?lifting|pulling (?:its|their) weight|earning (?:its|their) keep)\\b",
+      "evidence": "House ruling 2026-09-10/11; certified corpus counts in source linter"
+    },
+    {
+      "id": "knowing-wink",
+      "tier": 3,
+      "label": "knowing wink (and I would know etc.)",
+      "pattern": "\\b(?:and I would know|if I'?m (?:being )?honest|trust me on this|believe me,)",
+      "evidence": "House ruling 2026-09-10/11; certified corpus counts in source linter"
+    }
+  ]
+}
