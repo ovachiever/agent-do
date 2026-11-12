@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Engine Room — Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair2:rgba(231,227,218,0.32);
+    --sage:hsl(158,30%,55%);
+    --clay:hsl(12,42%,58%);
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{font-variant-numeric:tabular-nums}
+  body{background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans)}
+  .page{max-width:1440px;margin:0 auto;padding:0 28px}
+  .mono{font-family:var(--mono)}
+  .lab{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .fig{border-bottom:1px dotted hsla(158,30%,55%,.55);padding-bottom:1px;cursor:pointer}
+  .sage{color:var(--sage)}
+  .clay{color:var(--clay)}
+  .mut{color:var(--mut)}
+  .of{color:var(--mut)}
+
+  /* ── top nav ─────────────────────────────── */
+  nav{display:flex;align-items:center;gap:26px;height:48px;border-bottom:1px solid var(--hair)}
+  .wordmark{font-family:var(--serif);font-size:17px;color:var(--ink);letter-spacing:.01em}
+  .wordmark i{font-style:normal;display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sage);margin-right:8px;vertical-align:1px}
+  nav a{font-size:13px;color:var(--mut);text-decoration:none;padding:15px 0 13px;border-bottom:2px solid transparent}
+  nav a.active{color:var(--ink);border-bottom-color:var(--sage)}
+  .nav-right{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ── lede ────────────────────────────────── */
+  .lede{display:flex;justify-content:space-between;align-items:flex-start;gap:32px;padding:14px 0 12px}
+  .lede-left{max-width:960px}
+  .kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .verdict{font-family:var(--serif);font-size:19px;line-height:1.45;color:var(--ink);margin-top:5px}
+  .verdict .fig{padding-bottom:0}
+  .suspend-wrap{text-align:right;flex:0 0 288px;padding-top:2px}
+  .suspend{display:inline-block;height:38px;padding:0 20px;background:transparent;border:1px solid var(--hair2);color:var(--ink);font:12px var(--sans);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+  .suspend:hover{border-color:var(--ink)}
+  .consequence{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.4}
+
+  /* ── flow strip ──────────────────────────── */
+  .strip{display:flex;align-items:baseline;gap:14px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:8px 0}
+  .strip .chain{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;font-family:var(--mono)}
+  .strip .noun{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+  .strip .n{font-size:13px;color:var(--sage)}
+  .strip .arr{color:var(--mut);font-size:12px}
+  .strip .drillnote{margin-left:auto;font-size:12px;color:var(--mut)}
+  .strip .drillnote b{font-weight:400;border-bottom:1px dotted hsla(158,30%,55%,.55)}
+
+  /* ── main grid ───────────────────────────── */
+  main{display:grid;grid-template-columns:1fr 468px;gap:30px;margin-top:16px;align-items:start}
+
+  /* left: the line */
+  .spine{display:flex;flex-direction:column}
+  .srow{display:grid;grid-template-columns:216px 22px 1fr;align-items:stretch}
+  .blk{border:1px solid var(--hair);padding:9px 12px 10px;position:relative;display:flex;flex-direction:column;gap:3px}
+  .blk .idx{position:absolute;top:8px;right:10px;font-family:var(--mono);font-size:14px;color:var(--fnt)}
+  .blk .name{font-size:13px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink)}
+  .blk .role{font-size:12px;color:var(--mut);line-height:1.35}
+  .blk .live{margin-top:auto;font-family:var(--mono);font-size:12px;color:var(--mut);padding-top:5px}
+  .blk .live .fig{color:var(--ink)}
+  .rail{align-self:center;height:1px;background:var(--hair2)}
+  .dossier{border:1px solid var(--hair);background:rgba(231,227,218,0.02);padding:8px 12px 9px;display:flex;flex-direction:column;gap:5px}
+  .dhead{display:flex;align-items:baseline;gap:10px}
+  .dot{width:7px;height:7px;border-radius:50%;align-self:center;flex:0 0 7px}
+  .dot.on{background:var(--sage)}
+  .dot.off{background:transparent;border:1px solid var(--mut)}
+  .state{font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+  .state.on{color:var(--sage)}
+  .state.off{color:var(--mut)}
+  .since{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .since .fig{color:var(--ink)}
+  .dcost{margin-left:auto;font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .dcost .t{font-size:12px;color:var(--mut);letter-spacing:.06em;text-transform:uppercase;font-family:var(--sans)}
+  .acts{display:flex;flex-direction:column;gap:2px}
+  .act{display:flex;gap:10px;font-size:12.5px;color:var(--mut);line-height:1.4}
+  .act .t{font-family:var(--mono);font-size:12px;color:var(--ink);flex:0 0 62px}
+  .act .id{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .act .fig{color:var(--ink)}
+  .nums{display:flex;flex-wrap:wrap;gap:4px 16px;border-top:1px solid var(--hair);padding-top:6px}
+  .kv{display:flex;align-items:baseline;gap:6px}
+  .kv .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+  .kv .v{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+
+  /* connectors */
+  .conn{position:relative;height:30px;width:100%}
+  .conn svg{position:absolute;left:0;top:0}
+  .conn .clabel{position:absolute;left:132px;top:50%;transform:translateY(-50%);display:flex;align-items:baseline;gap:8px;font-family:var(--mono)}
+  .conn .noun{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);font-family:var(--sans)}
+  .conn .n{font-size:13px;color:var(--sage)}
+  .conn .sub{font-size:12px;color:var(--mut)}
+  .conn .sub .fig{color:var(--ink)}
+  .conn.entry{height:22px}
+  .conn.entry .clabel{left:132px}
+
+  .terminal{width:216px;border:1px solid var(--hair2);padding:7px 10px;text-align:center}
+  .terminal .t1{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .terminal .t2{font-family:var(--mono);font-size:12.5px;color:var(--ink);margin-top:3px}
+
+  /* right rail */
+  .rrail{display:flex;flex-direction:column;gap:16px}
+  .panel{border:1px solid var(--hair);padding:10px 12px 12px}
+  .ptitle{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--hair);padding-bottom:6px;margin-bottom:7px}
+  .ptitle .r{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .ptitle .r .fig{color:var(--ink)}
+
+  table{width:100%;border-collapse:collapse}
+  th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);font-weight:400;text-align:right;padding:1px 0 4px}
+  th:first-child{text-align:left}
+  th.bar{width:56px}
+  td{font-family:var(--mono);font-size:12.5px;color:var(--ink);text-align:right;padding:3px 0;border-top:1px solid var(--hair)}
+  td:first-child{font-family:var(--sans);font-size:12.5px;text-align:left;color:var(--ink)}
+  td.bar{padding-right:8px;padding-left:8px}
+  td .minibar{display:block;height:5px;border:1px solid var(--hair);position:relative}
+  td .minibar i{position:absolute;left:0;top:0;bottom:0;background:var(--sage)}
+  tr.total td{border-top:1px solid var(--hair2);color:var(--ink)}
+  tr.total td:first-child{letter-spacing:.06em;text-transform:uppercase;font-size:12px;color:var(--mut)}
+
+  .capbar{position:relative;height:8px;border:1px solid var(--hair);margin-top:10px}
+  .capbar .fill{position:absolute;left:0;top:0;bottom:0;background:var(--sage)}
+  .capbar .tick{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--hair2)}
+  .capline{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:6px}
+  .capline .fig{color:var(--ink)}
+  .paceline{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:4px}
+  .paceline .fig{color:var(--ink)}
+
+  .krow{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-top:1px solid var(--hair)}
+  .krow:first-of-type{border-top:0;padding-top:1px}
+  .krow .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);flex:0 0 88px;padding-top:1px}
+  .krow .v{font-family:var(--mono);font-size:12.5px;color:var(--ink);text-align:right}
+  .krow .v .of{color:var(--mut)}
+
+  .inc{display:grid;grid-template-columns:64px 1fr 58px;gap:2px 10px;padding:6px 0;border-top:1px solid var(--hair)}
+  .inc:first-of-type{border-top:0;padding-top:2px}
+  .inc .t{font-family:var(--mono);font-size:12px;color:var(--clay)}
+  .inc .what{font-size:12.5px;color:var(--ink);line-height:1.35}
+  .inc .lost{font-family:var(--mono);font-size:12px;color:var(--clay);text-align:right}
+  .inc .action{grid-column:2/4;font-size:12px;color:var(--mut);line-height:1.35}
+  .inc .action .fig{color:var(--ink)}
+
+  /* footer */
+  footer{display:flex;justify-content:space-between;align-items:baseline;gap:24px;border-top:1px solid var(--hair);margin-top:22px;padding:11px 0 22px;font-size:12px;color:var(--mut)}
+  footer .motto{color:var(--ink)}
+  footer .mono{font-size:12px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav>
+    <span class="wordmark"><i></i>Palingenesis</span>
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#">Library</a>
+    <a href="#">Portfolio</a>
+    <a href="#">Simulation</a>
+    <a href="#" class="active">Engine Room</a>
+    <span class="nav-right">2026-08-22 · <span class="fig">15:42:07</span></span>
+  </nav>
+
+  <div class="lede">
+    <div class="lede-left">
+      <div class="kicker">Engine Room — owner's console · six services on one line</div>
+      <div class="verdict">Running: cycle <span class="fig">11</span> of <span class="fig">16</span> in flight, <span class="fig">$59.38</span> spent of the <span class="fig">$500.00</span> hard cap, projected close <span class="fig">$86.37</span> — next cycle fires <span class="fig">16:30:00</span>.</div>
+    </div>
+    <div class="suspend-wrap">
+      <button class="suspend">Suspend generation</button>
+      <div class="consequence">Halts all six services at the end of their current acts — no further spend.</div>
+    </div>
+  </div>
+
+  <div class="strip">
+    <span class="lab">Today's flow</span>
+    <span class="chain">
+      <span class="noun">papers</span> <span class="n fig">47</span> <span class="arr">→</span>
+      <span class="noun">evidence</span> <span class="n fig">284</span> <span class="arr">→</span>
+      <span class="noun">candidates</span> <span class="n fig">12</span> <span class="arr">→</span>
+      <span class="noun">verdicts</span> <span class="n fig">9</span> <span class="arr">→</span>
+      <span class="noun">results</span> <span class="n fig">31</span> <span class="arr">→</span>
+      <span class="noun">records</span> <span class="n fig">9</span> <span class="arr">→</span>
+      <span class="noun">brief</span> <span class="n fig">1</span> <span class="sub mut">due 17:30:00</span>
+    </span>
+    <span class="drillnote">every <b>underlined figure</b> opens its lineage</span>
+  </div>
+
+  <main>
+
+    <!-- ─────────── THE LINE ─────────── -->
+    <div class="spine">
+
+      <div class="conn entry">
+        <svg width="216" height="22" viewBox="0 0 216 22" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="15" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 14 L113 14 L108 22 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">sources watched</span> <span class="n fig">132</span></span>
+      </div>
+
+      <!-- 01 SCOUT -->
+      <div class="srow">
+        <div class="blk">
+          <span class="idx">01</span>
+          <span class="name">Scout</span>
+          <span class="role">finds new sources</span>
+          <span class="live">next sweep <span class="fig">16:30:00</span></span>
+        </div>
+        <div class="rail"></div>
+        <div class="dossier">
+          <div class="dhead">
+            <span class="dot off"></span><span class="state off">idle</span>
+            <span class="since">since <span class="fig">15:08:44</span> · <span class="fig">33 min</span></span>
+            <span class="dcost"><span class="t">today</span> <span class="fig">$4.31</span></span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="t fig">15:08:44</span><span>closed sweep <span class="fig">11</span> — <span class="fig">12</span> feeds checked, <span class="fig">4</span> new papers taken</span></div>
+            <div class="act"><span class="t fig">15:06:19</span><span>added source Journal of Plant Nutrition &amp; Soil Science — RSS, trust tier <span class="fig">2</span></span></div>
+            <div class="act"><span class="t fig">15:00:12</span><span>opened sweep <span class="fig">11</span> — <span class="fig">12</span> feeds, <span class="fig">3</span> registries</span></div>
+          </div>
+          <div class="nums">
+            <span class="kv"><span class="k">feeds checked</span><span class="v fig">132</span></span>
+            <span class="kv"><span class="k">new papers</span><span class="v fig">47</span></span>
+            <span class="kv"><span class="k">sources added</span><span class="v fig">8</span></span>
+            <span class="kv"><span class="k">dead feeds flagged</span><span class="v fig">2</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn">
+        <svg width="216" height="30" viewBox="0 0 216 30" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="23" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 22 L113 22 L108 30 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">papers</span> <span class="n fig">47</span></span>
+      </div>
+
+      <!-- 02 READER -->
+      <div class="srow">
+        <div class="blk">
+          <span class="idx">02</span>
+          <span class="name">Reader</span>
+          <span class="role">reads papers, extracts claims</span>
+          <span class="live">queue <span class="fig">4</span> papers</span>
+        </div>
+        <div class="rail"></div>
+        <div class="dossier">
+          <div class="dhead">
+            <span class="dot on"></span><span class="state on">running</span>
+            <span class="since">since <span class="fig">15:12:03</span> · <span class="fig">30 min</span></span>
+            <span class="dcost"><span class="t">today</span> <span class="fig">$18.72</span></span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="t fig">15:41:37</span><span>extracted <span class="fig">6</span> claims from <span class="id fig">pap-4712</span> — drought-priming, maize</span></div>
+            <div class="act"><span class="t fig">15:38:02</span><span>parsed <span class="id fig">pap-4711</span> — <span class="fig">14</span> pages, <span class="fig">2</span> tables, <span class="fig">9</span> claims — root microbiome, wheat</span></div>
+            <div class="act"><span class="t fig">15:12:03</span><span>opened batch <span class="fig">11</span> — <span class="fig">8</span> papers: <span class="fig">4</span> done, <span class="fig">4</span> in queue</span></div>
+          </div>
+          <div class="nums">
+            <span class="kv"><span class="k">papers read</span><span class="v"><span class="fig">43</span><span class="of"> of 47</span></span></span>
+            <span class="kv"><span class="k">claims extracted</span><span class="v fig">284</span></span>
+            <span class="kv"><span class="k">tables parsed</span><span class="v fig">61</span></span>
+            <span class="kv"><span class="k">avg claims/paper</span><span class="v fig">6.6</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn">
+        <svg width="216" height="30" viewBox="0 0 216 30" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="23" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 22 L113 22 L108 30 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">evidence</span> <span class="n fig">284</span> <span class="sub">→ candidates <span class="fig">12</span></span></span>
+      </div>
+
+      <!-- 03 COUNCIL -->
+      <div class="srow">
+        <div class="blk">
+          <span class="idx">03</span>
+          <span class="name">Council</span>
+          <span class="role">argues candidates to verdicts</span>
+          <span class="live"><span class="fig">cnd-2214</span> on the floor</span>
+        </div>
+        <div class="rail"></div>
+        <div class="dossier">
+          <div class="dhead">
+            <span class="dot on"></span><span class="state on">deliberating</span>
+            <span class="since">since <span class="fig">15:20:02</span> · <span class="fig">22 min</span></span>
+            <span class="dcost"><span class="t">today</span> <span class="fig">$23.90</span></span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="t fig">15:40:19</span><span>seat <span class="fig">3</span> objection on <span class="id fig">cnd-2214</span> — cost-per-acre claim unsourced</span></div>
+            <div class="act"><span class="t fig">15:31:56</span><span>verdict: advance <span class="id fig">cnd-2213</span> — foliar silicon, rice — <span class="fig">4–1</span></span></div>
+            <div class="act"><span class="t fig">15:20:02</span><span>opened session <span class="fig">9</span> — <span class="id fig">cnd-2213</span>, <span class="id fig">cnd-2214</span> · <span class="fig">5</span> seats</span></div>
+          </div>
+          <div class="nums">
+            <span class="kv"><span class="k">argued</span><span class="v fig">12</span></span>
+            <span class="kv"><span class="k">verdicts</span><span class="v fig">9</span></span>
+            <span class="kv"><span class="k">advance</span><span class="v fig">4</span></span>
+            <span class="kv"><span class="k">reject</span><span class="v fig">3</span></span>
+            <span class="kv"><span class="k">revisit</span><span class="v fig">2</span></span>
+            <span class="kv"><span class="k">on floor</span><span class="v fig">1</span></span>
+            <span class="kv"><span class="k">queued</span><span class="v fig">2</span></span>
+            <span class="kv"><span class="k">avg/verdict</span><span class="v fig">18 min</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn">
+        <svg width="216" height="30" viewBox="0 0 216 30" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="23" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 22 L113 22 L108 30 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">verdicts</span> <span class="n fig">9</span> <span class="sub">advance <span class="fig">4</span> · reject <span class="fig">3</span> · revisit <span class="fig">2</span></span></span>
+      </div>
+
+      <!-- 04 SIMULATOR -->
+      <div class="srow">
+        <div class="blk">
+          <span class="idx">04</span>
+          <span class="name">Simulator</span>
+          <span class="role">tests ideas in models</span>
+          <span class="live"><span class="fig">sim-0428</span> running</span>
+        </div>
+        <div class="rail"></div>
+        <div class="dossier">
+          <div class="dhead">
+            <span class="dot on"></span><span class="state on">running</span>
+            <span class="since">since <span class="fig">15:29:40</span> · <span class="fig">12 min</span></span>
+            <span class="dcost"><span class="t">today</span> <span class="fig">$9.84</span></span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="t fig">15:39:55</span><span><span class="id fig">sim-0427</span> finished — nitrogen split-timing (<span class="id fig">cnd-2209</span>): yield <span class="fig">+4.2% ±1.1</span>, <span class="fig">400</span> runs</span></div>
+            <div class="act"><span class="t fig">15:34:12</span><span><span class="id fig">sim-0426</span> finished — nitrogen split-timing (<span class="id fig">cnd-2209</span>): N-leach <span class="fig">−2.8%</span>, <span class="fig">400</span> runs</span></div>
+            <div class="act"><span class="t fig">15:29:40</span><span>started <span class="id fig">sim-0428</span> — cover-crop rotation (<span class="id fig">cnd-2207</span>), <span class="fig">3</span> soil profiles</span></div>
+          </div>
+          <div class="nums">
+            <span class="kv"><span class="k">runs</span><span class="v fig">31</span></span>
+            <span class="kv"><span class="k">passed</span><span class="v fig">26</span></span>
+            <span class="kv"><span class="k">failed</span><span class="v"><span class="fig clay">3</span></span></span>
+            <span class="kv"><span class="k">diverged</span><span class="v"><span class="fig clay">2</span></span></span>
+            <span class="kv"><span class="k">model-hours</span><span class="v fig">8.4</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn">
+        <svg width="216" height="30" viewBox="0 0 216 30" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="23" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 22 L113 22 L108 30 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">results</span> <span class="n fig">31</span></span>
+      </div>
+
+      <!-- 05 ARCHIVIST -->
+      <div class="srow">
+        <div class="blk">
+          <span class="idx">05</span>
+          <span class="name">Archivist</span>
+          <span class="role">files verdicts and lineage</span>
+          <span class="live">queue <span class="fig">0</span></span>
+        </div>
+        <div class="rail"></div>
+        <div class="dossier">
+          <div class="dhead">
+            <span class="dot off"></span><span class="state off">idle</span>
+            <span class="since">since <span class="fig">15:32:20</span> · <span class="fig">10 min</span></span>
+            <span class="dcost"><span class="t">today</span> <span class="fig">$1.67</span></span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="t fig">15:32:20</span><span>filed <span class="id fig">rec-9161</span> — <span class="id fig">cnd-2213</span> advance + lineage: <span class="fig">9</span> claims, <span class="fig">3</span> sims, <span class="fig">2</span> sources</span></div>
+            <div class="act"><span class="t fig">15:30:04</span><span>linked <span class="id fig">sim-0426</span> into <span class="id fig">cnd-2209</span> lineage</span></div>
+            <div class="act"><span class="t fig">15:17:47</span><span>filed <span class="id fig">rec-9160</span> — <span class="id fig">cnd-2212</span> reject + grounds</span></div>
+          </div>
+          <div class="nums">
+            <span class="kv"><span class="k">records filed</span><span class="v fig">9</span></span>
+            <span class="kv"><span class="k">lineage links</span><span class="v fig">214</span></span>
+            <span class="kv"><span class="k">integrity checks</span><span class="v"><span class="fig">9</span><span class="of"> of 9 pass</span></span></span>
+            <span class="kv"><span class="k">queue</span><span class="v fig">0</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn">
+        <svg width="216" height="30" viewBox="0 0 216 30" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="23" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 22 L113 22 L108 30 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">records</span> <span class="n fig">9</span></span>
+      </div>
+
+      <!-- 06 COURIER -->
+      <div class="srow">
+        <div class="blk">
+          <span class="idx">06</span>
+          <span class="name">Courier</span>
+          <span class="role">delivers the brief</span>
+          <span class="live">№612 due <span class="fig">17:30:00</span></span>
+        </div>
+        <div class="rail"></div>
+        <div class="dossier">
+          <div class="dhead">
+            <span class="dot off"></span><span class="state off">waiting</span>
+            <span class="since">since <span class="fig">14:41:09</span> · <span class="fig">61 min</span></span>
+            <span class="dcost"><span class="t">today</span> <span class="fig">$0.94</span></span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="t fig">14:41:09</span><span>staged evening brief <span class="id fig">№612</span> §3 — <span class="fig">4</span> advances, <span class="fig">2</span> revisits</span></div>
+            <div class="act"><span class="t fig">12:02:31</span><span>delivered midday digest — <span class="fig">1</span> recipient, opened <span class="fig">12:36:55</span></span></div>
+            <div class="act"><span class="t fig">07:30:12</span><span>delivered morning brief <span class="id fig">№611</span> — Aug 21 close, <span class="fig">11</span> verdicts</span></div>
+          </div>
+          <div class="nums">
+            <span class="kv"><span class="k">delivered</span><span class="v fig">2</span></span>
+            <span class="kv"><span class="k">due</span><span class="v"><span class="fig">1</span><span class="of"> at 17:30:00</span></span></span>
+            <span class="kv"><span class="k">sections staged</span><span class="v"><span class="fig">3</span><span class="of"> of 5</span></span></span>
+            <span class="kv"><span class="k">recipients</span><span class="v fig">1</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn">
+        <svg width="216" height="30" viewBox="0 0 216 30" aria-hidden="true">
+          <line x1="108" y1="0" x2="108" y2="23" stroke="#A69D90" stroke-width="1.5"/>
+          <path d="M103 22 L113 22 L108 30 Z" fill="#A69D90"/>
+        </svg>
+        <span class="clabel"><span class="noun">brief</span> <span class="n fig">№612</span> <span class="sub">due <span class="fig">17:30:00</span></span></span>
+      </div>
+
+      <div class="terminal">
+        <div class="t1">Owner's desk</div>
+        <div class="t2"><span class="fig">2</span> delivered · <span class="fig">1</span> due today</div>
+      </div>
+
+    </div>
+
+    <!-- ─────────── RIGHT RAIL ─────────── -->
+    <div class="rrail">
+
+      <!-- DAY LEDGER -->
+      <div class="panel">
+        <div class="ptitle"><span class="lab">Day ledger</span><span class="r">vs <span class="fig">$500.00</span> hard cap</span></div>
+        <table>
+          <tr><th>service</th><th class="bar"></th><th>$ today</th><th>share</th><th>$/unit</th></tr>
+          <tr><td>Council</td><td class="bar"><span class="minibar"><i style="width:40%"></i></span></td><td class="fig">23.90</td><td class="fig">40.2%</td><td class="fig">2.656<span class="of">/verdict</span></td></tr>
+          <tr><td>Reader</td><td class="bar"><span class="minibar"><i style="width:32%"></i></span></td><td class="fig">18.72</td><td class="fig">31.5%</td><td class="fig">0.066<span class="of">/claim</span></td></tr>
+          <tr><td>Simulator</td><td class="bar"><span class="minibar"><i style="width:17%"></i></span></td><td class="fig">9.84</td><td class="fig">16.6%</td><td class="fig">0.317<span class="of">/run</span></td></tr>
+          <tr><td>Scout</td><td class="bar"><span class="minibar"><i style="width:7%"></i></span></td><td class="fig">4.31</td><td class="fig">7.3%</td><td class="fig">0.092<span class="of">/paper</span></td></tr>
+          <tr><td>Archivist</td><td class="bar"><span class="minibar"><i style="width:3%"></i></span></td><td class="fig">1.67</td><td class="fig">2.8%</td><td class="fig">0.186<span class="of">/record</span></td></tr>
+          <tr><td>Courier</td><td class="bar"><span class="minibar"><i style="width:2%"></i></span></td><td class="fig">0.94</td><td class="fig">1.6%</td><td class="fig">0.470<span class="of">/brief</span></td></tr>
+          <tr class="total"><td>total</td><td class="bar"></td><td class="fig">59.38</td><td class="fig">100%</td><td></td></tr>
+        </table>
+        <div class="capbar"><span class="fill" style="width:11.9%"></span><span class="tick" style="left:17.3%"></span></div>
+        <div class="capline"><span>spent <span class="fig">$59.38</span> · <span class="fig">11.9%</span> of cap</span><span>tick: projected <span class="fig">17.3%</span></span><span>headroom <span class="fig">$440.62</span></span></div>
+        <div class="paceline"><span>pace <span class="fig">$3.78/hr</span> since 00:00</span><span>avg <span class="fig">$5.40</span>/cycle</span><span>projected close <span class="fig">$86.37</span></span></div>
+      </div>
+
+      <!-- SCHEDULER -->
+      <div class="panel">
+        <div class="ptitle"><span class="lab">Scheduler</span><span class="r">cadence <span class="fig">90 min</span></span></div>
+        <div class="krow"><span class="k">cycle</span><span class="v"><span class="fig">11</span><span class="of"> of 16</span> — opened <span class="fig">15:00:00</span> · elapsed <span class="fig">42:07</span></span></div>
+        <div class="krow"><span class="k">next</span><span class="v">cycle <span class="fig">12</span> · <span class="fig">16:30:00</span> · in <span class="fig">47:53</span></span></div>
+        <div class="krow"><span class="k">last full</span><span class="v">cycle <span class="fig">10</span> · <span class="fig">13:30:00</span>→<span class="fig">14:41:22</span> · <span class="fig">71 min</span></span></div>
+        <div class="krow"><span class="k">day</span><span class="v">done <span class="fig">10</span> · in flight <span class="fig">1</span> · remaining <span class="fig">5</span> · final <span class="fig">22:30:00</span></span></div>
+        <div class="krow"><span class="k">drift</span><span class="v"><span class="fig">0 min</span> · missed <span class="fig">0</span></span></div>
+      </div>
+
+      <!-- DATA -->
+      <div class="panel">
+        <div class="ptitle"><span class="lab">Data</span><span class="r">snapshot <span class="fig">15:42:07</span></span></div>
+        <div class="krow"><span class="k">archive</span><span class="v"><span class="fig">9,161</span> records · <span class="fig">4.2 GB</span></span></div>
+        <div class="krow"><span class="k">backfill</span><span class="v"><span class="fig">91.4%</span> — <span class="fig">35,110</span><span class="of"> of 38,412</span> papers · 1998–2026</span></div>
+        <div class="krow"><span class="k">last write</span><span class="v"><span class="fig">rec-9161</span> · <span class="fig">15:39:12</span></span></div>
+        <div class="krow"><span class="k">integrity</span><span class="v"><span class="fig">03:00:11</span> · <span class="fig">9,152</span><span class="of"> of 9,152</span> pass</span></div>
+      </div>
+
+      <!-- INCIDENTS -->
+      <div class="panel">
+        <div class="ptitle"><span class="lab">Incidents</span><span class="r"><span class="fig clay">3</span> today · <span class="fig clay">28 min</span> lost · <span class="fig">0</span> open</span></div>
+        <div class="inc">
+          <span class="t fig">09:12:40</span>
+          <span class="what">arXiv feed q-bio.PE returned <span class="fig">429</span> rate-limit</span>
+          <span class="lost fig">7 min</span>
+          <span class="action">Scout paused the feed; clean retry <span class="fig">09:19:05</span></span>
+        </div>
+        <div class="inc">
+          <span class="t fig">11:47:22</span>
+          <span class="what"><span class="mono fig">sim-0412</span> diverged — soil-nitrogen model</span>
+          <span class="lost fig">4 min</span>
+          <span class="action">run killed, re-seeded, re-run passed <span class="fig">11:51:30</span></span>
+        </div>
+        <div class="inc">
+          <span class="t fig">13:05:59</span>
+          <span class="what">Council deadlock <span class="fig">2–2</span> on <span class="mono fig">cnd-2211</span> — biochar dosing</span>
+          <span class="lost fig">17 min</span>
+          <span class="action">fifth seat convened; verdict revisit <span class="fig">13:22:41</span></span>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    <span class="mono">Palingenesis engine 2.4.1 · 2026-08-22 · snapshot 15:42:07</span>
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="mono">6 services · 0 open incidents</span>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --hair:rgba(231,227,218,0.14);
+    --sage:#A9B79A;
+    --clay:#C98A66;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+  }
+  html,body{ background:var(--bg); color:var(--ink); }
+  body{ font:12px/1.45 var(--sans); font-variant-numeric:tabular-nums; }
+  .page{ width:1440px; margin:0 auto; padding:0 24px; }
+  .t{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .lbl{ font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--mut); }
+
+  /* ---- nav ---- */
+  .nav{ height:54px; display:flex; align-items:center; gap:26px; border-bottom:1px solid var(--hair); }
+  .wordmark{ font:700 15px var(--serif); letter-spacing:.24em; color:var(--ink); }
+  .nav a{ font-size:12px; font-weight:600; letter-spacing:.13em; text-transform:uppercase; color:var(--mut); text-decoration:none; padding:19px 0 17px; }
+  .nav a.on{ color:var(--sage); border-bottom:2px solid var(--sage); padding-bottom:15px; }
+  .nav .clock{ margin-left:auto; font:12px var(--mono); color:var(--mut); }
+  .nav .clock b{ color:var(--ink); font-weight:500; }
+
+  /* ---- verdict lede ---- */
+  .lede{ padding:16px 0 13px; border-bottom:1px solid var(--hair); }
+  .lede h1{ font:400 21px/1.45 var(--serif); color:var(--ink); max-width:1240px; }
+  .lede h1 .m{ font-family:var(--mono); font-size:18px; }
+  .lede h1 .ok{ color:var(--sage); }
+  .lede h1 .ex{ color:var(--clay); }
+  .ledesub{ margin-top:7px; display:flex; justify-content:space-between; font-size:12px; color:var(--mut); }
+  .ledesub .t{ color:var(--mut); }
+
+  /* ---- main: rail + grid ---- */
+  .main{ position:relative; display:grid; grid-template-columns:336px 1056px; }
+  .spine{ position:absolute; left:12px; top:34px; width:1px; height:588px; background:rgba(231,227,218,0.25); }
+
+  .railhead{ height:34px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--hair); padding:0 14px 0 30px; }
+  .railhead .rh2{ font:12px var(--mono); color:var(--mut); }
+  .gridhead{ height:34px; display:grid; grid-template-columns:repeat(16,1fr); border-bottom:1px solid var(--hair); }
+  .gh{ display:flex; align-items:center; justify-content:center; font:600 12px var(--sans); letter-spacing:.06em; color:var(--mut); border-left:1px solid var(--hair); }
+  .gh.live{ color:var(--sage); background:rgba(169,183,154,0.07); }
+
+  /* station blocks */
+  .st{ position:relative; height:98px; border-bottom:1px solid var(--hair); padding:9px 14px 8px 30px; }
+  .st::before{ content:""; position:absolute; left:9px; top:50%; transform:translateY(-50%); width:7px; height:7px; border-radius:50%; background:var(--bg); border:1.5px solid var(--mut); }
+  .st.live{ background:rgba(169,183,154,0.05); }
+  .st.live::before{ background:var(--sage); border-color:var(--sage); }
+  .st .h{ display:flex; align-items:center; justify-content:space-between; }
+  .sid{ font:700 13px var(--sans); letter-spacing:.10em; color:var(--ink); }
+  .st.live .sid{ color:var(--sage); }
+  .chip{ font:700 12px var(--sans); letter-spacing:.07em; color:var(--mut); border:1px solid rgba(231,227,218,0.30); border-radius:2px; padding:0 6px; line-height:17px; white-space:nowrap; }
+  .chip.live{ color:var(--sage); border-color:var(--sage); }
+  .job{ margin-top:2px; color:var(--mut); }
+  .exline{ margin-top:2px; color:var(--clay); }
+  .exline .t{ color:var(--clay); }
+  .meta{ margin-top:2px; color:var(--mut); }
+  .meta .t{ color:var(--mut); }
+  .fig{ margin-top:3px; display:flex; justify-content:space-between; align-items:baseline; }
+  .fig .n{ font:500 12px var(--mono); color:var(--ink); }
+  .fig .usd{ font:500 12px var(--mono); color:var(--ink); }
+  .flow{ position:absolute; left:2px; bottom:-9px; z-index:2; background:var(--bg); padding:2px 8px 2px 0; font:600 12px var(--sans); letter-spacing:.04em; color:var(--mut); }
+  .flow em{ font-style:normal; color:var(--ink); font-family:var(--mono); }
+
+  /* timetable rows */
+  .row{ height:98px; display:grid; grid-template-columns:repeat(16,1fr); border-bottom:1px solid var(--hair); }
+  .c{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border-left:1px solid var(--hair); font-family:var(--mono); font-size:12px; }
+  .c i{ font-style:normal; color:var(--mut); }
+  .c b{ font-weight:500; color:var(--ink); }
+  .c b.p{ color:var(--mut); font-weight:400; }
+  .c b.late{ color:var(--clay); }
+  .c.l{ background:rgba(169,183,154,0.07); }
+  .c.now{ background:rgba(169,183,154,0.14); }
+  .c.now b{ color:var(--sage); font-weight:700; }
+
+  /* drill law + ledger band */
+  .drill{ border-bottom:1px solid var(--hair); padding:12px 16px 12px 30px; }
+  .drill p{ margin-top:6px; color:var(--mut); line-height:1.5; }
+  .drill p b{ color:var(--ink); font-weight:600; }
+  .ledger{ border-bottom:1px solid var(--hair); padding:12px 0 12px 18px; }
+  .lhead{ display:flex; justify-content:space-between; align-items:baseline; }
+  .lhead .cap{ font-size:12px; color:var(--mut); }
+  .lhead .cap .t{ color:var(--ink); }
+  .meter{ position:relative; height:12px; background:rgba(231,227,218,0.08); margin:10px 0 4px; }
+  .fill{ position:absolute; left:0; top:0; bottom:0; width:63.68%; background:rgba(231,227,218,0.55); }
+  .tick{ position:absolute; top:-3px; bottom:-3px; width:1px; background:rgba(231,227,218,0.7); }
+  .mlab{ position:relative; height:16px; font:12px var(--mono); color:var(--mut); }
+  .mlab span{ position:absolute; white-space:nowrap; }
+  .mlab .spent{ left:63.68%; transform:translateX(-100%); padding-right:6px; color:var(--ink); }
+  .mlab .even{ left:71%; padding-left:5px; }
+  .mlab .proj{ left:89.74%; transform:translateX(-100%); padding-right:5px; color:var(--ink); }
+  .mlab .capend{ right:0; }
+  .lrow{ margin-top:8px; font:12px var(--mono); color:var(--mut); }
+  .lrow b{ color:var(--ink); font-weight:500; }
+
+  /* bottom strip */
+  .strip{ display:grid; grid-template-columns:280px 280px 1fr 280px; gap:24px; padding:14px 0 16px; border-bottom:1px solid var(--hair); }
+  .strip h3{ font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--mut); }
+  .srow{ display:flex; gap:10px; margin-top:6px; color:var(--mut); }
+  .srow .t{ color:var(--ink); width:44px; flex:none; }
+  .drow{ display:flex; gap:10px; margin-top:6px; color:var(--mut); }
+  .drow .k{ width:52px; flex:none; font-weight:700; letter-spacing:.08em; text-transform:uppercase; font-size:12px; }
+  .drow .t{ color:var(--ink); }
+  .drow .cl{ color:var(--clay); }
+  .inc{ border-left:2px solid var(--hair); padding-left:10px; margin-top:8px; color:var(--mut); }
+  .inc.open{ border-left-color:var(--clay); }
+  .inc .t{ color:var(--ink); }
+  .inc .stat{ font-weight:700; letter-spacing:.08em; }
+  .inc.open .stat{ color:var(--clay); }
+  .inc .act{ display:block; }
+  .inchead{ margin-top:6px; color:var(--mut); }
+  .inchead .cl{ color:var(--clay); font-weight:700; }
+  .suspend{ margin-top:10px; border:1px solid rgba(231,227,218,0.5); padding:13px 12px; text-align:center; font:700 14px var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--ink); }
+  .conseq{ margin-top:8px; color:var(--mut); line-height:1.5; }
+  .conseq .t{ color:var(--ink); }
+
+  /* footer */
+  .foot{ height:48px; display:flex; align-items:center; justify-content:space-between; color:var(--mut); }
+  .motto{ font:italic 400 13px var(--serif); color:var(--mut); }
+  .foot .t{ color:var(--mut); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- NAV -->
+  <div class="nav">
+    <span class="wordmark">PALINGENESIS</span>
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#">Library</a>
+    <a href="#">Portfolio</a>
+    <a href="#">Simulation</a>
+    <a href="#" class="on">Engine Room</a>
+    <span class="clock">Thu 22 Aug 2026 · <b>13:53:07</b> CT</span>
+  </div>
+
+  <!-- VERDICT LEDE -->
+  <div class="lede">
+    <h1><span class="ok">Running</span> — all six stations up, one feed on cache. <span class="m">$318.42</span> of the <span class="m">$500.00</span> cap is spent; at today's pace August closes at <span class="m">$448.68</span>. Cycle <span class="m">12</span> of <span class="m">16</span> sits with Council now; c13 boards <span class="m">14:24</span>.</h1>
+    <div class="ledesub">
+      <span>Engine Room · operator truth, unabridged · ledger snapshot <span class="t">13:53:07</span> · drill law in force</span>
+      <span>cells: booked over actual · <span style="color:var(--sage)">sage = live now</span> · <span style="color:var(--clay)">clay = exception</span> · all times CT, mono</span>
+    </div>
+  </div>
+
+  <!-- THE LINE (left rail) + TIMETABLE (right grid) -->
+  <div class="main">
+    <div class="spine"></div>
+
+    <div class="railhead"><span class="lbl" style="color:var(--ink)">The Line</span><span class="rh2">today 61 in ▸ 9 kept ▸ 1 brief due</span></div>
+    <div class="gridhead">
+      <div class="gh">c01</div><div class="gh">c02</div><div class="gh">c03</div><div class="gh">c04</div>
+      <div class="gh">c05</div><div class="gh">c06</div><div class="gh">c07</div><div class="gh">c08</div>
+      <div class="gh">c09</div><div class="gh">c10</div><div class="gh">c11</div><div class="gh live">c12 · live</div>
+      <div class="gh">c13</div><div class="gh">c14</div><div class="gh">c15</div><div class="gh">c16</div>
+    </div>
+
+    <!-- S1 READER -->
+    <div class="st">
+      <div class="h"><span class="sid">S1 · READER</span><span class="chip">POLLING</span></div>
+      <div class="job">Reads papers and field sensors.</div>
+      <div class="exline">FEED-04 silent 41m — reading <span class="t">13:12</span> cache · INC-114</div>
+      <div class="meta">since <span class="t">03:58</span> · last <span class="t">13:36</span> c12 in: 4 papers, 58 pp</div>
+      <div class="fig"><span class="n">61 papers · 812 pp · 14 feeds</span><span class="usd">$1.94</span></div>
+      <div class="flow">▾ <em>38</em> findings</div>
+    </div>
+    <div class="row">
+      <div class="c"><i>04:00</i><b>04:00</b></div>
+      <div class="c"><i>04:52</i><b>04:52</b></div>
+      <div class="c"><i>05:44</i><b>05:45</b></div>
+      <div class="c"><i>06:36</i><b>06:36</b></div>
+      <div class="c"><i>07:28</i><b>07:28</b></div>
+      <div class="c"><i>08:20</i><b>08:21</b></div>
+      <div class="c"><i>09:12</i><b>09:12</b></div>
+      <div class="c"><i>10:04</i><b>10:04</b></div>
+      <div class="c"><i>10:56</i><b>10:57</b></div>
+      <div class="c"><i>11:48</i><b>11:48</b></div>
+      <div class="c"><i>12:40</i><b>12:40</b></div>
+      <div class="c l"><i>13:32</i><b>13:32</b></div>
+      <div class="c"><i>14:24</i><b class="p">—</b></div>
+      <div class="c"><i>15:16</i><b class="p">—</b></div>
+      <div class="c"><i>16:08</i><b class="p">—</b></div>
+      <div class="c"><i>17:00</i><b class="p">—</b></div>
+    </div>
+
+    <!-- S2 SCOUT -->
+    <div class="st">
+      <div class="h"><span class="sid">S2 · SCOUT</span><span class="chip">IDLE · 14:32</span></div>
+      <div class="job">Drafts trial ideas from findings.</div>
+      <div class="meta">since <span class="t">13:47</span> · last <span class="t">13:47</span> c12: 2 drafted, 2 passed</div>
+      <div class="fig"><span class="n">34 drafted · 27 passed</span><span class="usd">$6.10</span></div>
+      <div class="flow">▾ <em>27</em> candidates</div>
+    </div>
+    <div class="row">
+      <div class="c"><i>04:08</i><b>04:08</b></div>
+      <div class="c"><i>05:00</i><b>05:01</b></div>
+      <div class="c"><i>05:52</i><b>05:52</b></div>
+      <div class="c"><i>06:44</i><b>06:44</b></div>
+      <div class="c"><i>07:36</i><b>07:37</b></div>
+      <div class="c"><i>08:28</i><b>08:28</b></div>
+      <div class="c"><i>09:20</i><b>09:20</b></div>
+      <div class="c"><i>10:12</i><b>10:13</b></div>
+      <div class="c"><i>11:04</i><b>11:04</b></div>
+      <div class="c"><i>11:56</i><b>11:56</b></div>
+      <div class="c"><i>12:48</i><b>12:49</b></div>
+      <div class="c l"><i>13:40</i><b>13:41</b></div>
+      <div class="c"><i>14:32</i><b class="p">—</b></div>
+      <div class="c"><i>15:24</i><b class="p">—</b></div>
+      <div class="c"><i>16:16</i><b class="p">—</b></div>
+      <div class="c"><i>17:08</i><b class="p">—</b></div>
+    </div>
+
+    <!-- S3 COUNCIL (live) -->
+    <div class="st live">
+      <div class="h"><span class="sid">S3 · COUNCIL</span><span class="chip live">LIVE</span></div>
+      <div class="job">Argues every idea; keeps the strong.</div>
+      <div class="meta">since <span class="t">13:49</span> · PL-0851 on the floor, seat 3 of 5</div>
+      <div class="fig"><span class="n">27 heard · 9 kept</span><span class="usd">$9.87</span></div>
+      <div class="flow">▾ <em>9</em> approved</div>
+    </div>
+    <div class="row">
+      <div class="c"><i>04:16</i><b>04:16</b></div>
+      <div class="c"><i>05:08</i><b>05:08</b></div>
+      <div class="c"><i>06:00</i><b>06:01</b></div>
+      <div class="c"><i>06:52</i><b>06:52</b></div>
+      <div class="c"><i>07:44</i><b>07:44</b></div>
+      <div class="c"><i>08:36</i><b>08:37</b></div>
+      <div class="c"><i>09:28</i><b>09:28</b></div>
+      <div class="c"><i>10:20</i><b>10:20</b></div>
+      <div class="c"><i>11:12</i><b>11:12</b></div>
+      <div class="c"><i>12:04</i><b>12:05</b></div>
+      <div class="c"><i>12:56</i><b>12:56</b></div>
+      <div class="c l now"><i>13:48</i><b>now</b></div>
+      <div class="c"><i>14:40</i><b class="p">—</b></div>
+      <div class="c"><i>15:32</i><b class="p">—</b></div>
+      <div class="c"><i>16:24</i><b class="p">—</b></div>
+      <div class="c"><i>17:16</i><b class="p">—</b></div>
+    </div>
+
+    <!-- S4 SIMULATOR -->
+    <div class="st">
+      <div class="h"><span class="sid">S4 · SIMULATOR</span><span class="chip">QUEUED · 13:56</span></div>
+      <div class="job">Grows survivors in virtual plots.</div>
+      <div class="meta">since <span class="t">13:14</span> · last <span class="t">13:14</span> c11: PL-0842 +11% yield</div>
+      <div class="fig"><span class="n">8 runs · 128 plot-yrs</span><span class="usd">$3.42</span></div>
+      <div class="flow">▾ <em>8</em> reports</div>
+    </div>
+    <div class="row">
+      <div class="c"><i>04:24</i><b>04:24</b></div>
+      <div class="c"><i>05:16</i><b>05:16</b></div>
+      <div class="c"><i>06:08</i><b>06:08</b></div>
+      <div class="c"><i>07:00</i><b>07:01</b></div>
+      <div class="c"><i>07:52</i><b class="late">08:03+11</b></div>
+      <div class="c"><i>08:44</i><b>08:45</b></div>
+      <div class="c"><i>09:36</i><b>09:36</b></div>
+      <div class="c"><i>10:28</i><b>10:29</b></div>
+      <div class="c"><i>11:20</i><b>11:20</b></div>
+      <div class="c"><i>12:12</i><b>12:12</b></div>
+      <div class="c"><i>13:04</i><b>13:04</b></div>
+      <div class="c l"><i>13:56</i><b class="p">—</b></div>
+      <div class="c"><i>14:48</i><b class="p">—</b></div>
+      <div class="c"><i>15:40</i><b class="p">—</b></div>
+      <div class="c"><i>16:32</i><b class="p">—</b></div>
+      <div class="c"><i>17:24</i><b class="p">—</b></div>
+    </div>
+
+    <!-- S5 ARCHIVIST -->
+    <div class="st">
+      <div class="h"><span class="sid">S5 · ARCHIVIST</span><span class="chip">READY</span></div>
+      <div class="job">Files results; checks every citation.</div>
+      <div class="meta">since <span class="t">13:26</span> · last <span class="t">13:26</span> c11: 22 records, links ok</div>
+      <div class="fig"><span class="n">214 filed · 0 broken</span><span class="usd">$0.61</span></div>
+      <div class="flow">▾ <em>9</em> brief sections</div>
+    </div>
+    <div class="row">
+      <div class="c"><i>04:36</i><b>04:36</b></div>
+      <div class="c"><i>05:28</i><b>05:29</b></div>
+      <div class="c"><i>06:20</i><b>06:20</b></div>
+      <div class="c"><i>07:12</i><b>07:12</b></div>
+      <div class="c"><i>08:04</i><b>08:09</b></div>
+      <div class="c"><i>08:56</i><b>08:56</b></div>
+      <div class="c"><i>09:48</i><b>09:48</b></div>
+      <div class="c"><i>10:40</i><b>10:40</b></div>
+      <div class="c"><i>11:32</i><b>11:33</b></div>
+      <div class="c"><i>12:24</i><b>12:24</b></div>
+      <div class="c"><i>13:16</i><b>13:16</b></div>
+      <div class="c l"><i>14:08</i><b class="p">—</b></div>
+      <div class="c"><i>15:00</i><b class="p">—</b></div>
+      <div class="c"><i>15:52</i><b class="p">—</b></div>
+      <div class="c"><i>16:44</i><b class="p">—</b></div>
+      <div class="c"><i>17:36</i><b class="p">—</b></div>
+    </div>
+
+    <!-- S6 COURIER -->
+    <div class="st">
+      <div class="h"><span class="sid">S6 · COURIER</span><span class="chip">STAGED · 18:00</span></div>
+      <div class="job">Packs the day brief; sends it 18:00.</div>
+      <div class="meta">since <span class="t">13:28</span> · last <span class="t">13:28</span> brief at 9 sections (8 trials + ledger)</div>
+      <div class="fig"><span class="n">0 sent · 9 sections ready</span><span class="usd">$0.12</span></div>
+    </div>
+    <div class="row">
+      <div class="c"><i>04:42</i><b>04:42</b></div>
+      <div class="c"><i>05:34</i><b>05:34</b></div>
+      <div class="c"><i>06:26</i><b>06:27</b></div>
+      <div class="c"><i>07:18</i><b>07:18</b></div>
+      <div class="c"><i>08:10</i><b>08:11</b></div>
+      <div class="c"><i>09:02</i><b>09:02</b></div>
+      <div class="c"><i>09:54</i><b>09:54</b></div>
+      <div class="c"><i>10:46</i><b>10:46</b></div>
+      <div class="c"><i>11:38</i><b>11:38</b></div>
+      <div class="c"><i>12:30</i><b>12:30</b></div>
+      <div class="c"><i>13:22</i><b>13:22</b></div>
+      <div class="c l"><i>14:14</i><b class="p">—</b></div>
+      <div class="c"><i>15:06</i><b class="p">—</b></div>
+      <div class="c"><i>15:58</i><b class="p">—</b></div>
+      <div class="c"><i>16:50</i><b class="p">—</b></div>
+      <div class="c"><i>17:42</i><b class="p">—</b></div>
+    </div>
+
+    <!-- DRILL LAW (rail foot) -->
+    <div class="drill">
+      <span class="lbl" style="color:var(--ink)">Drill Law</span>
+      <p>Every figure on this page is a door: it opens the <b>run log</b>, the <b>prompt</b>, and the <b>invoice line</b> that produced it — the same store the audit reads. Nothing here is typed by hand. A number is generated from the ledger, or it is absent.</p>
+    </div>
+
+    <!-- LEDGER BAND (grid foot) -->
+    <div class="ledger">
+      <div class="lhead"><span class="lbl" style="color:var(--ink)">Ledger — August</span><span class="cap">hard cap <span class="t">$500.00</span> — generation stops at the cap, never past it</span></div>
+      <div class="meter">
+        <div class="fill"></div>
+        <div class="tick" style="left:71%"></div>
+        <div class="tick" style="left:89.74%; background:rgba(231,227,218,0.4)"></div>
+      </div>
+      <div class="mlab">
+        <span class="spent">spent $318.42</span>
+        <span class="even">even pace $354.84</span>
+        <span class="proj">proj close $448.68</span>
+        <span class="capend">cap $500.00</span>
+      </div>
+      <div class="lrow">today <b>$22.06</b> · week <b>$101.88</b> · month <b>$318.42</b> of $500.00 · avg <b>$14.47</b>/day · <b>9</b> days left · under even pace by <b>$36.42</b> · margin at pace <b>$51.32</b></div>
+      <div class="lrow">by station, mtd — S1 <b>$41.20</b> · S2 <b>$88.63</b> · S3 <b>$121.14</b> · S4 <b>$48.90</b> · S5 <b>$12.31</b> · S6 <b>$6.24</b> · sum <b>$318.42</b></div>
+    </div>
+  </div>
+
+  <!-- SCHEDULER · DATA · INCIDENTS · CONTROL -->
+  <div class="strip">
+    <div>
+      <h3>Scheduler</h3>
+      <div class="srow"><span class="t">13:56</span><span>Simulator c12 releases on Council verdict</span></div>
+      <div class="srow"><span class="t">14:02</span><span>FEED-04 re-poll — misses <span class="t">13:22–13:52</span></span></div>
+      <div class="srow"><span class="t">14:24</span><span>c13 boards — cap check, then Reader</span></div>
+      <div class="srow"><span class="t">15:00</span><span>INC-114 escalates if feed still silent</span></div>
+      <div class="srow"><span class="t">18:00</span><span>Courier sends the day brief</span></div>
+      <div class="srow"><span class="t">02:10</span><span>archive sweep — Sat 23 Aug</span></div>
+      <div class="srow"><span class="t">03:58</span><span>daily boot; c01 boards <span class="t">04:00</span></span></div>
+      <div class="srow"><span class="t">every</span><span>boarding passes the cap gate — <span class="t">$500.00</span> hard stop</span></div>
+    </div>
+    <div>
+      <h3>Data</h3>
+      <div class="drow"><span class="k">feeds</span><span><span class="t">14</span> live · <span class="cl">1 stale (FEED-04)</span></span></div>
+      <div class="drow"><span class="k">papers</span><span><span class="t">18,412</span> indexed · <span class="t">+61</span> today</span></div>
+      <div class="drow"><span class="k">field</span><span><span class="t">1,209,344</span> rows · last write <span class="t">13:26</span></span></div>
+      <div class="drow"><span class="k">sims</span><span><span class="t">2,304</span> plot-yrs mtd · <span class="t">128</span> today</span></div>
+      <div class="drow"><span class="k">briefs</span><span><span class="t">143</span> archived · store <span class="t">41.2</span> of <span class="t">66.0</span> GB</span></div>
+      <div class="drow"><span class="k">fresh</span><span><span class="t">99.2%</span> of sources under 24h old</span></div>
+    </div>
+    <div>
+      <h3>Incidents &amp; Actions</h3>
+      <div class="inchead"><span class="cl">1 open</span> · 2 closed in 7 days</div>
+      <div class="inc open">
+        <span class="t">13:32</span> INC-114 <span class="stat">OPEN</span> — FEED-04 soil mirror silent since <span class="t">13:12</span>
+        <span class="act">→ Reader on <span class="t">13:12</span> cache · re-poll 10m · escalate <span class="t">15:00</span> · soil columns marked provisional in today's brief</span>
+      </div>
+      <div class="inc">
+        <span class="t">07:52</span> INC-112 <span class="stat">CLOSED 09:40</span> — Simulator c05 mesh retry ×3, boarded +11m
+        <span class="act">→ backlog cleared by c07 · no data lost</span>
+      </div>
+      <div class="inc">
+        <span class="t">Tue 19</span> INC-109 <span class="stat">CLOSED</span> — Courier bounce (550) on day brief
+        <span class="act">→ resent <span class="t">18:22</span> · address list repaired</span>
+      </div>
+    </div>
+    <div>
+      <h3>Control</h3>
+      <div class="suspend">Suspend Generation</div>
+      <p class="conseq">Halts Scout, Council and Simulator at the <span class="t">14:24</span> boundary. Reader keeps reading; Archivist keeps filing; Courier still sends <span class="t">18:00</span> with work already approved. No new spend past the running cycle; the cap stands. Restart is a human act.</p>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="foot">
+    <span class="motto">Palingenesis — new growth from known ground.</span>
+    <span>Engine Room v2.4.1 · ledger snapshot <span class="t">13:53:07</span> CT · times America/Chicago</span>
+  </div>
+
+</div>
+</body>
+</html>

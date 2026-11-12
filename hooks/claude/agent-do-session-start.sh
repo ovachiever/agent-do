@@ -293,6 +293,13 @@ append_coord_context() {
     # it: a wedged coord must degrade to "no coord context", never hold the
     # hook's budget open.
     coord_scratch=$(mktemp -d "${TMPDIR:-/tmp}/agent-do-session-coord.XXXXXX" 2>/dev/null) || return 0
+    # The same anchor this hook pinned into CLAUDE_ENV_FILE for the shell:
+    # the hook process itself never sees that file, so without the pin coord
+    # would read as a second identity and the shell's acknowledgments would
+    # not quiet what this hook shows (mn-812cd9).
+    if [ -n "$SESSION_ID" ] && [ -z "${AGENT_DO_COORD_SESSION:-}" ]; then
+        export AGENT_DO_COORD_SESSION="$SESSION_ID"
+    fi
     bounded_run 2 bash -c '
         cd "$1" || exit 0
         scratch="$2"
@@ -346,6 +353,8 @@ Use:
 \`agent-do coord status\`
 \`agent-do coord interrupts\`
 \`agent-do coord focus show\`
+A drop keeps returning until you acknowledge it (\`agent-do coord drop ack <drp-id>\`, you only)
+or its owner/recipient resolves it (\`agent-do coord drop resolve <drp-id> --reason ...\`, everyone).
 "
         return 0
     fi
