@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper: hsl(45, 50%, 95%);
+    --paper-deep: hsl(44, 38%, 89%);
+    --panel: hsl(45, 55%, 97%);
+    --ink: hsl(140, 22%, 13%);
+    --ink-soft: hsl(140, 10%, 30%);
+    --line: hsl(44, 22%, 78%);
+    --leaf: hsl(132, 33%, 34%);
+    --leaf-deep: hsl(138, 37%, 20%);
+    --leaf-wash: hsl(95, 36%, 90%);
+    --butter: hsl(45, 84%, 62%);
+    --butter-pale: hsl(46, 75%, 88%);
+    --clay: hsl(17, 63%, 45%);
+    --clay-text: hsl(17, 66%, 36%);
+    --clay-wash: hsl(20, 48%, 91%);
+
+    --serif: "Fraunces", "Georgia", serif;
+    --sans: "Inter", "Helvetica Neue", sans-serif;
+    --mono: "IBM Plex Mono", "Menlo", monospace;
+
+    --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px; --s7: 96px;
+    --r-s: 8px; --r-m: 16px; --r-l: 24px;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html{ background: var(--paper); }
+  body{
+    font-family: var(--sans);
+    font-size: 15px; line-height: 1.55;
+    color: var(--ink);
+    background: var(--paper);
+  }
+  a{ color: inherit; text-decoration: none; }
+  .wrap{ max-width: 1240px; margin: 0 auto; padding: 0 40px; }
+  .mono{ font-family: var(--mono); }
+
+  /* ---------- masthead ---------- */
+  .masthead{ padding-top: var(--s3); }
+  .bar{ display:flex; align-items:center; justify-content:space-between; gap: var(--s4); }
+  .wordmark{
+    display:flex; align-items:center; gap:10px;
+    font-family: var(--serif); font-weight: 500; font-size: 26px; letter-spacing: -0.01em;
+  }
+  .wordmark svg{ display:block; }
+  nav{ display:flex; align-items:center; gap: 4px; }
+  nav a{
+    display:inline-block; padding: 8px 14px; border-radius: 999px;
+    font-size: 15px; font-weight: 500; color: var(--ink-soft);
+  }
+  nav a.current{ background: var(--butter); color: var(--ink); font-weight: 600; }
+  .clock{ font-family: var(--mono); font-size: 15px; font-weight: 500; white-space: nowrap; }
+  .clock small{ font-size: 13px; color: var(--ink-soft); font-weight: 400; }
+  .masthead-rule{ border:0; border-top: 1px solid var(--line); margin: var(--s3) 0 0; }
+
+  /* ---------- course bar ---------- */
+  .course{ background: var(--butter); }
+  .course-in{
+    display:flex; align-items:center; justify-content:space-between; gap: var(--s4);
+    padding-top: 14px; padding-bottom: 14px;
+  }
+  .course-in .label{
+    font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    margin-right: 4px;
+  }
+  .course-in .what{ font-family: var(--serif); font-size: 19px; font-weight: 500; }
+  .course-in .meta{ font-size: 14px; color: hsl(140, 18%, 20%); }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-height: 40px; padding: 8px 18px; border-radius: var(--r-s);
+    font-size: 14px; font-weight: 600; letter-spacing: 0.01em;
+    border: 2px solid var(--ink); color: var(--ink); background: transparent;
+    cursor: pointer; font-family: var(--sans);
+  }
+
+  /* ---------- lede ---------- */
+  .lede{ padding-top: var(--s5); padding-bottom: var(--s5); }
+  .lede p{
+    font-family: var(--serif); font-size: 32px; font-weight: 380; line-height: 1.25;
+    letter-spacing: -0.01em; max-width: 46ch;
+  }
+  .lede .ok{ color: var(--leaf); font-weight: 500; }
+  .lede .t{ font-family: var(--mono); font-size: 0.8em; }
+
+  /* ---------- shared small parts ---------- */
+  .kicker{
+    display:block; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft);
+    margin-bottom: var(--s2);
+  }
+  section{ margin-bottom: var(--s6); }
+  .drill{
+    display:inline-flex; align-items:center; min-height: 24px;
+    font-size: 13px; font-weight: 600; color: var(--clay-text);
+    border-bottom: 1px dashed var(--clay);
+  }
+  .drill::after{ content: " \2192"; white-space: pre; }
+  .state{
+    display:inline-flex; align-items:center; min-height: 24px; padding: 1px 10px;
+    border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .state.idle{ background: var(--leaf-wash); color: var(--leaf-deep); }
+  .state.live{ background: hsl(17, 63%, 40%); color: hsl(45, 50%, 96%); }
+  .state.waits{ background: var(--butter-pale); color: hsl(35, 60%, 26%); }
+
+  /* ---------- wheels ---------- */
+  .wheels{ display:grid; grid-template-columns: repeat(6, 1fr); gap: var(--s2); }
+  .wheel{
+    position: relative; display:block;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-m);
+    padding: var(--s3) var(--s3) var(--s3);
+  }
+  .wheel.live{ border-color: hsl(17, 63%, 45%); background: hsl(24, 60%, 96%); }
+  .wheel .head{ display:flex; align-items:center; justify-content:space-between; gap: 8px; margin-bottom: 10px; }
+  .wheel h3{ font-family: var(--serif); font-size: 21px; font-weight: 500; letter-spacing: -0.01em; }
+  .wheel .role{ font-size: 13px; color: var(--ink-soft); margin-bottom: 12px; }
+  .wheel .row{ display:flex; flex-direction:column; align-items:flex-start; gap: 6px; margin-top: 10px; }
+  .wheel .last{ font-family: var(--mono); font-size: 13px; color: var(--ink-soft); }
+  .wheel .metric{
+    font-size: 15px; font-weight: 600;
+    border-bottom: 2px dotted var(--clay); padding-bottom: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .wheel .go{
+    position:absolute; top: 14px; right: 14px;
+    color: var(--clay-text); font-weight: 600; font-size: 14px;
+  }
+  .wheel svg{ display:block; margin-bottom: 12px; }
+
+  /* ---------- timetable ---------- */
+  table{ border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  .tt th{
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-soft); text-align: left; padding: 8px 10px;
+    border-bottom: 2px solid var(--ink);
+    white-space: nowrap;
+  }
+  .tt th.c{ text-align: center; }
+  .tt td{
+    padding: 6px 10px; border-bottom: 1px solid var(--line);
+    font-size: 13px; white-space: nowrap;
+  }
+  .tt td.c{ text-align: center; }
+  .tt .mono{ font-size: 13px; }
+  .tt .id{ border-bottom: 1px dashed var(--clay); color: var(--clay-text); font-weight: 500; }
+  .tt .st{ color: var(--ink-soft); }
+  .tt tr.struck td{ background: var(--clay-wash); color: hsl(17, 40%, 38%); }
+  .tt tr.struck .st{ color: var(--clay-text); font-weight: 600; }
+  .tt tr.livecycle td{ background: hsl(46, 75%, 92%); }
+  .tt tr.livecycle .st{ color: var(--ink); font-weight: 600; }
+  .tt tr.note td{
+    background: hsl(46, 75%, 92%); font-size: 12.5px; color: hsl(35, 60%, 26%);
+    border-bottom: 1px solid var(--line); white-space: normal;
+  }
+  .d{ display:inline-block; vertical-align: middle; }
+  .d.done{ width: 10px; height: 10px; border-radius: 50%; background: var(--leaf); }
+  .d.live{ width: 10px; height: 10px; background: var(--clay); }
+  .d.open{ width: 10px; height: 10px; border-radius: 50%; border: 2px solid hsl(44, 16%, 62%); }
+  .latechip{
+    display:inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px;
+    background: var(--butter); color: hsl(35, 65%, 22%);
+    font-family: var(--mono); font-size: 12px; font-weight: 500; line-height: 18px;
+  }
+  .legend{ display:flex; gap: var(--s3); align-items:center; margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
+  .legend span{ display:inline-flex; align-items:center; gap: 7px; }
+
+  /* ---------- volumes ---------- */
+  .volumes{ background: var(--paper-deep); border-radius: var(--r-m); padding: var(--s4); }
+  .figrow{ display:grid; grid-template-columns: repeat(6, 1fr); gap: var(--s3); }
+  .fig{ min-width: 0; }
+  .fig b{
+    display:inline-block; font-family: var(--serif); font-weight: 500;
+    font-size: 34px; line-height: 1.1; letter-spacing: -0.01em;
+    border-bottom: 2px dotted var(--clay); padding-bottom: 2px;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+  .fig span{ display:block; margin-top: 6px; font-size: 13px; color: var(--ink-soft); }
+
+  /* ---------- scheduler + data ---------- */
+  .twin{ display:grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+  .panel{
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-m);
+    padding: var(--s3) var(--s4);
+  }
+  .kv{ display:grid; grid-template-columns: 130px 1fr; gap: 6px 18px; align-items: baseline; }
+  .kv dt{ font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: 5px 0; }
+  .kv dd{ font-size: 14px; padding: 5px 0; }
+  .kv .mono{ font-size: 13px; }
+  .kv a.v{ border-bottom: 1px dashed var(--clay); color: var(--clay-text); font-weight: 500; }
+  .ok{ color: var(--leaf); font-weight: 600; }
+
+  /* ---------- standing orders ---------- */
+  .orders td{ padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .orders td:first-child{ font-weight: 600; width: 180px; }
+  .orders .mono{ font-size: 13px; }
+  .orders .prov{
+    display:inline-flex; align-items:center; min-height: 24px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 12px; color: var(--ink-soft); background: var(--paper);
+  }
+  .orders td:last-child{ text-align: right; }
+
+  /* ---------- log ---------- */
+  .log td{ padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .log .t{ font-family: var(--mono); font-size: 13px; width: 70px; color: var(--ink-soft); }
+  .log .who{ text-align: right; width: 80px; }
+  .erik{
+    display:inline-flex; align-items:center; min-height: 24px; padding: 0 10px;
+    border-radius: 999px; background: var(--butter); color: var(--ink);
+    font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+  }
+  .lost{ margin-top: var(--s2); font-size: 14px; color: var(--ink-soft); }
+  .lost b{
+    font-family: var(--serif); font-size: 20px; font-weight: 500; color: var(--ink);
+    border-bottom: 2px dotted var(--clay); font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- control ---------- */
+  .control{
+    display:flex; align-items:center; gap: var(--s4);
+    background: var(--clay-wash); border-radius: var(--r-m); padding: var(--s4);
+  }
+  .suspend{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-height: 56px; padding: 14px 30px; border-radius: var(--r-s);
+    border: 2.5px solid var(--clay-text); background: var(--panel);
+    color: var(--clay-text); font-family: var(--sans);
+    font-size: 15px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+    cursor: pointer; white-space: nowrap;
+  }
+  .control p{ font-size: 14px; color: hsl(17, 40%, 30%); max-width: 60ch; }
+  .control .t{ font-family: var(--mono); font-size: 13px; }
+
+  /* ---------- footer ---------- */
+  footer{ background: var(--leaf-deep); margin-top: var(--s7); }
+  .foot{
+    display:flex; align-items:center; justify-content:space-between; gap: var(--s4);
+    padding-top: var(--s5); padding-bottom: var(--s5);
+    color: hsl(45, 50%, 95%);
+  }
+  .foot .motto{
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: 20px; letter-spacing: 0.01em;
+  }
+  .foot .mark{ display:flex; align-items:center; gap:10px; font-family: var(--serif); font-size: 18px; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap bar">
+    <a class="wordmark" href="#">
+      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="9.1" y="9" width="1.8" height="10" fill="hsl(138, 37%, 20%)"/>
+        <path d="M10 10 C4.5 10 1.2 6 1 1.2 C6.5 1.6 10 5 10 10 Z" fill="hsl(132, 33%, 34%)"/>
+        <path d="M10 10 C15.5 10 18.8 6 19 1.2 C13.5 1.6 10 5 10 10 Z" fill="hsl(101, 30%, 54%)"/>
+      </svg>
+      Palingenesis
+    </a>
+    <nav aria-label="Primary">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a class="current" href="#" aria-current="page">Engine Room</a>
+    </nav>
+    <span class="clock">17:26:08 <small>&middot; Fri 22 Aug</small></span>
+  </div>
+  <div class="wrap"><hr class="masthead-rule"></div>
+</header>
+
+<div class="course">
+  <div class="wrap course-in">
+    <div>
+      <span class="label">Course</span>
+      <span class="what">drought-tolerant wheat</span>
+      <span class="meta">&nbsp;&middot; cycles 13&ndash;24 &middot; set <span class="mono">10:00</span> by Erik</span>
+    </div>
+    <button class="btn" type="button">Change course</button>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <section class="lede">
+    <p><span class="ok">Nominal</span> &mdash; ten cycles closed, one struck; cycle 12 mid&#8209;Simulate;
+    13 opens <span class="t">18:00:00</span>.</p>
+  </section>
+
+  <!-- ======================= WHEELS ======================= -->
+  <section>
+    <span class="kicker">Wheels</span>
+    <div class="wheels">
+
+      <a class="wheel" href="#">
+        <span class="go" aria-hidden="true">&rarr;</span>
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="17" fill="hsl(45, 84%, 62%)"/>
+          <path d="M6 24 L15 11 L22 24 Z" fill="hsl(138, 37%, 20%)"/>
+          <circle cx="24" cy="11" r="4" fill="hsl(17, 63%, 45%)"/>
+        </svg>
+        <div class="head"><h3>Scout</h3><span class="state idle">idle</span></div>
+        <p class="role">stocks the docket</p>
+        <div class="row"><span class="last">last 17:00</span><span class="metric">132 sources</span></div>
+      </a>
+
+      <a class="wheel" href="#">
+        <span class="go" aria-hidden="true">&rarr;</span>
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="17" fill="hsl(95, 36%, 90%)"/>
+          <path d="M17 10 C13 8 9.5 8 7 9 L7 24 C9.5 23 13 23 17 25 Z" fill="hsl(132, 33%, 34%)"/>
+          <path d="M17 10 C21 8 24.5 8 27 9 L27 24 C24.5 23 21 23 17 25 Z" fill="hsl(138, 37%, 20%)"/>
+        </svg>
+        <div class="head"><h3>Reader</h3><span class="state idle">idle</span></div>
+        <p class="role">reads the stack</p>
+        <div class="row"><span class="last">last 17:04</span><span class="metric">64 papers</span></div>
+      </a>
+
+      <a class="wheel" href="#">
+        <span class="go" aria-hidden="true">&rarr;</span>
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="17" fill="hsl(46, 75%, 88%)"/>
+          <circle cx="17" cy="8.5" r="3.4" fill="hsl(17, 63%, 45%)"/>
+          <circle cx="25" cy="14" r="3.4" fill="hsl(138, 37%, 20%)"/>
+          <circle cx="22" cy="24" r="3.4" fill="hsl(138, 37%, 20%)"/>
+          <circle cx="12" cy="24" r="3.4" fill="hsl(138, 37%, 20%)"/>
+          <circle cx="9" cy="14" r="3.4" fill="hsl(138, 37%, 20%)"/>
+          <circle cx="17" cy="17" r="2.2" fill="hsl(132, 33%, 34%)"/>
+        </svg>
+        <div class="head"><h3>Council</h3><span class="state idle">idle</span></div>
+        <p class="role">votes the verdict</p>
+        <div class="row"><span class="last">last 17:12</span><span class="metric">10 verdicts</span></div>
+      </a>
+
+      <a class="wheel live" href="#">
+        <span class="go" aria-hidden="true">&rarr;</span>
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="17" fill="hsl(46, 72%, 90%)"/>
+          <rect x="14.5" y="6" width="5" height="8" fill="hsl(138, 37%, 20%)"/>
+          <path d="M12 13 L22 13 L27 26 L7 26 Z" fill="hsl(132, 33%, 34%)"/>
+          <circle cx="17" cy="21" r="2.6" fill="hsl(45, 84%, 62%)"/>
+          <circle cx="21.5" cy="17.5" r="1.6" fill="hsl(17, 63%, 45%)"/>
+        </svg>
+        <div class="head"><h3>Simulator</h3><span class="state live">live</span></div>
+        <p class="role">runs the trial</p>
+        <div class="row"><span class="last">last 17:22</span><span class="metric">11 trials</span></div>
+      </a>
+
+      <a class="wheel" href="#">
+        <span class="go" aria-hidden="true">&rarr;</span>
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="17" fill="hsl(95, 36%, 90%)"/>
+          <rect x="8" y="9" width="18" height="4.6" rx="2.3" fill="hsl(17, 63%, 45%)"/>
+          <rect x="8" y="15" width="18" height="4.6" rx="2.3" fill="hsl(41, 66%, 54%)"/>
+          <rect x="8" y="21" width="18" height="4.6" rx="2.3" fill="hsl(138, 37%, 20%)"/>
+        </svg>
+        <div class="head"><h3>Archivist</h3><span class="state waits">waits</span></div>
+        <p class="role">writes lineage</p>
+        <div class="row"><span class="last">last 16:34</span><span class="metric">10 lineages</span></div>
+      </a>
+
+      <a class="wheel" href="#">
+        <span class="go" aria-hidden="true">&rarr;</span>
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="17" fill="hsl(46, 75%, 88%)"/>
+          <rect x="7" y="11" width="20" height="13" rx="2.5" fill="hsl(138, 37%, 20%)"/>
+          <path d="M7 12.5 L17 20 L27 12.5 L27 11 L7 11 Z" fill="hsl(45, 84%, 62%)"/>
+        </svg>
+        <div class="head"><h3>Courier</h3><span class="state waits">waits</span></div>
+        <p class="role">posts and closes</p>
+        <div class="row"><span class="last">last 16:41</span><span class="metric">10 digests</span></div>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- ======================= TIMETABLE ======================= -->
+  <section>
+    <span class="kicker">Timetable</span>
+    <table class="tt">
+      <thead>
+        <tr>
+          <th>Cycle</th>
+          <th>Open</th>
+          <th>Run</th>
+          <th class="c">Scout +0</th>
+          <th class="c">Reader +4</th>
+          <th class="c">Council +12</th>
+          <th class="c">Simulate +22</th>
+          <th class="c">Archive +34</th>
+          <th class="c">Post +41</th>
+          <th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>01</td><td class="mono">06:00</td><td class="mono"><a class="id" href="#">r-2201</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>02</td><td class="mono">07:00</td><td class="mono"><a class="id" href="#">r-2202</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>03</td><td class="mono">08:00</td><td class="mono"><a class="id" href="#">r-2203</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>04</td><td class="mono">09:00</td><td class="mono"><a class="id" href="#">r-2204</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>05</td><td class="mono">10:00</td><td class="mono"><a class="id" href="#">r-2205</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>06</td><td class="mono">11:00</td><td class="mono"><a class="id" href="#">r-2206</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr class="struck">
+          <td>07</td><td class="mono">12:00</td><td class="mono"><a class="id" href="#">r-2207</a></td>
+          <td class="c">&mdash;</td><td class="c">&mdash;</td><td class="c">&mdash;</td><td class="c">&mdash;</td><td class="c">&mdash;</td><td class="c">&mdash;</td>
+          <td class="st">struck &middot; kept on book</td>
+        </tr>
+        <tr>
+          <td>08</td><td class="mono">13:00</td><td class="mono"><a class="id" href="#">r-2208</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>09</td><td class="mono">14:00</td><td class="mono"><a class="id" href="#">r-2209</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="c"><span class="d done"></span><span class="latechip">+21</span></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed 15:02</td>
+        </tr>
+        <tr class="note">
+          <td></td><td colspan="9">cycle 09 Simulate &middot; booked <span class="mono">14:22</span> &middot; actual <span class="mono">14:43</span> &middot; closed <span class="mono">15:02</span></td>
+        </tr>
+        <tr>
+          <td>10</td><td class="mono">15:00</td><td class="mono"><a class="id" href="#">r-2210</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr>
+          <td>11</td><td class="mono">16:00</td><td class="mono"><a class="id" href="#">r-2211</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="st">closed</td>
+        </tr>
+        <tr class="livecycle">
+          <td>12</td><td class="mono">17:00</td><td class="mono"><a class="id" href="#">r-2212</a></td>
+          <td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td><td class="c"><span class="d done"></span></td>
+          <td class="c"><span class="d live"></span></td>
+          <td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td>
+          <td class="st">live &middot; mid-Simulate</td>
+        </tr>
+        <tr>
+          <td>13</td><td class="mono">18:00</td><td class="mono"><a class="id" href="#">r-2213</a></td>
+          <td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td>
+          <td class="st">booked</td>
+        </tr>
+        <tr>
+          <td>14</td><td class="mono">19:00</td><td class="mono"><a class="id" href="#">r-2214</a></td>
+          <td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td>
+          <td class="st">booked</td>
+        </tr>
+        <tr>
+          <td>15</td><td class="mono">20:00</td><td class="mono"><a class="id" href="#">r-2215</a></td>
+          <td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td>
+          <td class="st">booked</td>
+        </tr>
+        <tr>
+          <td>16</td><td class="mono">21:00</td><td class="mono"><a class="id" href="#">r-2216</a></td>
+          <td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td><td class="c"><span class="d open"></span></td>
+          <td class="st">booked</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="legend">
+      <span><span class="d done"></span> done</span>
+      <span><span class="d live"></span> live</span>
+      <span><span class="d open"></span> booked</span>
+      <span>&mdash; struck</span>
+    </div>
+  </section>
+
+  <!-- ======================= VOLUMES ======================= -->
+  <section>
+    <span class="kicker">Volumes</span>
+    <div class="volumes">
+      <div class="figrow">
+        <a class="fig" href="#"><b>132</b><span>sources</span></a>
+        <a class="fig" href="#"><b>64</b><span>papers</span></a>
+        <a class="fig" href="#"><b>409</b><span>claims</span></a>
+        <a class="fig" href="#"><b>11</b><span>trials</span></a>
+        <a class="fig" href="#"><b>10</b><span>verdicts</span></a>
+        <a class="fig" href="#"><b>10</b><span>digests</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= SCHEDULER + DATA ======================= -->
+  <section>
+    <div class="twin">
+      <div class="panel">
+        <span class="kicker">Scheduler</span>
+        <dl class="kv">
+          <dt>cadence</dt><dd>one open per hour <span class="mono">06:00&ndash;21:00</span></dd>
+          <dt>strike</dt><dd>past <span class="mono">+25</span> &middot; worst <a class="v mono" href="#">+21</a></dd>
+          <dt>next open</dt><dd><span class="mono">18:00:00</span> &middot; cycle 13 &middot; <a class="v mono" href="#">r-2213</a></dd>
+          <dt>farm local</dt><dd><span class="mono">UTC&minus;05</span></dd>
+        </dl>
+      </div>
+      <div class="panel">
+        <span class="kicker">Data</span>
+        <dl class="kv">
+          <dt>snapshot</dt><dd><span class="mono">17:15:09</span> &middot; <a class="v" href="#">412&nbsp;MB</a> &middot; <span class="ok">verified</span></dd>
+          <dt>archive</dt><dd><a class="v" href="#">1,283 runs</a> &middot; 9.6&nbsp;GB</dd>
+          <dt>next snap</dt><dd><span class="mono">18:15</span></dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= STANDING ORDERS ======================= -->
+  <section>
+    <span class="kicker">Standing orders</span>
+    <table class="orders">
+      <tbody>
+        <tr><td>cadence</td><td>hourly</td><td><span class="prov">default</span></td></tr>
+        <tr><td>strike</td><td>past <span class="mono">+25</span></td><td><span class="prov">default</span></td></tr>
+        <tr><td>retry</td><td>&times;1 then requeue</td><td><span class="prov">default</span></td></tr>
+        <tr><td>snapshot</td><td>hourly <span class="mono">:15</span></td><td><span class="prov">default</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ======================= LOG ======================= -->
+  <section>
+    <span class="kicker">Log</span>
+    <table class="log">
+      <tbody>
+        <tr>
+          <td class="t">09:12</td>
+          <td>Simulator allot raised</td>
+          <td class="who"><span class="erik">ERIK</span></td>
+        </tr>
+        <tr>
+          <td class="t">10:00</td>
+          <td>course set: drought wheat &times; 13&ndash;24</td>
+          <td class="who"><span class="erik">ERIK</span></td>
+        </tr>
+        <tr>
+          <td class="t">12:01</td>
+          <td>feed empty, cycle 07 &rarr; struck, kept on book</td>
+          <td class="who"></td>
+        </tr>
+        <tr>
+          <td class="t">14:22</td>
+          <td>simulator queue stall, cycle 09 &rarr; requeued <span class="mono">14:43</span>, closed <span class="mono">15:02</span> &middot; 21.0&nbsp;min</td>
+          <td class="who"></td>
+        </tr>
+        <tr>
+          <td class="t">17:15</td>
+          <td>snapshot checksum fail &rarr; write 2 <span class="ok">verified</span></td>
+          <td class="who"></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="lost">Minutes lost <a href="#"><b>21.2</b></a> of 960</p>
+  </section>
+
+  <!-- ======================= CONTROL ======================= -->
+  <section>
+    <span class="kicker">Control</span>
+    <div class="control">
+      <button class="suspend" type="button">Suspend generation</button>
+      <p>Cycle 12 runs to <span class="t">17:41</span> &middot; 13&ndash;16 do not open &middot; resume reopens next booked hour.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span class="motto">Every claim sourced &middot; every cost computed &middot; every verdict recorded.</span>
+    <span class="mark">
+      <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="9.1" y="9" width="1.8" height="10" fill="hsl(46, 75%, 88%)"/>
+        <path d="M10 10 C4.5 10 1.2 6 1 1.2 C6.5 1.6 10 5 10 10 Z" fill="hsl(45, 84%, 62%)"/>
+        <path d="M10 10 C15.5 10 18.8 6 19 1.2 C13.5 1.6 10 5 10 10 Z" fill="hsl(101, 30%, 54%)"/>
+      </svg>
+      Palingenesis
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>
