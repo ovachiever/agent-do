@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #1B1917;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-sel: rgba(231,227,218,0.06);
+    /* type scale: exactly four sizes */
+    --t-xs: 11px;  --lh-xs: 16px;
+    --t-sm: 13px;  --lh-sm: 20px;
+    --t-md: 16px;  --lh-md: 24px;
+    --t-lg: 22px;  --lh-lg: 32px;
+    /* column grid: page 1440, pad 26, frame 1px.
+       rail content x=51 · mid content x=348 (+184 = 532 · 716 · 900) · inspector content x=1133 */
+    --rail: 296px;
+    --insp: 304px;
+    --pad: 24px;
+    --sub: 184px;
+    --ikey: 96px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: var(--t-sm);
+    line-height: var(--lh-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  .page{ width: 1440px; margin: 0 auto; padding: 24px 26px 32px; }
+
+  /* ---------- nav ---------- */
+  .brandrow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+  }
+  .brandrow .brand{ color: var(--ink); font-weight: 700; }
+  .rooms{
+    display:flex; gap: 24px;
+    padding: 8px 0 16px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.04em; color: var(--ink-dim);
+  }
+  .rooms .active{ color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--ink); }
+
+  /* ---------- status strip ---------- */
+  .strip{
+    border: 1px solid var(--rule);
+    padding: 16px var(--pad) 24px;
+    margin-bottom: 16px;
+  }
+  .stats{ display:grid; grid-template-columns: 297px var(--sub) var(--sub) var(--sub) 233px 256px; }
+  .stat .lbl{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.08em; color: var(--ink-dim); }
+  .stat .num{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .stat .num.sage{ color: var(--sage); }
+  .stat .num.clay{ color: var(--clay); }
+
+  /* ---------- workstation frame ---------- */
+  .workstation{ position: relative; border: 1px solid var(--rule); }
+  .corner{ position:absolute; width:10px; height:10px; }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+
+  .grid3{ display:grid; grid-template-columns: var(--rail) 1px 1fr 1px var(--insp); align-items: stretch; }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: var(--pad); min-width: 0; }
+  .colhead{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    font-weight: 700; letter-spacing: 0.1em; color: var(--ink);
+    margin-bottom: 24px;
+  }
+  .blk + .blk{ margin-top: 24px; }
+  .sublabel{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+  .sublabel.strong{ color: var(--ink); font-weight: 700; }
+  .hr{ height: 1px; background: var(--rule-soft); }
+  .chev{ color: var(--ink-dim); text-align: right; }
+  .sage{ color: var(--sage); }
+  .clay{ color: var(--clay); }
+  .mid{ color: var(--ink-mid); }
+  .dim{ color: var(--ink-dim); }
+  svg{ display:block; }
+  svg text{ font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  /* ---------- LIFECYCLE rail ---------- */
+  .floor{ display:flex; align-items:center; gap: 16px; }
+  .floor .fv{ color: var(--ink); }
+  .floor svg{ width: 168px; height: 16px; }
+  .frow{ display:flex; justify-content:space-between; align-items:baseline; color: var(--ink-mid); }
+  .frow b{ color: var(--ink); font-weight: 500; }
+  .frow .caret{ color: var(--ink-dim); }
+  .frow.sort{ margin-top: 8px; }
+  .field{ display:inline-block; width: 128px; height: 12px; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
+  .grp .gname{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size: var(--t-xs); line-height: var(--lh-sm); letter-spacing: 0.08em; color: var(--ink);
+  }
+  .grp .gname .cnt{ font-size: var(--t-sm); letter-spacing: 0; color: var(--ink-mid); }
+  .grp.sage .gname .nm{ color: var(--sage); }
+  .grp.clay .gname .nm{ color: var(--clay); }
+  .grp.quiet .gname .nm{ color: var(--ink-mid); }
+  .grow{
+    display:grid; grid-template-columns: 1fr auto;
+    padding: 0 8px 0 6px; margin: 0 -8px;
+    border-left: 2px solid transparent;
+  }
+  .grow.sel{ background: var(--fill-sel); border-left-color: var(--ink); }
+  .grow .id{ color: var(--ink); white-space: nowrap; }
+  .grow .gf{ color: var(--ink-mid); text-align: right; }
+  .gsub{ display:grid; grid-template-columns: 1fr 16px; color: var(--ink-mid); white-space: nowrap; }
+  .gmore{ color: var(--ink-dim); }
+
+  /* ---------- SELECTED ITEM ---------- */
+  .ident{ display:flex; justify-content:space-between; align-items:baseline; gap: 16px; margin-bottom: 8px; }
+  .ident .id{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; letter-spacing: 0.04em; color: var(--ink); }
+  .ident .sv{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.06em; color: var(--ink-mid); }
+  .thesis{ color: var(--ink); max-width: 640px; }
+  .scale svg{ width: 100%; height: auto; }
+  .kv{ display:grid; grid-template-columns: var(--sub) 1fr 16px; }
+  .kv .k{ color: var(--ink-mid); }
+  .kv .v{ color: var(--ink); }
+  .kv .v.sage{ color: var(--sage); }
+  .kv .v.mid{ color: var(--ink-mid); }
+  .kv .v.dim{ color: var(--ink-dim); }
+  .kv .span{ grid-column: 1 / 3; color: var(--ink); }
+  .kv .span.mid{ color: var(--ink-mid); }
+  .judge{ margin-top: 16px; }
+  .ev{ display:grid; grid-template-columns: var(--sub) var(--sub) 1fr 16px; }
+  .ev .d{ color: var(--ink-mid); }
+  .ev .k{ color: var(--ink-mid); }
+  .ev .v{ color: var(--ink); }
+  .river svg{ width: 100%; height: auto; }
+
+  /* ---------- ITEM INSPECTOR ---------- */
+  .ibig{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); }
+  .ival{ color: var(--ink); }
+  .comp{ display:grid; grid-template-columns: 40px 40px 1fr; column-gap: 8px; align-items: center; }
+  .comp .c{ color: var(--ink-mid); }
+  .comp .cv{ color: var(--ink); text-align: right; }
+  .comp svg{ width: 160px; height: 16px; }
+  .ikv{ display:grid; grid-template-columns: var(--ikey) 1fr; }
+  .ikv .k{ color: var(--ink-mid); }
+  .ikv .v{ color: var(--ink); }
+  .ikv .v.dim{ color: var(--ink-dim); }
+  .lrow{ display:grid; grid-template-columns: 1fr 16px; }
+  .lrow .v{ color: var(--ink); }
+  .btns{ display:flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .btns.row{ gap: 16px; }
+  .btn{
+    display:inline-flex; align-items:center; height: 24px; padding: 0 10px;
+    border: 1px solid var(--rule); color: var(--ink-mid);
+    font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .btn.clay{ color: var(--clay); border-color: var(--clay); }
+  .stack{ display:flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  /* ---------- GENERATIONS foot ---------- */
+  .hdiv{ height: 1px; background: var(--rule); }
+  .gens{ display:grid; grid-template-columns: 297px 1fr; padding: var(--pad); align-items: baseline; }
+  .gens .t{ font-size: var(--t-xs); line-height: var(--lh-xs); font-weight: 700; letter-spacing: 0.1em; color: var(--ink); }
+  .gens .row{ display:flex; gap: 32px; color: var(--ink-mid); white-space: nowrap; }
+  .gens .row b{ color: var(--ink); font-weight: 600; }
+  .gens .row .chev{ margin-left: 8px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brandrow">
+    <span class="brand">PALINGENESIS</span>
+    <span>Tue 15 Sep 2026</span>
+  </div>
+  <nav class="rooms">
+    <span>Today</span>
+    <span class="active">PIPELINE</span>
+    <span>Library</span>
+    <span>Portfolio</span>
+    <span>Simulation</span>
+    <span>Engine Room</span>
+  </nav>
+
+  <!-- status strip -->
+  <section class="strip">
+    <div class="stats">
+      <div class="stat"><div class="lbl">GENERATION</div><div class="num">G12</div></div>
+      <div class="stat"><div class="lbl">POPULATION</div><div class="num">40</div></div>
+      <div class="stat"><div class="lbl">SURVIVAL</div><div class="num">35%</div></div>
+      <div class="stat"><div class="lbl">BEST FITNESS</div><div class="num sage">0.91</div></div>
+      <div class="stat"><div class="lbl">COUNCIL</div><div class="num">14:00 / 20:00</div></div>
+      <div class="stat"><div class="lbl">NEEDS HAND</div><div class="num clay">4</div></div>
+    </div>
+  </section>
+
+  <div class="workstation">
+    <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+
+    <div class="grid3">
+      <!-- LIFECYCLE -->
+      <section class="col">
+        <div class="colhead">LIFECYCLE</div>
+
+        <div class="blk">
+          <div class="sublabel">Fitness floor</div>
+          <div class="floor">
+            <span class="fv">0.70</span>
+            <svg viewBox="0 0 168 16" role="img" aria-label="Fitness floor">
+              <line x1="0.5" y1="3" x2="0.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="167.5" y1="3" x2="167.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="0" y1="8" x2="168" y2="8" stroke="var(--rule)" stroke-width="1"/>
+              <circle cx="117.6" cy="8" r="4" fill="var(--ink)"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="frow"><span>Stage</span><b>All <span class="caret">▾</span></b></div>
+          <div class="frow"><span>Verdict</span><b>All <span class="caret">▾</span></b></div>
+          <div class="frow"><span>Strategy</span><b>All <span class="caret">▾</span></b></div>
+          <div class="frow"><span>Text</span><span class="field"></span></div>
+          <div class="frow sort"><span>Sort</span><b>Fitness <span class="caret">▾</span></b></div>
+        </div>
+
+        <div class="grp blk">
+          <div class="gname"><span class="nm">EMBRYO</span><span class="cnt">8</span></div>
+          <div class="grow"><span class="id">item-0441</span><span class="gf">G12 · 0.63</span></div>
+          <div class="gmore">+7</div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">CANDIDATE</span><span class="cnt">7</span></div>
+          <div class="grow"><span class="id">item-0433</span><span class="gf">G12 · 0.76</span></div>
+          <div class="gmore">+6</div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">IN_EVALUATION</span><span class="cnt">6</span></div>
+          <div class="grow"><span class="id">item-0428</span><span class="gf">G12 · 0.82</span></div>
+          <div class="gmore">+5</div>
+        </div>
+        <div class="grp sage blk">
+          <div class="gname"><span class="nm">GREENLIGHT</span><span class="cnt">3</span></div>
+          <div class="grow"><span class="id">item-0421</span><span class="gf">G12 · 0.88</span></div>
+          <div class="gmore">+2</div>
+        </div>
+        <div class="grp quiet blk">
+          <div class="gname"><span class="nm">LIMINAL</span><span class="cnt">3</span></div>
+          <div class="grow"><span class="id">item-0418</span><span class="gf">G12 · 0.79</span></div>
+          <div class="gsub"><span>Parked 15 Sep · evidence gap</span><span class="chev">▸</span></div>
+          <div class="gmore">+2</div>
+        </div>
+        <div class="grp clay blk">
+          <div class="gname"><span class="nm">VETOED</span><span class="cnt">3</span></div>
+          <div class="grow"><span class="id">item-0409</span><span class="gf">G11 · 0.68</span></div>
+          <div class="gmore">+2</div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">SIMULATING</span><span class="cnt">2</span></div>
+          <div class="grow sel"><span class="id">● item-0417</span><span class="gf">G12 · 0.91</span></div>
+          <div class="gmore">+1</div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">PILOT_READY</span><span class="cnt">2</span></div>
+          <div class="grow"><span class="id">item-0384</span><span class="gf">G11 · 0.86</span></div>
+          <div class="gmore">+1</div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">IN_PILOT</span><span class="cnt">2</span></div>
+          <div class="grow"><span class="id">item-0367</span><span class="gf">G10 · 0.84</span></div>
+          <div class="gmore">+1</div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">COMMERCIALIZING</span><span class="cnt">1</span></div>
+          <div class="grow"><span class="id">item-0344</span><span class="gf">G9 · 0.81</span></div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">LAUNCHED</span><span class="cnt">1</span></div>
+          <div class="grow"><span class="id">item-0291</span><span class="gf">G8 · 0.87</span></div>
+        </div>
+        <div class="grp blk">
+          <div class="gname"><span class="nm">ARCHIVED</span><span class="cnt">1</span></div>
+          <div class="grow"><span class="id">item-0217</span><span class="gf">G6 · 0.72</span></div>
+        </div>
+        <div class="grp clay blk">
+          <div class="gname"><span class="nm">FAILED</span><span class="cnt">1</span></div>
+          <div class="grow"><span class="id">item-0182</span><span class="gf">G5 · 0.74</span></div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- SELECTED ITEM -->
+      <section class="col">
+        <div class="colhead">SELECTED ITEM</div>
+
+        <div class="blk">
+          <div class="ident"><span class="id">ITEM-0417</span><span class="sv">SIMULATING · <span class="sage">GREENLIGHT</span></span></div>
+          <div class="thesis">Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) at no change in litter moisture, paying back in one flock.</div>
+        </div>
+
+        <div class="scale blk">
+          <div class="sublabel strong">FITNESS</div>
+          <svg viewBox="0 0 736 96" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Fitness">
+            <text x="0" y="14" text-anchor="start" font-size="11" fill="var(--ink-mid)">0.0</text>
+            <text x="368" y="14" text-anchor="middle" font-size="11" fill="var(--ink-mid)">0.5</text>
+            <text x="736" y="14" text-anchor="end" font-size="11" fill="var(--ink-mid)">1.0</text>
+            <line x1="0.5" y1="40" x2="0.5" y2="56" stroke="var(--ink-mid)" stroke-width="1"/>
+            <line x1="368" y1="44" x2="368" y2="52" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="735.5" y1="40" x2="735.5" y2="56" stroke="var(--ink-mid)" stroke-width="1"/>
+            <line x1="0" y1="48" x2="736" y2="48" stroke="var(--rule)" stroke-width="1"/>
+            <circle cx="669.76" cy="48" r="5" fill="var(--sage)"/>
+            <text x="669.76" y="82" text-anchor="middle" font-size="13" fill="var(--sage)">0.91</text>
+          </svg>
+        </div>
+
+        <div class="blk">
+          <div class="kv"><span class="k">Council</span><span class="v sage">GREENLIGHT</span><span></span></div>
+          <div class="kv"><span class="span mid">Tue 15 Sep · 14:00</span><span class="chev">▸</span></div>
+          <div class="judge">
+            <div class="kv"><span class="k">Judge 01</span><span class="v sage">GREENLIGHT</span><span></span></div>
+            <div class="kv"><span class="span">"The claimed effect is bounded and testable."</span><span class="chev">▸</span></div>
+          </div>
+          <div class="judge">
+            <div class="kv"><span class="k">Judge 02</span><span class="v sage">GREENLIGHT</span><span></span></div>
+            <div class="kv"><span class="span">"The litter-moisture constraint is explicit."</span><span class="chev">▸</span></div>
+          </div>
+          <div class="judge">
+            <div class="kv"><span class="k">Judge 03</span><span class="v mid">LIMINAL</span><span></span></div>
+            <div class="kv"><span class="span">"The one-flock payback needs simulation."</span><span class="chev">▸</span></div>
+          </div>
+        </div>
+
+        <div class="hr blk"></div>
+
+        <div class="blk">
+          <div class="sublabel strong">RECEIPTS</div>
+          <div class="kv"><span class="k">Thesis</span><span class="v">24%</span><span></span></div>
+          <div class="kv"><span class="k">Interval</span><span class="v">18–30%</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k">Constraint</span><span class="v">no litter-moisture change</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k">Payback</span><span class="v">one flock</span><span class="chev">▸</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel strong">SEED PAPERS</div>
+          <div class="kv"><span class="span">paper-01</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="span">paper-02</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="span">paper-03</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="span mid">+ papers</span><span class="chev">▸</span></div>
+        </div>
+
+        <div class="hr blk"></div>
+
+        <div class="river blk">
+          <div class="sublabel strong">RIVER</div>
+          <svg viewBox="0 0 736 104" preserveAspectRatio="xMinYMin meet" role="img" aria-label="River">
+            <text x="32" y="16" text-anchor="middle" font-size="13" fill="var(--ink-mid)">embryo</text>
+            <text x="144" y="16" text-anchor="middle" font-size="13" fill="var(--ink-mid)">candidate</text>
+            <text x="256" y="16" text-anchor="middle" font-size="13" fill="var(--ink-mid)">evaluation</text>
+            <text x="368" y="16" text-anchor="middle" font-size="13" fill="var(--ink-mid)">council</text>
+            <text x="480" y="16" text-anchor="middle" font-size="13" fill="var(--ink)">simulation</text>
+            <text x="592" y="16" text-anchor="middle" font-size="13" fill="var(--ink-mid)">pilot</text>
+            <text x="704" y="16" text-anchor="middle" font-size="13" fill="var(--ink-mid)">commerce</text>
+            <line x1="32" y1="48" x2="704" y2="48" stroke="var(--rule)" stroke-width="1"/>
+            <circle cx="32" cy="48" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="144" cy="48" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="256" cy="48" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="368" cy="48" r="4" fill="var(--ink)"/>
+            <circle cx="480" cy="48" r="7" fill="var(--bg)" stroke="var(--sage)" stroke-width="1.5"/>
+            <circle cx="480" cy="48" r="3" fill="var(--sage)"/>
+            <circle cx="592" cy="48" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="704" cy="48" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <text x="480" y="84" text-anchor="middle" font-size="13" fill="var(--ink)">item-0417</text>
+          </svg>
+        </div>
+
+        <div class="blk">
+          <div class="kv"><span class="k">Verdict</span><span class="v sage">GREENLIGHT</span><span></span></div>
+          <div class="kv"><span class="k">Simulation</span><span class="v">running</span><span></span></div>
+          <div class="kv"><span class="k">Pilot</span><span class="v dim">—</span><span></span></div>
+          <div class="kv"><span class="k">Sites</span><span class="v dim">—</span><span></span></div>
+          <div class="kv"><span class="k">Readings</span><span class="v dim">—</span><span></span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel strong">EVENTS</div>
+          <div class="ev"><span class="d">Tue 15 Sep 14:00</span><span class="k">Council</span><span class="v sage">GREENLIGHT</span><span class="chev">▸</span></div>
+          <div class="ev"><span class="d">Tue 15 Sep 14:06</span><span class="k">Simulation</span><span class="v">run-1842</span><span class="chev">▸</span></div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- ITEM INSPECTOR -->
+      <section class="col">
+        <div class="colhead">ITEM INSPECTOR</div>
+
+        <div class="blk">
+          <div class="sublabel">GENERATION</div>
+          <div class="ibig">G12</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">FITNESS</div>
+          <div class="ibig">0.91</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">COMPONENTS</div>
+          <div class="comp"><span class="c">C01</span><span class="cv">0.94</span>
+            <svg viewBox="0 0 160 16" role="img" aria-label="C01">
+              <line x1="0.5" y1="3" x2="0.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/><line x1="159.5" y1="3" x2="159.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="0" y1="8" x2="160" y2="8" stroke="var(--rule)" stroke-width="1"/><circle cx="150.4" cy="8" r="3" fill="var(--ink)"/>
+            </svg></div>
+          <div class="comp"><span class="c">C02</span><span class="cv">0.92</span>
+            <svg viewBox="0 0 160 16" role="img" aria-label="C02">
+              <line x1="0.5" y1="3" x2="0.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/><line x1="159.5" y1="3" x2="159.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="0" y1="8" x2="160" y2="8" stroke="var(--rule)" stroke-width="1"/><circle cx="147.2" cy="8" r="3" fill="var(--ink)"/>
+            </svg></div>
+          <div class="comp"><span class="c">C03</span><span class="cv">0.90</span>
+            <svg viewBox="0 0 160 16" role="img" aria-label="C03">
+              <line x1="0.5" y1="3" x2="0.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/><line x1="159.5" y1="3" x2="159.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="0" y1="8" x2="160" y2="8" stroke="var(--rule)" stroke-width="1"/><circle cx="144" cy="8" r="3" fill="var(--ink)"/>
+            </svg></div>
+          <div class="comp"><span class="c">C04</span><span class="cv">0.89</span>
+            <svg viewBox="0 0 160 16" role="img" aria-label="C04">
+              <line x1="0.5" y1="3" x2="0.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/><line x1="159.5" y1="3" x2="159.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="0" y1="8" x2="160" y2="8" stroke="var(--rule)" stroke-width="1"/><circle cx="142.4" cy="8" r="3" fill="var(--ink)"/>
+            </svg></div>
+          <div class="comp"><span class="c">C05</span><span class="cv">0.88</span>
+            <svg viewBox="0 0 160 16" role="img" aria-label="C05">
+              <line x1="0.5" y1="3" x2="0.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/><line x1="159.5" y1="3" x2="159.5" y2="13" stroke="var(--ink-mid)" stroke-width="1"/>
+              <line x1="0" y1="8" x2="160" y2="8" stroke="var(--rule)" stroke-width="1"/><circle cx="140.8" cy="8" r="3" fill="var(--ink)"/>
+            </svg></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">STRATEGY</div>
+          <div class="ival">biomimicry</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">MODE</div>
+          <div class="ival">research_backed</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">LINEAGE</div>
+          <div class="mid">Parents</div>
+          <div class="lrow"><span class="v">item-0321</span><span class="chev">▸</span></div>
+          <div class="lrow"><span class="v">item-0338</span><span class="chev">▸</span></div>
+          <div class="mid" style="margin-top:8px">Siblings</div>
+          <div class="lrow"><span class="v">item-0415</span><span class="chev">▸</span></div>
+          <div class="lrow"><span class="v">item-0416</span><span class="chev">▸</span></div>
+          <div class="dim">+2</div>
+          <div class="btns"><span class="btn">Lineage view</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">SIMULATION</div>
+          <div class="ikv"><span class="k">Run</span><span class="v">run-1842</span></div>
+          <div class="ikv"><span class="k">Result</span><span class="v">pending</span></div>
+          <div class="ikv"><span class="k">Interval</span><span class="v dim">—</span></div>
+          <div class="ikv"><span class="k">In domain</span><span class="v dim">—</span></div>
+          <div class="ikv"><span class="k">Hindcast</span><span class="v dim">—</span></div>
+          <div class="btns"><span class="btn">Open run</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">ITEM ACTS</div>
+          <div class="stack">
+            <span class="btn">Open Dossier</span>
+          </div>
+          <div class="stack" style="margin-top:16px">
+            <span class="btn">Breed variants</span>
+            <span class="btn">Commission research</span>
+            <span class="btn">Re-evaluate</span>
+            <span class="btn">Send simulation</span>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">DISPOSITION</div>
+          <div class="btns row" style="margin-top:0"><span class="btn">Park</span><span class="btn clay">Kill</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">ACT RECORD</div>
+          <div class="ikv"><span class="k">Reason</span><span class="v"><span class="field"></span></span></div>
+          <div class="ikv"><span class="k">Date</span><span class="v">15 Sep 2026</span></div>
+          <div class="ikv"><span class="k">Actor</span><span class="v">Owner</span></div>
+          <div class="btns"><span class="btn">Record act</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="hdiv"></div>
+
+    <!-- GENERATIONS -->
+    <section class="gens">
+      <span class="t">GENERATIONS</span>
+      <div class="row">
+        <span><b>G12</b>&nbsp;&nbsp;40 items · 35% survival · best 0.91</span>
+        <span><b>G11</b><span class="chev">▸</span></span>
+        <span><b>G10</b><span class="chev">▸</span></span>
+        <span><b>G9</b><span class="chev">▸</span></span>
+        <span><b>SPECIES</b><span class="chev">▸</span></span>
+        <span><b>LINEAGES</b><span class="chev">▸</span></span>
+        <span><b>RECORD</b><span class="chev">▸</span></span>
+      </div>
+    </section>
+  </div>
+
+</div>
+</body>
+</html>
