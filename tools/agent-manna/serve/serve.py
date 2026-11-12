@@ -369,8 +369,9 @@ def coord_digest(peers: list[dict[str, Any]], coord: dict[str, Any]) -> str:
 
 
 # Buckets whose rows the page renders directly. The core serializes each as an
-# independent copy; the page decorates rows (digests, unknown-coord marking)
-# once, so every bucket must alias the same row objects as all[].
+# independent copy; the page applies live coordination overlays once, so every
+# bucket must alias the same row objects as all[]. Cached presentation fields
+# already arrive on every copy through the canonical state contract.
 ROW_BUCKETS = ("now", "next", "decisions", "dreams", "unlayered")
 
 
@@ -409,11 +410,13 @@ def mark_coordination_unknown(state: dict[str, Any]) -> None:
             claimant["attention"] = "unknown"
 
 
-def attach_digests(slug: str, state: dict[str, Any], schedule_missing: bool) -> None:
-    """Cached digest lines attach to the shared rows (hydrate_buckets first);
-    missing ones may generate in the background, and the cache file's change
-    re-signs the page."""
-    report = digest_lib.apply(slug, state.get("all") or [])
+def prepare_digests(slug: str, state: dict[str, Any], schedule_missing: bool) -> None:
+    """Plan missing digest generation without decorating canonical rows.
+
+    `manna state` owns cache attachment. Serve only schedules gaps, and the
+    cache file's change re-signs the page.
+    """
+    report = digest_lib.plan(slug, state.get("all") or [])
     state["digests"] = {"ready": report["ready"], "missing": report["missing"], "model": report["model"], "generating": False}
     if schedule_missing and report["missing_rows"] and DIGESTS_ENABLED:
         state["digests"]["generating"] = digest_lib.schedule(slug, report["missing_rows"])
@@ -592,7 +595,7 @@ class BoardCache:
             state["coord_refresh_seconds"] = COORD_REFRESH_SECONDS
             state["act_token"] = ACT_TOKEN
             state["actor"] = serve_identity()["session_id"]
-            attach_digests(slug, state, schedule_missing=True)
+            prepare_digests(slug, state, schedule_missing=True)
             if self.gitdir(root) is not None:
                 self.schedule_drift(key, root, self.base_signature(root))
             with self.lock:
@@ -715,7 +718,7 @@ def fast_state(slug: str, root: Path) -> dict[str, Any]:
     hydrate_buckets(state)
     if not warm:
         mark_coordination_unknown(state)
-    attach_digests(slug, state, schedule_missing=False)
+    prepare_digests(slug, state, schedule_missing=False)
     state.update({
         "slug": slug,
         "act_token": ACT_TOKEN,

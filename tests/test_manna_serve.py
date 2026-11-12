@@ -173,6 +173,78 @@ class DerivationTests(unittest.TestCase):
         private = {"claim_token_hash", "legacy_migration", "act_token", "actor"}
         self.assertFalse(private & nested_keys(payload))
 
+    def test_state_cli_attaches_hash_current_presentation_cache_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_board(Path(tmp) / "project").resolve()
+            issue_path = root / ".manna" / "issues.jsonl"
+            issues = [json.loads(line) for line in issue_path.read_text(encoding="utf-8").splitlines()]
+            cached_issue = next(issue for issue in issues if issue["id"] == "mn-aaaaaa")
+            cached_issue.update({
+                "title": "Ship “Résumé” — compass 🧭",
+                "description": "Line one\nLine two\x7f",
+                "type": "item",
+            })
+            issue_path.write_text(
+                "".join(json.dumps(issue) + "\n" for issue in issues),
+                encoding="utf-8",
+            )
+
+            home = Path(tmp) / "home"
+            serve_home = home / "manna" / "serve"
+            digest_home = serve_home / "digests"
+            digest_home.mkdir(parents=True)
+            (serve_home / "boards.json").write_text(json.dumps({
+                "version": 1,
+                "boards": {"Project Board": {"path": str(root)}},
+            }), encoding="utf-8")
+            content_hash = digest_lib.content_hash(cached_issue)
+            self.assertEqual(content_hash, "6843e053b291818f")
+            cache_path = digest_home / "Project_Board.json"
+            cache_path.write_text(json.dumps({
+                "version": 1,
+                "digests": {
+                    "mn-aaaaaa": {
+                        "hash": content_hash,
+                        "digest": "Render one shared line everywhere",
+                        "summary": "Every human-facing client reads this same cached explanation.",
+                        "summary_hash": f"{content_hash}:{digest_lib.SUMMARY_MAX_CHARS}:{digest_lib.SUMMARY_MAX_WORDS}",
+                    },
+                    "mn-bbbbbb": {
+                        "hash": "stale-content-hash",
+                        "digest": "Never attach stale presentation",
+                    },
+                },
+            }, sort_keys=True), encoding="utf-8")
+            before = cache_path.read_bytes()
+            env = {
+                **os.environ,
+                "AGENT_DO_HOME": str(home),
+                "MANNA_STATE_AGENT_DO": "none",
+            }
+            completed = subprocess.run(
+                [str(board_lib._state_binary()), "state", "--json", "--cached-drift"],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(completed.stdout)
+            attached = next(row for row in payload["all"] if row["id"] == "mn-aaaaaa")
+            self.assertEqual(attached["digest"], "Render one shared line everywhere")
+            self.assertEqual(
+                attached["summary"],
+                "Every human-facing client reads this same cached explanation.",
+            )
+            next_copy = next(row for row in payload["next"] if row["id"] == "mn-aaaaaa")
+            self.assertEqual(next_copy["digest"], attached["digest"])
+            miss = next(row for row in payload["all"] if row["id"] == "mn-bbbbbb")
+            self.assertNotIn("digest", miss)
+            self.assertNotIn("summary", miss)
+            self.assertEqual(cache_path.read_bytes(), before, "state is attach-only")
+
     def test_serve_adapter_returns_the_core_model_without_a_second_derivation(self) -> None:
         env = {**os.environ, "MANNA_STATE_AGENT_DO": "none"}
         direct = subprocess.run(
@@ -441,6 +513,20 @@ class DigestTests(unittest.TestCase):
         report = digest_lib.apply("proj", self.rows)
         self.assertIsNone(self.rows[0]["digest"])
         self.assertEqual([r["id"] for r in report["missing_rows"]], ["mn-aaaaaa"])
+
+    def test_plan_reports_gaps_without_reattaching_rows(self) -> None:
+        digest_lib.generate(
+            "proj",
+            self.rows[:1],
+            caller=lambda prompt: ({"mn-aaaaaa": "Make the first thing real"}, "stub-model"),
+        )
+        rows = [dict(row) for row in self.rows]
+        rows[0]["digest"] = "Make the first thing real"
+        before = json.dumps(rows, sort_keys=True)
+        report = digest_lib.plan("proj", rows)
+        self.assertEqual(report["ready"], 1)
+        self.assertEqual(report["missing"], 1)
+        self.assertEqual(json.dumps(rows, sort_keys=True), before)
 
     def test_chunking_is_byte_bounded(self) -> None:
         many = [{"id": f"mn-{i:06d}", "title": "t" * 40, "description": "d" * 400, "kind": "item"} for i in range(30)]
@@ -733,6 +819,7 @@ class RegistryAndHttpTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn("javascript", ctype)
             self.assertIn(b"RELATIONS", app)
+            self.assertIn(b"r.summary", app)
         finally:
             server.stopping = True
             server.shutdown()
@@ -757,6 +844,7 @@ class ServeRegressionTests(unittest.TestCase):
         self.original_cache = serve_lib.CACHE
         self.cache = serve_lib.BoardCache()
         serve_lib.CACHE = self.cache
+        serve_lib.register_board(self.root)
 
     def tearDown(self) -> None:
         serve_lib.AGENT_DO = self.original_agent_do
@@ -984,6 +1072,146 @@ class CliLifecycleTests(unittest.TestCase):
         wrapper = REPO / "tools" / "agent-manna" / "agent-manna"
         out = subprocess.run([str(wrapper), "--help"], capture_output=True, text=True, timeout=30).stdout
         self.assertRegex(out, r"\n  serve\s{2,}", msg=out)
+
+
+TRACK_HANDOFF = """---
+workflow: 2
+manna: {id}
+track: null
+source: null
+base_commit: fixture
+scope: {title}
+inputs: []
+binding: {binding}
+---
+
+# Handoff: {title}
+
+## Claim
+
+```bash
+agent-do manna claim {id}
+```
+
+## Scope
+
+{title}
+
+## Inputs
+
+- None declared.
+
+## Work order
+
+{title}: dispatch fixture.
+
+## Completion
+
+1. fixture
+"""
+
+DISPATCH_ISSUES = [
+    # A container track: no handoff, never launchable, still groups its items.
+    {"id": "mn-contai", "title": "TRACK: Container", "status": "open", "type": "track", "blocked_by": [], "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"},
+    {"id": "mn-cont01", "title": "Container child", "status": "open", "blocked_by": [], "track": "mn-contai", "prompt": ".handoff/mn-cont01-container-child.md", "handoff_digest": "sha256:" + "c" * 64, "created_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-02T00:00:00Z"},
+    # A dispatchable track: a sealed handoff, one eligible child, one chained child.
+    {"id": "mn-dispat", "title": "TRACK: Dispatchable", "status": "open", "type": "track", "blocked_by": [], "prompt": ".handoff/mn-dispat-dispatchable.md", "handoff_digest": "sha256:" + "d" * 64, "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"},
+    {"id": "mn-disp01", "title": "First step", "status": "open", "blocked_by": [], "track": "mn-dispat", "prompt": ".handoff/mn-disp01-first-step.md", "handoff_digest": "sha256:" + "1" * 64, "created_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-02T00:00:00Z"},
+    {"id": "mn-disp02", "title": "Second step", "status": "blocked", "blocked_by": ["mn-disp01"], "track": "mn-dispat", "prompt": ".handoff/mn-disp02-second-step.md", "handoff_digest": "sha256:" + "2" * 64, "created_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-02T00:00:00Z"},
+    # A dispatchable track whose only work is held elsewhere: waiting, not ready.
+    {"id": "mn-heldtr", "title": "TRACK: Held", "status": "open", "type": "track", "blocked_by": [], "prompt": ".handoff/mn-heldtr-held.md", "handoff_digest": "sha256:" + "e" * 64, "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"},
+    {"id": "mn-held01", "title": "Held step", "status": "in_progress", "blocked_by": [], "track": "mn-heldtr", "claimed_by": "claude-deadbeefdead0000", "claimed_at": "2026-08-12T00:00:00Z", "claim_token_hash": "sha256:" + "0" * 64, "prompt": ".handoff/mn-held01-held-step.md", "handoff_digest": "sha256:" + "3" * 64, "created_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-12T00:00:00Z"},
+]
+
+
+def make_dispatch_board(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "t@example.com")
+    git(root, "config", "user.name", "t")
+    board = root / ".manna"
+    board.mkdir()
+    (board / "issues.jsonl").write_text("".join(json.dumps(i) + "\n" for i in DISPATCH_ISSUES), encoding="utf-8")
+    (board / "sessions.jsonl").write_text("", encoding="utf-8")
+    (board / "handoff-order.yaml").write_text("version: 1\nitems:\n- mn-dispat\n- mn-disp01\n- mn-disp02\n- mn-cont01\n- mn-heldtr\n- mn-held01\n", encoding="utf-8")
+    (board / "workflow.yaml").write_text("version: 2\nhandoff_dir: .handoff\n", encoding="utf-8")
+    (board / "board.yaml").write_text("version: 1\nworkflow: strict\n", encoding="utf-8")
+    handoff = root / ".handoff"
+    handoff.mkdir()
+    for issue in DISPATCH_ISSUES:
+        if issue.get("prompt"):
+            (root / issue["prompt"]).write_text(
+                TRACK_HANDOFF.format(id=issue["id"], title=issue["title"], binding=issue["handoff_digest"]),
+                encoding="utf-8",
+            )
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "board: dispatch fixture")
+    return root
+
+
+class TrackDispatchTests(unittest.TestCase):
+    """A track with a sealed handoff is a whole-track assignment: the serve
+    page and native clients read the same derived rows, so the launch surface
+    sees it exactly as it sees an item, with its children beside it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = make_dispatch_board(Path(cls.tmp.name) / "dispatch")
+        cls.state = board_lib.derive(cls.root, agent_do=None)
+        cls.by_id = {r["id"]: r for r in cls.state["all"]}
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def test_container_track_is_not_launchable(self) -> None:
+        row = self.by_id["mn-contai"]
+        self.assertEqual(row["effective"], "track")
+        self.assertIsNone(row["handoff_exists"])
+        self.assertNotIn("mn-contai", [r["id"] for r in self.state["next"]])
+        self.assertEqual(row["children"]["next"], "mn-cont01", "a container still reports its children")
+
+    def test_dispatchable_track_is_ready_with_the_fields_a_launcher_reads(self) -> None:
+        row = self.by_id["mn-dispat"]
+        self.assertEqual(row["kind"], "track", "the row stays a track; grouping is preserved")
+        self.assertEqual(row["effective"], "ready")
+        self.assertTrue(row["prompt"])
+        self.assertTrue(row["handoff_digest"])
+        self.assertTrue(row["handoff_exists"])
+        self.assertIn("mn-dispat", [r["id"] for r in self.state["next"]])
+        self.assertEqual(self.state["next"][0]["id"], "mn-dispat", "priority order carries the track")
+        children = row["children"]
+        self.assertEqual(children["next"], "mn-disp01")
+        self.assertEqual(children["eligible"], ["mn-disp01"])
+        self.assertEqual([w["id"] for w in children["waiting"]], ["mn-disp02"])
+        self.assertEqual((children["total"], children["done"], children["open"]), (2, 0, 2))
+        self.assertIsNone(children["stall"])
+
+    def test_track_with_only_held_work_waits(self) -> None:
+        row = self.by_id["mn-heldtr"]
+        self.assertEqual(row["effective"], "waiting")
+        self.assertEqual(row["blockers"], [], "waiting without blockers: nothing to dispatch right now")
+        self.assertEqual(row["children"]["held"], [{"id": "mn-held01", "claimed_by": "claude-deadbeefdead0000"}])
+        self.assertIn("held by live claims", row["children"]["stall"])
+        self.assertNotIn("mn-heldtr", [r["id"] for r in self.state["next"]])
+
+    def test_grouping_lists_only_items_under_each_track(self) -> None:
+        tracks = {t["id"]: t for t in self.state["tracks"]}
+        self.assertEqual([i["id"] for i in tracks["mn-dispat"]["items"]], ["mn-disp01", "mn-disp02"])
+        self.assertEqual([i["id"] for i in tracks["mn-heldtr"]["items"]], ["mn-held01"])
+
+    def test_items_carry_no_children_block(self) -> None:
+        self.assertNotIn("children", self.by_id["mn-disp01"])
+
+    def test_summary_counts_mirror_the_core(self) -> None:
+        summary = board_lib.summary(self.root)
+        counts = self.state["counts"]
+        self.assertEqual(summary["status_counts"].get("ready", 0), counts.get("ready", 0))
+        self.assertEqual(summary["status_counts"].get("blocked", 0), counts.get("waiting", 0))
+        self.assertEqual(summary["status_counts"].get("active", 0), counts.get("active", 0))
+        self.assertEqual(summary["status_counts"].get("ready", 0), 3, "two items and one dispatchable track")
+        self.assertEqual(summary["total"], len(DISPATCH_ISSUES))
 
 
 if __name__ == "__main__":
