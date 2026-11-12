@@ -653,6 +653,27 @@ def signature(root: Path, gitdir: Path | None, include_coord: bool = True) -> st
     return "|".join(parts)
 
 
+def _track_waits(track: dict[str, Any], issues: list[dict[str, Any]], by_id: dict[str, dict[str, Any]], markers: tuple[str, ...]) -> bool:
+    """Mirror of the core's dispatch rule for a paired track: it waits when no
+    item in it is claimable now and work remains, or when it has no items; it
+    is ready while an item is claimable or every item is done."""
+    items = [i for i in issues if i.get("track") == track["id"] and i.get("type", "item") == "item"]
+    if not items:
+        return True
+    open_items = [i for i in items if i.get("status") != "done"]
+    if not open_items:
+        return False
+    for item in open_items:
+        if item.get("status") != "open" or item.get("claimed_by"):
+            continue
+        if any((by_id.get(dep) or {}).get("status") != "done" for dep in item.get("blocked_by") or []):
+            continue
+        if is_decision(item, markers):
+            continue
+        return False
+    return True
+
+
 def summary(root: Path, markers: tuple[str, ...] = DECISION_MARKERS) -> dict[str, Any]:
     """Cheap index-row view of a board: counts and freshness, no git walk."""
     board_dir = root / ".manna"
@@ -665,14 +686,20 @@ def summary(root: Path, markers: tuple[str, ...] = DECISION_MARKERS) -> dict[str
     dreams = 0
     decisions = 0
     for issue in issues:
+        track_waits = False
         if issue.get("type") == "track":
-            continue
+            # A track carrying a sealed handoff is a dispatchable assignment
+            # and counts under the item lifecycle, as the core derives it; a
+            # container track counts nowhere.
+            if not (issue.get("prompt") and issue.get("handoff_digest")):
+                continue
+            track_waits = _track_waits(issue, issues, by_id, markers)
         if issue.get("type") == "dream":
             if issue.get("status") != "done":
                 dreams += 1
             continue
         s = issue.get("status", "open")
-        blocked = any((by_id.get(dep) or {}).get("status") != "done" for dep in issue.get("blocked_by") or [])
+        blocked = track_waits or any((by_id.get(dep) or {}).get("status") != "done" for dep in issue.get("blocked_by") or [])
         decision = is_decision(issue, markers) and s != "done"
         if s == "done":
             key = "done"
