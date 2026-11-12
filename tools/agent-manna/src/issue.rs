@@ -13,6 +13,11 @@ use sha2::{Digest, Sha256};
 pub struct SessionIdentity {
     id: String,
     token_hash: String,
+    /// The human at the keyboard, derived only when no agent runtime pinned an
+    /// identity and stdin is a terminal. The operator is the estate's root:
+    /// `require_owner` never refuses it. Nothing on the board stores this
+    /// flag; it exists for the life of one process.
+    operator: bool,
 }
 
 impl SessionIdentity {
@@ -27,7 +32,20 @@ impl SessionIdentity {
         Ok(Self {
             id: id.to_string(),
             token_hash: format!("sha256:{:x}", digest),
+            operator: false,
         })
+    }
+
+    /// Mark this identity as the operator. Only the terminal-derivation path
+    /// in the binary calls it; an explicit `MANNA_SESSION_ID` pin never does,
+    /// so a pinned label spelled `operator-…` carries no root authority.
+    pub fn into_operator(mut self) -> Self {
+        self.operator = true;
+        self
+    }
+
+    pub fn is_operator(&self) -> bool {
+        self.operator
     }
 
     pub fn id(&self) -> &str {
@@ -35,6 +53,13 @@ impl SessionIdentity {
     }
 
     fn token_hash(&self) -> &str {
+        &self.token_hash
+    }
+
+    /// The persistable ownership proof: the SHA-256 digest of the bearer
+    /// token, never the token. Grants bind to it the way claims do, so a
+    /// coordinator session can print it for the operator to grant against.
+    pub fn proof(&self) -> &str {
         &self.token_hash
     }
 }
@@ -336,6 +361,62 @@ impl Issue {
         Ok(())
     }
 
+    /// Close on landed evidence: commits carrying this item's `Manna:` trailer
+    /// that touched real source. The evidence authorizes, never the requester,
+    /// so the transition is open from any live status and over any claimant.
+    /// The claim, if one exists, stays on the row as history of who built it.
+    pub fn complete_on_evidence(&mut self, evidence: &[String]) -> Result<(), String> {
+        if self.issue_type == IssueType::Dream {
+            return Err(format!(
+                "{} is a dream; landed evidence closes items, dreams close through their own transition",
+                self.id
+            ));
+        }
+        if evidence.is_empty() {
+            return Err("landed evidence is empty; nothing authorizes this close".to_string());
+        }
+        if self.status == IssueStatus::Done {
+            return Err(format!("Issue {} is already done", self.id));
+        }
+        self.status = IssueStatus::Done;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Close a managed item on recorded acceptance. The acceptance record is
+    /// the authority (checked by the caller under the board lock), so the
+    /// transition is open from any live status and over any claimant: the
+    /// worker who built it may be gone, and the close must not need it back.
+    /// The claim stays on the row as history of who built it.
+    pub fn complete_on_acceptance(&mut self) -> Result<(), String> {
+        if self.issue_type == IssueType::Dream {
+            return Err(format!("{} is a dream; acceptance closes items", self.id));
+        }
+        if self.status == IssueStatus::Done {
+            return Err(format!("Issue {} is already done", self.id));
+        }
+        self.status = IssueStatus::Done;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Close by the operator's word. The human who owns the estate closes
+    /// from any live status; a stranded claim is not theirs to fight.
+    pub fn complete_as_operator(&mut self, session: &SessionIdentity) -> Result<(), String> {
+        if !session.is_operator() {
+            return Err("only the operator identity may close without a claim".to_string());
+        }
+        if self.issue_type == IssueType::Dream {
+            return self.close_dream(session);
+        }
+        if self.status == IssueStatus::Done {
+            return Err(format!("Issue {} is already done", self.id));
+        }
+        self.status = IssueStatus::Done;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
     /// Close an unworked dream through an explicit lifecycle verb. Dreams are
     /// intentionally unclaimable, so requiring `in_progress` would make them
     /// impossible to retire without reviving the raw `update --status` bypass.
@@ -360,6 +441,11 @@ impl Issue {
     /// Unclaimed rows remain editable. Once a claim exists, every lifecycle
     /// and metadata mutation must present the same pinned session identity.
     pub fn require_owner(&self, session: &SessionIdentity) -> Result<(), String> {
+        // The operator is the estate's root: every claim on every board is
+        // ultimately theirs, so ownership never refuses them.
+        if session.is_operator() {
+            return Ok(());
+        }
         if let Some(owner) = self.claimed_by.as_deref() {
             if owner != session.id() {
                 return Err(format!(
@@ -997,5 +1083,86 @@ mod tests {
         let mut umbrella = Issue::new("mn-abc123".to_string(), "Umbrella".to_string()).unwrap();
         umbrella.issue_type = IssueType::Track;
         assert!(umbrella.claim(&session("ses_123")).is_ok());
+    }
+
+    #[test]
+    fn operator_identity_bypasses_require_owner() {
+        let mut issue = Issue::new("mn-op0001".to_string(), "Owned elsewhere".to_string()).unwrap();
+        issue.claim(&session("ses_builder")).unwrap();
+        let operator = session("operator-erik").into_operator();
+        assert!(operator.is_operator());
+        assert!(issue.require_owner(&operator).is_ok());
+        // A pinned label that merely spells "operator-…" carries nothing.
+        let pretender = session("operator-erik");
+        assert!(!pretender.is_operator());
+        assert!(issue.require_owner(&pretender).is_err());
+    }
+
+    #[test]
+    fn complete_on_evidence_closes_open_and_foreign_claims() {
+        let evidence = vec!["abc123def456".to_string()];
+        let mut open =
+            Issue::new("mn-ev0001".to_string(), "Landed, never claimed".to_string()).unwrap();
+        open.complete_on_evidence(&evidence).unwrap();
+        assert_eq!(open.status, IssueStatus::Done);
+        assert!(open.claimed_by.is_none());
+
+        let mut foreign =
+            Issue::new("mn-ev0002".to_string(), "Landed by another".to_string()).unwrap();
+        foreign.claim(&session("ses_other")).unwrap();
+        foreign.complete_on_evidence(&evidence).unwrap();
+        assert_eq!(foreign.status, IssueStatus::Done);
+        // The claim stays as history of who built it, and the row stays valid.
+        assert_eq!(foreign.claimed_by.as_deref(), Some("ses_other"));
+        foreign.validate().unwrap();
+
+        let mut blocked =
+            Issue::new("mn-ev0003".to_string(), "Landed while blocked".to_string()).unwrap();
+        blocked.blocked_by.push("mn-ev0001".to_string());
+        blocked.update_blocked_status();
+        assert_eq!(blocked.status, IssueStatus::Blocked);
+        blocked.complete_on_evidence(&evidence).unwrap();
+        assert_eq!(blocked.status, IssueStatus::Done);
+    }
+
+    #[test]
+    fn complete_on_evidence_refuses_done_dreams_and_empty_evidence() {
+        let evidence = vec!["abc123def456".to_string()];
+        let mut done = Issue::new("mn-ev0004".to_string(), "Already done".to_string()).unwrap();
+        done.complete_on_evidence(&evidence).unwrap();
+        assert!(done.complete_on_evidence(&evidence).is_err());
+
+        let mut dream = Issue::new("mn-ev0005".to_string(), "A spark".to_string()).unwrap();
+        dream.issue_type = IssueType::Dream;
+        assert!(dream.complete_on_evidence(&evidence).is_err());
+
+        let mut bare = Issue::new("mn-ev0006".to_string(), "No receipt".to_string()).unwrap();
+        assert!(bare.complete_on_evidence(&[]).is_err());
+        assert_eq!(bare.status, IssueStatus::Open);
+    }
+
+    #[test]
+    fn complete_as_operator_closes_any_live_status_and_only_for_operators() {
+        let operator = session("operator-erik").into_operator();
+        let mut open = Issue::new("mn-op0002".to_string(), "Open".to_string()).unwrap();
+        open.complete_as_operator(&operator).unwrap();
+        assert_eq!(open.status, IssueStatus::Done);
+
+        let mut foreign =
+            Issue::new("mn-op0003".to_string(), "Stranded claim".to_string()).unwrap();
+        foreign.claim(&session("ses_gone")).unwrap();
+        foreign.complete_as_operator(&operator).unwrap();
+        assert_eq!(foreign.status, IssueStatus::Done);
+
+        let mut untouched = Issue::new("mn-op0004".to_string(), "Not yours".to_string()).unwrap();
+        assert!(untouched
+            .complete_as_operator(&session("ses_agent"))
+            .is_err());
+        assert_eq!(untouched.status, IssueStatus::Open);
+
+        let mut dream = Issue::new("mn-op0005".to_string(), "Spark".to_string()).unwrap();
+        dream.issue_type = IssueType::Dream;
+        dream.complete_as_operator(&operator).unwrap();
+        assert_eq!(dream.status, IssueStatus::Done);
     }
 }

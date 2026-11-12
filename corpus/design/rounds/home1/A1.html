@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..600;1,8..60,400&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ── A1 · "The edition, then the depths"
+   grid: 12 × 96px from x=144 (content 1152, right edge 1296); 8px baseline; rail inset 32px
+   type: 12 / 14 / 18 / 32 / 48  (paper: 12·18·32·48 — dark: 12·14·18·32) */
+:root{
+  --paper:#F8F7F5; --pink:#221E1A; --pmuted:#6A6258; --pfaint:#9A9186; --phair:#DAD5CC; --psage:#4F6B46;
+  --bg:#1B1917; --ink:#E7E3DA; --muted:#A69D90; --faint:#6E675E;
+  --line:rgba(231,227,218,.14); --line2:rgba(231,227,218,.30);
+  --sage:#9CB08C; --clay:#C17A52;
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:'Source Sans 3',-apple-system,'Helvetica Neue',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{color:var(--ink);font:18px/32px var(--serif);-webkit-font-smoothing:antialiased;min-width:1440px}
+a{color:inherit;text-decoration:none}
+.wrap{width:1152px;margin:0 auto}
+.lbl{font:600 12px/16px var(--sans);letter-spacing:.14em;text-transform:uppercase}
+.mono{font:14px/24px var(--mono);font-variant-numeric:tabular-nums}
+
+/* ── the edition (paper) ─────────────────────────────────────── */
+.edition{background:var(--paper);color:var(--pink)}
+.strip{display:flex;align-items:baseline;justify-content:space-between;height:56px;padding-top:20px;border-bottom:1px solid var(--phair)}
+.strip .lbl{color:var(--pmuted)}
+.strip .brand{color:var(--pink)}
+.strip nav{display:flex;gap:32px}
+.strip nav .cur{color:var(--pink);border-bottom:1px solid var(--pink);padding-bottom:2px}
+.strip .acts{display:flex;gap:32px}
+.strip .acts .go{color:var(--psage)}
+.mast{text-align:center;padding-top:48px}
+.mast .word{font:400 32px/40px var(--serif);letter-spacing:.24em;text-indent:.24em;text-transform:uppercase}
+.mast .rule{margin-top:32px;border-top:2px solid var(--pink)}
+.mast .rule::after{content:"";display:block;margin-top:2px;border-top:1px solid var(--pink)}
+.folio{display:flex;align-items:baseline;gap:32px;height:48px;padding-top:12px;border-bottom:1px solid var(--phair);color:var(--pmuted)}
+.folio .lbl{color:var(--pink)}
+.folio i{font-style:italic}
+.promise{padding-top:64px}
+.promise .lbl{color:var(--pmuted)}
+.promise h1{margin-top:16px;width:960px;font:400 48px/56px var(--serif);letter-spacing:-.012em;text-wrap:balance}
+.promise .dek{margin-top:32px;width:864px;color:var(--pmuted)}
+.record{margin-top:64px;border-top:2px solid var(--pink)}
+.record .head{display:flex;justify-content:space-between;align-items:baseline;height:40px;padding-top:12px}
+.record .head .lbl{color:var(--pink)}
+.record .head .since{color:var(--pfaint)}
+.figs{display:grid;grid-template-columns:repeat(4,288px);margin-top:16px;border-top:1px solid var(--phair);border-bottom:1px solid var(--phair)}
+.fig{padding:24px 0 24px}
+.fig + .fig{border-left:1px solid var(--phair);padding-left:32px}
+.fig .v{font:300 32px/40px var(--serif);font-variant-numeric:tabular-nums}
+.fig .lbl{margin-top:8px;color:var(--pmuted)}
+.domain{margin-top:32px;padding-bottom:64px;font-style:italic;color:var(--pmuted)}
+
+/* ── the depths (dark) ───────────────────────────────────────── */
+.depths{background:var(--bg);color:var(--ink);padding-top:64px}
+.how{display:flex;justify-content:space-between;align-items:baseline;height:16px}
+.how .lbl{color:var(--muted)}
+.lede{margin-top:32px;width:864px}
+.descent{position:relative;margin-top:64px}
+.descent::before{content:"";position:absolute;left:0;top:0;bottom:0;width:1px;background:var(--line2)}
+.step{display:grid;grid-template-columns:192px 480px 480px;border-top:1px solid var(--line);padding:48px 0}
+.step:first-child{border-top:0;padding-top:0}
+.step .who{position:relative;padding-left:32px}
+.step .who::before{content:"";position:absolute;left:-6px;top:14px;width:11px;height:11px;border-radius:50%;background:var(--bg);border:1px solid var(--muted)}
+.step .who .n{font:14px/24px var(--mono);color:var(--muted);display:block;margin-bottom:8px}
+.step .who .name{font:400 32px/40px var(--serif)}
+.step .who .n{margin-top:8px}
+.step .door .top{display:flex;justify-content:space-between;align-items:baseline;height:16px}
+.step .door .top .lbl{color:var(--muted)}
+.step .door .top .room{color:var(--ink)}
+.step .door .line{margin-top:16px;color:var(--ink)}
+.step .door .detail{margin-top:16px;width:448px;color:var(--muted)}
+.step .door .cue{margin-top:16px;color:var(--sage)}
+.step .door .cue::after{content:" ▸"}
+.step .inst{padding-left:32px}
+.step .inst svg{display:block;width:448px;height:auto;overflow:visible}
+.step .inst .mono{color:var(--muted)}
+.step .inst .lot .lbl{color:var(--muted)}
+.step .inst .lot .verdict{font:400 18px/32px var(--serif);letter-spacing:.2em;text-transform:uppercase;color:var(--sage)}
+.step .inst .lot .fitness{font:300 32px/40px var(--serif);font-variant-numeric:tabular-nums}
+.lot{display:grid;grid-template-columns:128px 192px 128px}
+.lot .seats{display:flex;gap:8px;height:32px;align-items:center}
+.lot .seats i{display:block;width:12px;height:12px;border-radius:50%;border:1px solid var(--sage)}
+.lot .seats i.on{background:var(--sage)}
+.wheels{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.wheels div{background:var(--bg);height:56px;position:relative}
+.wheels div::after{content:"";position:absolute;left:8px;right:8px;bottom:8px;height:3px;background:rgba(231,227,218,.09)}
+.wheels div i{position:absolute;left:8px;bottom:8px;height:3px;background:var(--sage)}
+.owner{margin-top:64px;border-top:1px solid var(--line);padding:48px 0 96px}
+.owner .lbl{color:var(--muted)}
+.owner p{margin-top:32px;width:768px}
+.owner p.reality{color:var(--muted)}
+.actions{display:flex;gap:32px;margin-top:48px}
+.btn{display:inline-block;height:48px;padding:16px 32px 0;font:600 12px/16px var(--sans);letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--line2);color:var(--ink)}
+.btn.pri{background:var(--sage);border-color:var(--sage);color:var(--bg)}
+</style>
+</head>
+<body>
+
+<!-- ═══ THE EDITION ═══ -->
+<section class="edition">
+  <div class="wrap">
+    <header class="strip">
+      <span class="lbl brand">Palingenesis</span>
+      <nav class="lbl">
+        <a href="#" class="cur">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a href="#">Engine Room</a>
+      </nav>
+      <span class="acts lbl"><a href="#">Sign in</a><a href="#" class="go">Open Today</a></span>
+    </header>
+
+    <div class="mast">
+      <div class="word">Palingenesis</div>
+      <div class="rule" aria-hidden="true"></div>
+    </div>
+
+    <div class="folio">
+      <span class="lbl">Today</span>
+      <i>The morning edition: what needs a ruling, and the machine's record of the night.</i>
+    </div>
+
+    <div class="promise" data-blk>
+      <div class="lbl">The promise</div>
+      <h1>An autonomous engine for agricultural innovation — reading continuously, judged adversarially, ruled by one human.</h1>
+      <p class="dek">It reads the literature, breeds candidate innovations, argues about them in a council, simulates the winners, and carries them into the field.</p>
+    </div>
+
+    <div class="record" data-blk>
+      <div class="head"><span class="lbl">The record</span><span class="lbl since">Since 00:00</span></div>
+      <div class="figs">
+        <div class="fig" data-blk><div class="v">212</div><div class="lbl">Papers read</div></div>
+        <div class="fig" data-blk><div class="v">41</div><div class="lbl">Claims scored</div></div>
+        <div class="fig" data-blk><div class="v">84%</div><div class="lbl">Interval coverage</div></div>
+        <div class="fig" data-blk><div class="v">9</div><div class="lbl">Positions</div></div>
+      </div>
+    </div>
+
+    <p class="domain" data-blk>Built for commercial poultry first. The engine is general.</p>
+  </div>
+</section>
+
+<!-- ═══ THE DEPTHS ═══ -->
+<section class="depths">
+  <div class="wrap">
+    <div class="how" data-blk><span class="lbl">How it works</span><span class="lbl">The rooms</span></div>
+    <p class="lede" data-blk>Every claim carries its source. Every verdict is recorded with its reason. Nothing is deleted.</p>
+
+    <div class="descent">
+
+      <!-- 1 · Reads · Library -->
+      <div class="step">
+        <div class="who" data-blk><span class="n">1</span><span class="name">Reads</span></div>
+        <div class="door" data-blk>
+          <div class="top"><span class="lbl">Room</span><span class="lbl room">Library</span></div>
+          <div class="line mono">212 papers · 45 findings · 3 evidence clusters</div>
+          <p class="detail">What the machine has read and knows. Every claim extracted verbatim, with its source.</p>
+          <div class="cue lbl">Open</div>
+        </div>
+        <div class="inst" data-blk>
+          <svg viewBox="0 0 448 120" width="448" height="120" role="img" aria-label="Library: papers, findings, evidence clusters">
+            <g font-family="JetBrains Mono,monospace" font-size="12" fill="#A69D90">
+              <text x="0" y="14">papers</text>
+              <text x="0" y="54">findings</text>
+              <text x="0" y="94">evidence clusters</text>
+            </g>
+            <g fill="rgba(231,227,218,.09)">
+              <rect x="0" y="22" width="448" height="8"/><rect x="0" y="62" width="448" height="8"/><rect x="0" y="102" width="448" height="8"/>
+            </g>
+            <g fill="#9CB08C">
+              <rect x="0" y="22" width="448" height="8"/><rect x="0" y="62" width="95" height="8"/><rect x="0" y="102" width="6" height="8"/>
+            </g>
+            <g font-family="JetBrains Mono,monospace" font-size="12" fill="#E7E3DA" text-anchor="end">
+              <text x="448" y="14">212</text><text x="448" y="54">45</text><text x="448" y="94">3</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 2 · Breeds · Pipeline -->
+      <div class="step">
+        <div class="who" data-blk><span class="n">2</span><span class="name">Breeds</span></div>
+        <div class="door" data-blk>
+          <div class="top"><span class="lbl">Room</span><span class="lbl room">Pipeline</span></div>
+          <div class="line mono">Generation 12 · 40 items · best fitness 0.91</div>
+          <p class="detail">The living population moving through one river, one candidate enlarged for judgment.</p>
+          <div class="cue lbl">Open</div>
+        </div>
+        <div class="inst" data-blk>
+          <svg viewBox="0 0 448 120" width="448" height="120" role="img" aria-label="Pipeline river: 40 items on the fitness axis, best 0.91">
+            <g font-family="JetBrains Mono,monospace" font-size="12" fill="#A69D90">
+              <text x="0" y="14">Fitness</text>
+              <text x="0" y="112">0.0</text>
+              <text x="448" y="112" text-anchor="end">1.0</text>
+            </g>
+            <line x1="0" y1="64" x2="448" y2="64" stroke="rgba(231,227,218,.30)"/>
+            <line x1="0" y1="58" x2="0" y2="70" stroke="#6E675E"/><line x1="448" y1="58" x2="448" y2="70" stroke="#6E675E"/>
+            <!-- 40 items -->
+            <g stroke="#A69D90" stroke-width="1">
+              <line x1="112" y1="56" x2="112" y2="72"/><line x1="130" y1="56" x2="130" y2="72"/><line x1="143" y1="56" x2="143" y2="72"/><line x1="156" y1="56" x2="156" y2="72"/><line x1="165" y1="56" x2="165" y2="72"/>
+              <line x1="178" y1="56" x2="178" y2="72"/><line x1="187" y1="56" x2="187" y2="72"/><line x1="196" y1="56" x2="196" y2="72"/><line x1="205" y1="56" x2="205" y2="72"/><line x1="214" y1="56" x2="214" y2="72"/>
+              <line x1="223" y1="56" x2="223" y2="72"/><line x1="232" y1="56" x2="232" y2="72"/><line x1="241" y1="56" x2="241" y2="72"/><line x1="250" y1="56" x2="250" y2="72"/><line x1="259" y1="56" x2="259" y2="72"/>
+              <line x1="268" y1="56" x2="268" y2="72"/><line x1="277" y1="56" x2="277" y2="72"/><line x1="286" y1="56" x2="286" y2="72"/><line x1="295" y1="56" x2="295" y2="72"/><line x1="304" y1="56" x2="304" y2="72"/>
+              <line x1="313" y1="56" x2="313" y2="72"/><line x1="322" y1="56" x2="322" y2="72"/><line x1="331" y1="56" x2="331" y2="72"/><line x1="340" y1="56" x2="340" y2="72"/><line x1="349" y1="56" x2="349" y2="72"/>
+              <line x1="358" y1="56" x2="358" y2="72"/><line x1="367" y1="56" x2="367" y2="72"/><line x1="376" y1="56" x2="376" y2="72"/><line x1="381" y1="56" x2="381" y2="72"/><line x1="385" y1="56" x2="385" y2="72"/>
+              <line x1="390" y1="56" x2="390" y2="72"/><line x1="394" y1="56" x2="394" y2="72"/><line x1="399" y1="56" x2="399" y2="72"/><line x1="403" y1="56" x2="403" y2="72"/><line x1="407" y1="56" x2="407" y2="72"/>
+              <line x1="412" y1="56" x2="412" y2="72"/><line x1="416" y1="56" x2="416" y2="72"/><line x1="421" y1="56" x2="421" y2="72"/><line x1="425" y1="56" x2="425" y2="72"/>
+            </g>
+            <circle cx="407.7" cy="64" r="8" fill="#1B1917" stroke="#9CB08C" stroke-width="1.5"/>
+            <circle cx="407.7" cy="64" r="3.5" fill="#9CB08C"/>
+            <text x="407.7" y="36" font-family="JetBrains Mono,monospace" font-size="12" fill="#9CB08C" text-anchor="middle">0.91</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 3 · Judges · Dossier -->
+      <div class="step">
+        <div class="who" data-blk><span class="n">3</span><span class="name">Judges</span></div>
+        <div class="door" data-blk>
+          <div class="top"><span class="lbl">Room</span><span class="lbl room">Dossier</span></div>
+          <div class="line mono">Council 5 of 6 · GREENLIGHT · fitness 87.4</div>
+          <p class="detail">One innovation, the whole case: mechanism, economics, each judge's reason, the decision.</p>
+          <div class="cue lbl">Open</div>
+        </div>
+        <div class="inst" data-blk>
+          <div class="lot">
+            <div><div class="lbl">Council</div><div class="seats"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div></div>
+            <div><div class="lbl">Verdict</div><div class="verdict">Greenlight</div></div>
+            <div><div class="lbl">Fitness</div><div class="fitness">87.4</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 · Simulates · Simulation -->
+      <div class="step">
+        <div class="who" data-blk><span class="n">4</span><span class="name">Simulates</span></div>
+        <div class="door" data-blk>
+          <div class="top"><span class="lbl">Room</span><span class="lbl room">Simulation</span></div>
+          <div class="line mono">Hindcast skill 0.82 · 90% coverage 88%</div>
+          <p class="detail">A calibrated simulator scored against what actually happened.</p>
+          <div class="cue lbl">Open</div>
+        </div>
+        <div class="inst" data-blk>
+          <svg viewBox="0 0 448 120" width="448" height="120" role="img" aria-label="Simulation envelope: observed, median, 50% and 90% bands">
+            <!-- 90% band -->
+            <path d="M0 62 C 60 58, 120 60, 180 54 S 300 30, 448 22 L 448 102 C 300 96, 240 88, 180 82 S 60 72, 0 70 Z" fill="rgba(156,176,140,.10)"/>
+            <!-- 50% band -->
+            <path d="M0 64 C 60 61, 120 62, 180 58 S 300 44, 448 40 L 448 84 C 300 80, 240 74, 180 72 S 60 68, 0 68 Z" fill="rgba(156,176,140,.22)"/>
+            <!-- median -->
+            <path d="M0 66 C 60 63, 120 64, 180 65 S 300 62, 448 62" fill="none" stroke="#9CB08C" stroke-width="1.5"/>
+            <!-- observed -->
+            <g fill="#E7E3DA">
+              <circle cx="0" cy="67" r="2"/><circle cx="24" cy="64" r="2"/><circle cx="48" cy="66" r="2"/><circle cx="72" cy="61" r="2"/><circle cx="96" cy="65" r="2"/><circle cx="120" cy="63" r="2"/><circle cx="144" cy="68" r="2"/><circle cx="168" cy="64" r="2"/>
+            </g>
+            <!-- cutoff -->
+            <line x1="180" y1="8" x2="180" y2="112" stroke="rgba(231,227,218,.30)" stroke-dasharray="2 3"/>
+            <line x1="0" y1="112" x2="448" y2="112" stroke="rgba(231,227,218,.30)"/>
+            <g font-family="JetBrains Mono,monospace" font-size="12" fill="#A69D90">
+              <text x="448" y="16" text-anchor="end">90%</text>
+                          </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 5 · Proves · Portfolio -->
+      <div class="step">
+        <div class="who" data-blk><span class="n">5</span><span class="name">Proves</span></div>
+        <div class="door" data-blk>
+          <div class="top"><span class="lbl">Room</span><span class="lbl room">Portfolio</span></div>
+          <div class="line mono">41 claims scored · 29 on or above · coverage 84%</div>
+          <p class="detail">The book of bets that made it, thesis beside reality.</p>
+          <div class="cue lbl">Open</div>
+        </div>
+        <div class="inst" data-blk>
+          <svg viewBox="0 0 448 120" width="448" height="120" role="img" aria-label="Portfolio claim ledger: 41 claims, 29 on or above">
+            <g font-family="JetBrains Mono,monospace" font-size="12" fill="#A69D90">
+              <text x="0" y="14">on or above</text>
+                            <text x="448" y="14" text-anchor="end" fill="#E7E3DA">29</text>
+              <text x="448" y="78" text-anchor="end" fill="#E7E3DA">12</text>
+            </g>
+            <g fill="#9CB08C">
+              <rect x="0" y="24" width="12" height="12"/><rect x="16" y="24" width="12" height="12"/><rect x="32" y="24" width="12" height="12"/><rect x="48" y="24" width="12" height="12"/><rect x="64" y="24" width="12" height="12"/><rect x="80" y="24" width="12" height="12"/><rect x="96" y="24" width="12" height="12"/><rect x="112" y="24" width="12" height="12"/><rect x="128" y="24" width="12" height="12"/><rect x="144" y="24" width="12" height="12"/><rect x="160" y="24" width="12" height="12"/><rect x="176" y="24" width="12" height="12"/><rect x="192" y="24" width="12" height="12"/><rect x="208" y="24" width="12" height="12"/><rect x="224" y="24" width="12" height="12"/><rect x="240" y="24" width="12" height="12"/><rect x="256" y="24" width="12" height="12"/><rect x="272" y="24" width="12" height="12"/><rect x="288" y="24" width="12" height="12"/><rect x="304" y="24" width="12" height="12"/><rect x="320" y="24" width="12" height="12"/>
+              <rect x="0" y="40" width="12" height="12"/><rect x="16" y="40" width="12" height="12"/><rect x="32" y="40" width="12" height="12"/><rect x="48" y="40" width="12" height="12"/><rect x="64" y="40" width="12" height="12"/><rect x="80" y="40" width="12" height="12"/><rect x="96" y="40" width="12" height="12"/><rect x="112" y="40" width="12" height="12"/>
+            </g>
+            <g fill="#C17A52">
+              <rect x="0" y="88" width="12" height="12"/><rect x="16" y="88" width="12" height="12"/><rect x="32" y="88" width="12" height="12"/><rect x="48" y="88" width="12" height="12"/><rect x="64" y="88" width="12" height="12"/><rect x="80" y="88" width="12" height="12"/><rect x="96" y="88" width="12" height="12"/><rect x="112" y="88" width="12" height="12"/><rect x="128" y="88" width="12" height="12"/><rect x="144" y="88" width="12" height="12"/><rect x="160" y="88" width="12" height="12"/><rect x="176" y="88" width="12" height="12"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 6 · Accounts · Engine Room -->
+      <div class="step">
+        <div class="who" data-blk><span class="n">6</span><span class="name">Accounts</span></div>
+        <div class="door" data-blk>
+          <div class="top"><span class="lbl">Room</span><span class="lbl room">Engine Room</span></div>
+          <div class="line mono">6 wheels · every order logged on the clock</div>
+          <p class="detail">The machine accounts for itself; the owner steers it.</p>
+          <div class="cue lbl">Open</div>
+        </div>
+        <div class="inst" data-blk>
+          <div class="wheels" aria-label="Engine Room: six wheels">
+            <div><i style="width:48px"></i></div><div><i style="width:31px"></i></div><div><i style="width:44px"></i></div><div><i style="width:18px"></i></div><div><i style="width:40px"></i></div><div><i style="width:36px"></i></div>
+          </div>
+          <div class="mono" style="margin-top:16px;text-align:right">Since 00:00</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ═══ THE OWNER ═══ -->
+    <div class="owner" data-blk>
+      <div class="lbl">The owner</div>
+      <p>The owner does not operate the machine. The owner reviews winners, believes or challenges the receipts, and decides.</p>
+      <p class="reality">Approved claims stay frozen beside what the field measured, for the rest of the bet's life.</p>
+      <div class="actions"><a href="#" class="btn">Sign in</a><a href="#" class="btn pri">Open Today</a></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>
