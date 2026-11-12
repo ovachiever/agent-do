@@ -9,7 +9,7 @@ import yaml
 ROOT_NAME = ".agent-do-incident"; MAX_RESPONSE = 1_048_576
 SOURCES = ("github", "kubernetes", "render")
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
-SECRET = re.compile(r"(?i)\b(token|secret|password|api[_-]?key|authorization)([=:]\s*)\S+")
+SECRET = re.compile(r"(?i)\b(token|secret|password|api[_-]?key|authorization)([=:]\s*)(?:bearer\s+)?\S+")
 SECRET_KEY = re.compile(r"(?i)(?:token|secret|password|api[_-]?key|authorization)")
 
 class IncidentError(RuntimeError): pass

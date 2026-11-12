@@ -37,7 +37,7 @@ def test_config_rejects_alias(tmp_path:Path):
  except tracker.IncidentError: return
  raise AssertionError("accepted YAML alias")
 def test_redacts_nested_credential_fields():
- value={"access_token":"example-token", "nested":[{"authorization":"Bearer private", "api_key":"private", "status":"ok"}], "message":"password=private"}
- assert tracker.redact(value)=={"access_token":"[REDACTED]", "nested":[{"authorization":"[REDACTED]", "api_key":"[REDACTED]", "status":"ok"}], "message":"password=[REDACTED]"}
+ value={"access_token":"example-token", "nested":[{"authorization":"Bearer private", "api_key":"private", "status":"ok"}], "message":"password=private", "log":"Authorization: Bearer private"}
+ assert tracker.redact(value)=={"access_token":"[REDACTED]", "nested":[{"authorization":"[REDACTED]", "api_key":"[REDACTED]", "status":"ok"}], "message":"password=[REDACTED]", "log":"Authorization: [REDACTED]"}
 if __name__=="__main__":
  test_trace_calls_only_allowlist_and_writes_packet(); test_config_rejects_spacelift(Path(tempfile.mkdtemp())); test_config_rejects_alias(Path(tempfile.mkdtemp())); test_redacts_nested_credential_fields(); print("incident tests passed")
