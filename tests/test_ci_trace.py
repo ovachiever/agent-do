@@ -9,6 +9,7 @@ and never returns an unbounded or unredacted log excerpt.
 from __future__ import annotations
 
 import json
+import io
 import os
 import stat
 import subprocess
@@ -84,6 +85,16 @@ else:
 
 
 def main() -> int:
+    import sys
+    sys.path.insert(0, str(ROOT / "lib"))
+    from ci_trace import bounded_log_stream
+
+    # A byte cap can cut away the identifying prefix of a secret. Never emit
+    # that partial line, even when there are no subsequent complete lines.
+    partial = bounded_log_stream(io.BytesIO(b"Authorization: Bearer confidential-value"), "1", False, 10, 12)
+    require(partial["log"] == "" and partial["truncated"]["bytes"], f"partial secret escaped: {partial}")
+    complete = bounded_log_stream(io.BytesIO(b"old long line\nnewest\n"), "1", False, 10, 7)
+    require(complete["log"] == "newest" and complete["truncated"]["bytes"], f"complete final line lost: {complete}")
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         binp = tmp / "bin"; binp.mkdir()

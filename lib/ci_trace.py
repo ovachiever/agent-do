@@ -133,7 +133,7 @@ def bounded_log(raw: str, run_id: str, failed_only: bool, tail: int, max_bytes: 
     excerpt = redact("\n".join(selected))
     encoded = excerpt.encode("utf-8")
     truncated_bytes = source_truncated or len(encoded) > max_bytes
-    if truncated_bytes:
+    if len(encoded) > max_bytes:
         # Preserve valid UTF-8 and retain the newest portion of a tail.
         excerpt = encoded[-max_bytes:].decode("utf-8", errors="ignore")
         newline = excerpt.find("\n")
@@ -160,9 +160,9 @@ def bounded_log_stream(stream: BinaryIO, run_id: str, failed_only: bool, tail: i
                        max_bytes: int) -> dict[str, Any]:
     """Build an excerpt while retaining at most the requested byte cap in memory.
 
-    ``gh run view --log`` has no server-side byte limit.  Reading it through
-    this bounded ring keeps the incident client from materializing an entire
-    workflow log before it can redact and return its small excerpt.
+    ``gh run view --log`` has no server-side byte limit. The ring retains one
+    extra byte to identify a partial first line, which must be discarded before
+    redaction: otherwise a cut can remove a credential's recognizable prefix.
     """
     if tail < 1 or tail > MAX_LOG_LINES:
         raise ValueError(f"--tail must be between 1 and {MAX_LOG_LINES}")
@@ -178,13 +178,20 @@ def bounded_log_stream(stream: BinaryIO, run_id: str, failed_only: bool, tail: i
         newline_count += chunk.count(b"\n")
         ends_in_newline = chunk.endswith(b"\n")
         retained.extend(chunk)
-        if len(retained) > max_bytes:
-            del retained[:-max_bytes]
+        if len(retained) > max_bytes + 1:
+            del retained[:-(max_bytes + 1)]
 
     total_lines = newline_count + int(total_bytes > 0 and not ends_in_newline)
+    source_truncated = total_bytes > max_bytes
+    if source_truncated:
+        preceding = retained[0]
+        del retained[0]
+        if preceding != ord("\n"):
+            newline = retained.find(b"\n")
+            retained = retained[newline + 1:] if newline >= 0 else bytearray()
     raw = retained.decode("utf-8", errors="ignore")
     return bounded_log(raw, run_id, failed_only, tail, max_bytes,
-                       total_lines=total_lines, source_truncated=total_bytes > len(retained))
+                       total_lines=total_lines, source_truncated=source_truncated)
 
 
 def main() -> int:
