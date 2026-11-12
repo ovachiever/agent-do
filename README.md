@@ -12,7 +12,7 @@ agent-do is the workshop's answer to both problems: a standard, known shape, tha
 agent-do <tool> <command> [args...]
 ```
 
-Behind that shape sit 102 tools exposing 930 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
+Behind that shape sit 104 tools exposing 967 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
 
 ## The tools on the bench
 
@@ -32,11 +32,14 @@ A declaration is only worth what checks it, and these are checked in three ways:
 
 Verify is the beat where the vessel checks its own act against the world. `browse wait --stable` blocks until the network is quiet and the page has stopped moving. `namecheap` reads a DNS record back from the provider after writing it and compares the bytes. `manna lint` grades the work board's grammar and exits nonzero on findings.
 
-The vessel also has a crude sense of visual craft, and it is worth saying exactly how crude. `dpt` scores a live web page from 0 to 100 against 65 rules across five layers of perception. In August the project tested it with controlled pages and wrote the result down in `.handoff/dpt-audit-2026-08-22.md`: a deliberately broken page scored 29, correctly, with four named faults; the owner's ratified design scored 67, and a banned neon template scored 66. One point apart. So dpt is proprioception, a sense of whether the act landed roughly where it should have. It stays on the bench as a floor check for unreadable text and invisible buttons, and workers are told never to chase its score. A faculty whose limits are written down beside it is worth more than one that is simply trusted.
+The vessel's sense of visual craft is now a method rather than a score. Two earlier instruments were retired on 2026-09-18 with their results written down: `dpt` scored live pages 0–100 and proved to be a floor check, not taste (a ratified design and a banned neon template scored one point apart); `aphrodite` generated pages from relational briefs and lost every blind trial it entered. What survived them is a record and a process: the judged corpus in `corpus/design/` (every round, every verdict verbatim, the pinned Very Good Designs) and the image-first method that won a controlled trial on the Palingenesis home page — a top image model renders looks from the owner's copy, the owner picks pictures, a builder reproduces the pick in HTML under a copy contract, and a measured polish audit runs in the live page before anything is shown. That method is being built as `agent-do design`.
+
 
 ### The key locker (creds)
 
 27 tools declare the secrets they need. Those are stored once in the operating system's secure store, and the dispatcher resolves each one at the moment of the call and passes it to the tool as an environment variable, so a token never appears in a command line, a log, a document, or a commit. A worker never carries a key in a command or a note.
+
+`OPENAI_API_KEY` is an explicit-access exception: ordinary tool dispatch and intent routing never load it from the secure store. On macOS, credential status, source, and check commands inspect Keychain metadata without reading the secret or opening an unlock prompt. A stored key being present does not authorize its use. After user authorization, only a named `creds get OPENAI_API_KEY --reveal` or `creds export OPENAI_API_KEY` request can unlock it; a denied read fails without retrying. Bulk `creds export --tool ...` refuses tools that include this key. Existing explicitly supplied process environments remain supported.
 
 ### Where the vessel ends (+live)
 

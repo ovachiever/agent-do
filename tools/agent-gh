@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agent-gh - GitHub PR and review work-state for agent-do."""
+"""agent-gh - GitHub issue, PR, and review work-state for agent-do."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote, urlencode
 
 
 AGENT_DO_HOME = Path(os.environ.get("AGENT_DO_HOME", Path.home() / ".agent-do"))
@@ -96,6 +97,12 @@ class PrRef:
     repo: str | None
     number: str
     original: str
+
+
+@dataclass(frozen=True)
+class IssueRef:
+    repo: str
+    number: str
 
 
 def now_iso() -> str:
@@ -279,6 +286,126 @@ def commit_correlation(repo: str, sha: str) -> dict[str, Any]:
                        "truncated": any(result["truncated"] for result in issue_results),
                        **({"reason": "One or more associated pull requests did not expose closing-issue references"}
                           if degraded else {})}}
+def resolve_repo(repo: str | None) -> str:
+    value = repo if repo is not None else repo_from_git()
+    if not value or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+", value):
+        raise GhError("A GitHub owner/repo is required; pass --repo outside a GitHub-backed repo")
+    if value.split("/")[1] in {".", ".."}:
+        raise GhError("Invalid GitHub repository")
+    return value
+
+
+def parse_issue_ref(raw: str, repo: str | None = None) -> IssueRef:
+    value = raw.strip()
+    match = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/issues/([1-9][0-9]*)(?:[?#].*)?", value)
+    if match is None:
+        match = re.fullmatch(r"([^/#\s]+/[^/#\s]+)#([1-9][0-9]*)", value)
+    if match:
+        target_repo = resolve_repo(match.group(1))
+        if repo is not None and resolve_repo(repo).lower() != target_repo.lower():
+            raise GhError("Issue reference conflicts with --repo")
+        return IssueRef(target_repo, match.group(2))
+    if re.fullmatch(r"[1-9][0-9]*", value):
+        return IssueRef(resolve_repo(repo), value)
+    raise GhError(f"Invalid issue reference: {value}")
+
+
+def normalize_issue(repo: str, item: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(item, dict) or not isinstance(item.get("number"), int):
+        raise GhError("GitHub returned an invalid issue object")
+    if "pull_request" in item:
+        raise GhError(f"{repo}#{item['number']} is a pull request, not an issue")
+    return {
+        "ref": f"{repo}#{item['number']}", "repo": repo, "number": item["number"],
+        "title": item.get("title"), "body": item.get("body"), "state": item.get("state"),
+        "url": item.get("html_url"), "author": (item.get("user") or {}).get("login"),
+        "assignees": [user["login"] for user in item.get("assignees") or []],
+        "labels": [label["name"] for label in item.get("labels") or []],
+        "created_at": item.get("created_at"), "updated_at": item.get("updated_at"),
+        "closed_at": item.get("closed_at"),
+    }
+
+
+def issue_detail(ref: IssueRef) -> dict[str, Any]:
+    issue = normalize_issue(ref.repo, gh_json(["api", f"repos/{ref.repo}/issues/{ref.number}"]))
+    if str(issue["number"]) != ref.number:
+        raise GhError("GitHub returned a different issue number")
+    return issue
+
+
+def cmd_issue_list(args: argparse.Namespace) -> None:
+    repo = resolve_repo(args.repo)
+    query = {"state": args.state}
+    for key, value in (("assignee", args.assignee), ("creator", args.author)):
+        if value is not None:
+            query[key] = current_user(refresh=True)["login"] if value == "@me" else value
+    if args.label:
+        query["labels"] = ",".join(args.label)
+    # REST's issues collection includes PRs. Fetch all pages before filtering
+    # and applying the caller's display cap so total always means real issues.
+    pages = gh_json(["api", "--paginate", "--slurp", f"repos/{repo}/issues?{urlencode(query)}"])
+    if not isinstance(pages, list) or any(
+        not isinstance(page, list) or any(not isinstance(item, dict) for item in page)
+        for page in pages
+    ):
+        raise GhError("GitHub returned invalid issue pages")
+    issues = [normalize_issue(repo, item) for page in pages for item in page if "pull_request" not in item]
+    shown = issues if args.limit is None else issues[:args.limit]
+    payload = {"repo": repo, "count": len(shown), "total": len(issues), "issues": shown}
+    if args.json:
+        print_json(payload)
+    else:
+        print_table(shown, ["ref", "state", "title"])
+        if len(shown) != len(issues):
+            print(f"[truncated: {len(shown)} of {len(issues)} shown]")
+
+
+def cmd_issue_create(args: argparse.Namespace) -> None:
+    repo = resolve_repo(args.repo)
+    body = read_body(args, required=True)
+    gh_args = ["issue", "create", "--repo", repo, "--title", args.title, "--body-file", "-"]
+    append_repeated_flag(gh_args, "--assignee", args.assignee)
+    append_repeated_flag(gh_args, "--label", args.label)
+    url = run_gh(gh_args, input_text=body).strip()
+    # Creation already happened if read-back fails. Never retry a write here.
+    try:
+        ref = parse_issue_ref(url, repo)
+        issue = issue_detail(ref)
+    except GhError as exc:
+        raise GhError(f"Issue creation succeeded ({url}), but read-back failed: {exc}. Do not recreate it.") from exc
+    output({"issue": issue}, json_mode=args.json)
+
+
+def cmd_issue_mutate(args: argparse.Namespace) -> None:
+    ref = parse_issue_ref(args.issue, args.repo)
+    action = args.issue_command
+    body = read_body(args, required=True) if action == "comment" else None
+    if action == "comment" and not body.strip():
+        raise GhError("An issue comment requires a nonempty body")
+    if action == "label" and not (args.add or args.remove):
+        raise GhError("issue label requires --add or --remove")
+    # Check object kind before using GitHub's shared issue/PR mutation surface.
+    issue_detail(ref)
+    gh_args = ["issue", "edit" if action in {"assign", "unassign", "label"} else action,
+               ref.number, "--repo", ref.repo]
+    if action in {"assign", "unassign"}:
+        flag = "--add-assignee" if action == "assign" else "--remove-assignee"
+        append_repeated_flag(gh_args, flag, args.assignee or ["@me"])
+    elif action == "label":
+        append_repeated_flag(gh_args, "--add-label", args.add)
+        append_repeated_flag(gh_args, "--remove-label", args.remove)
+    elif action == "close":
+        gh_args.extend(["--reason", args.reason])
+    elif action == "comment":
+        gh_args.extend(["--body-file", "-"])
+    result = run_gh(gh_args, input_text=body).strip()
+    try:
+        issue = issue_detail(ref)
+        if action == "close" and issue["state"] != "closed":
+            raise GhError("Issue remains open after close")
+    except GhError as exc:
+        raise GhError(f"Issue {action} succeeded for {ref.repo}#{ref.number}, but read-back failed: {exc}. Do not repeat the write blindly.") from exc
+    output({"action": action, "issue": issue, "result": result}, json_mode=args.json)
 
 
 def current_user(*, refresh: bool = False) -> dict[str, Any]:
@@ -2164,8 +2291,12 @@ def read_body(args: argparse.Namespace, *, required: bool = False) -> str | None
     if args.body_file:
         if args.body_file == "-":
             return sys.stdin.read()
-        return Path(args.body_file).read_text()
-    if args.body:
+        try:
+            with open(args.body_file, encoding="utf-8", newline="") as source:
+                return source.read()
+        except (OSError, UnicodeError) as exc:
+            raise GhError(f"Cannot read --body-file: {exc}") from exc
+    if args.body is not None:
         return args.body
     if required:
         raise GhError("--body or --body-file is required")
@@ -2333,10 +2464,189 @@ def cmd_ready(args: argparse.Namespace, *, draft: bool = False) -> None:
     print(f"{'Converted to draft' if draft else 'Marked ready'}: {ref.repo}#{ref.number}")
 
 
+DECLARATION_START = "<!-- agent-do:declaration:v1 -->"
+DECLARATION_END = "<!-- /agent-do:declaration -->"
+
+
+def read_git(args: list[str]) -> str:
+    result = subprocess.run(["git", *args], text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise GhError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def pr_declaration(repo: str, base: str, head: str) -> dict[str, Any]:
+    """Preserve every contribution's committed stamps without self-reporting.
+
+    The attest lane owns generating/validating these stamps. This consumer
+    copies them and refuses missing or ambiguous fields, never infers a model
+    from the PR author's current session or an unrelated commit on HEAD.
+    """
+    if ":" in head:
+        raise GhError("--declare requires a local --head branch with committed provenance")
+    head_oid = read_git(["rev-parse", "--verify", "--end-of-options", f"refs/heads/{head}^{{commit}}"])
+    base_refs = [f"refs/heads/{base}"]
+    if (repo_from_git() or "").lower() == repo.lower():
+        base_refs.insert(0, f"refs/remotes/origin/{base}")
+    base_oid = None
+    for ref in base_refs:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+            text=True, capture_output=True, check=False,
+        )
+        if result.returncode == 0:
+            base_oid = result.stdout.strip()
+            break
+    if base_oid is None:
+        raise GhError("--declare requires the base branch locally; fetch it before creating the PR")
+    commits = read_git(["log", "--reverse", "--format=%H", f"{base_oid}..{head_oid}"]).splitlines()
+    if not commits:
+        raise GhError("--declare found no commits between base and head")
+    contributions = []
+    for commit in commits:
+        trailers = read_git(["show", "-s", "--format=%(trailers:only,unfold=true)", commit])
+        fields: dict[str, set[str]] = {}
+        for line in trailers.splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                fields.setdefault(key.lower(), set()).add(value.strip())
+        work_items = fields.get("work-item", set()) | fields.get("manna", set())
+        fields["work-item"] = work_items
+        entry = {"commit": commit}
+        for key in ("work-item", "model", "effort", "session"):
+            values = fields.get(key, set())
+            if len(values) != 1 or not next(iter(values), ""):
+                raise GhError(f"--declare requires one {key} trailer on commit {commit}; stamp the commit before publishing")
+            entry[key.replace("-", "_")] = next(iter(values))
+        contributions.append(entry)
+    return {"version": 1, "source": "git-commit-trailers", "base_commit": base_oid,
+            "head_commit": head_oid, "contributions": contributions}
+
+
+def cmd_pr_create(args: argparse.Namespace) -> None:
+    repo = resolve_repo(args.repo)
+    body = read_body(args, required=True)
+    head = args.head or read_git(["symbolic-ref", "--quiet", "--short", "HEAD"])
+    declaration = None
+    if args.declare:
+        if DECLARATION_START in body or DECLARATION_END in body:
+            raise GhError("Body already contains an agent-do declaration; remove it before --declare")
+        declaration = pr_declaration(repo, args.base, head)
+        # JSON escapes are valid JSON and keep trailer text from closing the
+        # Markdown fence or declaration marker inside the PR body.
+        encoded = json.dumps(declaration, indent=2, ensure_ascii=True)
+        encoded = encoded.replace("`", "\\u0060").replace("<", "\\u003c").replace(">", "\\u003e")
+        body += ("\n\n" + DECLARATION_START + "\n## Work declaration\n\n```json\n"
+                 + encoded + "\n```\n" + DECLARATION_END + "\n")
+    payload = {"repo": repo, "title": args.title, "body": body, "base": args.base,
+               "head": head, "draft": args.draft, "assignees": args.assignee or [],
+               "labels": args.label or [], "reviewers": args.reviewer or [],
+               "declaration": declaration}
+    if args.dry_run:
+        # gh pr create --dry-run can push. Our preview never invokes gh.
+        output({"dry_run": True, "pr": payload}, json_mode=args.json)
+        return
+    if declaration is not None:
+        remote = gh_json(["api", f"repos/{repo}/git/ref/heads/{quote(head, safe='/')}"])
+        if not isinstance(remote, dict) or (remote.get("object") or {}).get("sha") != declaration["head_commit"]:
+            raise GhError("Published head differs from the declaration's local head; synchronize the branch explicitly before creating the PR")
+    gh_args = ["pr", "create", "--repo", repo, "--title", args.title,
+               "--body-file", "-", "--base", args.base, "--head", head]
+    if args.draft:
+        gh_args.append("--draft")
+    append_repeated_flag(gh_args, "--assignee", args.assignee)
+    append_repeated_flag(gh_args, "--label", args.label)
+    append_repeated_flag(gh_args, "--reviewer", args.reviewer)
+    url = run_gh(gh_args, input_text=body).strip()
+    created = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/pull/[1-9][0-9]*", url)
+    if created is None or created.group(1).lower() != repo.lower():
+        raise GhError(f"PR creation returned an unexpected receipt: {url}. Inspect GitHub before retrying.")
+    if declaration is not None:
+        try:
+            actual = gh_json(["pr", "view", url, "--repo", repo, "--json", "headRefOid,body"])
+            if not isinstance(actual, dict) or actual.get("headRefOid") != declaration["head_commit"] or actual.get("body") != body:
+                raise GhError("Created PR head or body differs from its declaration")
+        except GhError as exc:
+            raise GhError(f"PR creation succeeded ({url}), but declaration read-back failed: {exc}. Inspect that PR before retrying.") from exc
+    output({"url": url, "declaration": declaration}, json_mode=args.json)
+
+
+def add_body_arguments(parser: argparse.ArgumentParser) -> None:
+    body = parser.add_mutually_exclusive_group(required=True)
+    body.add_argument("--body", help="Body text (passed to gh over stdin)")
+    body.add_argument("--body-file", help="Read UTF-8 body text; - reads stdin")
+
+
+def positive_limit(value: str) -> int:
+    try:
+        result = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("limit must be a positive integer") from None
+    if result <= 0:
+        raise argparse.ArgumentTypeError("limit must be a positive integer")
+    return result
+
+
+def nonempty_title(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("title must not be empty")
+    return value
+
+
+def build_pr_create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="agent-do gh pr create", description="Create a PR without pushing or launching an editor")
+    parser.add_argument("--repo", help="GitHub owner/repo; defaults to origin")
+    parser.add_argument("--title", type=nonempty_title, required=True)
+    parser.add_argument("--base", required=True, help="Target branch")
+    parser.add_argument("--head", help="Source branch; defaults to the current branch")
+    add_body_arguments(parser)
+    parser.add_argument("--draft", action="store_true")
+    parser.add_argument("--assignee", action="append")
+    parser.add_argument("--label", action="append")
+    parser.add_argument("--reviewer", action="append")
+    parser.add_argument("--declare", action="store_true", help="Append every base..head commit's Work-Item (or Manna), Model, Effort, Session trailers")
+    parser.add_argument("--dry-run", action="store_true", help="Preview locally; never call GitHub or push")
+    parser.add_argument("--json", action="store_true")
+    parser.set_defaults(func=cmd_pr_create)
+    return parser
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="agent-gh - GitHub PR and review work-state")
+    parser = argparse.ArgumentParser(description="agent-gh - GitHub issue, PR, and review work-state")
     parser.set_defaults(func=None)
     sub = parser.add_subparsers(dest="command")
+
+    issue = sub.add_parser("issue", help="Create, list, assign, label, close, and comment on issues")
+    issue_sub = issue.add_subparsers(dest="issue_command", required=True)
+    for name in ("create", "list", "assign", "unassign", "label", "close", "comment"):
+        command = issue_sub.add_parser(name)
+        command.add_argument("--repo", help="GitHub owner/repo; defaults to the reference or origin")
+        command.add_argument("--json", action="store_true")
+        if name == "create":
+            command.add_argument("--title", type=nonempty_title, required=True)
+            add_body_arguments(command)
+            command.add_argument("--assignee", action="append")
+            command.add_argument("--label", action="append")
+            command.set_defaults(func=cmd_issue_create)
+        elif name == "list":
+            command.add_argument("--state", choices=["open", "closed", "all"], default="open")
+            command.add_argument("--assignee")
+            command.add_argument("--author")
+            command.add_argument("--label", action="append")
+            command.add_argument("--limit", type=positive_limit, help="Display cap after all pages are counted; default shows all")
+            command.set_defaults(func=cmd_issue_list)
+        else:
+            command.add_argument("issue", help="owner/repo#number, issue URL, or bare number")
+            command.set_defaults(func=cmd_issue_mutate)
+            if name in {"assign", "unassign"}:
+                command.add_argument("--assignee", action="append", help="Login to add/remove; repeatable, defaults to @me")
+            elif name == "label":
+                command.add_argument("--add", action="append", help="Label to add; repeatable")
+                command.add_argument("--remove", action="append", help="Label to remove; repeatable")
+            elif name == "close":
+                command.add_argument("--reason", choices=["completed", "not planned"], default="completed")
+            elif name == "comment":
+                add_body_arguments(command)
 
     whoami = sub.add_parser("whoami", help="Show authenticated GitHub user")
     whoami.add_argument("--json", action="store_true")
@@ -2394,7 +2704,7 @@ def build_parser() -> argparse.ArgumentParser:
     awaiting.add_argument("--probe-deploys", action="store_true", help="Best-effort Render/Vercel env-key probe for env vars changed in each PR")
     awaiting.set_defaults(func=cmd_awaiting)
 
-    pr = sub.add_parser("pr", help="Show PR detail")
+    pr = sub.add_parser("pr", help="Show PR detail; pr create --help for creation", epilog="For creation: agent-do gh pr create --help")
     pr.add_argument("pr", nargs="?")
     pr.add_argument("--json", action="store_true")
     pr.set_defaults(func=cmd_pr)
@@ -2524,7 +2834,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def show_help() -> None:
     print(
-        """GitHub PR/review operations. For local repository work use: agent-do git
+        """GitHub issue and PR/review operations. For local repository work use: agent-do git
 
 Commands:
   whoami                         Show authenticated GitHub user
@@ -2534,6 +2844,15 @@ Commands:
   awaiting                       Show open PRs likely awaiting your review
   prs [query]                    Search pull requests
   pr <repo#num|url|num>          Show PR details
+  pr create --title T --base B --body-file F [--declare] [--dry-run]
+                                Create a PR; --declare copies committed provenance
+  issue create --title T --body-file F  Create an issue
+  issue list [--repo owner/repo]        List issues, all pages by default
+  issue assign <issue>                 Add assignees (default @me)
+  issue unassign <issue>               Remove assignees (default @me)
+  issue label <issue> --add L --remove L  Change issue labels
+  issue close <issue>                  Close an issue
+  issue comment <issue> --body-file F  Comment on an issue
   diff <pr>                      Show PR diff
   threads <pr>                   Show unresolved PR review threads
   checks <pr>                    Show PR checks
@@ -2554,6 +2873,9 @@ Commands:
 
 Examples:
   agent-do gh inbox
+  agent-do gh issue list --repo ovachiever/agent-do --assignee @me --json
+  agent-do gh issue assign ovachiever/agent-do#12
+  agent-do gh pr create --title "Fix issue" --base main --body-file pr.md --declare --dry-run --json
   agent-do gh inbox --ceremony-only
   agent-do gh portfolio add Versova-Intelligence-Division/*
   agent-do gh awaiting --owner Versova-Intelligence-Division --author ctyrrell-versova
@@ -2575,8 +2897,12 @@ def main(argv: list[str] | None = None) -> int:
     if len(argv) == 1 and argv[0] in {"help", "--help", "-h"}:
         show_help()
         return 0
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    if argv[:2] == ["pr", "create"]:
+        parser = build_pr_create_parser()
+        args = parser.parse_args(argv[2:])
+    else:
+        parser = build_parser()
+        args = parser.parse_args(argv)
     if args.func is None:
         parser.print_help()
         return 0

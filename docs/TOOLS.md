@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (103 tools)
+## Summary (104 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -44,23 +44,24 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [coderabbit](#coderabbit) | Local AI diff review via CodeRabbit CLI — review uncommitted changes, staged diffs, or branch diffs before opening a PR | mixed | 6 |
 | [colab](#colab) | Google Colab notebook management | mixed | 4 |
 | [context](#context) | Knowledge library — fetch, index, and serve external reference docs. Complementary to zpc (experience journal). | mixed | 27 |
-| [coord](#coord) | Project-local agent state and interrupt broker | mixed | 23 |
+| [coord](#coord) | Project-local agent state and interrupt broker | mixed | 25 |
 | [creds](#creds) | Secure credential storage and resolution for agent-do tools | mixed | 8 |
 | [cronitor](#cronitor) | Cronitor scheduled job and uptime monitoring | mixed | 11 |
 | [db](#db) | Control database clients | mixed | 5 |
+| [deai](#deai) | Offline prose-tell linter with measured ceilings and explicit register policies | mixed | 5 |
 | [debug](#debug) | Control debuggers | read | 5 |
+| [design](#design) | Image-first design workflow with approved copy and measured browser polish | mixed | 6 |
 | [discord](#discord) | Control Discord | mixed | 2 |
 | [dns](#dns) | DNS lookups and resolution diagnostics (read-only; record writes live in namecheap/cloudflare) | read | 2 |
 | [docker](#docker) | Control Docker containers | write | 7 |
-| [dpt](#dpt) | Design Perception Tensor - automated design quality scoring | read | 7 |
 | [email](#email) | Control email | mixed | 12 |
 | [eval](#eval) | LLM output evaluation and testing | read | 4 |
 | [excel](#excel) | AI-first Excel CLI for workbook automation | mixed | 11 |
 | [figma](#figma) | Control Figma | read | 3 |
 | [gcp](#gcp) | Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials | mixed | 19 |
-| [gh](#gh) | GitHub repository, pull request, review, and merge work-state across accessible repos | mixed | 24 |
+| [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 32 |
 | [ghidra](#ghidra) | Ghidra reverse engineering automation | read | 4 |
-| [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 19 |
+| [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 28 |
 | [handbrake](#handbrake) | Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs | mixed | 7 |
 | [hardware](#hardware) | Unified hardware device control across serial, bluetooth, USB, printers, and MIDI | mixed | 6 |
 | [harness](#harness) | Observable agent-do harness inventory, evidence, and change-manifest front door | mixed | 8 |
@@ -77,7 +78,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [linear](#linear) | Control Linear | mixed | 3 |
 | [logs](#logs) | Control log aggregation | read | 3 |
 | [macos](#macos) | Control native macOS desktop applications via accessibility APIs | mixed | 6 |
-| [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 27 |
+| [manna](#manna) | Git-backed issue tracking with generated, bidirectionally linked handoff work orders | write | 33 |
 | [meet](#meet) | Google Meet control | mixed | 4 |
 | [meetings](#meetings) | Unified enterprise meeting orchestration across Zoom, Google Meet, and Microsoft Teams | mixed | 14 |
 | [memory](#memory) | Persistent memory and context | mixed | 4 |
@@ -1215,9 +1216,11 @@ Concurrency: `mixed`
 - name the isolation remedy in contention interrupts (split ownership first, worktree second) and flag a declared branch this checkout is not on as mandatory isolation
 - proactively warn concurrent active building writers to use separate worktrees because compile state and build artifacts remain shared even when source paths are disjoint
 - manage advisory claims and a warn-only pre-commit guard over live claims and territories
-- point peers at files via drops, declare dependencies, publish artifacts with file pointers
+- point peers at files via drops with a lifecycle (stable id, per-reader acknowledgment, authorized resolution, revisions, audit history, nothing deleted), declare dependencies, publish artifacts with file pointers
+- ring live named peers with a payload-free pending bit after addressed need/drop writes; consume at supported turn-boundary hooks without changing claims or acceptance
 - compute contention, notice, dependency, and novelty interrupts and expose the event journal as history
 - merge harness hook observations and timestamped external supervisor verdicts into shared six-state pulse telemetry without renewing target liveness, then rank live peers attention-first
+- expose the wake demands open action drops raise to a host adapter (contract coord-wake/1), let one live consumer reserve a demand under its own coord identity, fence the transport with a durable dispatch-started mark, and record transport receipts (waiting, dispatching, submitted, unknown, failed, released) that never count as the recipient's acknowledgment; a holder that dies after dispatch-started leaves the outcome unknown until transport evidence establishes it
 
 **Commands**
 
@@ -1225,7 +1228,7 @@ Concurrency: `mixed`
 - `whoami`: Show current coordination identity, session, pid, and runtime
 - `alias`: Assign a friendly alias: alias \<name>
 - `aliases`: List known aliases in this project
-- `peers`: List known peers with liveness-verified status and age: peers [--all] [--active-only] [--writers]
+- `peers`: List known peers with liveness-verified status, age, and stored Manna binding: peers [--all] [--active-only] [--writers]
 - `stop`: Retire this session cleanly (Stop-hook safe): stop [--note \<text>]
 - `bye`: Delete this agent's own board records
 - `role`: Declare role and territory: role set \<builder|auditor|researcher|overseer> [--mode read-only|writer] --territory \<path>
@@ -1235,14 +1238,16 @@ Concurrency: `mixed`
 - `interrupts`: Show current interrupts: interrupts [--mark-seen] [--limit \<n>]
 - `focus`: Manage structured focus and report a warn-only concurrent-builder isolation nudge: focus set \<goal> [--path \<p>] [--phase \<phase>] [--note \<t>] [--blocking-on \<ref>] [--last-ship \<t>] [--branch \<name>] | show | clear
 - `pulse`: Shared session telemetry: pulse record --from-hook (stdin JSON, always exit 0) | pulse record --session \<harness-session-id> --status \<working|needs-user|finished|failed|idle|ended> --updated-at \<RFC3339> [--activity \<note>|--clear-activity] | pulse show [peer|harness-session-id]
+- `bell`: Payload-free attention: bell ring --for \<agent> | bell check --from-hook (stdin hook JSON; fixed context only, silent on failure)
 - `claims`: List advisory claims
 - `claim`: Claim a file/path: claim \<path> [--reason \<text>] [--strength soft|strong]
 - `release`: Release a claim you own: release \<path>
-- `need`: Manage dependencies: need add|list|clear
+- `need`: Manage dependencies: need add \<key> --why \<text> [--from \<agent>|--for \<agent>] | need list [--all] | need clear \<key>
 - `publishes`: List published artifacts
 - `publish`: Manage published artifacts: publish add [--file \<path>]|clear
-- `drop`: Point a peer at a file: drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>]
-- `drops`: List drops: drops [--for-me]
+- `drop`: Drop lifecycle (stable ids, never deleted): drop add \<path> --for \<agent|role|any> [--note \<text>] [--key \<need-key>] [--action] (default kind info is a delivery shown as a notice; --action is an obligation shown as a dependency until resolved; re-adding changed content bumps the revision; a direct --for must be a registered session or alias, a role, or any, else refused) | drop add \<path> --for-item \<mn-id> [--action] [--allows \<text> ... --excludes \<text> ... --authorized-by \<who>] (address the worker on an item: pins the board claimant, claim proof, attempt and work-order digest, resolves the exact coord session by proof equality, never a label or prefix; no live bound session leaves it visibly pending until the worker's next touch; a replacement claimant, a new claim or attempt, or a revised work order marks it STALE, never forwards it, and a STALE drop is void for its recipient: ack and resolve refused, shown as a notice that names only the owner's way out, retired or readdressed only by its owner; --allows/--excludes/--authorized-by record an approval's scope, all three required, and the drop is an action; routing confers no authority) | drop ack \<id> (recipient acknowledges: read, never done; an info drop leaves that reader's interrupts, an action drop stays listed until resolved; a STALE item drop refuses) | drop resolve \<id> --reason \<text> [--evidence \<ref>] [--for-everyone] (owner or addressed recipient settles it for every reader; a STALE item drop, only its owner; kept in history) | drop history \<id> | drop wake \<id> [--revision \<n>] [--after \<request-id> --evidence \<text>] (host adapter claims the wake demand an open action drop raises for its exact live recipient, under the caller's own coord identity; one live consumer per demand; refused for informational, broadcast, acknowledged, resolved or stale drops, for pending or ambiguous recipients, and while an earlier request's outcome is unknown) | drop wake \<id> --request \<request-id> --waiting \<reason> | drop wake \<id> --request \<request-id> --dispatching \<evidence> (the durable dispatch-started mark the holder writes immediately before it touches the transport; coord revalidates the demand and refuses with do not send when it moved or is no longer actionable; after the mark a holder that dies leaves the outcome unknown, never reclaimable, until a live consumer establishes submitted or failed with transport evidence) | drop wake \<id> --request \<request-id> --outcome submitted|unknown|failed|released --evidence \<text> (transport receipts: a replay is duplicate and changes nothing, a different state is a correction that keeps history, released applies to a reservation only, and no receipt is ever an acknowledgment)
+- `drops`: List open drops: drops [--for-me] [--all] (--all includes resolved), each with its delivery stage: recorded, recipient resolved, bell queued, acknowledged, completed, and its host-notification state; a ledger write, a queued bell or a transport receipt is never acknowledgment; a note is a dated report, never a verified present fact | drops --wake (host adapter read, contract coord-wake/1: actionable wake demands first, held ones with reasons, each with its notification state)
+- `worker`: The worker on an item: worker \<mn-id> shows the exact coord session bound by claim proof, the board assignment beside the session's declared focus title, liveness evidence (lease, process, pulse) and its open obligations with delivery stages; a lookup confers nothing
 - `history`: Read the coordination event journal: history [peer] [--limit \<n>]
 
 **Examples**
@@ -1268,6 +1273,22 @@ agent-do coord need add dm-sdk@1.2.2 --why "switch off tarball dependency"
 agent-do coord publish add dm-sdk@1.2.2 --status ready --summary "private package published"
 # hand another agent a research file
 agent-do coord drop add .dev/research-drops/report.md --for builder-a --note "ephemeris findings"
+# acknowledge a drop so it stops nudging me
+agent-do coord drop ack drp-1a2b3c4d5e6f
+# hand another agent an obligation that keeps reminding until resolved
+agent-do coord drop add .dev/fix-me.md --for builder-a --note "please fix" --action
+# record an approval for the worker on an item without copying a session id
+agent-do coord drop add .dev/mn-261c29/approval.md --for-item mn-261c29 --allows "write the migration file; local build and test" --excludes "applying it to staging or production" --authorized-by "Erik, 2026-10-30 16:20 CDT, via Claude"
+# who is the worker on this item and did they read my drop
+agent-do coord worker mn-261c29
+# as a host adapter, list the wake demands open action drops raise
+agent-do coord drops --wake --json
+# as a host adapter, claim a wake demand and record that the instruction was submitted
+agent-do coord drop wake drp-1a2b3c4d5e6f --json
+# as a host adapter, record that dispatch started immediately before touching the transport
+agent-do coord drop wake drp-1a2b3c4d5e6f --request wrq-0f1e2d3c4b5a --dispatching "tmux pane %5, server epoch 12, worker pid alive, composer empty" --json
+# settle a drop for every reader once its work is done
+agent-do coord drop resolve drp-1a2b3c4d5e6f --reason "folded into the release" --evidence "commit abc123"
 # see whether anything should interrupt me
 agent-do coord interrupts
 # see what a session is observably doing right now
@@ -1280,8 +1301,8 @@ agent-do coord stop --note "lane 14 shipped"
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `aliases`, `claims`, `drops`, `history`, `need list`, `peers`, `publishes`, `status`, `territory`, `whoami`
-- Write (connect/interact/save): `alias`, `bye`, `claim soft`, `claim strong`, `drop`, `focus`, `guard`, `interrupts`, `need add`, `need clear`, `publish add`, `publish clear`, `pulse`, `release`, `role`, `stop`, `touch`
+- Read-only (snapshot/verify; safe to parallelize): `aliases`, `claims`, `drops`, `history`, `need list`, `peers`, `publishes`, `status`, `territory`, `whoami`, `worker`
+- Write (connect/interact/save): `alias`, `bell`, `bye`, `claim soft`, `claim strong`, `drop`, `focus`, `guard`, `interrupts`, `need add`, `need clear`, `publish add`, `publish clear`, `pulse`, `release`, `role`, `stop`, `touch`
 - destructive (irreversible data loss; confirm before auto-running): `bye`, `need clear`, `publish clear`
 - polymorphic (beat decided by payload or flag at call time): `guard`, `interrupts`, `pulse`
 - composite (one call performs several beats internally): `touch`
@@ -1428,6 +1449,43 @@ agent-do db query 'SELECT * FROM users'
 - Write (connect/interact/save): `connect`, `export`, `query`
 - polymorphic (beat decided by payload or flag at call time): `query`
 
+### deai
+
+Offline prose-tell linter with measured ceilings and explicit register policies
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- lint essays, email, technical prose, and product answers without rewriting input
+- report every finding with source line, column, rule, and measurement provenance
+- preserve strict essay rules while allowing literal technical language in the default pack
+- measure proposed rules on a local corpus with word denominators and content hashes
+
+**Commands**
+
+- `lint`: lint \<file...|-> [--register essay|email|default|product-answer] [--json]; exit 0 clean, 1 findings, 2 error
+- `packs`: packs [--register NAME] [--json]; complete rules, ceilings, whitelists, and provenance
+- `measure`: measure \<file...> --rule-id ID --pattern REGEX --source CITATION [--json]; exact local corpus measurement
+- `validate`: validate [--json]; reject missing measurements, changed patterns, or unattributed whitelists
+- `guard`: guard check|install [--register NAME] [--json]; advisory staged-prose check or pre-commit hook setup
+
+**Examples**
+
+```bash
+# lint an essay for prose tells
+agent-do deai lint draft.md --register essay
+# check technical prose without banning literal engineering terms
+agent-do deai lint README.md --register default --json
+# inspect register policy and measured ceilings
+agent-do deai packs --register email --json
+```
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `guard check`, `lint`, `measure`, `packs`, `validate`
+- Write (connect/interact/save): `guard install`
+
 ### debug
 
 Control debuggers
@@ -1463,6 +1521,50 @@ agent-do debug print x
 - Read-only (snapshot/verify; safe to parallelize): `backtrace`, `print`
 - Write (connect/interact/save): `break`, `continue`, `step`
 - own_state (writes only its own cache/state; parallel-safe): `break`, `continue`, `step`
+
+### design
+
+Image-first design workflow with approved copy and measured browser polish
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- freeze owner copy and facts into exact, half and open image prompts
+- generate images with current strongest-model authority and actual usage receipts
+- measure chosen images and reproduce them with independent browser repair checks
+- hand blind self-saving ballots to Claude Code and import verbatim owner rulings
+- measure rendered typography, inline text, SVG captions, clipping, controls and overflow
+- preserve audit evidence with viewport and threshold provenance
+
+**Commands**
+
+- `brief`: brief --copy COPY --facts FACTS --round ROUND [--dry-run] [--json]
+- `imagine`: imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]
+- `measure`: measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]
+- `reproduce`: reproduce --round ROUND [--selected] [--dry-run] [--retry-uncertain] [--json]
+- `ballot`: ballot images|pages --round ROUND [--publish] [--claude-session ID] [--submitted HTML --receipt JSON] [--dry-run] [--json]
+- `polish`: polish \<url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--dry-run] [--json]
+
+**Examples**
+
+```bash
+# check a design for clipped captions and orphan words
+agent-do design polish page.html --viewport 1440x1000 --json
+```
+
+**Credentials**
+
+- Optional: `OPENAI_API_KEY`
+- `OPENAI_API_KEY`: Image generation and vision-capable frontend reproduction [recommended]
+
+**Safety (from contracts)**
+
+- Write (connect/interact/save): `ballot`, `brief`, `imagine`, `measure`, `polish`, `reproduce`
+- long_running (daemon/stream/session; may never return): `imagine`, `reproduce`
+- polymorphic (beat decided by payload or flag at call time): `ballot`
+- composite (one call performs several beats internally): `ballot`, `brief`, `imagine`, `measure`, `polish`, `reproduce`
+- own_state (writes only its own cache/state; parallel-safe): `brief`, `measure`, `polish`
 
 ### discord
 
@@ -1567,52 +1669,6 @@ agent-do docker shell my-container
 - passthrough (arbitrary-payload escape hatch; beat decided by the argument): `exec`, `shell`
 - polymorphic (beat decided by payload or flag at call time): `compose`
 
-### dpt
-
-Design Perception Tensor - automated design quality scoring
-
-Concurrency: `read`
-
-**Capabilities**
-
-- scan any webpage for design quality
-- score 0-100 across 5 perception layers
-- detect contrast, typography, spacing, hierarchy, coherence violations
-- generate prioritized fix lists with CSS selectors
-- baseline/diff for before/after comparison
-
-**Commands**
-
-- `scan`: Full-page scan → JSON with all 65 checks
-- `score`: Quick score + grade + dimension summary
-- `report`: Narrative design critique report
-- `violations`: Violations sorted by impact for AI fix loops
-- `baseline`: Save a browser-session + project baseline
-- `diff`: Compare against that scoped baseline, show deltas
-- `build`: Rebuild engine from source
-
-**Examples**
-
-```bash
-# check the design quality of this page
-agent-do dpt score
-# scan stripe.com for design issues
-agent-do dpt scan https://stripe.com
-# what design violations are on this page
-agent-do dpt violations
-# save a design baseline before making changes
-agent-do dpt baseline
-# did my changes improve the design
-agent-do dpt diff
-```
-
-**Safety (from contracts)**
-
-- Read-only (snapshot/verify; safe to parallelize): `diff`, `report`, `scan`, `score`, `violations`
-- Write (connect/interact/save): `baseline`, `build`
-- composite (one call performs several beats internally): `baseline`
-- own_state (writes only its own cache/state; parallel-safe): `baseline`, `build`
-
 ### email
 
 Control email
@@ -1624,6 +1680,7 @@ Concurrency: `mixed`
 - send emails
 - query inboxes and mailboxes
 - search messages with account and mailbox scoping
+- search Microsoft Graph live with per-account local freshness receipts
 - wait for matching messages
 - fetch exact messages by id
 - extract verification codes
@@ -1642,7 +1699,7 @@ Concurrency: `mixed`
 - `code`: Extract verification code from matching email
 - `link`: Extract magic link from matching email
 - `mailboxes`: List available mailboxes
-- `status`: Show feature and provider hydration readiness
+- `status`: Show per-account freshness and verified live provider readiness
 
 **Examples**
 
@@ -1665,7 +1722,7 @@ agent-do email link --from login@example.com --domain app.example.com
 
 **Credentials**
 
-- Optional: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `AGENT_EMAIL_PROVIDER`, `AGENT_EMAIL_IMAP_HOST`, `AGENT_EMAIL_IMAP_PORT`, `AGENT_EMAIL_IMAP_USER`, `AGENT_EMAIL_IMAP_PASS`, `AGENT_EMAIL_IMAP_MAILBOX`, `AGENT_EMAIL_IMAP_MAILBOXES`
+- Optional: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `AGENT_EMAIL_PROVIDER`, `AGENT_EMAIL_IMAP_HOST`, `AGENT_EMAIL_IMAP_PORT`, `AGENT_EMAIL_IMAP_USER`, `AGENT_EMAIL_IMAP_PASS`, `AGENT_EMAIL_IMAP_MAILBOX`, `AGENT_EMAIL_IMAP_MAILBOXES`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `GRAPH_TARGET_MAILBOX`, `AGENT_EMAIL_GRAPH_ACCOUNT`
 
 **Safety (from contracts)**
 
@@ -1874,13 +1931,15 @@ agent-do gcp snapshot
 
 ### gh
 
-GitHub repository, pull request, review, and merge work-state across accessible repos
+GitHub issues, pull requests, reviews, and merges
 
 Concurrency: `mixed`
 
 **Capabilities**
 
 - discover accessible GitHub repositories
+- create, list, assign, unassign, label, close, and comment on GitHub issues
+- create pull requests with committed provenance declarations and a local preview
 - list actionable pull requests across repos
 - inspect pull request details, diffs, checks, and unresolved review threads
 - classify changed files by review-risk tier (critical/elevated/standard)
@@ -1898,6 +1957,14 @@ Concurrency: `mixed`
 - `awaiting`: Show open PRs likely awaiting your review by broad review heuristics
 - `prs`: Search pull requests
 - `pr`: Show PR details
+- `pr create`: Create a PR with explicit title, body and base; --declare copies every branch commit's provenance, --dry-run previews locally without pushing
+- `issue create`: Create an issue with --title and --body or --body-file, then read it back
+- `issue list`: List all repository issues with exact totals; optional state, assignee, author, label filters and display limit
+- `issue assign`: Add issue assignees (--assignee, repeatable; default @me); additive GitHub assignment, not exclusive claim arbitration
+- `issue unassign`: Remove issue assignees (--assignee, repeatable; default @me)
+- `issue label`: Add or remove issue labels (--add and --remove, repeatable)
+- `issue close`: Close an issue with --reason completed or "not planned", then read it back
+- `issue comment`: Comment on an issue with --body or --body-file, then read it back
 - `diff`: Show PR diff
 - `threads`: Show unresolved PR review threads
 - `checks`: Show PR checks
@@ -1919,6 +1986,16 @@ Concurrency: `mixed`
 **Examples**
 
 ```bash
+# list assigned issues
+agent-do gh issue list --repo ovachiever/agent-do --assignee @me --json
+# create an issue
+agent-do gh issue create --repo ovachiever/agent-do --title "Fix export" --body-file issue.md
+# assign an issue
+agent-do gh issue assign ovachiever/agent-do#12
+# update GitHub issue labels
+agent-do gh issue label ovachiever/agent-do#12 --add in-progress --remove ready
+# preview a pull request with provenance
+agent-do gh pr create --title "Fix export" --base main --body-file pr.md --declare --dry-run --json
 # show GitHub pull requests that need me
 agent-do gh inbox
 # show PRs awaiting my review in VID repos
@@ -1945,8 +2022,10 @@ agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-nee
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `diff`, `doctrine`, `inbox`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
-- Write (connect/interact/save): `approve`, `checkout`, `close`, `comment`, `draft`, `edit`, `merge`, `portfolio add`, `portfolio remove`, `ready`, `reopen`, `request-changes`, `update-branch`
+- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `diff`, `doctrine`, `inbox`, `issue list`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
+- Write (connect/interact/save): `approve`, `checkout`, `close`, `comment`, `draft`, `edit`, `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`, `merge`, `portfolio add`, `portfolio remove`, `pr create`, `ready`, `reopen`, `request-changes`, `update-branch`
+- polymorphic (beat decided by payload or flag at call time): `pr create`
+- composite (one call performs several beats internally): `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`
 - own_state (writes only its own cache/state; parallel-safe): `portfolio add`, `portfolio remove`
 
 ### ghidra
@@ -1998,6 +2077,11 @@ Concurrency: `mixed`
 - bind a new worktree's zpc memory to the primary store and warn that the manna board does not follow it
 - inspect and recover files from refs/auto shadow snapshots
 - preview safe branch cleanup before explicit apply
+- opt a repository into Managed Integration through its private git config, never a branch
+- register one worktree and branch per assignment attempt, bound to the claimant by claim proof
+- queue a submission that pins the commit, the submission id, the attempt and the evidence
+- land queued submissions through one integrator per repository, validated against the unchanged tested base
+- recover an interrupted landing idempotently and report building, queued, integrating, landed or blocked with receipts
 
 **Commands**
 
@@ -2020,12 +2104,27 @@ Concurrency: `mixed`
 - `conflicts`: List unmerged files with conflict-marker counts
 - `recover`: Read-only reflog and unreachable-commit report
 - `sweep`: Preview safe local branch deletion; mutate only with --apply
+- `integration enable`: Opt this repository into Managed Integration (target, checks, authority) in the common git dir's config
+- `integration disable`: Stop new dispatch and automatic landing; keep status, recovery, pending submissions and worktrees
+- `integration config`: Show the integration policy and whether it is off, enabled, disabled or invalid
+- `integration workspace add`: Register one worktree and branch for the current assignment attempt, bound to the claimant
+- `integration workspace list`: List registered assignment workspaces with their latest submission state
+- `integration submit`: Queue the workspace branch tip for integration, pinning commit, submission id, attempt and evidence
+- `integration run`: Build, validate and land queued submissions against the unchanged tested base; one integrator per repository
+- `integration recover`: Finish or void a landing interrupted before or after the ref update, never landing twice
+- `integration status`: Report building, queued, integrating, landed or blocked per item with reason, receipts and next action
 
 **Examples**
 
 ```bash
 # commit the changes I already staged
 agent-do git commit 'fix: describe the staged change'
+# start work on an assigned item in its own managed workspace
+agent-do git integration workspace add mn-abc123
+# request integration of the work I committed in my workspace
+agent-do git integration submit mn-abc123 --evidence 'python3 tests/test_x.py passed'
+# land every queued submission that passes the repository's checks
+agent-do git integration run
 # show recent commits
 agent-do git log
 # create an isolated worktree and carry local env files into it
@@ -2038,10 +2137,13 @@ agent-do git sweep
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `conflicts`, `diff`, `log`, `recover`, `snap diff`, `snap list`, `snapshot`, `status`, `worktree list`
-- Write (connect/interact/save): `branch`, `commit`, `pull`, `push`, `snap restore`, `stash`, `sweep`, `sync`, `worktree add`, `worktree remove`
+- Read-only (snapshot/verify; safe to parallelize): `conflicts`, `diff`, `integration config`, `integration status`, `integration workspace list`, `log`, `recover`, `snap diff`, `snap list`, `snapshot`, `status`, `worktree list`
+- Write (connect/interact/save): `branch`, `commit`, `integration disable`, `integration enable`, `integration recover`, `integration run`, `integration submit`, `integration workspace add`, `pull`, `push`, `snap restore`, `stash`, `sweep`, `sync`, `worktree add`, `worktree remove`
 - destructive (irreversible data loss; confirm before auto-running): `snap restore`, `sweep`, `worktree remove`
+- sensitive (emits or persists secret material; guard output): `integration disable`, `integration enable`
+- long_running (daemon/stream/session; may never return): `integration run`
 - polymorphic (beat decided by payload or flag at call time): `branch`, `sweep`
+- composite (one call performs several beats internally): `integration recover`, `integration run`
 
 ### handbrake
 
@@ -2659,6 +2761,7 @@ Concurrency: `write`
 **Capabilities**
 
 - track issues and dependencies
+- coordinator-owned closure for managed items (submission distinct from acceptance, pinned integration targets, scoped proof-bound grants, attempt-guarded release, append-only lifecycle audit)
 - declare portable typed relations between autonomous repository boards
 - manage session state
 - store context across sessions
@@ -2669,15 +2772,21 @@ Concurrency: `write`
 - `init`: Initialize .manna plus the tracked .handoff workflow scaffold
 - `migrate`: Atomically admit a legacy board into strict paired workflow state
 - `status`: Show current session and claimed issues
-- `state`: Emit the full derived board model as JSON or YAML, including graph buckets, receipts, federation, drift, and coord attention
+- `state`: Emit the full derived board model as JSON or YAML, including graph buckets, receipts, federation, drift, coord attention, and hash-current cached presentation fields
 - `estate`: Emit every registered board as the /api/boards model without starting or contacting the serve daemon
-- `create`: Create an issue; actionable items generate a linked .handoff work order (--type track|item|dream, --track, --source)
-- `claim`: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted)
-- `done`: Mark a claimed issue as done
+- `create`: Create an issue; items and tracks generate a linked .handoff work order, a track's being the dispatch protocol one agent follows through the track's items in dependency order (--type track|item|dream, --track, --source)
+- `claim`: Claim an issue for the current session (fails closed on broken handoff pairs; refuses dreams until converted and tracks until `handoff attach` gives them a work order)
+- `done`: Mark a claimed issue as done; a managed item closes only on recorded acceptance by an authorized coordinator, and a track only when every item in it is done: done \<id> [--assessment \<digest>]
+- `identity`: Print this session''s public label and ownership proof (the token never prints)
+- `coordinator`: Scoped coordinator authority, operator-granted and proof-bound: coordinator grant --session \<id> --proof \<sha256> [--item \<id>] [--track \<id>] --reason \<text> | revoke \<grant-id> --reason \<text> | list
+- `managed`: Coordinator-owned closure: managed require \<id> --check \<name>... | correct \<id> --reason \<text> | release \<id> --reason \<text> [--isolated-checkout \<path>] (needs coord to have verified the worker dead or stopped, or a validated separate working tree; also completes an interrupted release) | history \<id> | recover \<id|board> (finish an incomplete state-plus-audit transaction: an item id for the operator, a granted coordinator, or the session that started it; board for a grant or revocation, operator only) | doctor [--probe] (commands, hook registration, and with --probe an end-to-end run through the real binaries and hooks)
+- `submit`: Claim-holder records its result for the current attempt (not acceptance): submit \<id> --report \<file|-> [--revision \<ref>]
+- `accept`: Coordinator records one required check for the submission it reviewed at an explicitly pinned integration target; a submission or attempt that moved since the look is refused under the lock: accept \<id> --check \<name> --target \<ref> --evidence \<text> --submission \<sub-id> --attempt \<n> [--repin]
+- `assess`: Read-only closure assessment: target revision and kind, trailer evidence by relation, outstanding acceptance, incomplete transactions, authority, exact next action, and an assessment token (assess:v2 when closable, blocked:v2 otherwise) that done recomputes under the lock: assess \<id> [--target \<ref>] [--deployed \<sha>]
 - `order`: Move a paired item to a dense one-based handoff priority and synchronize generated presentation
 - `sync`: Derive numbered handoff filenames, blocker launch gates, and the README index from board state
 - `abandon`: Release a claimed issue back to open
-- `handoff`: Seal and bind an intentional canonical handoff edit
+- `handoff`: Seal and bind an intentional canonical handoff edit (handoff seal \<id>); give an existing track its dispatch work order idempotently, adopting a document already at the canonical path (handoff attach \<track-id>)
 - `federation`: Initialize, inspect, or explicitly fork a portable Manna federation identity
 - `relate`: Add one typed outbound cross-board relation
 - `unrelate`: Remove one typed outbound cross-board relation
@@ -2685,7 +2794,7 @@ Concurrency: `write`
 - `block`: Add a blocker dependency
 - `unblock`: Remove a blocker dependency
 - `list`: List issues (--status, --type, --track filters)
-- `show`: Show issue details
+- `show`: Show issue details; a track also reports its children (what is done, the next eligible item in dispatch order, what is held or waiting and why)
 - `update`: Update issue metadata; lifecycle state changes require claim, done, abandon, block, or unblock
 - `delete`: Delete issue
 - `context`: Get session context
@@ -2715,8 +2824,18 @@ agent-do manna show 1
 agent-do manna dream 'Unify the auth flows'
 # convert a dream into claimable work
 agent-do manna update mn-abc123 --type item
+# let one agent build a whole track in dependency order
+agent-do manna handoff attach mn-abc123
 # check the board for drift
 agent-do manna reconcile --write-drift
+# see what still blocks closing an item and who may close it
+agent-do manna assess mn-abc123 --target origin/staging --json
+# record that the work landed on the integration branch
+agent-do manna accept mn-abc123 --check integration --target origin/staging --evidence "merge 1a2b3c reachable" --submission sub-1a2b3c4d5e6f --attempt 1
+# hand in my result for coordinator acceptance
+agent-do manna submit mn-abc123 --report .handoff/report.md
+# check whether the managed lifecycle is live on this machine
+agent-do manna managed doctor --probe
 # move an item to the top of the handoff plan
 agent-do manna order mn-abc123 1
 # synchronize handoff filenames after a board change
@@ -2739,12 +2858,13 @@ agent-do manna relations --resolve --check
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `context`, `estate`, `lint`, `list`, `relations`, `show`, `state`, `status`
-- Write (connect/interact/save): `abandon`, `block`, `claim`, `create`, `delete`, `done`, `dream`, `federation`, `handoff`, `init`, `migrate`, `order`, `reconcile`, `relate`, `sync`, `unblock`, `unrelate`, `update`
+- Read-only (snapshot/verify; safe to parallelize): `assess`, `context`, `estate`, `identity`, `lint`, `list`, `relations`, `show`, `state`, `status`
+- Write (connect/interact/save): `abandon`, `accept`, `block`, `claim`, `coordinator`, `create`, `delete`, `done`, `dream`, `federation`, `handoff`, `init`, `managed`, `migrate`, `order`, `reconcile`, `relate`, `submit`, `sync`, `unblock`, `unrelate`, `update`
 - destructive (irreversible data loss; confirm before auto-running): `delete`, `federation`, `migrate`, `unrelate`
+- sensitive (emits or persists secret material; guard output): `coordinator`
 - long_running (daemon/stream/session; may never return): `serve`
-- polymorphic (beat decided by payload or flag at call time): `federation`, `reconcile`, `relations`
-- composite (one call performs several beats internally): `federation`, `migrate`, `order`, `sync`
+- polymorphic (beat decided by payload or flag at call time): `coordinator`, `federation`, `managed`, `reconcile`, `relations`
+- composite (one call performs several beats internally): `assess`, `federation`, `managed`, `migrate`, `order`, `sync`
 
 ### meet
 

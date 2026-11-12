@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palingenesis — Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1B1917;
+    --surface:#211E1B;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair-strong:rgba(231,227,218,0.22);
+    --sage:hsl(158,30%,55%);
+    --sage-dim:hsla(158,30%,55%,0.14);
+    --clay:hsl(12,42%,58%);
+    --clay-dim:hsla(12,42%,58%,0.14);
+    --serif:'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --sans:'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono:SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  .shell{ max-width:1240px; margin:0 auto; padding:0 48px; }
+  a{ color:inherit; text-decoration:none; }
+
+  /* ---------- Nav ---------- */
+  .nav{
+    position:sticky; top:0; z-index:10;
+    background:var(--bg);
+    border-bottom:1px solid var(--hair);
+  }
+  .nav-inner{
+    max-width:1240px; margin:0 auto; padding:0 48px;
+    height:64px; display:flex; align-items:center; gap:40px;
+  }
+  .wordmark{
+    font-family:var(--serif); font-weight:600; font-size:19px;
+    letter-spacing:0.01em; color:var(--ink); white-space:nowrap;
+  }
+  .nav-links{ list-style:none; display:flex; gap:28px; margin:0; padding:0; flex:1; }
+  .nav-links a{
+    font-size:13px; letter-spacing:0.04em; text-transform:uppercase;
+    color:var(--muted); padding:6px 0; border-bottom:2px solid transparent;
+  }
+  .nav-links a.current{ color:var(--ink); border-bottom-color:var(--sage); }
+  .nav-meta{ display:flex; align-items:center; gap:14px; font-family:var(--mono); font-size:13px; color:var(--muted); white-space:nowrap; }
+  .nav-meta .clock{ color:var(--ink); }
+  .nav-meta .dot{ color:var(--muted); }
+
+  /* ---------- Room header ---------- */
+  .room-header{ padding:56px 0 40px; border-bottom:1px solid var(--hair); }
+  .eyebrow{
+    font-size:12px; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--sage); font-weight:600; margin-bottom:14px;
+  }
+  .room-header h1{
+    font-family:var(--serif); font-weight:600; font-size:52px; line-height:1.05;
+    margin:0 0 12px; color:var(--ink);
+  }
+  .room-note{
+    font-family:var(--serif); font-style:italic; font-size:18px; color:var(--muted);
+    margin:0 0 28px;
+  }
+  .standing{
+    display:flex; flex-wrap:wrap; align-items:center; gap:0;
+    padding:16px 20px; background:var(--surface); border:1px solid var(--hair); border-radius:3px;
+  }
+  .standing-item{
+    font-size:13px; color:var(--muted); font-family:var(--sans);
+    padding:0 16px; border-right:1px solid var(--hair);
+  }
+  .standing-item:first-child{ padding-left:0; font-family:var(--mono); color:var(--ink); }
+  .standing-item:last-child{ border-right:none; }
+  .standing-item.tier-inline{
+    font-family:var(--mono); font-weight:700; letter-spacing:0.04em;
+    color:var(--sage); padding:0 16px;
+  }
+
+  /* ---------- Section framing ---------- */
+  section{ padding:56px 0; border-bottom:1px solid var(--hair); }
+  section:last-of-type{ border-bottom:none; }
+  .section-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:28px; gap:24px; }
+  .section-legend{ font-size:13px; color:var(--muted); font-family:var(--mono); }
+
+  /* ---------- Specimen cards ---------- */
+  .cards{ display:flex; flex-direction:column; gap:32px; }
+  .card{
+    background:var(--surface);
+    border:1px solid var(--hair);
+    border-radius:4px;
+    padding:40px 44px 32px;
+  }
+  .card.cannot-sim{ border-color:var(--hair-strong); }
+  .card-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .sim-id{ font-family:var(--mono); font-size:13px; color:var(--muted); letter-spacing:0.04em; }
+  .tier-chip{
+    font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:0.06em;
+    padding:4px 12px; border-radius:20px; border:1px solid var(--sage); color:var(--sage);
+  }
+  .tier-chip.tier-screen{ border-color:var(--clay); color:var(--clay); }
+  .tier-chip.tier-none{ border-color:var(--hair-strong); color:var(--muted); }
+
+  .question{
+    font-family:var(--serif); font-weight:500; font-size:25px; line-height:1.35;
+    color:var(--ink); margin:0 0 6px; max-width:900px;
+  }
+  .setup{ font-size:13px; color:var(--muted); margin-bottom:26px; }
+
+  .answer-row{ margin-bottom:6px; }
+  .answer-row + .answer-row{ margin-top:26px; }
+  .answer-label{ font-size:13px; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:4px; }
+  .answer-value{ font-family:var(--serif); font-weight:600; font-size:40px; color:var(--ink); }
+  .answer-value.screen{ color:var(--clay); }
+  .rangebar{ display:block; margin-top:8px; }
+  .flag-note{
+    font-size:13px; color:var(--clay); margin-top:16px; padding-top:16px;
+    border-top:1px dashed var(--hair-strong);
+  }
+  .flag-note b{ color:var(--clay); font-weight:600; }
+
+  .verdict{
+    font-family:var(--serif); font-size:19px; line-height:1.55; color:var(--ink);
+    max-width:860px; margin:4px 0 8px;
+  }
+  .verdict-tag{
+    display:inline-block; font-family:var(--mono); font-size:12px; font-weight:700;
+    letter-spacing:0.06em; color:var(--muted); margin-bottom:14px;
+  }
+
+  .fields{
+    margin-top:30px; padding-top:24px; border-top:1px solid var(--hair);
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:22px 28px;
+  }
+  .field-label{ font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  .field-value{ font-size:14px; color:var(--ink); line-height:1.45; }
+  .field-value.mono{ font-family:var(--mono); font-size:13px; }
+  .field-value.dim{ color:var(--faint); }
+  .field[data-span="2"]{ grid-column:span 2; }
+
+  /* ---------- Hindcast record ---------- */
+  .hindcast-summary{ font-size:15px; color:var(--muted); margin-bottom:28px; }
+  .hindcast-summary b{ color:var(--ink); font-weight:600; }
+  .skill-chart{ display:grid; grid-template-columns:140px 1fr 56px; row-gap:14px; column-gap:16px; position:relative; }
+  .skill-row-label{ font-size:14px; color:var(--muted); align-self:center; }
+  .skill-track{ align-self:center; height:10px; background:var(--hair); border-radius:5px; overflow:hidden; position:relative; }
+  .skill-fill{ height:100%; background:var(--sage); border-radius:5px 0 0 5px; }
+  .skill-value{ font-family:var(--mono); font-size:13px; color:var(--ink); align-self:center; text-align:right; }
+  .breedbook-ref{
+    position:absolute; top:0; bottom:0;
+    left:calc(156px + 0.61 * (100% - 228px));
+    width:0; border-left:1px dashed var(--clay);
+  }
+  .breedbook-ref::before{
+    content:"Breed-Book 0.61"; position:absolute; left:0; top:-24px; transform:translateX(-50%);
+    font-family:var(--mono); font-size:12px; color:var(--clay); white-space:nowrap;
+  }
+
+  /* ---------- Calibration state ---------- */
+  .cal-table{ display:flex; flex-direction:column; }
+  .cal-row{
+    display:grid; grid-template-columns:220px 1fr 90px; gap:20px; align-items:center;
+    padding:18px 0; border-top:1px solid var(--hair);
+  }
+  .cal-row:last-child{ border-bottom:1px solid var(--hair); }
+  .cal-name{ font-family:var(--serif); font-weight:600; font-size:17px; color:var(--ink); }
+  .cal-sub{ font-size:13px; color:var(--muted); margin-top:2px; }
+  .cal-status{ font-size:14px; color:var(--muted); }
+  .cal-tier{ text-align:right; }
+  .cal-dash{ color:var(--muted); font-family:var(--mono); font-size:13px; text-align:right; display:block; }
+
+  /* ---------- Ground truth feeds ---------- */
+  .feed-chips{ display:flex; flex-wrap:wrap; gap:12px; }
+  .feed-chip{
+    font-size:13px; color:var(--muted); border:1px solid var(--hair-strong);
+    border-radius:20px; padding:8px 16px; font-family:var(--sans);
+  }
+  .feed-chip b{ color:var(--ink); font-weight:600; }
+
+  /* ---------- Footer ---------- */
+  footer{ padding:40px 0 56px; text-align:center; }
+  .motto{
+    font-size:12px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted);
+    font-family:var(--sans);
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="wordmark">Palingenesis</div>
+    <ul class="nav-links">
+      <li><a href="#">Today</a></li>
+      <li><a href="#">Pipeline</a></li>
+      <li><a href="#">Library</a></li>
+      <li><a href="#">Portfolio</a></li>
+      <li><a href="#" class="current">Simulation</a></li>
+      <li><a href="#">Engine Room</a></li>
+    </ul>
+    <div class="nav-meta">
+      <span class="clock">17:26:08</span>
+      <span class="dot">·</span>
+      <span class="date">Fri 22 Aug</span>
+    </div>
+  </div>
+</nav>
+
+<main class="shell">
+
+  <header class="room-header">
+    <div class="eyebrow">Simulation Room</div>
+    <h1>Simulation</h1>
+    <p class="room-note">Provenance card as the unit of evidence</p>
+    <div class="standing">
+      <span class="standing-item">palingenesis-sim v0.9.3</span>
+      <span class="standing-item">Majella House 4</span>
+      <span class="standing-item tier-inline">T2</span>
+      <span class="standing-item">Hindcast skill 0.82 vs breed-book 0.61</span>
+      <span class="standing-item">90% interval coverage 88% (n=41)</span>
+      <span class="standing-item">Calibrated 2026-08-19 · 14 mo telemetry</span>
+      <span class="standing-item">67% site-calibrated / 33% published</span>
+    </div>
+  </header>
+
+  <!-- ============ TODAY'S RUNS ============ -->
+  <section>
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Today's Runs</div>
+      </div>
+      <div class="section-legend">Band = 90% interval · Tick = point estimate</div>
+    </div>
+
+    <div class="cards">
+
+      <!-- CARD 1 — sim-4471 -->
+      <article class="card">
+        <div class="card-head">
+          <span class="sim-id">SIM-4471</span>
+          <span class="tier-chip">T2</span>
+        </div>
+        <h2 class="question">Does a biochar litter amendment at 12 t/ha equivalent bedding reduce litter moisture?</h2>
+        <div class="setup">40 seasons · 3 weather years (2019, 2022, 2024 ERA5) · 3 price paths (AMS 2024–26)</div>
+
+        <div class="answer-row">
+          <span class="answer-label">Litter Moisture</span>
+          <span class="answer-value">−11%</span>
+          <svg class="rangebar" width="1000" height="72" viewBox="0 0 1000 72" role="img" aria-label="Interval −14 to −8, point −11">
+            <line x1="30" y1="36" x2="970" y2="36" stroke="var(--hair-strong)" stroke-width="1"/>
+            <line x1="910" y1="20" x2="910" y2="52" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3,3"/>
+            <text x="910" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">0%</text>
+            <rect x="200" y="28" width="320" height="16" rx="3" fill="var(--sage-dim)"/>
+            <line x1="200" y1="24" x2="200" y2="48" stroke="var(--sage)" stroke-width="1.5"/>
+            <line x1="520" y1="24" x2="520" y2="48" stroke="var(--sage)" stroke-width="1.5"/>
+            <line x1="360" y1="14" x2="360" y2="58" stroke="var(--sage)" stroke-width="3"/>
+            <text x="360" y="12" font-family="var(--mono)" font-size="15" fill="var(--sage)" text-anchor="middle" font-weight="700">−11%</text>
+            <text x="200" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">−14%</text>
+            <text x="520" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">−8%</text>
+          </svg>
+        </div>
+
+        <div class="fields">
+          <div class="field"><div class="field-label">Tier</div><div class="field-value">T2 — Site-Calibrated</div></div>
+          <div class="field"><div class="field-label">Model</div><div class="field-value mono">palingenesis-sim v0.9.3</div></div>
+          <div class="field"><div class="field-label">Calibration</div><div class="field-value">2026-08-19 · 14 mo telemetry</div></div>
+          <div class="field"><div class="field-label">Lineage</div><div class="field-value">67% site / 33% published</div></div>
+          <div class="field"><div class="field-label">Hindcast Skill</div><div class="field-value">0.82 vs 0.61 breed-book</div></div>
+          <div class="field"><div class="field-label">Coverage</div><div class="field-value">88% · n=41</div></div>
+          <div class="field"><div class="field-label">In-Domain</div><div class="field-value">Yes</div></div>
+          <div class="field" data-span="2"><div class="field-label">Cannot-See</div><div class="field-value dim">Gut microbiome · bird behavior · disease spillover · feed-mill shocks</div></div>
+        </div>
+      </article>
+
+      <!-- CARD 2 — sim-4472 -->
+      <article class="card">
+        <div class="card-head">
+          <span class="sim-id">SIM-4472</span>
+          <span class="tier-chip tier-screen">T1</span>
+        </div>
+        <h2 class="question">Does a co-inoculated legume forage supplement change feed cost?</h2>
+
+        <div class="answer-row">
+          <span class="answer-label">Feed-Cost Proxy</span>
+          <span class="answer-value screen">−3…+1%</span>
+          <svg class="rangebar" width="1000" height="72" viewBox="0 0 1000 72" role="img" aria-label="Interval −3 to +1, no point estimate, screening tier">
+            <line x1="30" y1="36" x2="970" y2="36" stroke="var(--hair-strong)" stroke-width="1"/>
+            <line x1="615" y1="20" x2="615" y2="52" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3,3"/>
+            <text x="615" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">0%</text>
+            <rect x="270" y="28" width="460" height="16" rx="3" fill="var(--clay-dim)"/>
+            <line x1="270" y1="24" x2="270" y2="48" stroke="var(--clay)" stroke-width="1.5"/>
+            <line x1="730" y1="24" x2="730" y2="48" stroke="var(--clay)" stroke-width="1.5"/>
+            <text x="270" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">−3%</text>
+            <text x="730" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">+1%</text>
+          </svg>
+          <div class="flag-note"><b>Randomized:</b> amino-acid digestibility unknown for this forage</div>
+        </div>
+
+        <div class="fields">
+          <div class="field"><div class="field-label">Tier</div><div class="field-value">T1 — Screening Only</div></div>
+          <div class="field"><div class="field-label">Model</div><div class="field-value mono">palingenesis-sim v0.9.3</div></div>
+          <div class="field"><div class="field-label">Calibration</div><div class="field-value dim">None — published parameters only</div></div>
+          <div class="field"><div class="field-label">Lineage</div><div class="field-value dim">0% site — screening</div></div>
+          <div class="field"><div class="field-label">Hindcast Skill</div><div class="field-value dim">Not scored — T1</div></div>
+          <div class="field"><div class="field-label">Coverage</div><div class="field-value dim">Not applicable</div></div>
+          <div class="field"><div class="field-label">In-Domain</div><div class="field-value">No — novel forage</div></div>
+          <div class="field" data-span="2"><div class="field-label">Cannot-See</div><div class="field-value dim">Amino-acid digestibility — randomized, declared</div></div>
+        </div>
+      </article>
+
+      <!-- CARD 3 — sim-4473 -->
+      <article class="card">
+        <div class="card-head">
+          <span class="sim-id">SIM-4473</span>
+          <span class="tier-chip">T2</span>
+        </div>
+        <h2 class="question">Does raising the summer ventilation setpoint by 1.5°C reduce heat stress and mortality?</h2>
+
+        <div class="answer-row">
+          <span class="answer-label">Barn Heat Stress Hours</span>
+          <span class="answer-value">−22%</span>
+          <svg class="rangebar" width="1000" height="72" viewBox="0 0 1000 72" role="img" aria-label="Interval −28 to −15, point −22">
+            <line x1="30" y1="36" x2="970" y2="36" stroke="var(--hair-strong)" stroke-width="1"/>
+            <line x1="906" y1="20" x2="906" y2="52" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3,3"/>
+            <text x="906" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">0%</text>
+            <rect x="150" y="28" width="370" height="16" rx="3" fill="var(--sage-dim)"/>
+            <line x1="150" y1="24" x2="150" y2="48" stroke="var(--sage)" stroke-width="1.5"/>
+            <line x1="520" y1="24" x2="520" y2="48" stroke="var(--sage)" stroke-width="1.5"/>
+            <line x1="320" y1="14" x2="320" y2="58" stroke="var(--sage)" stroke-width="3"/>
+            <text x="320" y="12" font-family="var(--mono)" font-size="15" fill="var(--sage)" text-anchor="middle" font-weight="700">−22%</text>
+            <text x="150" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">−28%</text>
+            <text x="520" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">−15%</text>
+          </svg>
+        </div>
+
+        <div class="answer-row">
+          <span class="answer-label">Mortality Δ</span>
+          <span class="answer-value">−0.2 pts</span>
+          <svg class="rangebar" width="1000" height="72" viewBox="0 0 1000 72" role="img" aria-label="Interval −0.4 to 0.0 points, point −0.2 points">
+            <line x1="30" y1="36" x2="970" y2="36" stroke="var(--hair-strong)" stroke-width="1"/>
+            <rect x="200" y="28" width="600" height="16" rx="3" fill="var(--sage-dim)"/>
+            <line x1="200" y1="24" x2="200" y2="48" stroke="var(--sage)" stroke-width="1.5"/>
+            <line x1="800" y1="20" x2="800" y2="52" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3,3"/>
+            <line x1="520" y1="14" x2="520" y2="58" stroke="var(--sage)" stroke-width="3"/>
+            <text x="520" y="12" font-family="var(--mono)" font-size="15" fill="var(--sage)" text-anchor="middle" font-weight="700">−0.2 pts</text>
+            <text x="200" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">−0.4 pts</text>
+            <text x="800" y="66" font-family="var(--mono)" font-size="13" fill="var(--muted)" text-anchor="middle">0.0 pts</text>
+          </svg>
+        </div>
+
+        <div class="fields">
+          <div class="field"><div class="field-label">Tier</div><div class="field-value">T2 — Site-Calibrated</div></div>
+          <div class="field"><div class="field-label">Model</div><div class="field-value mono">palingenesis-sim v0.9.3</div></div>
+          <div class="field"><div class="field-label">Calibration</div><div class="field-value">2026-08-19 · 14 mo telemetry</div></div>
+          <div class="field"><div class="field-label">Lineage</div><div class="field-value">67% site / 33% published</div></div>
+          <div class="field"><div class="field-label">Hindcast Skill</div><div class="field-value">0.82 vs 0.61 breed-book</div></div>
+          <div class="field"><div class="field-label">Coverage</div><div class="field-value">88% · n=41</div></div>
+          <div class="field"><div class="field-label">In-Domain</div><div class="field-value">Yes</div></div>
+          <div class="field" data-span="2"><div class="field-label">Cannot-See</div><div class="field-value dim">Gut microbiome · bird behavior · disease spillover · feed-mill shocks</div></div>
+        </div>
+      </article>
+
+      <!-- CARD 4 — sim-4474 -->
+      <article class="card cannot-sim">
+        <div class="card-head">
+          <span class="sim-id">SIM-4474</span>
+          <span class="tier-chip tier-none">—</span>
+        </div>
+        <h2 class="question">Does probiotic X-17 change flock health?</h2>
+        <div class="verdict-tag">Verdict</div>
+        <p class="verdict">CANNOT SIMULATE — outside the model's state space. No gut-microbiome core exists in this model version. Verdict recorded; routed to field-trial design.</p>
+
+        <div class="fields">
+          <div class="field"><div class="field-label">Tier</div><div class="field-value dim">— No core exists</div></div>
+          <div class="field"><div class="field-label">Model</div><div class="field-value mono">palingenesis-sim v0.9.3</div></div>
+          <div class="field"><div class="field-label">Calibration</div><div class="field-value dim">None — no gut-microbiome core</div></div>
+          <div class="field"><div class="field-label">Lineage</div><div class="field-value dim">Not applicable</div></div>
+          <div class="field"><div class="field-label">Hindcast Skill</div><div class="field-value dim">Not applicable</div></div>
+          <div class="field"><div class="field-label">Coverage</div><div class="field-value dim">Not applicable</div></div>
+          <div class="field"><div class="field-label">In-Domain</div><div class="field-value">No</div></div>
+          <div class="field" data-span="2"><div class="field-label">Cannot-See</div><div class="field-value dim">Gut microbiome — entire core absent from this model version</div></div>
+        </div>
+      </article>
+
+      <!-- CARD 5 — sim-4475 -->
+      <article class="card cannot-sim">
+        <div class="card-head">
+          <span class="sim-id">SIM-4475</span>
+          <span class="tier-chip tier-screen">T0</span>
+        </div>
+        <h2 class="question">What happens to production and cost in a cage-free transition at House 4?</h2>
+        <div class="verdict-tag">Verdict</div>
+        <p class="verdict">CANNOT SIMULATE — outside calibration domain. No cage-free telemetry exists at this site. Nearest published parameters would be T0.</p>
+
+        <div class="fields">
+          <div class="field"><div class="field-label">Tier</div><div class="field-value">T0 — Nearest Published</div></div>
+          <div class="field"><div class="field-label">Model</div><div class="field-value mono">palingenesis-sim v0.9.3</div></div>
+          <div class="field"><div class="field-label">Calibration</div><div class="field-value dim">None at site — no cage-free telemetry</div></div>
+          <div class="field"><div class="field-label">Lineage</div><div class="field-value dim">0% site — no cage-free data</div></div>
+          <div class="field"><div class="field-label">Hindcast Skill</div><div class="field-value dim">Not applicable — untested</div></div>
+          <div class="field"><div class="field-label">Coverage</div><div class="field-value dim">Not applicable</div></div>
+          <div class="field"><div class="field-label">In-Domain</div><div class="field-value">No — outside domain</div></div>
+          <div class="field" data-span="2"><div class="field-label">Cannot-See</div><div class="field-value dim">Cage-free system dynamics — no telemetry at this site</div></div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ HINDCAST RECORD ============ -->
+  <section>
+    <div class="section-head">
+      <div class="eyebrow">Hindcast Record</div>
+    </div>
+    <p class="hindcast-summary"><b>41</b> hindcasts · <b>36</b> inside interval · worst miss — egg mass, 2026-07-15 (+0.5 g over)</p>
+
+    <div class="skill-chart">
+      <div class="breedbook-ref"></div>
+
+      <div class="skill-row-label">Lay Rate</div>
+      <div class="skill-track"><div class="skill-fill" style="width:84%"></div></div>
+      <div class="skill-value">0.84</div>
+
+      <div class="skill-row-label">Feed Intake</div>
+      <div class="skill-track"><div class="skill-fill" style="width:79%"></div></div>
+      <div class="skill-value">0.79</div>
+
+      <div class="skill-row-label">Egg Mass</div>
+      <div class="skill-track"><div class="skill-fill" style="width:71%"></div></div>
+      <div class="skill-value">0.71</div>
+
+      <div class="skill-row-label">Barn RH</div>
+      <div class="skill-track"><div class="skill-fill" style="width:88%"></div></div>
+      <div class="skill-value">0.88</div>
+
+      <div class="skill-row-label">Mortality</div>
+      <div class="skill-track"><div class="skill-fill" style="width:83%"></div></div>
+      <div class="skill-value">0.83</div>
+
+      <div class="skill-row-label">Shell</div>
+      <div class="skill-track"><div class="skill-fill" style="width:80%"></div></div>
+      <div class="skill-value">0.80</div>
+
+      <div class="skill-row-label">Margin/Dozen</div>
+      <div class="skill-track"><div class="skill-fill" style="width:77%"></div></div>
+      <div class="skill-value">0.77</div>
+
+      <div class="skill-row-label">Water</div>
+      <div class="skill-track"><div class="skill-fill" style="width:86%"></div></div>
+      <div class="skill-value">0.86</div>
+    </div>
+  </section>
+
+  <!-- ============ CALIBRATION STATE ============ -->
+  <section>
+    <div class="section-head">
+      <div class="eyebrow">Calibration State</div>
+      <div class="section-legend">Per core</div>
+    </div>
+
+    <div class="cal-table">
+      <div class="cal-row">
+        <div>
+          <div class="cal-name">Hen Physiology</div>
+          <div class="cal-sub">EPM-style</div>
+        </div>
+        <div class="cal-status">Calibrated 2026-08-19 · 14 mo · skill 0.85</div>
+        <span class="cal-dash">—</span>
+      </div>
+      <div class="cal-row">
+        <div>
+          <div class="cal-name">Barn Environment</div>
+          <div class="cal-sub">CIGR balance</div>
+        </div>
+        <div class="cal-status">Calibrated 2026-08-19 · skill 0.88</div>
+        <span class="cal-dash">—</span>
+      </div>
+      <div class="cal-row">
+        <div>
+          <div class="cal-name">Health Risk</div>
+          <div class="cal-sub">AI transmission · Salmonella</div>
+        </div>
+        <div class="cal-status">Published parameters only</div>
+        <div class="cal-tier"><span class="tier-chip tier-screen">T1</span></div>
+      </div>
+      <div class="cal-row">
+        <div>
+          <div class="cal-name">Economics</div>
+          <div class="cal-sub">USDA AMS/NASS paths</div>
+        </div>
+        <div class="cal-status">Live data through 2026-08-21</div>
+        <span class="cal-dash">—</span>
+      </div>
+      <div class="cal-row">
+        <div>
+          <div class="cal-name">Litter/Soil</div>
+        </div>
+        <div class="cal-status">Calibration pending · first field samples due 30 Sep</div>
+        <div class="cal-tier"><span class="tier-chip tier-screen">T1</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GROUND-TRUTH FEEDS ============ -->
+  <section>
+    <div class="section-head">
+      <div class="eyebrow">Ground-Truth Feeds</div>
+    </div>
+    <div class="feed-chips">
+      <span class="feed-chip"><b>ERA5</b></span>
+      <span class="feed-chip"><b>PRISM</b></span>
+      <span class="feed-chip"><b>SSURGO</b></span>
+      <span class="feed-chip"><b>USDA NASS</b></span>
+      <span class="feed-chip"><b>USDA AMS</b> — Weekly Egg Prices</span>
+      <span class="feed-chip"><b>NAEMS</b> — Emissions Baseline</span>
+      <span class="feed-chip"><b>Site Telemetry</b> — House 4, 14 Months</span>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="motto">Every claim sourced · every cost computed · every verdict recorded</div>
+</footer>
+
+</body>
+</html>
