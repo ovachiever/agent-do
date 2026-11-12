@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Today — Palingenesis</title>
+<style>
+  :root {
+    --ground: #1A1510;
+    --cream: #EFE7D4;
+    --c-92: rgba(239,231,212,.92);
+    --c-70: rgba(239,231,212,.70);
+    --c-55: rgba(239,231,212,.55);
+    --c-38: rgba(239,231,212,.38);
+    --hair: rgba(239,231,212,.15);
+    --hair-strong: rgba(239,231,212,.32);
+    --accent: #A9C47F;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    background: var(--ground);
+    color: var(--c-70);
+    font: 400 14px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(169,196,127,.28); color: var(--cream); }
+  a { text-decoration: none; color: inherit; transition: color .18s ease; }
+
+  .page { max-width: 1160px; margin: 0 auto; padding: 0 56px; }
+
+  /* ————— Nav ————— */
+  nav {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 24px 0 18px; border-bottom: 1px solid var(--hair);
+  }
+  .wordmark {
+    font-family: var(--serif); font-size: 15px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--c-92);
+  }
+  .wordmark .fleuron { color: var(--c-38); margin-right: 10px; letter-spacing: 0; }
+  .nav-links { display: flex; gap: 36px; }
+  .nav-links a {
+    font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--c-55);
+  }
+  .nav-links a:hover { color: var(--c-92); }
+  .nav-links a.active { color: var(--c-92); }
+  .nav-links a.active::before {
+    content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); margin-right: 9px; vertical-align: 2px;
+  }
+
+  /* ————— Masthead: the date is the monument ————— */
+  .masthead { position: relative; padding-top: 52px; text-align: center; }
+  .overline {
+    font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: var(--c-38);
+  }
+  h1.date {
+    margin-top: 18px;
+    font-family: var(--serif); font-weight: 400; font-size: 54px; line-height: 1.1;
+    letter-spacing: -.005em; color: var(--cream);
+  }
+  h1.date em { font-style: italic; font-weight: 400; }
+  .date-meta {
+    margin-top: 16px;
+    font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--c-55);
+    font-variant-numeric: tabular-nums;
+  }
+  .epigraph {
+    margin-top: 20px;
+    font-family: var(--serif); font-style: italic; font-size: 14.5px; color: var(--c-55);
+  }
+  .edge {
+    position: absolute; top: 96px; width: 172px;
+    font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
+    line-height: 1.85; color: var(--c-38);
+  }
+  .edge.prev { left: 0; text-align: left; }
+  .edge.next { right: 0; text-align: right; }
+  .double-rule {
+    margin-top: 38px; height: 5px;
+    border-top: 1px solid var(--hair-strong); border-bottom: 1px solid var(--hair);
+  }
+
+  /* ————— Section liturgy: same heads, same order, every day ————— */
+  section { margin-top: 56px; }
+  .sect-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 1px solid var(--hair); padding-bottom: 11px;
+  }
+  .sect-title {
+    font-size: 11px; letter-spacing: .24em; text-transform: uppercase; color: var(--c-55);
+  }
+  .sect-title .numeral { color: var(--c-38); margin-right: 14px; }
+  .sect-note {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--c-38);
+    font-variant-numeric: tabular-nums;
+  }
+  .sect-note .count { color: var(--accent); }
+
+  /* ————— I · Conditions ————— */
+  .pulse {
+    padding: 20px 0 4px;
+    font-size: 15px; color: var(--c-92); font-variant-numeric: tabular-nums;
+  }
+  .pulse .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); margin-right: 14px; vertical-align: 1px;
+    animation: breathe 3.8s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+  @media (prefers-reduced-motion: reduce) { .pulse .dot { animation: none; } }
+  .plabel {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--c-38); margin-right: 9px;
+  }
+  .psep { color: var(--c-38); margin: 0 18px; }
+
+  /* ————— II · For decision ————— */
+  .candidate {
+    display: grid; grid-template-columns: 56px 1fr 230px; column-gap: 32px;
+    padding: 30px 0 28px; align-items: start;
+  }
+  .candidate + .candidate { border-top: 1px solid var(--hair); }
+  .cand-index {
+    font-family: var(--serif); font-size: 22px; color: var(--c-38); padding-top: 3px;
+  }
+  .thesis {
+    font-family: var(--serif); font-weight: 400; font-size: 21.5px; line-height: 1.42;
+    color: var(--cream); max-width: 62ch;
+  }
+  .provenance {
+    margin-top: 12px; font-size: 12.5px; line-height: 1.7; color: var(--c-55);
+    font-variant-numeric: tabular-nums;
+  }
+  .provenance .sep { color: var(--c-38); margin: 0 7px; }
+  .verdict-block { text-align: right; padding-top: 5px; }
+  .verdict {
+    font-size: 12.5px; font-weight: 600; letter-spacing: .26em; margin-right: -.26em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .fitness {
+    margin-top: 12px; font-size: 34px; font-weight: 300; line-height: 1;
+    color: var(--c-92); font-variant-numeric: tabular-nums;
+  }
+  .fitness-label {
+    margin-top: 7px; font-size: 9.5px; letter-spacing: .24em; margin-right: -.24em;
+    text-transform: uppercase; color: var(--c-38);
+  }
+  .dossier-link {
+    display: inline-block; margin-top: 16px;
+    font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--c-38);
+  }
+  .dossier-link:hover { color: var(--c-92); }
+
+  /* ————— III · The record ————— */
+  .entry {
+    display: grid; grid-template-columns: 56px 112px 1fr 92px; column-gap: 24px;
+    padding: 14px 0; align-items: baseline;
+  }
+  .entry + .entry { border-top: 1px solid var(--hair); }
+  .rec-time { font-size: 13px; color: var(--c-55); font-variant-numeric: tabular-nums; }
+  .rec-tag { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--c-38); }
+  .rec-text { font-size: 14px; line-height: 1.55; color: var(--c-70); font-variant-numeric: tabular-nums; }
+  .rec-text b { font-weight: 500; color: var(--c-92); }
+  .rec-cost { text-align: right; font-size: 13px; color: var(--c-55); font-variant-numeric: tabular-nums; }
+  .rec-total {
+    display: grid; grid-template-columns: 56px 112px 1fr 92px; column-gap: 24px;
+    padding: 13px 0; border-top: 1px solid var(--hair-strong); align-items: baseline;
+  }
+  .rec-total .total-label {
+    grid-column: 3; text-align: right;
+    font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--c-38);
+    font-variant-numeric: tabular-nums;
+  }
+  .rec-total .total-value {
+    text-align: right; font-size: 13.5px; font-weight: 500; color: var(--c-92);
+    font-variant-numeric: tabular-nums;
+  }
+  .record-close {
+    margin-top: 30px; text-align: center;
+    font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--c-38);
+  }
+
+  /* ————— Footer ————— */
+  footer {
+    margin-top: 84px; border-top: 1px solid var(--hair);
+    padding: 32px 0 52px; text-align: center;
+  }
+  .motto {
+    font-family: var(--serif); font-style: italic; font-size: 15.5px; color: var(--c-55);
+  }
+  .motto .sep { color: var(--c-38); font-style: normal; margin: 0 10px; }
+  .colophon {
+    margin-top: 14px;
+    font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: var(--c-38);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 1100px) {
+    .page { padding: 0 32px; }
+    .edge { display: none; }
+    .candidate { grid-template-columns: 40px 1fr; }
+    .verdict-block {
+      grid-column: 2; text-align: left; padding-top: 0; margin-top: 16px;
+      display: flex; align-items: baseline; gap: 22px;
+    }
+    .fitness, .fitness-label, .dossier-link { margin-top: 0; }
+    .entry, .rec-total { grid-template-columns: 48px 90px 1fr 80px; column-gap: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav>
+    <a class="wordmark" href="#"><span class="fleuron">&#10087;</span>Palingenesis</a>
+    <div class="nav-links">
+      <a class="active" href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Engine Room</a>
+    </div>
+  </nav>
+
+  <header class="masthead">
+    <div class="edge prev">&#8592; Friday 21 August<br>Generation 146 closed:<br>two advanced, one vetoed</div>
+    <div class="edge next">Sunday 23 August &#8594;<br>Generation 148 opens<br>at 02:00 UTC</div>
+    <p class="overline">The Register &middot; No. 287</p>
+    <h1 class="date"><em>Saturday,</em> 22 August 2026</h1>
+    <p class="date-meta">Day 234 of 365 &nbsp;&middot;&nbsp; Generation 147 in session &nbsp;&middot;&nbsp; 41st week of continuous operation</p>
+    <p class="epigraph">&ldquo;What survives the council may still fail the field.&rdquo;</p>
+    <div class="double-rule"></div>
+  </header>
+
+  <section>
+    <div class="sect-head">
+      <span class="sect-title"><span class="numeral">I</span>Conditions</span>
+      <span class="sect-note">as of 16:04 UTC</span>
+    </div>
+    <p class="pulse">
+      <span class="dot"></span><span class="plabel">Systems</span>All six running
+      <span class="psep">&middot;</span><span class="plabel">Spent today</span>$412.86
+      <span class="psep">&middot;</span><span class="plabel">Next generation</span>in 9 h 56 m &mdash; Gen 148 convenes 02:00 UTC
+    </p>
+  </section>
+
+  <section>
+    <div class="sect-head">
+      <span class="sect-title"><span class="numeral">II</span>For Decision</span>
+      <span class="sect-note"><span class="count">2</span> matters await &middot; council concurs on both</span>
+    </div>
+
+    <article class="candidate">
+      <div class="cand-index">1.</div>
+      <div>
+        <h2 class="thesis">A three-strain rhizobial seed coating primes winter wheat against drought, holding +11% yield under a 40% irrigation deficit.</h2>
+        <p class="provenance">PG-147-031<span class="sep">&middot;</span>drawn from 23 papers, 9 independent field trials<span class="sep">&middot;</span>council 6&ndash;1 in favor<span class="sep">&middot;</span>2,400 simulated seasons<span class="sep">&middot;</span>projected field trial $18,400</p>
+      </div>
+      <div class="verdict-block">
+        <div class="verdict">Greenlight</div>
+        <div class="fitness">0.91</div>
+        <div class="fitness-label">Fitness</div>
+        <a class="dossier-link" href="#">Open dossier &#9656;</a>
+      </div>
+    </article>
+
+    <article class="candidate">
+      <div class="cand-index">2.</div>
+      <div>
+        <h2 class="thesis">Rotating three lytic phages against bacterial leaf blight in rice denies the pathogen a single target to out-evolve.</h2>
+        <p class="provenance">PG-147-044<span class="sep">&middot;</span>drawn from 31 papers, 2 meta-analyses<span class="sep">&middot;</span>council 7&ndash;0 in favor<span class="sep">&middot;</span>1,800 simulated seasons<span class="sep">&middot;</span>projected field trial $9,700</p>
+      </div>
+      <div class="verdict-block">
+        <div class="verdict">Greenlight</div>
+        <div class="fitness">0.84</div>
+        <div class="fitness-label">Fitness</div>
+        <a class="dossier-link" href="#">Open dossier &#9656;</a>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <div class="sect-head">
+      <span class="sect-title"><span class="numeral">III</span>The Record</span>
+      <span class="sect-note">six entries &middot; 02:00&ndash;16:04 UTC</span>
+    </div>
+
+    <div class="entry">
+      <span class="rec-time">02:00</span>
+      <span class="rec-tag">Cycle</span>
+      <span class="rec-text">Generation 147 convened; <b>88 candidates</b> carried forward from Gen 146, 12 retired at the threshold.</span>
+      <span class="rec-cost">$66.20</span>
+    </div>
+    <div class="entry">
+      <span class="rec-time">06:12</span>
+      <span class="rec-tag">Intake</span>
+      <span class="rec-text">Read <b>412 papers</b> across 9 journals; 37 flagged for the drought-physiology line.</span>
+      <span class="rec-cost">$96.40</span>
+    </div>
+    <div class="entry">
+      <span class="rec-time">09:48</span>
+      <span class="rec-tag">Council</span>
+      <span class="rec-text"><b>Vetoed PG-147-029</b>, foliar silica for lodging resistance, 5&ndash;2 &mdash; both supporting trials share an author and neither replicates independently.</span>
+      <span class="rec-cost">$8.15</span>
+    </div>
+    <div class="entry">
+      <span class="rec-time">11:31</span>
+      <span class="rec-tag">Simulation</span>
+      <span class="rec-text">PG-147-031 completed <b>2,400 seasons</b> across 14 soil classes; fitness settled at <b>0.91</b> from a 0.86 provisional.</span>
+      <span class="rec-cost">$148.20</span>
+    </div>
+    <div class="entry">
+      <span class="rec-time">13:05</span>
+      <span class="rec-tag">Sweep</span>
+      <span class="rec-text">Commissioned a literature sweep on rhizobial priming in low-phosphorus soils after the council flagged an evidence gap; <b>61 papers</b> queued.</span>
+      <span class="rec-cost">$22.60</span>
+    </div>
+    <div class="entry">
+      <span class="rec-time">15:40</span>
+      <span class="rec-tag">Intake</span>
+      <span class="rec-text">Second pass read <b>872 papers</b>, 24 held; the day&rsquo;s running total stands at <b>1,284</b>.</span>
+      <span class="rec-cost">$71.31</span>
+    </div>
+    <div class="rec-total">
+      <span class="total-label">Computed total &middot; 00:00&ndash;16:04 UTC</span>
+      <span class="total-value">$412.86</span>
+    </div>
+
+    <p class="record-close">The record continues. Generation 148 convenes at 02:00 UTC.</p>
+  </section>
+
+  <footer>
+    <p class="motto">Every claim sourced<span class="sep">&middot;</span>every cost computed<span class="sep">&middot;</span>every verdict recorded</p>
+    <p class="colophon">Palingenesis &middot; Register No. 287 &middot; printed continuously</p>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -91,6 +91,10 @@ Behavior:
 Notes:
   - store/get/delete/list operate on the secure store
   - get without --reveal does not print secret values
+  - macOS get/status/check/source probes inspect metadata without unlocking secrets
+  - OPENAI_API_KEY is never automatically loaded for general tool calls
+  - only named get --reveal or export can request that key from macOS Keychain
+  - export --tool refuses OPENAI_API_KEY; name the key explicitly instead
   - export is explicit and intended for debugging or shell handoff
 
 Examples:
@@ -168,7 +172,8 @@ cmd_get() {
 
     [[ -n "$key" ]] || { echo "Usage: agent-creds get <KEY> [--reveal|--source|--json]" >&2; return 1; }
 
-    if ! creds_has "$key"; then
+    local source
+    if ! source="$(creds_get_source "$key" 2>/dev/null)"; then
         if [[ "$json" == "true" ]]; then
             printf '{"key":"%s","present":false}\n' "$key"
         else
@@ -176,9 +181,6 @@ cmd_get() {
         fi
         return 1
     fi
-
-    local source value
-    source="$(creds_get_source "$key" 2>/dev/null || echo "unknown")"
 
     if [[ "$source_only" == "true" ]]; then
         echo "$source"
@@ -190,7 +192,8 @@ cmd_get() {
         # macOS `security -w` already ends with a newline, so a bare printf
         # after it produced a second, blank line and `$(… | tail -1)` captured
         # an empty string (silent 401s downstream).
-        value="$(creds_get "$key")"
+        # Exactly one secret read. Denial propagates without a retry or fallback.
+        value="$(creds_get "$key" explicit)" || return $?
         printf '%s\n' "$value"
         return 0
     fi
@@ -469,6 +472,12 @@ for key in data.get('keys', []):
     print(key)
 " 2>/dev/null)
         [[ ${#keys[@]} -gt 0 ]] || return 1
+        for key in "${keys[@]}"; do
+            if [[ "$(normalize_secret_key "$key")" == "OPENAI_API_KEY" ]]; then
+                echo "OPENAI_API_KEY cannot be exported implicitly with --tool; name the key explicitly after authorization." >&2
+                return 2
+            fi
+        done
     else
         [[ $# -gt 0 ]] || { echo "Usage: agent-creds export <KEY...> | --tool <tool>" >&2; return 1; }
         keys=("$@")
@@ -478,7 +487,7 @@ for key in data.get('keys', []):
     local key
     for key in "${keys[@]}"; do
         if creds_has "$key"; then
-            creds_export_line "$key"
+            creds_export_line "$key" explicit || return $?
         else
             echo "# missing: $key" >&2
             had_error="true"

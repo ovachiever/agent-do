@@ -147,6 +147,9 @@ load_tool_credentials() {
     local key value
     while IFS= read -r key; do
         [[ -n "$key" ]] || continue
+        # A tool declaring optional paid features is not an OpenAI key request.
+        # Leave deliberate key retrieval to the named creds get/export commands.
+        [[ "$key" == "OPENAI_API_KEY" ]] && continue
         [[ -n "${!key:-}" ]] && continue
         value="$(creds_get_from_store "$key" 2>/dev/null || true)"
         if [[ -n "$value" ]]; then
