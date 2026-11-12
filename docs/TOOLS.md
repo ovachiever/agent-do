@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (103 tools)
+## Summary (104 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -27,6 +27,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [android](#android) | Control Android Emulator | mixed | 5 |
 | [api](#api) | API testing plus canonical API integration templates for agents | mixed | 13 |
 | [appleevents](#appleevents) | Control scriptable macOS apps through AppleEvents, AppleScript, and JXA | mixed | 9 |
+| [appstore](#appstore) | App Store Connect via Apple's official REST API — apps, builds, versions, TestFlight, customer reviews and responses, certificates, profiles, devices, sales/finance report downloads (decompressed to a tab-separated file at --output), review submission. Auth is a short-lived ES256 JWT from a team API key. Not covered — app-record creation and account agreements/tax/banking (no API surface), binary upload (buildUploads endpoints out of scope; use Transporter). | mixed | 13 |
 | [audio](#audio) | Audio processing | mixed | 3 |
 | [auth](#auth) | Site-level authentication orchestration over encrypted session bundles, browser import, and secure credentials | mixed | 13 |
 | [betterstack](#betterstack) | Better Stack Uptime monitoring, incidents, heartbeats, status pages, and on-call | mixed | 14 |
@@ -341,6 +342,70 @@ agent-do +live(scope=desktop,ttl=5m) appleevents permissions Finder
 - passthrough (arbitrary-payload escape hatch; beat decided by the argument): `run`, `tell`
 - polymorphic (beat decided by payload or flag at call time): `cache`
 - composite (one call performs several beats internally): `permissions`
+
+### appstore
+
+App Store Connect via Apple's official REST API — apps, builds, versions, TestFlight, customer reviews and responses, certificates, profiles, devices, sales/finance report downloads (decompressed to a tab-separated file at --output), review submission. Auth is a short-lived ES256 JWT from a team API key. Not covered — app-record creation and account agreements/tax/banking (no API surface), binary upload (buildUploads endpoints out of scope; use Transporter).
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- list and inspect apps, builds, and App Store versions
+- snapshot apps with latest build and pending review submissions
+- manage TestFlight beta groups and testers, invite new testers
+- read customer reviews and publish responses
+- list signing certificates, provisioning profiles, and registered devices
+- download sales and finance reports (gzipped tab-separated files)
+- submit an App Store version for review
+
+**Commands**
+
+- `snapshot`: Apps + latest build + pending review submissions: snapshot [--limit N]
+- `apps`: List apps: apps [--bundle-id X] [--name X] [--limit N] [--all]
+- `app`: One app: app \<id-or-bundle-id>
+- `builds`: List builds newest first: builds [--app REF] [--limit N] [--all]
+- `versions`: App Store versions: versions \<app> [--platform P]
+- `testflight`: TestFlight: groups [--app REF] | testers [--group ID] | add-tester \<email> --group ID
+- `reviews`: Customer reviews: reviews \<app> [--rating N] [--sort S]
+- `certs`: Signing certificates: certs [--type T]
+- `profiles`: Provisioning profiles: profiles [--type T]
+- `devices`: Registered devices: devices [--platform IOS|MAC_OS|UNIVERSAL] [--status S]
+- `reports`: Report downloads to --output PATH: sales --vendor N --frequency F | finance --vendor N --region RR --date YYYY-MM
+- `respond`: Publish a review response: respond \<review-id> --body TEXT
+- `submit`: Submit a version for App Review: submit \<app> --version-id ID --yes
+
+**Examples**
+
+```bash
+# list app store connect apps
+agent-do appstore apps
+# app store connect snapshot
+agent-do appstore snapshot
+# latest testflight builds
+agent-do appstore builds --app com.example.app
+# invite a testflight beta tester
+agent-do appstore testflight add-tester dev@example.com --group abc123
+# read recent app store reviews
+agent-do appstore reviews com.example.app --limit 20
+# download monthly sales report from app store connect
+agent-do appstore reports sales --vendor 12345678 --frequency MONTHLY --date 2026-09
+# respond to an app store review
+agent-do appstore respond REVIEW_ID --body "Thanks for the report; fixed in 2.1."
+# submit my app version for review
+agent-do appstore submit com.example.app --version-id VERSION_ID --yes
+```
+
+**Credentials**
+
+- Required: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH`
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `app`, `apps`, `builds`, `certs`, `devices`, `profiles`, `reviews`, `snapshot`, `testflight groups`, `testflight testers`, `versions`
+- Write (connect/interact/save): `reports finance`, `reports sales`, `respond`, `submit`, `testflight add-tester`
+- destructive (irreversible data loss; confirm before auto-running): `submit`
+- sensitive (emits or persists secret material; guard output): `certs`, `devices`, `profiles`, `reports finance`, `reports sales`, `submit`
 
 ### audio
 

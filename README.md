@@ -12,11 +12,11 @@ agent-do is the workshop's answer to both problems: a standard, known shape, tha
 agent-do <tool> <command> [args...]
 ```
 
-Behind that shape sit 103 tools exposing 961 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
+Behind that shape sit 104 tools exposing 974 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
 
 ## The tools on the bench
 
-Every worker picks up the same vessel, and every part of it follows one rhythm: Connect, Snapshot, Interact, Verify, Save. That rhythm is the first article of the shop's dharma, and it is machine-readable. Each of the 919 commands is filed under one of those five beats in `registry.yaml` (6,525 lines), so the worker knows before it moves whether a command looks or acts.
+Every worker picks up the same vessel, and every part of it follows one rhythm: Connect, Snapshot, Interact, Verify, Save. That rhythm is the first article of the shop's dharma, and it is machine-readable. Each of the 945 commands is filed under one of those five beats in `registry.yaml` (6,776 lines), so the worker knows before it moves whether a command looks or acts.
 
 ### Eyes that return structure (snapshot)
 

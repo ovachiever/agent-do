@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# agent-appstore - App Store Connect management via Apple's official REST API
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="${AGENT_DO_PYTHON:-python3}"
+
+show_help() {
+    cat << 'EOF'
+agent-appstore - App Store Connect management (api.appstoreconnect.apple.com)
+
+READS
+  snapshot [--limit N]              Apps + latest build + pending review submissions
+  apps [--bundle-id X] [--name X]   List apps
+  app <id-or-bundle-id>             One app's details
+  builds [--app REF]                List builds (newest first)
+  versions <app> [--platform P]     App Store versions for an app
+  testflight groups [--app REF]     TestFlight beta groups
+  testflight testers [--group ID] [--email X] [--app REF]
+                                    TestFlight beta testers
+  reviews <app> [--rating N] [--sort S]
+                                    Customer reviews for an app (title and body)
+  certs [--type T] [--with-content]
+                                    Signing certificates (certificateContent
+                                    redacted unless --with-content)
+  profiles [--type T] [--with-content]
+                                    Provisioning profiles (profileContent
+                                    redacted unless --with-content)
+  devices [--platform IOS|MAC_OS|UNIVERSAL] [--status S]
+                                    Registered devices (device platform is its
+                                    own enum; TV_OS/VISION_OS are not valid here)
+  reports sales --vendor N --frequency F --output PATH [--date D] [--type T] [--subtype S]
+                                    Download a sales report; the gzipped payload
+                                    is decompressed and written to --output as
+                                    a tab-separated file
+  reports finance --vendor N --region RR --date YYYY-MM --output PATH [--type T]
+                                    Download a finance report (same handling)
+
+WRITES
+  testflight add-tester <email> --group ID [--first X] [--last Y]
+                                    Invite a beta tester; an existing tester is
+                                    linked to the groups instead of re-created
+  respond <review-id> --body TEXT   Publish a response to a customer review
+  submit <app> --version-id ID [--platform IOS] --yes
+                                    Submit an App Store version for review;
+                                    refuses when an open submission exists and
+                                    cancels its own submission if a step fails
+
+List options: --limit N (page cap 200), --all (follow pagination), --json
+
+Environment / credentials (resolved through agent-do creds when not in env):
+  ASC_KEY_ID            App Store Connect API key ID
+  ASC_ISSUER_ID         Issuer ID (team keys; from Users and Access > Integrations)
+  ASC_PRIVATE_KEY_PATH  Path to the downloaded .p8 private key file
+  ASC_API_URL           API base override (testing/fixtures only)
+
+Auth model: a short-lived ES256 JSON Web Token is minted per process from the
+.p8 key and cached in memory only. Apple rejects tokens that expire more than
+20 minutes out; the lifetime comes from the quantity authority, never a bare
+literal. The private key and the token are never printed or written to disk.
+
+NOT COVERED (honest gaps, v1):
+  - Creating a new app record, account-level agreements, tax, and banking have
+    no API surface (beta and end-user license agreement endpoints exist in the
+    API but are not wrapped here).
+  - Binary upload is not implemented: the API's buildUploads endpoints are out
+    of scope for v1; use Transporter or altool.
+  - Individual API keys (sub-claim auth) are not supported; use a team key.
+
+Examples:
+  agent-appstore snapshot
+  agent-appstore apps --bundle-id com.example.app
+  agent-appstore builds --app com.example.app --limit 5
+  agent-appstore testflight add-tester dev@example.com --group abc123
+  agent-appstore reports sales --vendor 12345678 --frequency MONTHLY --date 2026-09
+  agent-appstore submit com.example.app --version-id abc-def --yes
+EOF
+}
+
+case "${1:-}" in
+    -h|--help|help|"")
+        show_help
+        exit 0
+        ;;
+esac
+
+exec "$PYTHON_BIN" "$SCRIPT_DIR/appstore_ops.py" "$@"

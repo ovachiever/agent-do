@@ -108,6 +108,7 @@ check_cmd "v1.1 routing foundation tests" python3 "$SCRIPT_DIR/tests/test_v11_ro
 check_cmd "transcribe tests" python3 "$SCRIPT_DIR/tests/test_transcribe.py"
 check_cmd "handbrake tests" python3 "$SCRIPT_DIR/tests/test_handbrake.py"
 check_cmd "substack tests" python3 "$SCRIPT_DIR/tests/test_substack.py"
+check_cmd "appstore tests" python3 "$SCRIPT_DIR/tests/test_appstore.py"
 check_cmd "deai prose and register tests" python3 "$SCRIPT_DIR/tests/test_deai.py"
 check_cmd "design live browser polish tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_polish.py"
 check_cmd "design readiness unit tests (no browser)" python3 "$SCRIPT_DIR/tools/agent-design/test/test_settle.py"

@@ -1797,6 +1797,152 @@ tools:
         kernel:
         - destructive
     concurrency: mixed
+  appstore:
+    description: App Store Connect via Apple's official REST API — apps, builds, versions,
+      TestFlight, customer reviews and responses, certificates, profiles, devices,
+      sales/finance report downloads (decompressed to a tab-separated file at --output),
+      review submission. Auth is a short-lived ES256 JWT from a team API key. Not
+      covered — app-record creation and account agreements/tax/banking (no API surface),
+      binary upload (buildUploads endpoints out of scope; use Transporter).
+    capabilities:
+    - list and inspect apps, builds, and App Store versions
+    - snapshot apps with latest build and pending review submissions
+    - manage TestFlight beta groups and testers, invite new testers
+    - read customer reviews and publish responses
+    - list signing certificates, provisioning profiles, and registered devices
+    - download sales and finance reports (gzipped tab-separated files)
+    - submit an App Store version for review
+    commands:
+      snapshot: 'Apps + latest build + pending review submissions: snapshot [--limit N]'
+      apps: 'List apps: apps [--bundle-id X] [--name X] [--limit N] [--all]'
+      app: 'One app: app <id-or-bundle-id>'
+      builds: 'List builds newest first: builds [--app REF] [--limit N] [--all]'
+      versions: 'App Store versions: versions <app> [--platform P]'
+      testflight: 'TestFlight: groups [--app REF] | testers [--group ID] | add-tester <email> --group ID'
+      reviews: 'Customer reviews: reviews <app> [--rating N] [--sort S]'
+      certs: 'Signing certificates: certs [--type T]'
+      profiles: 'Provisioning profiles: profiles [--type T]'
+      devices: 'Registered devices: devices [--platform IOS|MAC_OS|UNIVERSAL] [--status S]'
+      reports: 'Report downloads to --output PATH: sales --vendor N --frequency F | finance --vendor N --region RR --date YYYY-MM'
+      respond: 'Publish a review response: respond <review-id> --body TEXT'
+      submit: 'Submit a version for App Review: submit <app> --version-id ID --yes'
+    examples:
+    - intent: list app store connect apps
+      command: agent-appstore apps
+    - intent: app store connect snapshot
+      command: agent-appstore snapshot
+    - intent: latest testflight builds
+      command: agent-appstore builds --app com.example.app
+    - intent: invite a testflight beta tester
+      command: agent-appstore testflight add-tester dev@example.com --group abc123
+    - intent: read recent app store reviews
+      command: agent-appstore reviews com.example.app --limit 20
+    - intent: download monthly sales report from app store connect
+      command: agent-appstore reports sales --vendor 12345678 --frequency MONTHLY --date 2026-09
+    - intent: respond to an app store review
+      command: agent-appstore respond REVIEW_ID --body "Thanks for the report; fixed in 2.1."
+    - intent: submit my app version for review
+      command: agent-appstore submit com.example.app --version-id VERSION_ID --yes
+    credentials:
+      required:
+      - ASC_KEY_ID
+      - ASC_ISSUER_ID
+      - ASC_PRIVATE_KEY_PATH
+    routing:
+      discover_keywords:
+      - app store connect
+      - appstore
+      - testflight
+      - app review
+      - sales report
+      - provisioning profile
+      - beta tester
+      prompt_patterns:
+      - \bapp\s?store\s?connect\b
+      - \btestflight\b
+      - \bappstoreconnect\b
+      - \bapp review\b
+      - \bprovisioning profile\b
+      recommended_entrypoints:
+      - agent-do appstore snapshot
+      - agent-do appstore apps
+      - agent-do appstore builds --app <ref>
+      default_command: snapshot
+      raw_cli_equivalents:
+      - pattern: \bcurl\b.*\bapi\.appstoreconnect\.apple\.com\b
+        replacement: agent-do appstore
+        example: agent-do appstore apps
+        reason: agent-do appstore mints the ES256 token and wraps the JSON:API surface;
+          ad hoc curl needs hand-rolled JWT signing
+      project_signals:
+      - ios
+      - xcode
+      - fastlane
+      - testflight
+      readiness:
+        check: agent-do appstore apps --limit 1
+        fix: agent-do creds store ASC_KEY_ID --stdin
+        note: Needs ASC_KEY_ID, ASC_ISSUER_ID, and ASC_PRIVATE_KEY_PATH (path to the
+          .p8 team key); agent-do resolves each from env or secure storage
+    contracts:
+      snapshot:
+      - snapshot
+      - apps
+      - app
+      - builds
+      - versions
+      - testflight groups
+      - testflight testers
+      - reviews
+      - certs
+      - profiles
+      - devices
+      interact:
+      - testflight add-tester
+      - respond
+      - submit
+      save:
+      - reports sales
+      - reports finance
+      attributes:
+        submit:
+        - destructive
+        - sensitive
+        certs:
+        - sensitive
+        profiles:
+        - sensitive
+        devices:
+        - sensitive
+        reports sales:
+        - sensitive
+        reports finance:
+        - sensitive
+    bounds:
+      apps: &asc_page_bound
+        source: registry
+        ref: apple.appstoreconnect.page_limit
+        why: Apple's collection endpoints cap one page at the published limit maximum;
+          the tool ships that ceiling as its default page size, refuses a larger --limit
+          without --all, and every listing carries its total and a truncation marker
+          with magnitude when a page boundary cut it.
+      app: *asc_page_bound
+      builds: *asc_page_bound
+      versions: *asc_page_bound
+      testflight: *asc_page_bound
+      reviews: *asc_page_bound
+      certs: *asc_page_bound
+      profiles: *asc_page_bound
+      devices: *asc_page_bound
+      snapshot:
+        source: none
+        why: The default of 10 apps sizes the fan-out (two extra API calls per app),
+          a caller-facing default rather than any published ceiling; the per-page
+          ceiling stays governed by the registry bound on the list verbs, the
+          latest-build probe asks for exactly one row because "latest" is one row
+          by definition, and the output carries the account's total app count with
+          a truncation marker when the default cut it.
+    concurrency: mixed
   api:
     description: API testing plus canonical API integration templates for agents
     capabilities:
