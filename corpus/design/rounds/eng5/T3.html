@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Engine Room — Day Sheet — Palingenesis</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#1B1917; --ink:#E7E3DA; --mut:#A69D90; --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14); --hair2:rgba(231,227,218,0.35);
+    --sage:#9DB89A; --clay:#C98B6B;
+    --sagewash:rgba(157,184,154,0.07); --claywash:rgba(201,139,107,0.05);
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+    --mono:ui-monospace,"SF Mono",Menlo,"Cascadia Mono",Consolas,monospace;
+  }
+  html { background:var(--bg); }
+  body {
+    background:var(--bg); color:var(--ink);
+    font:13px/1.35 var(--sans);
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page { width:1440px; margin:0 auto; padding:0 28px 14px; }
+  .lbl { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--mut); font-weight:600; }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .sage { color:var(--sage); }
+  .clay { color:var(--clay); }
+  .mut  { color:var(--mut); }
+  .drill { border-bottom:1px dotted var(--hair2); }
+
+  /* ---------- top nav ---------- */
+  .top { display:flex; justify-content:space-between; align-items:stretch; height:50px; border-bottom:1px solid var(--hair); }
+  .wordmark { font-family:var(--serif); font-size:15px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink); align-self:center; }
+  .navlinks { display:flex; align-items:stretch; }
+  .navlinks a { display:flex; align-items:center; margin-left:28px; color:var(--mut); text-decoration:none;
+    font-size:12px; letter-spacing:.12em; text-transform:uppercase; border-bottom:2px solid transparent; }
+  .navlinks a.active { color:var(--ink); border-bottom-color:var(--sage); }
+
+  /* ---------- lede ---------- */
+  .ledeband { padding:13px 0 12px; }
+  .ledetag { display:flex; align-items:baseline; gap:14px; margin-bottom:7px; }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--sage); margin-right:6px; position:relative; top:-1px; }
+  .runtag { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--sage); font-weight:600; }
+  .lede { font-family:var(--serif); font-size:20px; line-height:1.4; color:var(--ink); max-width:1240px; }
+  .lede .lm { font-family:var(--mono); font-size:17px; }
+
+  /* ---------- services strip ---------- */
+  .services { display:grid; grid-template-columns:repeat(6,1fr); border:1px solid var(--hair); }
+  .svc { padding:9px 12px 10px; border-left:1px solid var(--hair); }
+  .svc:first-child { border-left:none; }
+  .svc .row1 { display:flex; justify-content:space-between; align-items:baseline; }
+  .svc .name { font-size:13px; font-weight:600; color:var(--ink); }
+  .svc .state { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--mut); }
+  .svc .state.on { color:var(--sage); }
+  .svc .job { font-size:12px; color:var(--mut); margin:2px 0 4px; }
+  .svc .meter { font-family:var(--mono); font-size:12px; color:var(--ink); }
+
+  /* ---------- ledger band ---------- */
+  .ledger { display:flex; border:1px solid var(--hair); border-top:none; }
+  .spend { flex:1; padding:9px 14px 11px; }
+  .spendrow { display:flex; align-items:baseline; gap:12px; }
+  .spendrow .big { font-family:var(--mono); font-size:20px; color:var(--ink); }
+  .spendrow .of { font-size:13px; color:var(--mut); }
+  .bar { position:relative; height:6px; background:rgba(231,227,218,0.10); margin:8px 0 7px; }
+  .bar .fill { position:absolute; left:0; top:0; bottom:0; width:61.0%; background:var(--sage); }
+  .bar .tick { position:absolute; top:-3px; bottom:-3px; width:1px; }
+  .bar .tick.proj { left:87.7%; background:var(--sage); }
+  .bar .tick.book { left:92.8%; background:var(--hair2); }
+  .spendstats { font-size:12px; color:var(--mut); }
+  .spendstats .mono { color:var(--ink); }
+  .suspendbox { width:352px; border-left:1px solid var(--hair); padding:9px 14px 10px; }
+  .btn { display:inline-block; border:1px solid var(--hair2); color:var(--ink); text-decoration:none;
+    font-size:13px; letter-spacing:.14em; text-transform:uppercase; font-weight:600;
+    padding:12px 20px; line-height:1; }
+  .consequence { font-size:12px; color:var(--mut); margin-top:7px; line-height:1.4; }
+
+  /* ---------- the day sheet grid ---------- */
+  .sheet { border:1px solid var(--hair); border-top:none; }
+  .sheethead { display:flex; justify-content:space-between; align-items:baseline; padding:8px 12px; border-bottom:1px solid var(--hair); }
+  .legend { font-size:12px; color:var(--mut); }
+  .legend em { font-style:normal; color:var(--mut); }
+  .legend b  { font-weight:400; color:var(--ink); }
+  .legend .x { text-decoration:line-through; }
+  .sheetbody { display:flex; align-items:stretch; }
+
+  table.tt { border-collapse:collapse; table-layout:fixed; flex:1; align-self:flex-start; width:1026px; }
+  .tt col.stgcol { width:114px; }
+  .tt col.dead { background:var(--claywash); }
+  .tt col.live { background:var(--sagewash); }
+  .tt th, .tt td { border:1px solid var(--hair); vertical-align:top; text-align:left; padding:4px 5px 5px; font-weight:400; }
+  .tt thead th { padding:5px 5px 6px; }
+  .tt thead b { display:block; font-size:12px; font-weight:600; color:var(--ink); font-family:var(--mono); }
+  .tt thead em { display:block; font-style:normal; font-size:12px; color:var(--mut); font-family:var(--mono); }
+  .tt thead i { display:block; font-style:normal; font-size:12px; letter-spacing:.04em; }
+  .tt thead i.scrubtag { color:var(--clay); }
+  .tt thead i.nowtag { color:var(--sage); font-weight:600; }
+  .tt th.stg b { display:block; font-size:13px; font-weight:600; color:var(--ink); font-family:var(--sans); }
+  .tt th.stg em { display:block; font-style:normal; font-size:12px; color:var(--mut); font-family:var(--sans); }
+  .tt td em { display:block; font-style:normal; font-family:var(--mono); font-size:12px; color:var(--mut); }
+  .tt td b  { display:block; font-weight:400; font-family:var(--mono); font-size:12px; color:var(--ink); }
+  .tt td b i { font-style:normal; color:var(--clay); margin-left:2px; }
+  .tt td b.no { color:var(--mut); }
+  .tt td b.now { color:var(--sage); font-weight:600; }
+  .tt .x { text-decoration:line-through; }
+  .tt td.nowcell { background:var(--sagewash); box-shadow:inset 0 0 0 1px var(--sage); }
+  .tt tfoot th { font-size:12px; color:var(--mut); font-weight:400; }
+  .tt tfoot td { font-family:var(--mono); font-size:12px; color:var(--ink); }
+  .tt tfoot td.dim { color:var(--mut); }
+
+  /* exceptions margin */
+  .exc { width:348px; border-left:1px solid var(--hair); display:flex; flex-direction:column; background:rgba(231,227,218,0.02); }
+  .exchead { display:flex; justify-content:space-between; align-items:baseline; padding:7px 12px; border-bottom:1px solid var(--hair); }
+  .exchead .n { font-family:var(--mono); font-size:12px; color:var(--mut); }
+  .x-entry { padding:6px 12px 7px; border-bottom:1px solid var(--hair); }
+  .x-entry:last-of-type { border-bottom:none; }
+  .x-entry.scrub { border-left:2px solid var(--clay); padding-left:10px; }
+  .xh { display:flex; align-items:baseline; gap:8px; }
+  .xh .xt { font-family:var(--mono); font-size:12px; color:var(--ink); }
+  .xh .xw { font-size:12px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--ink); flex:1; }
+  .xh .xm { font-family:var(--mono); font-size:12px; color:var(--clay); }
+  .xb { font-size:12px; color:var(--mut); margin-top:1px; line-height:1.35; }
+  .excfoot { margin-top:auto; border-top:1px solid var(--hair); padding:7px 12px; display:flex; justify-content:space-between; align-items:baseline; }
+  .excfoot .sum { font-family:var(--mono); font-size:12px; color:var(--clay); }
+
+  /* totals bar across the grid foot */
+  .totalsbar { border-top:1px solid var(--hair); display:flex; justify-content:space-between; align-items:baseline; padding:8px 12px; }
+  .totalsbar .t { font-family:var(--mono); font-size:13px; color:var(--ink); }
+  .totalsbar .t .dim { color:var(--mut); }
+  .totalsbar .lost { font-family:var(--mono); font-size:13px; color:var(--clay); }
+
+  /* ---------- drill law ---------- */
+  .drilllaw { display:flex; gap:16px; align-items:baseline; border:1px solid var(--hair); border-top:none; padding:8px 12px; }
+  .drilllaw .lbl { color:var(--sage); }
+  .drilllaw p { font-size:13px; color:var(--ink); }
+
+  /* ---------- scheduler / data / incidents ---------- */
+  .tri { display:grid; grid-template-columns:1fr 1fr 1.15fr; border:1px solid var(--hair); border-top:none; }
+  .blk { padding:9px 14px 11px; border-left:1px solid var(--hair); }
+  .blk:first-child { border-left:none; }
+  .blk h3 { margin-bottom:5px; }
+  .r { display:flex; justify-content:space-between; gap:12px; padding:2px 0; font-size:12px; }
+  .r .k { color:var(--ink); }
+  .r .v { font-family:var(--mono); color:var(--mut); text-align:right; white-space:nowrap; }
+  .r .v b { font-weight:400; color:var(--ink); }
+  .inc { padding:3px 0; font-size:12px; color:var(--mut); line-height:1.4; }
+  .inc + .inc { border-top:1px solid var(--hair); }
+  .tag { font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; margin-right:6px; }
+  .tag.open, .tag.watch { color:var(--clay); }
+  .tag.closed { color:var(--mut); }
+  .inc .when { font-family:var(--mono); color:var(--ink); }
+
+  /* ---------- footer ---------- */
+  footer { display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid var(--hair); margin-top:14px; padding-top:10px; }
+  .motto { font-family:var(--serif); font-style:italic; font-size:14px; color:var(--faint); }
+  .sig { font-size:12px; color:var(--mut); }
+  .sig .mono { color:var(--ink); }
+  .rule { display:inline-block; width:170px; border-bottom:1px solid var(--hair2); height:12px; margin:0 8px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- top nav -->
+  <nav class="top">
+    <span class="wordmark">Palingenesis</span>
+    <span class="navlinks">
+      <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a href="#" class="active">Engine Room</a>
+    </span>
+  </nav>
+
+  <!-- verdict lede -->
+  <header class="ledeband">
+    <div class="ledetag">
+      <span class="lbl">Engine Room · Day Sheet — Friday 22 August 2026 · printed 14:37</span>
+      <span class="runtag"><span class="dot"></span>Running</span>
+    </div>
+    <p class="lede">Sound and under cap — ten of sixteen cycles landed, one scrubbed, the eleventh ruling now. <span class="lm">$305.21</span> of the <span class="lm">$500.00</span> day is spent; the close projects <span class="lm">$438.71</span>. Cycle 13 fires at <span class="lm">15:00</span>.</p>
+  </header>
+
+  <!-- six services -->
+  <section class="services">
+    <div class="svc">
+      <div class="row1"><span class="name">Reader</span><span class="state">Idle · 15:00</span></div>
+      <div class="job">pulls journals, patents, trial feeds</div>
+      <div class="meter">118 pulls · $41.22</div>
+    </div>
+    <div class="svc">
+      <div class="row1"><span class="name">Scout</span><span class="state">Idle · 15:06</span></div>
+      <div class="job">hunts candidate innovations</div>
+      <div class="meter">36 candidates · $88.10</div>
+    </div>
+    <div class="svc">
+      <div class="row1"><span class="name">Council</span><span class="state on">Ruling C12</span></div>
+      <div class="job">three judges rule each candidate</div>
+      <div class="meter">10 verdicts · $96.44</div>
+    </div>
+    <div class="svc">
+      <div class="row1"><span class="name">Simulator</span><span class="state">Queued · 14:39</span></div>
+      <div class="job">trials yield and economics</div>
+      <div class="meter">8,412 runs · $58.90</div>
+    </div>
+    <div class="svc">
+      <div class="row1"><span class="name">Archivist</span><span class="state">Idle · 14:51</span></div>
+      <div class="job">writes the library, keeps receipts</div>
+      <div class="meter">10 entries · $9.13</div>
+    </div>
+    <div class="svc">
+      <div class="row1"><span class="name">Courier</span><span class="state">Idle · 14:55</span></div>
+      <div class="job">carries digests, pages owners</div>
+      <div class="meter">12 sends · $11.42</div>
+    </div>
+  </section>
+
+  <!-- ledger band + suspend -->
+  <section class="ledger">
+    <div class="spend">
+      <div class="spendrow">
+        <span class="lbl">Spend vs cap</span>
+        <span class="big">$305.21</span>
+        <span class="of">of $500.00 · 61.0% · reconciles service meters and cycle feet</span>
+      </div>
+      <div class="bar"><span class="fill"></span><span class="tick proj"></span><span class="tick book"></span></div>
+      <div class="spendstats">pace <span class="mono">$35.42/hr</span> since 06:00 · booked day <span class="mono">$464.10</span> · projected close <span class="mono sage">$438.71</span> at <span class="mono">17:57</span> — <span class="sage">$61.29 under cap</span> · yesterday closed <span class="mono">$471.88</span></div>
+    </div>
+    <div class="suspendbox">
+      <a class="btn" href="#">Suspend generation</a>
+      <p class="consequence">Halts Scout, Council, Simulator after the running stage lands. Reader and Archivist close the day; the ledger keeps counting. Restart is manual — no cycle fires until a steward orders it.</p>
+    </div>
+  </section>
+
+  <!-- the day sheet: timetable + accounting feet + exceptions margin -->
+  <section class="sheet">
+    <div class="sheethead">
+      <span class="lbl">Timetable — sixteen cycles, booked and actual</span>
+      <span class="legend"><em>booked</em> over <b>actual</b> · <b>+m <span class="clay">started late</span></b> · <span class="clay">ran +m overran</span> · <em class="x">struck = scrubbed, slot kept</em> · <span class="sage">▸ now</span> · — not yet · $··· in flight</span>
+    </div>
+    <div class="sheetbody">
+      <table class="tt">
+        <colgroup>
+          <col class="stgcol"><col><col><col><col><col><col><col><col><col class="dead"><col><col><col class="live"><col><col><col><col>
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="stg"><b>Stage</b><em>service</em></th>
+            <th><b>C01</b><em>06:00</em></th>
+            <th><b>C02</b><em>06:45</em></th>
+            <th><b>C03</b><em>07:30</em></th>
+            <th><b>C04</b><em>08:15</em></th>
+            <th><b>C05</b><em>09:00</em></th>
+            <th><b>C06</b><em>09:45</em></th>
+            <th><b>C07</b><em>10:30</em></th>
+            <th><b>C08</b><em>11:15</em></th>
+            <th><b class="x">C09</b><em class="x">12:00</em><i class="scrubtag">scrub 11:52</i></th>
+            <th><b>C10</b><em>12:45</em></th>
+            <th><b>C11</b><em>13:30</em></th>
+            <th><b>C12</b><em>14:15</em><i class="nowtag">▸ now 14:37</i></th>
+            <th><b>C13</b><em>15:00</em></th>
+            <th><b>C14</b><em>15:45</em></th>
+            <th><b>C15</b><em>16:30</em></th>
+            <th><b>C16</b><em>17:15</em></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="stg"><b>Read</b><em>Reader</em></th>
+            <td><em>06:00</em><b>06:02<i>+2</i></b></td>
+            <td><em>06:45</em><b>06:45</b></td>
+            <td><em>07:30</em><b>07:30</b></td>
+            <td><em>08:15</em><b>08:15</b></td>
+            <td><em>09:00</em><b>09:00</b></td>
+            <td><em>09:45</em><b>09:45</b></td>
+            <td><em>10:30</em><b>10:30</b></td>
+            <td><em>11:15</em><b>11:15</b></td>
+            <td><em class="x">12:00</em></td>
+            <td><em>12:45</em><b>12:45</b></td>
+            <td><em>13:30</em><b>13:30</b></td>
+            <td><em>14:15</em><b>14:15</b></td>
+            <td><em>15:00</em><b class="no">—</b></td>
+            <td><em>15:45</em><b class="no">—</b></td>
+            <td><em>16:30</em><b class="no">—</b></td>
+            <td><em>17:15</em><b class="no">—</b></td>
+          </tr>
+          <tr>
+            <th class="stg"><b>Scout</b><em>Scout</em></th>
+            <td><em>06:06</em><b>06:08<i>+2</i></b></td>
+            <td><em>06:51</em><b>06:51</b></td>
+            <td><em>07:36</em><b>07:36</b></td>
+            <td><em>08:21</em><b>08:25<i>+4</i></b></td>
+            <td><em>09:06</em><b>09:06</b></td>
+            <td><em>09:51</em><b>09:51</b></td>
+            <td><em>10:36</em><b>10:36</b></td>
+            <td><em>11:21</em><b>11:21</b></td>
+            <td><em class="x">12:06</em></td>
+            <td><em>12:51</em><b>12:51</b></td>
+            <td><em>13:36</em><b>13:36</b></td>
+            <td><em>14:21</em><b>14:21</b></td>
+            <td><em>15:06</em><b class="no">—</b></td>
+            <td><em>15:51</em><b class="no">—</b></td>
+            <td><em>16:36</em><b class="no">—</b></td>
+            <td><em>17:21</em><b class="no">—</b></td>
+          </tr>
+          <tr>
+            <th class="stg"><b>Deliberate</b><em>Council</em></th>
+            <td><em>06:14</em><b>06:14</b></td>
+            <td><em>06:59</em><b>06:59</b></td>
+            <td><em>07:44</em><b>07:44</b></td>
+            <td><em>08:29</em><b>08:33<i>+4</i></b></td>
+            <td><em>09:14</em><b>09:14</b></td>
+            <td><em>09:59</em><b>09:59</b></td>
+            <td><em>10:44</em><b>10:44</b></td>
+            <td><em>11:29</em><b>11:29</b></td>
+            <td><em class="x">12:14</em></td>
+            <td><em>12:59</em><b>12:59<i>ran +6</i></b></td>
+            <td><em>13:44</em><b>13:44</b></td>
+            <td class="nowcell"><em>14:29</em><b class="now">14:29 ▸</b></td>
+            <td><em>15:14</em><b class="no">—</b></td>
+            <td><em>15:59</em><b class="no">—</b></td>
+            <td><em>16:44</em><b class="no">—</b></td>
+            <td><em>17:29</em><b class="no">—</b></td>
+          </tr>
+          <tr>
+            <th class="stg"><b>Simulate</b><em>Simulator</em></th>
+            <td><em>06:24</em><b>06:24</b></td>
+            <td><em>07:09</em><b>07:09</b></td>
+            <td><em>07:54</em><b>07:54</b></td>
+            <td><em>08:39</em><b>08:41<i>+2</i></b></td>
+            <td><em>09:24</em><b>09:24</b></td>
+            <td><em>10:09</em><b>10:09</b></td>
+            <td><em>10:54</em><b>10:54<i>ran +9</i></b></td>
+            <td><em>11:39</em><b>11:39</b></td>
+            <td><em class="x">12:24</em></td>
+            <td><em>13:09</em><b>13:15<i>+6</i></b></td>
+            <td><em>13:54</em><b>13:54</b></td>
+            <td><em>14:39</em><b class="no">queued</b></td>
+            <td><em>15:24</em><b class="no">—</b></td>
+            <td><em>16:09</em><b class="no">—</b></td>
+            <td><em>16:54</em><b class="no">—</b></td>
+            <td><em>17:39</em><b class="no">—</b></td>
+          </tr>
+          <tr>
+            <th class="stg"><b>Archive</b><em>Archivist</em></th>
+            <td><em>06:36</em><b>06:36</b></td>
+            <td><em>07:21</em><b>07:21</b></td>
+            <td><em>08:06</em><b>08:06</b></td>
+            <td><em>08:51</em><b>08:51</b></td>
+            <td><em>09:36</em><b>09:36</b></td>
+            <td><em>10:21</em><b>10:21</b></td>
+            <td><em>11:06</em><b>11:15<i>+9</i></b></td>
+            <td><em>11:51</em><b>11:51</b></td>
+            <td><em class="x">12:36</em></td>
+            <td><em>13:21</em><b>13:27<i>+6</i></b></td>
+            <td><em>14:06</em><b>14:07<i>+1</i></b></td>
+            <td><em>14:51</em><b class="no">—</b></td>
+            <td><em>15:36</em><b class="no">—</b></td>
+            <td><em>16:21</em><b class="no">—</b></td>
+            <td><em>17:06</em><b class="no">—</b></td>
+            <td><em>17:51</em><b class="no">—</b></td>
+          </tr>
+          <tr>
+            <th class="stg"><b>Dispatch</b><em>Courier</em></th>
+            <td><em>06:40</em><b>06:40</b></td>
+            <td><em>07:25</em><b>07:25</b></td>
+            <td><em>08:10</em><b>08:10</b></td>
+            <td><em>08:55</em><b>08:55</b></td>
+            <td><em>09:40</em><b>09:40</b></td>
+            <td><em>10:25</em><b>10:25</b></td>
+            <td><em>11:10</em><b>11:19<i>+9</i></b></td>
+            <td><em>11:55</em><b>11:55</b></td>
+            <td><em class="x">12:40</em></td>
+            <td><em>13:25</em><b>13:31<i>+6</i></b></td>
+            <td><em>14:10</em><b>14:11<i>+1</i></b></td>
+            <td><em>14:55</em><b class="no">—</b></td>
+            <td><em>15:40</em><b class="no">—</b></td>
+            <td><em>16:25</em><b class="no">—</b></td>
+            <td><em>17:10</em><b class="no">—</b></td>
+            <td><em>17:55</em><b class="no">—</b></td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Yield — cand · verd</th>
+            <td>4 · 1</td>
+            <td>3 · 1</td>
+            <td>5 · 2</td>
+            <td>3 · 0</td>
+            <td>4 · 1</td>
+            <td>2 · 1</td>
+            <td>3 · 1</td>
+            <td>4 · 1</td>
+            <td class="dim x">—</td>
+            <td>3 · 1</td>
+            <td>3 · 1</td>
+            <td>2 · ··</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+          </tr>
+          <tr>
+            <th>Cost — $ this cycle</th>
+            <td>28.94</td>
+            <td>27.61</td>
+            <td>31.87</td>
+            <td>30.12</td>
+            <td>28.40</td>
+            <td>26.05</td>
+            <td>34.66</td>
+            <td>29.23</td>
+            <td class="dim x">0.00</td>
+            <td>28.77</td>
+            <td>27.94</td>
+            <td>11.62···</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <!-- exceptions margin -->
+      <aside class="exc">
+        <div class="exchead">
+          <span class="lbl">Exceptions ledger</span>
+          <span class="n">6 entries · every deviation ruled</span>
+        </div>
+        <div class="x-entry">
+          <div class="xh"><span class="xt">06:00</span><span class="xw">C01 · Read</span><span class="xm">2m</span></div>
+          <div class="xb">Cold start, embedding cache empty. Warmed in line; Deliberate start absorbed the slip.</div>
+        </div>
+        <div class="x-entry">
+          <div class="xh"><span class="xt">08:21</span><span class="xw">C04 · Scout</span><span class="xm">4m</span></div>
+          <div class="xb">arXiv answered 429. Three retries at 40 s backoff; Simulate clawed back 2 min.</div>
+        </div>
+        <div class="x-entry">
+          <div class="xh"><span class="xt">10:58</span><span class="xw">C07 · Simulate</span><span class="xm">9m</span></div>
+          <div class="xb">Yield variance breach, σ 2.4 over the 2.1 gate. Re-ran 400 seasons on the wider rain band; verdict stood.</div>
+        </div>
+        <div class="x-entry scrub">
+          <div class="xh"><span class="xt">11:52</span><span class="xw">C09 · whole cycle</span><span class="xm">42m</span></div>
+          <div class="xb">USDA feed mirror 503 — Reader held zero new rows. Scrubbed pre-flight under the zero-row guard; slot kept dark, owner paged 11:53.</div>
+        </div>
+        <div class="x-entry">
+          <div class="xh"><span class="xt">13:05</span><span class="xw">C10 · Deliberate</span><span class="xm">6m</span></div>
+          <div class="xb">Judge 3 timed out twice at 20 s. Ruled 2 of 3; verdict flagged for re-vote at 18:10.</div>
+        </div>
+        <div class="x-entry">
+          <div class="xh"><span class="xt">14:06</span><span class="xw">C11 · Archive</span><span class="xm">1m</span></div>
+          <div class="xb">Hourly snapshot held the library write lock. Waited for release; Dispatch slipped 1 min.</div>
+        </div>
+        <div class="excfoot">
+          <span class="lbl">Minutes lost</span>
+          <span class="sum">22 late · 42 scrubbed · <span class="drill">64 total</span></span>
+        </div>
+      </aside>
+    </div>
+
+    <!-- totals row at the grid's foot -->
+    <div class="totalsbar">
+      <span><span class="lbl">Totals to 14:37&nbsp;&nbsp;</span><span class="t">36 candidates · 10 verdicts · <span class="drill">$305.21</span> spent <span class="dim">of $464.10 booked</span> · projected close $438.71</span></span>
+      <span class="t dim" style="color:var(--mut)">cycle feet Σ = service meters Σ = ledger — <span class="sage">reconciled 14:37</span></span>
+      <span class="lost">64 min lost</span>
+    </div>
+  </section>
+
+  <!-- drill law -->
+  <section class="drilllaw">
+    <span class="lbl">Drill law</span>
+    <p>Every figure on this sheet opens to its receipt — a cell to its run log, a foot to its cycle ledger, an exception to its incident file, a meter to its fetch trace. Nothing here is summary-only; the sheet is the index, the archive is the proof.</p>
+  </section>
+
+  <!-- scheduler / data / incidents -->
+  <section class="tri">
+    <div class="blk">
+      <h3 class="lbl">Scheduler</h3>
+      <div class="r"><span class="k">Cadence</span><span class="v"><b>every 45 min</b> · 06:00–18:00</span></div>
+      <div class="r"><span class="k">Booked today</span><span class="v"><b>16 cycles</b> · last lands 17:57</span></div>
+      <div class="r"><span class="k">Next</span><span class="v"><b class="sage">C13 fires 15:00</b></span></div>
+      <div class="r"><span class="k">Slack</span><span class="v">3 min per cycle · <b>22 min spent</b></span></div>
+      <div class="r"><span class="k">Guards</span><span class="v">zero-row scrub · hard stop <b>$500.00</b></span></div>
+      <div class="r"><span class="k">After close</span><span class="v">digest 18:05 · sheet signs <b>18:00</b></span></div>
+    </div>
+    <div class="blk">
+      <h3 class="lbl">Data sources</h3>
+      <div class="r"><span class="k">arXiv agronomy</span><span class="v"><b>41 docs</b> · 08:25</span></div>
+      <div class="r"><span class="k">Patent gazette</span><span class="v"><b>12 docs</b> · 07:44</span></div>
+      <div class="r"><span class="k">Field-trial registry</span><span class="v"><b>32 rows</b> · 09:03</span></div>
+      <div class="r"><span class="k">FAO price index</span><span class="v"><b>fresh</b> · 06:12</span></div>
+      <div class="r"><span class="k">USDA feed mirror</span><span class="v"><b class="clay">down</b> · since 11:47</span></div>
+      <div class="r"><span class="k">Library</span><span class="v"><b>12,412 entries</b> · +10 today</span></div>
+    </div>
+    <div class="blk">
+      <h3 class="lbl">Incidents</h3>
+      <div class="inc"><span class="tag open">Open</span><span class="when">11:47</span> — USDA feed mirror 503. C09 scrubbed; owner paged 11:53; retry every 20 min, last failed 14:27.</div>
+      <div class="inc"><span class="tag watch">Watch</span><span class="when">12:30</span> — Council judge 3 slow, 3 timeouts. Rulings passed 2 of 3; flagged verdicts re-vote 18:10.</div>
+      <div class="inc"><span class="tag closed">Closed</span><span class="when">08:21</span> — arXiv throttle 429. Cleared 08:25 after three retries; 4 min charged to C04.</div>
+    </div>
+  </section>
+
+  <!-- footer -->
+  <footer>
+    <span class="motto">Everything grown here can be grown again.</span>
+    <span class="sig">sheet <span class="mono">№ 234</span> · opened <span class="mono">06:00</span> · closes <span class="mono">18:00</span> · steward of record signs at close<span class="rule"></span></span>
+  </footer>
+
+</div>
+</body>
+</html>

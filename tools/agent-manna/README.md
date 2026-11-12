@@ -188,6 +188,11 @@ It joins the complete public issue rows with unresolved blockers, reverse
 dependents, handoff priority and existence, claimant liveness and pulse, Manna
 trailer commits, federation resolution, Git state, drift, and the derived
 `now`, `next`, `decisions`, `waves`, `dreams`, and `tracks` sections.
+For a board registered with `manna serve`, it also reads the shared local
+presentation cache and attaches hash-current `digest` and `summary` fields to
+every matching row copy. This path is attach-only: it never registers a board,
+creates cache state, or invokes a model. A missing or stale cache value leaves
+the optional field absent.
 
 ```bash
 agent-do manna state --json
@@ -200,6 +205,8 @@ consumers do not need to join `list` and `show` themselves. Custom decision
 markers can be added with repeated `--decision-marker '[NAME]'` flags. Because
 the sections and counts claim whole-board coverage, a malformed JSONL row
 fails `state` closed instead of being silently omitted.
+The optional digest and summary fields are presentation material for human
+interfaces. Agents continue to ground decisions in the durable board fields.
 
 ### `estate [--json]`
 
@@ -224,7 +231,10 @@ and any still-building presence count. Output is YAML by default or JSON with
 
 Create a new issue. On strict boards, each actionable item also creates a
 repository-relative `.handoff/<mn-id>-<slug>.md` work order and stores that
-path in the issue's `prompt` field. A write-ahead transaction makes the row and
+path in the issue's `prompt` field. A new track (`--type track`) is paired the
+same way: its generated document is the dispatch protocol one agent follows to
+work the track's items in dependency order (see "Tracks as whole-track build
+assignments" below). Dreams never pair. A write-ahead transaction makes the row and
 file recover as one pair after interruption. The transaction is HMAC-bound to
 the canonical project root, complete rows, filename, canonical paths, and
 payload, then installed with atomic no-clobber semantics.
@@ -304,10 +314,17 @@ issue:
   structured frontmatter, exact Claim section, and whole-document SHA-256
   binding
 - After claim, only the pinned `claimed_by` session may mutate or close the row
+- A track is claimable only once it carries a dispatch work order (new tracks
+  do; an older container track takes one through `handoff attach`). Claiming a
+  track without one exits 2 and names that command; its items stay claimable
+  individually either way
 
 ### `done <id>`
 
-Mark an issue as completed.
+Mark an issue as completed and remove its ID from every dependent's
+`blocked_by` list in the same locked, atomic board write. Dependents whose last
+blocker clears return to `open`, or `in_progress` if already claimed. Dependents
+with other blockers remain `blocked`; completed dependents stay `done`.
 
 ```bash
 agent-do manna done mn-abc123
@@ -320,7 +337,92 @@ issue:
   id: mn-abc123
   title: Fix login bug
   status: done
+released:
+  - mn-def456
 ```
+
+`released` lists the dependents that became unblocked, in board order, and is
+`[]` when none did. They are ready immediately after `done` returns. Deleted or
+missing blockers and stale boards from older binaries remain the responsibility
+of `reconcile --fix`.
+
+For a **managed** item (one a coordinator put under `managed require`), `done`
+takes none of the paths above. It needs a current submission, a pinned
+integration target, every required check accepted for the current attempt at
+that target, and an identity that is the operator, a granted coordinator, or
+the claim-holder; trailer commits are receipts, never acceptance. Pass
+`--assessment <digest>` from `assess` and the close refuses when the item's
+acceptance state moved since that look. See "Managed lifecycle" below.
+
+For a **track**, `done` closes only when every item in the track is done. Any
+other state refuses with exit 2, writes nothing, and lists the open items with
+their status; a submitted-but-unaccepted managed item is open. The same gate
+runs under the board lock on every close path (owner, operator, landed
+evidence, acceptance) and inside the locked write of `reconcile --fix`, where
+it reads the items as they are at that moment rather than as they were when
+the board was inspected: an item created under or moved into the track in
+between refuses the close. No authority closes a track over open work. An
+empty track cannot close: give it items or `delete` it.
+
+### Managed lifecycle
+
+Coordinator-owned closure: a worker submits, its session may vanish, and an
+authorized coordinator accepts and closes (or releases) without resuming or
+impersonating it. Records live in `.manna/coordinators.json`,
+`.manna/managed.json`, and the append-only `.manna/lifecycle.jsonl`, written
+under the board lock and never inside `issues.jsonl` rows.
+
+```bash
+agent-do manna identity                       # this session's label + proof (never the token)
+agent-do manna coordinator grant --session ses_lead --proof sha256:... \
+    --item mn-abc123 --reason "lead for this item"      # operator terminal only
+agent-do manna managed require mn-abc123 --check integration --check deployed
+agent-do manna submit mn-abc123 --report report.md --revision feat/x   # claim-holder
+agent-do manna assess mn-abc123 --target origin/staging --json          # read-only
+agent-do manna accept mn-abc123 --check integration --target origin/staging \
+    --evidence "merge 1a2b3c reachable from staging" --submission sub-1a2b3c4d5e6f --attempt 1
+agent-do manna accept mn-abc123 --check deployed --target origin/staging --evidence "release 42" \
+    --submission sub-1a2b3c4d5e6f --attempt 1
+agent-do manna managed recover mn-abc123     # finish a transaction whose audit or state write failed
+agent-do manna managed recover board         # finish a grant or revocation that did not fully land (operator)
+agent-do manna done mn-abc123 --assessment assess:...   # coordinator closes; worker not needed
+agent-do manna managed correct mn-abc123 --reason "tests missing"
+agent-do manna managed release mn-abc123 --reason "worker gone" --isolated-checkout /path/to/worktree
+agent-do manna managed history mn-abc123
+agent-do manna managed doctor --probe         # commands, hook registration, verified end to end
+```
+
+Authority never comes from a coord role, a pulse, a claimed label, or a
+worker's shared secret: a grant binds a session label to its ownership proof
+and to explicit items or tracks, and only the operator issues one. Every
+mutation reloads the row and the grants under the board lock and re-derives
+authority there, so a grant revoked meanwhile refuses. An acceptance names
+the exact submission and attempt the coordinator reviewed (`--submission`,
+`--attempt`, both printed by `assess`) and is refused under the lock when
+either moved; a resubmission (after `managed correct` or otherwise) needs a
+fresh verdict before anyone can close. Each mutation's outcome is durable as
+an intent before its state and audit writes, so a failed write leaves the
+item refusing to move until `managed recover` finishes the transaction.
+Recovery decides who may finish it under the board lock, against the grants
+and the pending transactions as they are then: a grant that was live when
+recovery started and is revoked by the time it holds the lock refuses, with
+nothing written, and only the transactions that look authorized are
+replayed. A
+grant or revocation is a board-level transaction: while one is incomplete
+the grants file is not the truth, so nothing managed moves and no grant
+changes until the operator runs `managed recover board`. A close whose row
+landed but whose audit did not exits nonzero, reports the row as done, and
+names the transaction: it is not a clean close until recovered. The
+`assessment` token is `assess:v2:...` only when closable and `blocked:v2:...`
+otherwise; `done --assessment` refuses a blocked token and recomputes a
+closable one's conditions under the lock. Each release
+advances the attempt in the same locked transaction that releases the claim,
+so a superseded worker cannot submit or complete; an interrupted release is
+reported by `assess` and completed by the coordinator's next `managed
+release`. Release needs coord to have verified the worker dead or stopped, or
+`--isolated-checkout` naming a validated separate git working tree; a stale
+or idle lease, an unknown peer, and a bare path all refuse.
+`reconcile --fix` never closes or releases a managed item.
 
 ### `abandon <id>`
 
@@ -331,9 +433,15 @@ or remains `blocked` when unresolved blocker edges remain.
 agent-do manna abandon mn-abc123
 ```
 
-`done` and `abandon` reject every session except the current owner. `done` also
-provides the explicit unclaimed close transition for a parked dream, because a
-dream cannot be claimed.
+`abandon` rejects every session except the current owner. `done` closes on
+receipts, strongest authority first: `evidence` (a commit carrying
+`Manna: <id>` that touched a path outside `.manna/` and `.handoff/` closes the
+item from any live status over any claimant, and the commits are listed),
+`operator` (the human's terminal identity closes any live item), or `owner`
+(the claim-holder's proof plus `in_progress`). The response names the
+`authority`; paperwork drift is returned as `warnings` and never holds a
+close. `done` also provides the explicit unclaimed close transition for a
+parked dream, because a dream cannot be claimed.
 
 **Output:**
 ```yaml
@@ -366,7 +474,10 @@ issue:
 
 ### `unblock <id> <blocker_id>`
 
-Remove a blocker dependency. If no blockers remain, status reverts to `open`.
+Manually remove a blocker dependency. If no blockers remain, status returns to
+`open`, or `in_progress` if already claimed; completed issues stay `done`.
+Completing a blocker with `done` removes its edges automatically, so no manual
+`unblock` is needed for completed work.
 
 ```bash
 agent-do manna unblock mn-abc123 mn-def456
@@ -430,7 +541,17 @@ issue:
   claimed_at: null
 ```
 
-### `handoff seal <id>`
+For a track, `show` also carries a `children` block derived from the board at
+that moment: `total`, `done`, `open`; `eligible` (claimable now, in dispatch
+order: handoff priority, then the oldest row, then the lowest id) and `next`
+(its first entry, or `null`); `held` (items another session holds, with the
+owner), `waiting` (items whose blockers are open, `missing` from the board, or
+part of a `cycle`), `decisions` (open items carrying a decision marker, a
+human's to rule on), `dreams`, `added_since_claim` (items created after the
+track was claimed), and `stall`, a sentence saying why `next` is null. Items
+print exactly as before; the block is absent.
+
+### `handoff seal <id>` and `handoff attach <track-id>`
 
 Bind an intentional edit to the board. The command preserves the handoff body,
 normalizes authoritative frontmatter, computes the canonical document SHA-256
@@ -443,6 +564,21 @@ agent-do manna handoff seal mn-abc123
 
 Until sealing succeeds, `claim` fails closed. A comment containing a claim
 command is never a handoff.
+
+`handoff attach <track-id>` gives an existing track its dispatch work order,
+idempotently: a track that already carries a valid pair reports
+`changed: false`; a document already sitting at the canonical path is adopted
+(body kept byte for byte, frontmatter normalized, binding computed) rather than
+overwritten, and reports `adopted: true`; otherwise the generated protocol is
+created. A document that does not validate refuses with the defect named and
+nothing written. The attach transaction carries the lifecycle unchanged: it
+never touches the claim, status, dependencies, or items, and on a claimed
+track only the holder may run it. Items refuse (they pair at creation) and
+dreams refuse (convert first).
+
+```bash
+agent-do manna handoff attach mn-track1
+```
 
 ### `update <id> [metadata]`
 
@@ -501,8 +637,10 @@ board:
 - **⌘K / jump**: sheets, items, peers, other boards
 - **digests**: each row shows a one-line digest of the item (fast model,
   hash-keyed cache under `$AGENT_DO_HOME/manna/serve/digests/`, regenerated
-  only when title or description change, title as fallback); the manna title
-  stays in the inspector. Set `AGENT_DO_SERVE_AI=off` to keep titles only.
+  only when title or description change, title as fallback). The Rust
+  `manna state` contract attaches current cache values for every human-facing
+  client; serve only schedules missing values. The manna title stays in the
+  inspector. Set `AGENT_DO_SERVE_AI=off` to keep titles only.
 
 Finish: ledger density on a 12px floor, one-line rows, zebra, a severity
 stripe leading each row, outlined state pills, prompt headers (`$ manna next`),
@@ -525,7 +663,11 @@ daemon's own pinned identity (`$AGENT_DO_HOME/manna/serve/identity.json`, mode
 600, the same `MANNA_SESSION_ID` + `MANNA_SESSION_TOKEN` pin scripted lanes
 use), behind the loopback Host/Origin checks and a per-process token the page
 carries; manna's own refusals print on the row verbatim. Nothing on the page
-edits a file. The SessionEnd hook applies the same two safe repairs.
+edits a file. The SessionEnd hook applies the same two safe repairs
+(`reconcile --fix --only dead_claim,blocker_desync`). Neither `apply` nor any
+other `reconcile --fix` closes a row: `landed_open` is advisory in every path
+(mn-880173); a trailer identifies work, and `close` (claim then done) is the
+explicit act that approves it.
 
 Agents never need the daemon: `state --json` is the complete board contract,
 and `estate --json` is the registered-board index contract. `context`, `list`,
@@ -535,6 +677,56 @@ Implementation: `serve/serve.py` (daemon, registry, two-clock cache),
 `serve/board.py` (core-state adapter and estate helpers), `serve/digest.py`
 (digests), `serve/estate.py` (daemon-independent estate CLI adapter), and
 `src/state.rs` (the canonical derivation).
+
+## Tracks as whole-track build assignments
+
+A track is an organizational container, and it can also be an assignment: the
+owner selects either the track (one agent works its items in dependency order)
+or individual items (ordinary multi-agent dispatch). Both go through the same
+board claim flow; nothing new is clicked or configured.
+
+**Flow.** `create --type track` pairs the track with a sealed dispatch work
+order; an older container track takes one through `handoff attach <id>`. The
+paired track enters `.manna/handoff-order.yaml` and the generated index like an
+item (`order <id> <n>` moves it). `state` derives it as `ready` while the board
+offers an item to claim (or every item is done and the track can close), as
+`waiting` while all remaining work is held elsewhere, cycled, missing a
+dependency, or a human's to rule on, as `active` once claimed, and `done` when
+closed; a track without a handoff keeps `effective: track`. A ready track sits
+in `next` with `prompt`, `handoff_digest`, and `handoff_exists`, the fields a
+launcher reads, and its `kind` stays `track`, so grouping is unchanged. The
+dispatched agent claims the track, runs `show <track> --json`, claims
+`children.next` individually, follows that item's own sealed work order to its
+own close, re-reads `show` before every selection, and stops when `next` is
+null, recording `children.stall`. A lane that ends releases the track with
+`abandon`; a successor claims it and rebuilds progress from the board.
+
+**Limits, by design.**
+- Holding a track grants only the right to claim its eligible items one at a
+  time. It reserves no item, blocks no independent worker (the board's atomic
+  claim decides), confers no coordinator authority, accepts nothing, and
+  authorizes no merge, deploy, push, or pull request.
+- A refused child claim is final for that child: the agent takes the next
+  eligible item or stops. Nothing retries around a refusal.
+- Items added to a track after the claim appear under `added_since_claim`;
+  each carries its own sealed work order, and the agent names the change of
+  scope before claiming one. Items moved out or deleted leave the list; one
+  the agent already holds stays its own under its own work order.
+- The track closes only when every item in it is done (see `done`); an empty
+  track cannot close. Nothing here wakes an idle or closed worker, spawns
+  one, or schedules anything: the board changes state, and whoever reads it
+  next acts.
+- A paired track is `effective: ready|waiting|active|done` on every consumer
+  of `state`. The Holy board's worker dispatch additionally guards
+  `kind == "item"` in its refusal
+  (`macos/Sources/HolyGhostty/Board/HolyMannaBoardWorker.swift`,
+  `HolyMannaWorkerDispatch.refusal`); until that guard admits a ready track,
+  Holy will refuse to launch one even though the row carries every field it
+  reads. That counterpart is Holy's to change; `manna serve`'s launch pointer
+  needs nothing.
+- Older `manna-core` binaries read a strict board that holds a paired track as
+  invalid (`cannot carry an item handoff`); rebuild them. No track gains a
+  handoff until someone creates one or runs `handoff attach`.
 
 ## Architecture
 
@@ -583,11 +775,16 @@ Claim ownership uses two pinned environment variables:
 - `MANNA_SESSION_TOKEN`: private bearer token of at least 32 characters; only
   its SHA-256 digest is stored in the board
 
-Lifecycle mutations fail closed when either value is absent. Session hooks pin
-both across shell invocations. Codex and other hosts that expose an opaque
-runtime identity derive the proof under a machine-local key outside the
-repository. Scripted lanes and plain shells must export both explicitly. A
-visible owner label alone cannot complete, abandon, or edit its claim.
+Lifecycle mutations fail closed when either value is absent and no host
+identity applies. Session hooks pin both across shell invocations. Codex and
+other hosts that expose an opaque runtime identity derive the proof under a
+machine-local key outside the repository. A plain interactive shell (stdin is
+a terminal, nothing pinned) derives the operator identity `operator-<login>`
+under the same key; the operator is the estate's root and `require_owner`
+never refuses it. Agent hosts run on pipes and never reach that branch;
+`MANNA_OPERATOR=0` opts a terminal out. Scripted lanes on pipes must export
+both pins explicitly. A visible owner label alone cannot complete, abandon,
+or edit its claim.
 
 ### Exit Codes
 
