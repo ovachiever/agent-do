@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917;
+  --surface:#211E1B;
+  --cellfill:#2A2621;
+  --ink:#E7E3DA;
+  --muted:#A69D90;
+  --hair:rgba(231,227,218,0.14);
+  --sage:hsl(158,30%,55%);
+  --clay:hsl(12,42%,58%);
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,'Source Sans 3','Segoe UI',sans-serif;
+  --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{color:var(--ink);font:14px/1.45 var(--sans);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.wrap{width:1440px;margin:0 auto;padding:0 48px}
+
+/* ── shared vocabulary ─────────────────────────────── */
+.label{font:600 12px/1.2 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.t{font-family:var(--mono)}
+.m{font-variant-numeric:tabular-nums;text-decoration:underline dotted;text-decoration-thickness:1px;text-decoration-color:rgba(166,157,144,.65);text-underline-offset:3px}
+.sage{color:var(--sage)}
+.clay{color:var(--clay)}
+
+/* ── nav ───────────────────────────────────────────── */
+.nav{border-bottom:1px solid var(--hair)}
+.nav .wrap{display:flex;align-items:center;height:64px}
+.wordmark{font:600 19px var(--serif);letter-spacing:.01em;margin-right:40px}
+.tabs{display:flex;gap:4px}
+.tab{font:600 12px/1 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:14px 12px;border-bottom:1px solid transparent}
+.tab.on{color:var(--sage);border-bottom-color:var(--sage)}
+.clock{margin-left:auto;font:13px var(--mono);color:var(--ink)}
+.clock .date{color:var(--muted)}
+
+/* ── lede ──────────────────────────────────────────── */
+.lede{font:400 28px/1.35 var(--serif);color:var(--ink);margin:44px 0 4px}
+.lede .m{font-family:var(--sans);font-weight:600;font-size:25px}
+.lede .t{font-size:24px}
+
+/* ── sections ──────────────────────────────────────── */
+.sec{margin-top:40px}
+.sec-h{border-bottom:1px solid var(--hair);padding-bottom:8px;margin-bottom:14px}
+
+/* ── block rows ────────────────────────────────────── */
+.row{display:grid;gap:1px;background:var(--hair);border:1px solid var(--hair)}
+.row-7{grid-template-columns:repeat(7,1fr)}
+.row-6{grid-template-columns:repeat(6,1fr)}
+.row-4{grid-template-columns:repeat(4,1fr)}
+.block{background:var(--surface);padding:13px 14px;display:flex;flex-direction:column;gap:9px;min-width:0}
+.job{font-size:12px;color:var(--muted);min-height:14px}
+.frow{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.k{font-size:12px;color:var(--muted);white-space:nowrap}
+.fig{font:600 20px/1.1 var(--sans);color:var(--ink);font-variant-numeric:tabular-nums}
+.fig.t{font-family:var(--mono);font-size:19px}
+.unit{font:400 12px var(--sans);color:var(--muted);margin-left:3px}
+.v{font-size:12px;color:var(--muted)}
+.foot{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-top:auto;padding-top:9px;border-top:1px solid var(--hair)}
+.state{font-size:12px;color:var(--ink);white-space:nowrap}
+.state .t{color:var(--muted)}
+.drill{font:12px var(--mono);color:var(--muted);white-space:nowrap}
+
+/* ── timetable (exception 1) ───────────────────────── */
+.tt{display:grid;grid-template-columns:150px repeat(16,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair)}
+.tt>div{background:var(--surface)}
+.ch{padding:10px 4px 9px;display:flex;flex-direction:column;align-items:center;gap:3px}
+.ch .h{font:600 13px var(--mono);color:var(--ink)}
+.ch .id{font:12px var(--mono);color:var(--muted)}
+.ch .st{font:12px var(--sans);color:var(--muted)}
+.rh{padding:8px 12px;display:flex;flex-direction:column;justify-content:center;gap:4px}
+.rh .top{display:flex;justify-content:space-between;align-items:baseline}
+.rh .stage{font:600 12px/1.2 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--ink)}
+.rh .off{font:12px var(--mono);color:var(--muted)}
+.rh .svc{font-size:12px;color:var(--muted)}
+.cell{height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font:13px var(--mono)}
+.cell.d{background:var(--cellfill);color:var(--ink)}
+.cell.b{color:var(--muted)}
+.cell.s{color:var(--muted);text-decoration:line-through}
+.cell.late{background:var(--cellfill);color:var(--clay)}
+.cell.live{color:var(--sage);outline:1px solid var(--sage);outline-offset:-1px}
+.cell .d2{font-size:12px}
+
+/* ── incidents ─────────────────────────────────────── */
+.inc{display:grid;grid-template-columns:100px 180px 110px 1fr 110px 130px;gap:1px;background:var(--hair);border:1px solid var(--hair)}
+.inc>div{background:var(--surface);padding:13px 14px;display:flex;align-items:baseline;min-height:44px}
+.i-t{font:12px var(--mono);color:var(--muted)}
+.i-s{font:12px var(--mono);color:var(--muted)}
+.i-a{font-size:12px;color:var(--ink)}
+.i-a .t{color:var(--muted)}
+.i-m{justify-content:flex-end;font:600 14px var(--sans);color:var(--ink);font-variant-numeric:tabular-nums}
+.i-m .unit{font-weight:400}
+.i-d{justify-content:flex-end;font:12px var(--mono);color:var(--muted)}
+
+/* ── control (exception 2) ─────────────────────────── */
+.control{display:flex;align-items:center;gap:28px;background:var(--surface);border:1px solid var(--hair);padding:20px}
+.suspend{display:inline-flex;align-items:center;border:1px solid var(--ink);color:var(--ink);background:none;padding:15px 26px;font:600 12px/1 var(--sans);letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.consequence{font-size:13px;color:var(--muted)}
+.consequence .t{color:var(--ink)}
+
+/* ── footer ────────────────────────────────────────── */
+.pagefoot{border-top:1px solid var(--hair);margin-top:56px}
+.pagefoot .wrap{padding:22px 48px}
+.motto{font:400 14px var(--serif);color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <span class="wordmark">Palingenesis</span>
+    <nav class="tabs">
+      <a class="tab" href="#">Today</a>
+      <a class="tab" href="#">Pipeline</a>
+      <a class="tab" href="#">Library</a>
+      <a class="tab" href="#">Portfolio</a>
+      <a class="tab" href="#">Simulation</a>
+      <a class="tab on" href="#">Engine Room</a>
+    </nav>
+    <span class="clock">17:26:08 <span class="date">· Fri 22 Aug</span></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <p class="lede">Nominal — ten closed, one <span class="clay">struck</span>, <span class="m">$107.13</span> spent, 12 mid&#8209;Simulate, 13 opens <span class="t">18:00:00</span>.</p>
+
+  <!-- ── LEDGER ─────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Ledger</span></div>
+    <div class="row row-7">
+
+      <div class="block">
+        <span class="label">Day Total</span>
+        <span class="job"></span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$107.13</span></div>
+        <div class="frow"><span class="k">cap</span><span class="v m">$500.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$155.90</span></div>
+        <div class="foot"><span class="state">under cap</span><span class="drill">▸ ledger</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Scout</span>
+        <span class="job">stocks the docket</span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$8.62</span></div>
+        <div class="frow"><span class="k">allot</span><span class="v m">$45.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$12.40</span></div>
+        <div class="foot"><span class="state">done · <span class="t">17:00</span></span><span class="drill">▸ r-2212</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Reader</span>
+        <span class="job">reads the stack</span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$19.84</span></div>
+        <div class="frow"><span class="k">allot</span><span class="v m">$60.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$28.90</span></div>
+        <div class="foot"><span class="state">done · <span class="t">17:04</span></span><span class="drill">▸ r-2212</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Council</span>
+        <span class="job">votes the verdict</span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$36.90</span></div>
+        <div class="frow"><span class="k">allot</span><span class="v m">$130.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$53.70</span></div>
+        <div class="foot"><span class="state">done · <span class="t">17:12</span></span><span class="drill">▸ r-2212</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Simulator</span>
+        <span class="job">runs the trial</span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$31.55</span></div>
+        <div class="frow"><span class="k">allot</span><span class="v m">$175.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$46.00</span></div>
+        <div class="foot"><span class="state"><span class="sage">live</span> · <span class="t">17:22</span></span><span class="drill">▸ r-2212</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Archivist</span>
+        <span class="job">writes lineage</span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$5.71</span></div>
+        <div class="frow"><span class="k">allot</span><span class="v m">$40.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$8.30</span></div>
+        <div class="foot"><span class="state">done · <span class="t">16:34</span></span><span class="drill">▸ r-2211</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Courier</span>
+        <span class="job">posts and closes</span>
+        <div class="frow"><span class="k">spent</span><span class="fig m">$4.51</span></div>
+        <div class="frow"><span class="k">allot</span><span class="v m">$50.00</span></div>
+        <div class="frow"><span class="k">≈ close</span><span class="v m">$6.60</span></div>
+        <div class="foot"><span class="state">done · <span class="t">16:41</span></span><span class="drill">▸ r-2211</span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── TIMETABLE ──────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Timetable</span></div>
+    <div class="tt">
+
+      <div class="ch"></div>
+      <div class="ch"><span class="h">06:00</span><span class="id">r-2201</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">07:00</span><span class="id">r-2202</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">08:00</span><span class="id">r-2203</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">09:00</span><span class="id">r-2204</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">10:00</span><span class="id">r-2205</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">11:00</span><span class="id">r-2206</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">12:00</span><span class="id">r-2207</span><span class="st clay">struck</span></div>
+      <div class="ch"><span class="h">13:00</span><span class="id">r-2208</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">14:00</span><span class="id">r-2209</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">15:00</span><span class="id">r-2210</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">16:00</span><span class="id">r-2211</span><span class="st">closed</span></div>
+      <div class="ch"><span class="h">17:00</span><span class="id">r-2212</span><span class="st sage">live</span></div>
+      <div class="ch"><span class="h">18:00</span><span class="id">r-2213</span><span class="st">booked</span></div>
+      <div class="ch"><span class="h">19:00</span><span class="id">r-2214</span><span class="st">booked</span></div>
+      <div class="ch"><span class="h">20:00</span><span class="id">r-2215</span><span class="st">booked</span></div>
+      <div class="ch"><span class="h">21:00</span><span class="id">r-2216</span><span class="st">booked</span></div>
+
+      <div class="rh"><div class="top"><span class="stage">Open</span><span class="off">+0</span></div><span class="svc">Scout</span></div>
+      <div class="cell d">06:00</div>
+      <div class="cell d">07:00</div>
+      <div class="cell d">08:00</div>
+      <div class="cell d">09:00</div>
+      <div class="cell d">10:00</div>
+      <div class="cell d">11:00</div>
+      <div class="cell s">12:00</div>
+      <div class="cell d">13:00</div>
+      <div class="cell d">14:00</div>
+      <div class="cell d">15:00</div>
+      <div class="cell d">16:00</div>
+      <div class="cell d">17:00</div>
+      <div class="cell b">18:00</div>
+      <div class="cell b">19:00</div>
+      <div class="cell b">20:00</div>
+      <div class="cell b">21:00</div>
+
+      <div class="rh"><div class="top"><span class="stage">Read</span><span class="off">+4</span></div><span class="svc">Reader</span></div>
+      <div class="cell d">06:04</div>
+      <div class="cell d">07:04</div>
+      <div class="cell d">08:04</div>
+      <div class="cell d">09:04</div>
+      <div class="cell d">10:04</div>
+      <div class="cell d">11:04</div>
+      <div class="cell s">12:04</div>
+      <div class="cell d">13:04</div>
+      <div class="cell d">14:04</div>
+      <div class="cell d">15:04</div>
+      <div class="cell d">16:04</div>
+      <div class="cell d">17:04</div>
+      <div class="cell b">18:04</div>
+      <div class="cell b">19:04</div>
+      <div class="cell b">20:04</div>
+      <div class="cell b">21:04</div>
+
+      <div class="rh"><div class="top"><span class="stage">Deliberate</span><span class="off">+12</span></div><span class="svc">Council</span></div>
+      <div class="cell d">06:12</div>
+      <div class="cell d">07:12</div>
+      <div class="cell d">08:12</div>
+      <div class="cell d">09:12</div>
+      <div class="cell d">10:12</div>
+      <div class="cell d">11:12</div>
+      <div class="cell s">12:12</div>
+      <div class="cell d">13:12</div>
+      <div class="cell d">14:12</div>
+      <div class="cell d">15:12</div>
+      <div class="cell d">16:12</div>
+      <div class="cell d">17:12</div>
+      <div class="cell b">18:12</div>
+      <div class="cell b">19:12</div>
+      <div class="cell b">20:12</div>
+      <div class="cell b">21:12</div>
+
+      <div class="rh"><div class="top"><span class="stage">Simulate</span><span class="off">+22</span></div><span class="svc">Simulator</span></div>
+      <div class="cell d">06:22</div>
+      <div class="cell d">07:22</div>
+      <div class="cell d">08:22</div>
+      <div class="cell d">09:22</div>
+      <div class="cell d">10:22</div>
+      <div class="cell d">11:22</div>
+      <div class="cell s">12:22</div>
+      <div class="cell d">13:22</div>
+      <div class="cell late">14:43<span class="d2">+21</span></div>
+      <div class="cell d">15:22</div>
+      <div class="cell d">16:22</div>
+      <div class="cell live">17:22<span class="d2">live</span></div>
+      <div class="cell b">18:22</div>
+      <div class="cell b">19:22</div>
+      <div class="cell b">20:22</div>
+      <div class="cell b">21:22</div>
+
+      <div class="rh"><div class="top"><span class="stage">Record</span><span class="off">+34</span></div><span class="svc">Archivist</span></div>
+      <div class="cell d">06:34</div>
+      <div class="cell d">07:34</div>
+      <div class="cell d">08:34</div>
+      <div class="cell d">09:34</div>
+      <div class="cell d">10:34</div>
+      <div class="cell d">11:34</div>
+      <div class="cell s">12:34</div>
+      <div class="cell d">13:34</div>
+      <div class="cell d">14:55</div>
+      <div class="cell d">15:34</div>
+      <div class="cell d">16:34</div>
+      <div class="cell b">17:34</div>
+      <div class="cell b">18:34</div>
+      <div class="cell b">19:34</div>
+      <div class="cell b">20:34</div>
+      <div class="cell b">21:34</div>
+
+      <div class="rh"><div class="top"><span class="stage">Close</span><span class="off">+41</span></div><span class="svc">Courier</span></div>
+      <div class="cell d">06:41</div>
+      <div class="cell d">07:41</div>
+      <div class="cell d">08:41</div>
+      <div class="cell d">09:41</div>
+      <div class="cell d">10:41</div>
+      <div class="cell d">11:41</div>
+      <div class="cell s">12:41</div>
+      <div class="cell d">13:41</div>
+      <div class="cell d">15:02</div>
+      <div class="cell d">15:41</div>
+      <div class="cell d">16:41</div>
+      <div class="cell b">17:41</div>
+      <div class="cell b">18:41</div>
+      <div class="cell b">19:41</div>
+      <div class="cell b">20:41</div>
+      <div class="cell b">21:41</div>
+
+    </div>
+  </section>
+
+  <!-- ── VOLUMES ────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Volumes</span></div>
+    <div class="row row-6">
+
+      <div class="block">
+        <span class="label">Sources</span>
+        <div class="frow"><span class="k">scouted</span><span class="fig">132</span></div>
+        <div class="foot"><span class="state">to <span class="t">17:26</span></span><span class="drill">▸ pipeline</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Papers</span>
+        <div class="frow"><span class="k">read</span><span class="fig">64</span></div>
+        <div class="foot"><span class="state">to <span class="t">17:26</span></span><span class="drill">▸ library</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Claims</span>
+        <div class="frow"><span class="k">kept</span><span class="fig">409</span></div>
+        <div class="foot"><span class="state">to <span class="t">17:26</span></span><span class="drill">▸ library</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Trials</span>
+        <div class="frow"><span class="k">run</span><span class="fig">11</span></div>
+        <div class="foot"><span class="state">to <span class="t">17:26</span></span><span class="drill">▸ simulation</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Verdicts</span>
+        <div class="frow"><span class="k">recorded</span><span class="fig">10</span></div>
+        <div class="foot"><span class="state">to <span class="t">17:26</span></span><span class="drill">▸ portfolio</span></div>
+      </div>
+
+      <div class="block">
+        <span class="label">Digests</span>
+        <div class="frow"><span class="k">posted</span><span class="fig">10</span></div>
+        <div class="foot"><span class="state">to <span class="t">17:26</span></span><span class="drill">▸ today</span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── SCHEDULER ──────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Scheduler</span></div>
+    <div class="row row-4">
+
+        <div class="block">
+          <span class="label">Cadence</span>
+          <div class="frow"><span class="k">cycles</span><span class="fig">16</span></div>
+          <div class="foot"><span class="state">hourly · <span class="t">06:00–21:00</span></span><span class="drill">▸ timetable</span></div>
+        </div>
+
+        <div class="block">
+          <span class="label">Late Rule</span>
+          <div class="frow"><span class="k">struck past</span><span class="fig t">+25</span></div>
+          <div class="foot"><span class="state">worst today <span class="clay t">+21</span></span><span class="drill">▸ r-2209</span></div>
+        </div>
+
+        <div class="block">
+          <span class="label">Next Open</span>
+          <div class="frow"><span class="k">cycle 13</span><span class="fig t">18:00:00</span></div>
+          <div class="foot"><span class="state">booked</span><span class="drill">▸ r-2213</span></div>
+        </div>
+
+        <div class="block">
+          <span class="label">Clock</span>
+          <div class="frow"><span class="k">farm local</span><span class="fig t">17:26:08</span></div>
+          <div class="foot"><span class="state"><span class="t">UTC−05</span></span><span class="drill">▸ timetable</span></div>
+        </div>
+
+    </div>
+  </section>
+
+  <!-- ── DATA ───────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Data</span></div>
+    <div class="row row-4">
+
+        <div class="block">
+          <span class="label">Snapshot</span>
+          <div class="frow"><span class="k">wrote</span><span class="fig">412<span class="unit">MB</span></span></div>
+          <div class="foot"><span class="state">verified · <span class="t">17:15:09</span></span><span class="drill">▸ archive</span></div>
+        </div>
+
+        <div class="block">
+          <span class="label">Archive</span>
+          <div class="frow"><span class="k">runs held</span><span class="fig">1,283</span></div>
+          <div class="foot"><span class="state">9.6 GB · to <span class="t">16:43</span></span><span class="drill">▸ archive</span></div>
+        </div>
+
+        <div class="block">
+          <span class="label">Backfill</span>
+          <div class="frow"><span class="k">owed</span><span class="fig">0</span></div>
+          <div class="foot"><span class="state">repaired · <span class="t">19 Aug</span></span><span class="drill">▸ archive</span></div>
+        </div>
+
+        <div class="block">
+          <span class="label">Next Snap</span>
+          <div class="frow"><span class="k">writes</span><span class="fig t">18:15:00</span></div>
+          <div class="foot"><span class="state">hourly at <span class="t">:15</span></span><span class="drill">▸ archive</span></div>
+        </div>
+
+    </div>
+  </section>
+
+  <!-- ── INCIDENTS ──────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Incidents</span></div>
+    <div class="inc">
+
+      <div class="i-t">12:01</div>
+      <div><span class="label">Feed Empty</span></div>
+      <div class="i-s">cycle 07</div>
+      <div class="i-a"><span><span class="clay">struck</span> · kept on book</span></div>
+      <div class="i-m">0.0<span class="unit">min</span></div>
+      <div class="i-d">▸ r-2207</div>
+
+      <div class="i-t">14:22</div>
+      <div><span class="label">Queue Stall</span></div>
+      <div class="i-s">cycle 09</div>
+      <div class="i-a"><span>requeued <span class="t">14:43</span> · closed <span class="t">15:02</span></span></div>
+      <div class="i-m clay">21.0<span class="unit">min</span></div>
+      <div class="i-d">▸ r-2209</div>
+
+      <div class="i-t">17:15</div>
+      <div><span class="label">Checksum Fail</span></div>
+      <div class="i-s">write 1</div>
+      <div class="i-a"><span>write 2 verified · <span class="t">17:15:09</span></span></div>
+      <div class="i-m">0.2<span class="unit">min</span></div>
+      <div class="i-d">▸ archive</div>
+
+      <div class="i-t">to 17:26</div>
+      <div><span class="label">Minutes Lost</span></div>
+      <div class="i-s">today</div>
+      <div class="i-a">of 960 booked</div>
+      <div class="i-m">21.2<span class="unit">min</span></div>
+      <div class="i-d">▸ log</div>
+
+    </div>
+  </section>
+
+  <!-- ── CONTROL ────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-h"><span class="label">Control</span></div>
+    <div class="control">
+      <button class="suspend" type="button">Suspend Generation</button>
+      <p class="consequence">Cycle 12 runs to <span class="t">17:41</span> · 13–16 do not open · resume reopens next booked hour.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="pagefoot">
+  <div class="wrap">
+    <p class="motto">Every claim sourced · every cost computed · every verdict recorded</p>
+  </div>
+</footer>
+
+</body>
+</html>

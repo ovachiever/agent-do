@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — The Library</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --rail:#171512;
+    --field:#211E1B;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --sage:hsl(158,30%,55%);
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    display:flex;
+    height:100vh;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  ::selection{background:var(--sage);color:#1B1917}
+  a{color:inherit;text-decoration:none;cursor:pointer}
+  .lbl{font-family:var(--sans);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.14em}
+  .num{font-variant-numeric:tabular-nums}
+  .mono{font-family:var(--mono);font-size:12px}
+  .dr{text-decoration:underline dotted rgba(231,227,218,.3);text-underline-offset:3px;text-decoration-thickness:1px}
+  .dr:hover{color:var(--ink);text-decoration-color:rgba(231,227,218,.6)}
+
+  /* ---------- main column ---------- */
+  main{flex:1;min-width:0;display:flex;flex-direction:column;padding:0 44px}
+
+  /* nav */
+  nav{height:50px;flex-shrink:0;display:flex;align-items:center;border-bottom:1px solid var(--hair)}
+  .wordmark{font-family:var(--serif);font-size:17px;color:var(--ink);letter-spacing:.02em}
+  .navlinks{margin-left:auto;display:flex;gap:26px}
+  .navlinks a{display:inline-flex;align-items:center;height:50px;margin-bottom:-1px;border-bottom:2px solid transparent;
+    font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.13em;color:var(--muted)}
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.active{color:var(--ink);border-bottom-color:var(--sage)}
+
+  /* masthead */
+  .masthead{flex-shrink:0;text-align:center;padding:18px 0 0}
+  .masthead h1{font-family:var(--serif);font-weight:400;font-size:42px;line-height:1.05;letter-spacing:.01em}
+  .motto{font-family:var(--serif);font-style:italic;font-size:13.5px;color:var(--muted);margin-top:7px}
+  .dateline{display:flex;align-items:center;gap:16px;margin-top:13px}
+  .dateline::before,.dateline::after{content:"";flex:1;border-top:1px solid var(--hair)}
+  .dateline .lbl{color:var(--muted);font-weight:600;letter-spacing:.16em;white-space:nowrap}
+  .dateline .lbl b{color:var(--ink);font-weight:600}
+  .statline{display:flex;justify-content:center;align-items:baseline;gap:9px;margin-top:12px;flex-wrap:nowrap}
+  .stat{display:inline-block;padding:2px 0;font-size:13px;line-height:20px;color:var(--muted);white-space:nowrap}
+  .stat b{color:var(--ink);font-weight:600}
+  .sep{color:var(--muted);opacity:.7;font-size:13px}
+  .mastrule{height:5px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);margin-top:15px}
+
+  /* ---------- ask hero ---------- */
+  .hero{flex-shrink:0;text-align:center;padding:24px 0 18px}
+  .ask-label{color:var(--sage);letter-spacing:.18em}
+  .askbox{position:relative;max-width:740px;margin:10px auto 0}
+  .askbox input{
+    width:100%;height:56px;background:var(--field);
+    border:1px solid hsla(158,30%,55%,.45);border-radius:3px;
+    padding:0 100px 0 20px;color:var(--ink);
+    font-family:var(--serif);font-style:italic;font-size:16px;outline:none;
+  }
+  .askbox input::placeholder{color:var(--muted);opacity:1}
+  .askbox input:focus{border-color:var(--sage)}
+  .askbox button{
+    position:absolute;right:8px;top:8px;bottom:8px;width:78px;
+    background:var(--sage);color:#1B1917;border:none;border-radius:2px;
+    font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.16em;cursor:pointer;
+  }
+  .askbox button:hover{background:hsl(158,32%,60%)}
+  .examples{margin-top:13px}
+  .q{display:inline-block;line-height:25px;font-family:var(--serif);font-style:italic;font-size:15px;color:var(--muted);
+     text-decoration:underline dotted rgba(166,157,144,.5);text-underline-offset:3px;text-decoration-thickness:1px}
+  .q:hover{color:var(--ink)}
+
+  /* ---------- overnight readings ---------- */
+  .readings{flex:1;min-height:0;display:flex;flex-direction:column}
+  .band{flex-shrink:0;display:flex;align-items:baseline;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:9px 0}
+  .band-mark{width:7px;height:7px;background:var(--sage);display:inline-block;margin-right:10px;position:relative;top:-1px}
+  .band-title{color:var(--ink);letter-spacing:.16em}
+  .band-stats{margin-left:auto;display:flex;align-items:baseline;gap:9px}
+  .bstat{display:inline-block;padding:1px 0;font-size:13px;line-height:22px;color:var(--muted);white-space:nowrap}
+  .bstat b{color:var(--ink);font-weight:600}
+  .bstat .mono{color:var(--ink)}
+
+  .cols{
+    flex:1;min-height:120px;overflow:hidden;
+    column-count:4;column-gap:34px;column-rule:1px solid var(--hair);
+    padding-top:16px;
+  }
+  .shelf-head{
+    display:flex;align-items:baseline;gap:8px;
+    padding:2px 0 5px;margin:16px 0 8px;border-bottom:1px solid var(--hair);
+    break-inside:avoid;break-after:avoid;
+  }
+  .shelf-head:first-child{margin-top:0}
+  .shelf-name{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--ink)}
+  .shelf-count{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--sage)}
+  .entry{display:block;margin-bottom:11px;break-inside:avoid}
+  .entry .title{
+    display:block;font-family:var(--serif);font-size:14px;line-height:19px;color:var(--ink);
+    text-decoration:underline dotted rgba(231,227,218,.26);text-underline-offset:3px;text-decoration-thickness:1px;
+  }
+  .entry:hover .title{text-decoration-color:rgba(231,227,218,.55)}
+  .entry .meta{display:flex;align-items:baseline;gap:6px;margin-top:3px}
+  .src{font-family:var(--serif);font-style:italic;font-size:12.5px;color:var(--muted);
+       flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .claims{font-size:12px;color:var(--muted);white-space:nowrap;
+          text-decoration:underline dotted rgba(166,157,144,.45);text-underline-offset:3px;text-decoration-thickness:1px}
+  .claims b{color:var(--ink);font-weight:600}
+  .lead{flex:1;min-width:10px;border-bottom:1px dotted rgba(231,227,218,.2);margin-bottom:4px}
+  .cost{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap;
+        text-decoration:underline dotted rgba(166,157,144,.45);text-underline-offset:3px;text-decoration-thickness:1px}
+  .entry:hover .cost,.entry:hover .claims{color:var(--ink)}
+
+  .morerow{flex-shrink:0;text-align:center;padding:8px 0 12px}
+  .morerow a{display:inline-block;line-height:24px;font-size:13px;color:var(--muted)}
+  .morerow b{color:var(--ink);font-weight:600}
+  .morerow .go{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--sage);margin-left:10px}
+  .morerow a:hover .go{color:hsl(158,32%,64%)}
+
+  /* footer */
+  footer{flex-shrink:0;border-top:1px solid var(--hair);padding:12px 0 14px;text-align:center}
+  footer .lbl{color:var(--muted);letter-spacing:.16em;font-weight:600}
+
+  /* ---------- dock ---------- */
+  .dock{width:190px;flex-shrink:0;background:var(--rail);border-left:1px solid var(--hair);display:flex;flex-direction:column}
+  .dock-head{height:50px;flex-shrink:0;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--hair)}
+  .dock-head .lbl{color:var(--muted)}
+  .dock-n{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--sage)}
+  .dock-sub{padding:10px 18px 6px;font-size:12px;color:var(--muted)}
+  .tab{display:block;padding:11px 18px 12px;border-bottom:1px solid var(--hair)}
+  .tab:hover{background:#1C1916}
+  .tab-row{display:flex;align-items:baseline;gap:6px}
+  .chev{color:var(--faint);font-size:14px;line-height:1;flex-shrink:0;width:9px}
+  .tab-name{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.13em;color:var(--ink);white-space:nowrap}
+  .tab-count{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--sage)}
+  .gloss{display:block;margin-top:4px;padding-left:15px;font-size:12px;line-height:16px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<main>
+  <nav>
+    <span class="wordmark">Palingenesis</span>
+    <span class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#" class="active">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#">Engine&nbsp;Room</a>
+    </span>
+  </nav>
+
+  <header class="masthead">
+    <h1>The Library</h1>
+    <div class="motto">What the machine has read — and how it fits together.</div>
+    <div class="dateline">
+      <span class="lbl">Saturday · 22 August 2026 &nbsp;·&nbsp; <a class="dr" href="#">Overnight cycle <b class="num">Nº&nbsp;412</b></a> &nbsp;·&nbsp; closed 06:00 UTC</span>
+    </div>
+    <div class="statline num">
+      <a class="stat dr" href="#"><b>128,406</b> papers read</a><span class="sep">·</span>
+      <a class="stat dr" href="#"><b>4,913</b> evidence records</a><span class="sep">·</span>
+      <a class="stat dr" href="#"><b>61,204</b> connections</a><span class="sep">·</span>
+      <a class="stat dr" href="#"><b>12</b> research sweeps</a><span class="sep">·</span>
+      <a class="stat dr" href="#"><b>9</b> contradictions open</a>
+    </div>
+    <div class="mastrule"></div>
+  </header>
+
+  <section class="hero">
+    <div class="lbl ask-label">Ask the Library</div>
+    <div class="askbox">
+      <input type="text" aria-label="Ask the Library" placeholder="Ask anything the machine has read — answers cite their sources.">
+      <button type="button">Ask</button>
+    </div>
+    <div class="examples">
+      <a class="q" href="#">“Which cover crops cut nitrogen inputs without yield drag?”</a><br>
+      <a class="q" href="#">“What does the corpus hold on biochar in sandy loams?”</a><br>
+      <a class="q" href="#">“Where do our irrigation trials disagree with the literature?”</a>
+    </div>
+  </section>
+
+  <section class="readings">
+    <div class="band">
+      <span class="band-mark"></span>
+      <span class="lbl band-title">Overnight Readings</span>
+      <span class="band-stats num">
+        <a class="bstat dr" href="#"><b>341</b> papers</a><span class="sep">·</span>
+        <a class="bstat dr" href="#"><b>2,118</b> claims extracted</a><span class="sep">·</span>
+        <a class="bstat dr" href="#"><span class="mono">$14.62</span> metered</a>
+      </span>
+    </div>
+
+    <div class="cols">
+      <a class="shelf-head" href="#"><span class="shelf-name">Soil &amp; Water</span><span class="shelf-count num">84</span></a>
+      <a class="entry" href="#">
+        <span class="title">Ureide flux as a nitrogen-stress signal in irrigated soybean</span>
+        <span class="meta"><span class="src">Plant &amp; Soil 2026</span><span class="claims num"><b>9</b> claims</span><span class="lead"></span><span class="cost">$0.052</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Biochar half-life under repeated wet–dry cycling</span>
+        <span class="meta"><span class="src">Geoderma 2025</span><span class="claims num"><b>6</b> claims</span><span class="lead"></span><span class="cost">$0.038</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Drip lateral spacing and root plasticity in sandy loams</span>
+        <span class="meta"><span class="src">Agric. Water Mgmt 2026</span><span class="claims num"><b>11</b> claims</span><span class="lead"></span><span class="cost">$0.061</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Cover-crop rooting depth and residual moisture debt</span>
+        <span class="meta"><span class="src">Agron. Sustain. Dev. 2025</span><span class="claims num"><b>7</b> claims</span><span class="lead"></span><span class="cost">$0.035</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Gypsum rates for sodic patches in pivot corners</span>
+        <span class="meta"><span class="src">Soil Tillage Res. 2024</span><span class="claims num"><b>4</b> claims</span><span class="lead"></span><span class="cost">$0.019</span></span>
+      </a>
+
+      <a class="shelf-head" href="#"><span class="shelf-name">Crop Genetics</span><span class="shelf-count num">67</span></a>
+      <a class="entry" href="#">
+        <span class="title">A pan-genome scan for heat-tolerance loci in bread wheat</span>
+        <span class="meta"><span class="src">Nat. Plants 2026</span><span class="claims num"><b>14</b> claims</span><span class="lead"></span><span class="cost">$0.079</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Marker-assisted stacking of Sub1A with drought QTLs</span>
+        <span class="meta"><span class="src">Crop Sci. 2025</span><span class="claims num"><b>8</b> claims</span><span class="lead"></span><span class="cost">$0.044</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">CRISPR knockouts of GmELF3 and photoperiod escape</span>
+        <span class="meta"><span class="src">Plant Cell 2026</span><span class="claims num"><b>12</b> claims</span><span class="lead"></span><span class="cost">$0.068</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Landrace alleles for kernel micronutrient density</span>
+        <span class="meta"><span class="src">Theor. Appl. Genet. 2024</span><span class="claims num"><b>7</b> claims</span><span class="lead"></span><span class="cost">$0.036</span></span>
+      </a>
+
+      <a class="shelf-head" href="#"><span class="shelf-name">Pests &amp; Disease</span><span class="shelf-count num">58</span></a>
+      <a class="entry" href="#">
+        <span class="title">Rust spore drift modelling across the northern corridor</span>
+        <span class="meta"><span class="src">Phytopathology 2026</span><span class="claims num"><b>10</b> claims</span><span class="lead"></span><span class="cost">$0.055</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">RNAi sprays against Colorado beetle: field persistence</span>
+        <span class="meta"><span class="src">Pest Manag. Sci. 2025</span><span class="claims num"><b>9</b> claims</span><span class="lead"></span><span class="cost">$0.048</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Volatile priming of maize against stem borers</span>
+        <span class="meta"><span class="src">J. Chem. Ecol. 2025</span><span class="claims num"><b>5</b> claims</span><span class="lead"></span><span class="cost">$0.027</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Endophyte seed coats and damping-off suppression</span>
+        <span class="meta"><span class="src">Biol. Control 2026</span><span class="claims num"><b>6</b> claims</span><span class="lead"></span><span class="cost">$0.031</span></span>
+      </a>
+
+      <a class="shelf-head" href="#"><span class="shelf-name">Canopy &amp; Light</span><span class="shelf-count num">47</span></a>
+      <a class="entry" href="#">
+        <span class="title">Far-red enrichment and pod set in dense canopies</span>
+        <span class="meta"><span class="src">Field Crops Res. 2026</span><span class="claims num"><b>8</b> claims</span><span class="lead"></span><span class="cost">$0.042</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Row orientation and radiation-use efficiency at high latitude</span>
+        <span class="meta"><span class="src">Eur. J. Agron. 2024</span><span class="claims num"><b>5</b> claims</span><span class="lead"></span><span class="cost">$0.024</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Semi-dwarf stature and lodging risk under storm gusts</span>
+        <span class="meta"><span class="src">Agron. J. 2025</span><span class="claims num"><b>7</b> claims</span><span class="lead"></span><span class="cost">$0.039</span></span>
+      </a>
+
+      <a class="shelf-head" href="#"><span class="shelf-name">Storage &amp; Post-Harvest</span><span class="shelf-count num">39</span></a>
+      <a class="entry" href="#">
+        <span class="title">Hermetic bag ozone flushes and aflatoxin load</span>
+        <span class="meta"><span class="src">J. Stored Prod. Res. 2026</span><span class="claims num"><b>9</b> claims</span><span class="lead"></span><span class="cost">$0.047</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Chilling-injury thresholds for early tomato hybrids</span>
+        <span class="meta"><span class="src">Postharvest Biol. 2025</span><span class="claims num"><b>6</b> claims</span><span class="lead"></span><span class="cost">$0.033</span></span>
+      </a>
+      <a class="entry" href="#">
+        <span class="title">Ethylene scrubbing at village scale: energy budgets</span>
+        <span class="meta"><span class="src">Biosyst. Eng. 2024</span><span class="claims num"><b>5</b> claims</span><span class="lead"></span><span class="cost">$0.026</span></span>
+      </a>
+    </div>
+
+    <div class="morerow">
+      <a href="#" class="num">… and <b>322</b> further titles across <b>11</b> shelves<span class="go">Full record ›</span></a>
+    </div>
+  </section>
+
+  <footer>
+    <span class="lbl">Every claim sourced · every cost computed · every verdict recorded</span>
+  </footer>
+</main>
+
+<aside class="dock">
+  <div class="dock-head"><span class="lbl">Panels</span><span class="dock-n num">6</span></div>
+  <div class="dock-sub">closed — select to open</div>
+
+  <a class="tab" href="#">
+    <span class="tab-row"><span class="chev">‹</span><span class="tab-name">Connections</span><span class="tab-count num">61,204</span></span>
+    <span class="gloss">how evidence relates</span>
+  </a>
+  <a class="tab" href="#">
+    <span class="tab-row"><span class="chev">‹</span><span class="tab-name">In Use Now</span><span class="tab-count num">147</span></span>
+    <span class="gloss">evidence feeding live work</span>
+  </a>
+  <a class="tab" href="#">
+    <span class="tab-row"><span class="chev">‹</span><span class="tab-name">Refresh Due</span><span class="tab-count num">96</span></span>
+    <span class="gloss">sources gone stale</span>
+  </a>
+  <a class="tab" href="#">
+    <span class="tab-row"><span class="chev">‹</span><span class="tab-name">Reading Ledger</span><span class="tab-count num">$412.09</span></span>
+    <span class="gloss">cost of reading · August</span>
+  </a>
+  <a class="tab" href="#">
+    <span class="tab-row"><span class="chev">‹</span><span class="tab-name">Research Sweeps</span><span class="tab-count num">12</span></span>
+    <span class="gloss">7 under way · 5 queued</span>
+  </a>
+  <a class="tab" href="#">
+    <span class="tab-row"><span class="chev">‹</span><span class="tab-name">Contradictions</span><span class="tab-count num">9</span></span>
+    <span class="gloss">sources in disagreement</span>
+  </a>
+</aside>
+
+</body>
+</html>
