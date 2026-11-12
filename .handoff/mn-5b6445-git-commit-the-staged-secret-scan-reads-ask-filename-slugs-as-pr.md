@@ -7,7 +7,7 @@ base_commit: 989a7fb7810e5348685e3b25916d2708177fecd2
 scope: 'git commit: the staged-secret scan reads ''ask-'' filename slugs as provider keys (sk- matches mid-word)'
 inputs:
 - holy-ghostty /push prep, agent-do session c3f1ed43, 2026-11-12; blocked board commit
-binding: sha256:98c82bf6690ba5a60ac93d7b8100e5c8ade286baca922d91f585735b47181e18
+binding: sha256:f13a6806a657af1a2f4c5e84629552c99d8af1de804f8e8b0d7d09012c82e2f5
 ---
 
 # Handoff: git commit: the staged-secret scan reads 'ask-' filename slugs as provider keys (sk- matches mid-word)
@@ -49,8 +49,9 @@ Observed 2026-11-12 on the holy-ghostty board commit. agent-do git commit refuse
 - `bash -n tools/agent-git` and `git diff --check` passed. These are syntax/whitespace checks; the Python suite above executed real Git fixture operations. This CLI change has no Xcode target or compiled-only test receipt.
 - The installed `agent-do` entry resolves to this checkout, so no installation is required. No installed app launch, screenshot, live session creation, push, or pull request occurred.
 - Separate open work orders `mn-fefa01` (plain-text finding reporter) and `mn-481318` (commit help) are unchanged.
-- Lessons logged: 2 (new), `les-7a7839` and `les-72904c`. Decisions logged: 0 (new).
+- Lessons logged: 3 (new), covering provider boundaries, normalized handoff binding verification, and per-command output flags (`handoff seal` rejects `--json`; use `show --json` after sealing). Decisions logged: 0 (new).
+- Implementation commit: `3d355a1ea93d588e388310ef532dceba7703e8ee`, `fix(git): bound provider key detection to token starts`, with exact trailer `Manna: mn-5b6445`. Created through `agent-do git commit` with scanning enabled, exit 0. Only the implementation, regression test, this handoff, and this item's Manna row were staged. Foreign `.manna/drift.yaml` changes remain untouched.
 
 ## Remaining acceptance
 
-The Holy checkout still has its owner's staged board changes. Required verification (4), a real board commit through `agent-do git commit` with scanning enabled, is pending that owner's receipt. Coordinated via agent-do drops `drp-a74739781e37` and Holy drop `drp-1dcb8c62a8b3`. The claim remains in progress until the actual command, exit status, and commit SHA are verified. Visual/app acceptance is not applicable to this CLI-only work order.
+The Holy checkout still has its owner's staged board changes. Required verification (4), a real board commit through `agent-do git commit` with scanning enabled, is pending that owner's receipt. Coordinated via agent-do drops `drp-a74739781e37` and Holy drop `drp-1dcb8c62a8b3`, and dependency `mn-5b6445-holy-board-commit` from `session-c3f1ed434170`. The claim remains in progress until the actual command, exit status, and commit SHA are verified. Visual/app acceptance is not applicable to this CLI-only work order.
