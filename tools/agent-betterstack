@@ -48,7 +48,7 @@ INCIDENTS
   resolve <id>                  Resolve an incident
 
 HEARTBEATS
-  heartbeats                    List all heartbeats with status
+  heartbeats [--reveal]         List all heartbeats with status (ping URLs redacted unless --reveal)
 
 STATUS PAGES
   status-pages                  List all status pages
@@ -334,10 +334,29 @@ print(json.dumps({
 }
 
 cmd_heartbeats() {
+    # The heartbeat ping URL is a write credential: anyone holding it can mark
+    # the job alive. Redact it unless --reveal. The v2 list endpoint does not
+    # return last_pinged_at, so no LAST PING column: it was always '-'.
     _pop_json_flag "$@"
+    local reveal=false arg
+    for arg in "${_JSON_ARGS[@]+"${_JSON_ARGS[@]}"}"; do
+        [[ "$arg" == "--reveal" ]] && reveal=true
+    done
     local result
     result=$(bs_get "${BETTERSTACK_API_V2}/heartbeats") || return 1
-    if $_json_mode; then _emit_json "$result"; return; fi
+    if $_json_mode; then
+        if $reveal; then _emit_json "$result"; return; fi
+        printf '%s' "$result" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for item in d.get("data", []) if isinstance(d, dict) else []:
+    a = item.get("attributes", {})
+    if isinstance(a, dict) and "url" in a:
+        a["url"] = "<redacted>"
+print(json.dumps(d, indent=2))
+'
+        return
+    fi
     echo "$result" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -345,16 +364,17 @@ items = d.get('data', [])
 if not items:
     print('No heartbeats found.')
     sys.exit(0)
-fmt = '{:<10} {:<30} {:<12} {:<24}'
-print(fmt.format('ID', 'NAME', 'STATUS', 'LAST PING'))
-print('-' * 76)
+fmt = '{:<10} {:<30} {:<12} {:>8} {:>8}'
+print(fmt.format('ID', 'NAME', 'STATUS', 'PERIOD', 'GRACE'))
+print('-' * 72)
 for item in items:
     a = item.get('attributes', {})
     print(fmt.format(
         item.get('id', ''),
         a.get('name', '')[:30],
         a.get('status', ''),
-        (a.get('last_pinged_at', '') or '-')[:24],
+        str(a.get('period', '') or '-'),
+        str(a.get('grace', '') or '-'),
     ))
 "
 }

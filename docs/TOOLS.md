@@ -518,6 +518,7 @@ agent-do betterstack snapshot
 
 - Read-only (snapshot/verify; safe to parallelize): `availability`, `heartbeats`, `incident`, `incidents`, `monitors`, `on-call`, `response-times`, `show`, `snapshot`, `status-pages`
 - Write (connect/interact/save): `ack`, `pause`, `resolve`, `resume`
+- sensitive (emits or persists secret material; guard output): `heartbeats`
 - composite (one call performs several beats internally): `ack`, `pause`, `resolve`, `resume`
 
 ### bluetooth
