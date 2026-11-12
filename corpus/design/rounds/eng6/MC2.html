@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917;
+  --card:#211E1B;
+  --ink:#E7E3DA;
+  --mut:#A69D90;
+  --faint:#6E675E;
+  --hair:rgba(231,227,218,.14);
+  --sage:hsl(158,30%,55%);
+  --clay:hsl(12,42%,58%);
+  --serif:"Source Serif 4",Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:var(--bg)}
+body{font-family:var(--sans);font-size:14px;line-height:1.45;color:var(--ink);-webkit-font-smoothing:antialiased;min-width:1280px}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1376px;margin:0 auto;padding:0 40px}
+.mono{font-family:var(--mono)}
+.mut{color:var(--mut)}
+.mutv{color:var(--mut)}
+.sep{color:var(--mut)}
+.m{font-variant-numeric:tabular-nums}
+.r{text-align:right}
+.fig{text-decoration:underline dotted rgba(166,157,144,.6);text-underline-offset:3px;text-decoration-thickness:1px}
+.lbl{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+.lbl.strong{color:var(--ink)}
+
+/* nav */
+.nav{border-bottom:1px solid var(--hair)}
+.navrow{display:flex;align-items:center;gap:34px;height:62px}
+.wordmark{font-family:var(--serif);font-weight:600;font-size:19px}
+.navlinks{display:flex;gap:6px;flex:1}
+.navlinks a{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);padding:10px 10px 9px;line-height:1}
+.navlinks a.cur{color:var(--sage);border-bottom:1px solid var(--sage);padding-bottom:8px}
+.clock{font-size:14px}
+
+/* lede */
+.lede{font-family:var(--serif);font-weight:400;font-size:27px;line-height:1.3;padding:30px 0 24px}
+.lede .good{color:var(--sage);font-weight:600}
+.lede .mono{font-size:22px}
+
+/* day strip */
+.strip{display:flex;gap:26px;padding:16px 0 14px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+.ticks{flex:1;display:flex;position:relative}
+.ticks::before{content:"";position:absolute;left:calc(100%/32);right:calc(100%/32);top:24px;height:1px;background:var(--hair)}
+.tick{flex:1;display:flex;flex-direction:column;align-items:center;row-gap:4px}
+.chip{height:16px;line-height:16px;font-size:12px;color:var(--mut)}
+.chip.live{color:var(--sage)}
+.chip.slip{color:var(--clay);font-family:var(--mono)}
+.mk{width:10px;height:10px;border:1.5px solid var(--mut);background:var(--bg);position:relative;flex:none;z-index:1}
+.mk.done{background:var(--ink);border-color:var(--ink)}
+.mk.live{background:var(--sage);border-color:var(--sage);outline:1px solid var(--sage);outline-offset:2.5px}
+.mk.struck::before,.mk.struck::after{content:"";position:absolute;left:50%;top:50%;width:14px;height:1.5px;background:var(--mut)}
+.mk.struck::before{transform:translate(-50%,-50%) rotate(45deg)}
+.mk.struck::after{transform:translate(-50%,-50%) rotate(-45deg)}
+.tick .t{font-family:var(--mono);font-size:13px}
+.tick .id{font-family:var(--mono);font-size:12px;color:var(--mut)}
+.tick.open .t{color:var(--mut)}
+.tick.off .t,.tick.off .id{color:var(--mut);text-decoration:line-through;text-decoration-color:rgba(166,157,144,.7)}
+.totals{min-width:198px;display:flex;flex-direction:column;justify-content:center;gap:5px;border-left:1px solid var(--hair);padding-left:26px}
+.trow{display:flex;justify-content:space-between;align-items:baseline;gap:18px}
+.trow .val{font-size:14px}
+
+/* figure: rail + cards */
+.figure{padding:28px 0 12px}
+.frow{display:grid;grid-template-columns:330px 26px 1fr}
+.fhead{align-items:end;margin-bottom:12px}
+.fh-left{padding-left:30px;display:flex;gap:14px;align-items:baseline}
+.fh-left .mono{font-size:13px}
+.heads{padding:0 17px}
+.railbody{position:relative;display:flex;flex-direction:column}
+.railline{position:absolute;left:5px;top:34px;bottom:20px;width:2px}
+.railline svg{display:block;width:100%;height:100%}
+.stage{align-items:center;margin:4px 0}
+.st{position:relative;padding-left:30px}
+.st .mk{position:absolute;left:1px;top:50%;transform:translateY(-50%)}
+.sname{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
+.sname .off{font-weight:400;letter-spacing:0;font-size:12px;color:var(--mut);margin-left:7px}
+.sname.golive{color:var(--sage)}
+.sname.golive .off{color:var(--mut)}
+.stime{font-family:var(--mono);font-size:13px;margin-top:4px;color:var(--mut)}
+.stime .a{color:var(--ink)}
+.stime .a.none{color:var(--mut)}
+.tk{height:1px;background:var(--hair);align-self:center}
+.card{background:var(--card);border:1px solid var(--hair);padding:10px 16px;min-height:58px}
+.card.golive{border-left:2px solid var(--sage);padding-left:15px}
+.cgrid{display:grid;grid-template-columns:minmax(180px,1fr) 76px 170px 190px 96px;column-gap:18px;align-items:center}
+.svc .sn{font-family:var(--serif);font-weight:600;font-size:16px}
+.svc .job{font-size:12px;color:var(--mut);margin-top:2px}
+.state{font-size:13px;color:var(--mut)}
+.state.golive{color:var(--sage)}
+.last{font-family:var(--mono);font-size:13px}
+.cc{font-size:14px}
+.pin{position:relative;font-size:12px;color:var(--mut);padding:2px 0 12px 30px;margin-top:-1px}
+.pin::before{content:"";position:absolute;left:2.5px;top:6px;width:7px;height:7px;border:1.5px solid var(--mut);background:var(--bg);transform:rotate(45deg)}
+.pin .mono{font-size:12px}
+.pin.clay{color:var(--clay)}
+.pin.clay::before{border-color:var(--clay)}
+.pinfoot{position:relative;padding:10px 0 2px 30px;display:flex;gap:8px;align-items:baseline}
+.pinfoot::before{content:"";position:absolute;left:3px;top:14px;width:6px;height:6px;background:var(--mut)}
+.pinfoot .mono{font-size:13px}
+.of{font-size:12px;color:var(--mut)}
+
+/* bands */
+.band{display:grid;grid-template-columns:150px 1fr;gap:26px;padding:18px 0;border-top:1px solid var(--hair);align-items:start}
+.band.first{margin-top:16px}
+.sub{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:5px}
+.stats{display:flex;justify-content:space-between;gap:26px}
+.stat{display:flex;flex-direction:column;gap:5px}
+.stat .val{font-size:16px}
+.stat .valt{font-size:13.5px}
+.stat .valt .mono{font-size:13px}
+.clayv{color:var(--clay)}
+.sagev{color:var(--sage)}
+.ctl{display:flex;align-items:center;gap:26px}
+.btn{display:inline-flex;align-items:center;border:1px solid var(--mut);color:var(--ink);font-size:13px;letter-spacing:.14em;text-transform:uppercase;padding:12px 22px;line-height:1}
+.conseq{font-size:13.5px;color:var(--mut)}
+.conseq .mono{font-size:13px;color:var(--ink)}
+
+/* footer */
+footer{border-top:1px solid var(--hair);margin-top:26px}
+.motto{font-family:var(--serif);font-size:13.5px;color:var(--mut);text-align:center;padding:22px 0 40px}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap navrow">
+    <span class="wordmark">Palingenesis</span>
+    <nav class="navlinks">
+      <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a href="#" class="cur">Engine Room</a>
+    </nav>
+    <span class="clock mono">17:26:08 <span class="mut">· Fri 22 Aug</span></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <h1 class="lede"><span class="good">Nominal</span> · ten closed, one struck · cycle 12 mid-Simulate · 13 opens <span class="mono">18:00:00</span>.</h1>
+
+  <section class="strip">
+    <div class="ticks">
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">06:00</span><span class="id">r-2201</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">07:00</span><span class="id">r-2202</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">08:00</span><span class="id">r-2203</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">09:00</span><span class="id">r-2204</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">10:00</span><span class="id">r-2205</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">11:00</span><span class="id">r-2206</span></div>
+      <div class="tick off"><span class="chip">struck</span><span class="mk struck"></span><span class="t">12:00</span><span class="id">r-2207</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">13:00</span><span class="id">r-2208</span></div>
+      <div class="tick"><span class="chip slip">+21</span><span class="mk done"></span><span class="t">14:00</span><span class="id">r-2209</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">15:00</span><span class="id">r-2210</span></div>
+      <div class="tick"><span class="chip"></span><span class="mk done"></span><span class="t">16:00</span><span class="id">r-2211</span></div>
+      <div class="tick"><span class="chip live">live</span><span class="mk live"></span><span class="t">17:00</span><span class="id">r-2212</span></div>
+      <div class="tick open"><span class="chip"></span><span class="mk"></span><span class="t">18:00</span><span class="id">r-2213</span></div>
+      <div class="tick open"><span class="chip"></span><span class="mk"></span><span class="t">19:00</span><span class="id">r-2214</span></div>
+      <div class="tick open"><span class="chip"></span><span class="mk"></span><span class="t">20:00</span><span class="id">r-2215</span></div>
+      <div class="tick open"><span class="chip"></span><span class="mk"></span><span class="t">21:00</span><span class="id">r-2216</span></div>
+    </div>
+    <div class="totals">
+      <div class="trow"><span class="lbl">Spent</span><span class="val m fig">$107.13</span></div>
+      <div class="trow"><span class="lbl">Cap</span><span class="val m fig mutv">$500.00</span></div>
+      <div class="trow"><span class="lbl">≈ Close</span><span class="val m fig mutv">$155.90</span></div>
+    </div>
+  </section>
+
+  <section class="figure">
+    <div class="frow fhead">
+      <div class="fh-left"><span class="lbl strong">Cycle 12</span><span class="mono">r-2212</span><span class="mono mut">opened 17:00</span></div>
+      <div></div>
+      <div class="cgrid heads"><div></div><div class="lbl">State</div><div class="lbl">Last act</div><div class="lbl r">Spent / allot</div><div class="lbl r">≈ Close</div></div>
+    </div>
+    <div class="railbody">
+      <div class="railline" aria-hidden="true"><svg preserveAspectRatio="none" viewBox="0 0 2 100"><line x1="1" y1="0" x2="1" y2="100" stroke="rgba(231,227,218,0.14)" stroke-width="1.25" vector-effect="non-scaling-stroke"/></svg></div>
+
+      <div class="frow stage">
+        <div class="st">
+          <span class="mk done"></span>
+          <div class="sname">Open <span class="off mono">+0</span></div>
+          <div class="stime"><span class="b">17:00</span> → <span class="a">17:00</span></div>
+        </div>
+        <div class="tk"></div>
+        <div class="card cgrid">
+          <div class="svc"><div class="sn">Scout</div><div class="job">stocks the docket</div></div>
+          <div class="state">idle</div>
+          <div class="last">17:00 <span class="sep">·</span> <span class="mutv">r-2212</span></div>
+          <div class="cc r m"><span class="fig">$8.62</span> <span class="sep">/</span> <span class="fig mutv">$45.00</span></div>
+          <div class="cc r m"><span class="fig mutv">$12.40</span></div>
+        </div>
+      </div>
+      <div class="pin"><span class="mono">12:01</span> · feed empty · <span class="mono">r-2207</span> · struck, kept on book · <span class="mono">0.0 min</span></div>
+
+      <div class="frow stage">
+        <div class="st">
+          <span class="mk done"></span>
+          <div class="sname">Read <span class="off mono">+4</span></div>
+          <div class="stime"><span class="b">17:04</span> → <span class="a">17:04</span></div>
+        </div>
+        <div class="tk"></div>
+        <div class="card cgrid">
+          <div class="svc"><div class="sn">Reader</div><div class="job">reads the stack</div></div>
+          <div class="state">idle</div>
+          <div class="last">17:04 <span class="sep">·</span> <span class="mutv">r-2212</span></div>
+          <div class="cc r m"><span class="fig">$19.84</span> <span class="sep">/</span> <span class="fig mutv">$60.00</span></div>
+          <div class="cc r m"><span class="fig mutv">$28.90</span></div>
+        </div>
+      </div>
+
+      <div class="frow stage">
+        <div class="st">
+          <span class="mk done"></span>
+          <div class="sname">Deliberate <span class="off mono">+12</span></div>
+          <div class="stime"><span class="b">17:12</span> → <span class="a">17:12</span></div>
+        </div>
+        <div class="tk"></div>
+        <div class="card cgrid">
+          <div class="svc"><div class="sn">Council</div><div class="job">votes the verdict</div></div>
+          <div class="state">idle</div>
+          <div class="last">17:12 <span class="sep">·</span> <span class="mutv">r-2212</span></div>
+          <div class="cc r m"><span class="fig">$36.90</span> <span class="sep">/</span> <span class="fig mutv">$130.00</span></div>
+          <div class="cc r m"><span class="fig mutv">$53.70</span></div>
+        </div>
+      </div>
+
+      <div class="frow stage">
+        <div class="st">
+          <span class="mk live"></span>
+          <div class="sname golive">Simulate <span class="off mono">+22</span></div>
+          <div class="stime"><span class="b">17:22</span> → <span class="a">17:22</span></div>
+        </div>
+        <div class="tk"></div>
+        <div class="card cgrid golive">
+          <div class="svc"><div class="sn">Simulator</div><div class="job">runs the trial</div></div>
+          <div class="state golive">live</div>
+          <div class="last">17:22 <span class="sep">·</span> <span class="mutv">r-2212</span></div>
+          <div class="cc r m"><span class="fig">$31.55</span> <span class="sep">/</span> <span class="fig mutv">$175.00</span></div>
+          <div class="cc r m"><span class="fig mutv">$46.00</span></div>
+        </div>
+      </div>
+      <div class="pin clay"><span class="mono">14:22</span> · queue stall · <span class="mono">r-2209</span> · requeued <span class="mono">14:43</span> · closed <span class="mono">15:02</span> · <span class="mono">21.0 min</span></div>
+
+      <div class="frow stage">
+        <div class="st">
+          <span class="mk"></span>
+          <div class="sname">Record <span class="off mono">+34</span></div>
+          <div class="stime"><span class="b">17:34</span> → <span class="a none">—</span></div>
+        </div>
+        <div class="tk"></div>
+        <div class="card cgrid">
+          <div class="svc"><div class="sn">Archivist</div><div class="job">writes lineage</div></div>
+          <div class="state">idle</div>
+          <div class="last">16:34 <span class="sep">·</span> <span class="mutv">r-2211</span></div>
+          <div class="cc r m"><span class="fig">$5.71</span> <span class="sep">/</span> <span class="fig mutv">$40.00</span></div>
+          <div class="cc r m"><span class="fig mutv">$8.30</span></div>
+        </div>
+      </div>
+      <div class="pin"><span class="mono">17:15</span> · snapshot checksum fail · write 1 · write 2 verified <span class="mono">17:15:09</span> · <span class="mono">0.2 min</span></div>
+
+      <div class="frow stage">
+        <div class="st">
+          <span class="mk"></span>
+          <div class="sname">Close <span class="off mono">+41</span></div>
+          <div class="stime"><span class="b">17:41</span> → <span class="a none">—</span></div>
+        </div>
+        <div class="tk"></div>
+        <div class="card cgrid">
+          <div class="svc"><div class="sn">Courier</div><div class="job">posts and closes</div></div>
+          <div class="state">idle</div>
+          <div class="last">16:41 <span class="sep">·</span> <span class="mutv">r-2211</span></div>
+          <div class="cc r m"><span class="fig">$4.51</span> <span class="sep">/</span> <span class="fig mutv">$50.00</span></div>
+          <div class="cc r m"><span class="fig mutv">$6.60</span></div>
+        </div>
+      </div>
+
+      <div class="pinfoot"><span class="lbl">Minutes lost</span> <span class="mono m fig">21.2</span> <span class="of">of</span> <span class="mono m">960</span> <span class="of">booked</span></div>
+    </div>
+  </section>
+
+  <section class="band first">
+    <div class="bl"><div class="lbl">Volumes</div><div class="sub">to 17:26</div></div>
+    <div class="stats">
+      <div class="stat"><span class="lbl">Sources scouted</span><span class="val m fig">132</span></div>
+      <div class="stat"><span class="lbl">Papers read</span><span class="val m fig">64</span></div>
+      <div class="stat"><span class="lbl">Claims kept</span><span class="val m fig">409</span></div>
+      <div class="stat"><span class="lbl">Trials run</span><span class="val m fig">11</span></div>
+      <div class="stat"><span class="lbl">Verdicts recorded</span><span class="val m fig">10</span></div>
+      <div class="stat"><span class="lbl">Digests posted</span><span class="val m fig">10</span></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="bl"><div class="lbl">Scheduler</div></div>
+    <div class="stats">
+      <div class="stat"><span class="lbl">Cadence</span><span class="valt">1 open / hour · <span class="mono">06:00–21:00</span></span></div>
+      <div class="stat"><span class="lbl">Late rule</span><span class="valt">struck past <span class="mono">+25</span></span></div>
+      <div class="stat"><span class="lbl">Worst today</span><span class="valt mono clayv">+21</span></div>
+      <div class="stat"><span class="lbl">Next open</span><span class="valt"><span class="mono">18:00:00</span> · cycle 13 · <span class="mono">r-2213</span></span></div>
+      <div class="stat"><span class="lbl">Clock</span><span class="valt">farm local · UTC−05</span></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="bl"><div class="lbl">Data</div></div>
+    <div class="stats">
+      <div class="stat"><span class="lbl">Snapshot</span><span class="valt"><span class="mono">17:15:09</span> · <span class="m fig">412 MB</span> · <span class="sagev">verified</span></span></div>
+      <div class="stat"><span class="lbl">Archive</span><span class="valt"><span class="m fig">1,283 runs</span> · <span class="m fig">9.6 GB</span> · to <span class="mono">16:43</span></span></div>
+      <div class="stat"><span class="lbl">Backfill</span><span class="valt"><span class="m fig">0 owed</span></span></div>
+      <div class="stat"><span class="lbl">Last repair</span><span class="valt">Aug 19</span></div>
+      <div class="stat"><span class="lbl">Next snap</span><span class="valt"><span class="mono">18:15:00</span> · hourly at <span class="mono">:15</span></span></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="bl"><div class="lbl">Control</div></div>
+    <div class="ctl">
+      <a class="btn" href="#">Suspend generation</a>
+      <p class="conseq">Cycle 12 runs to <span class="mono">17:41</span> · cycles 13–16 do not open · resume reopens next booked hour.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap"><p class="motto">Every claim sourced · every cost computed · every verdict recorded</p></div>
+</footer>
+
+</body>
+</html>

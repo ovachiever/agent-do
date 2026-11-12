@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917;
+  --ink:#E7E3DA;
+  --muted:#A69D90;
+  --hair:rgba(231,227,218,0.14);
+  --sage:hsl(158,30%,55%);
+  --clay:hsl(12,42%,58%);
+  --lift:#211E1B;
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:'Source Sans 3',-apple-system,'Helvetica Neue',Arial,sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{background:var(--bg)}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font:400 14px/1.45 var(--sans);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{width:1200px;margin:0 auto}
+
+/* type planes */
+.t{font-family:var(--mono)}                            /* times */
+.r{font-family:var(--mono);color:var(--muted)}         /* run ids */
+.hd{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.m{text-decoration:underline dotted rgba(166,157,144,.75);text-underline-offset:3px;text-decoration-thickness:1px}
+.clay{color:var(--clay)}
+.sage{color:var(--sage)}
+
+/* nav */
+nav{border-bottom:1px solid var(--hair)}
+.navrow{display:flex;align-items:center;justify-content:space-between}
+.mark{font-family:var(--serif);font-size:21px;font-weight:600;padding:18px 0}
+.links{display:flex;gap:26px}
+.links a{text-decoration:none;color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:24px 0 22px}
+.links a.cur{color:var(--sage);border-bottom:2px solid var(--sage);margin-bottom:-1px}
+.clock{font-family:var(--mono);font-size:13px}
+.clock .d{color:var(--muted)}
+
+/* lede */
+h1.lede{
+  font-family:var(--serif);font-weight:400;font-size:25px;line-height:1.4;
+  margin:36px 0 34px;letter-spacing:.005em;
+}
+h1.lede .m{font-family:var(--sans);font-size:22px;font-weight:600}
+h1.lede .t{font-size:22px}
+
+/* figure */
+.figure{position:relative;height:784px;margin-bottom:8px}
+.figure svg{position:absolute;inset:0}
+.figure svg line{stroke:var(--hair);stroke-width:1;shape-rendering:crispEdges}
+
+.tick{position:absolute;top:0;width:75px;height:80px;text-align:center}
+.hh{position:absolute;top:0;left:0;right:0;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.rid{position:absolute;top:16px;left:0;right:0;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.stw{position:absolute;top:32px;left:0;right:0;font-size:12px;color:var(--muted)}
+.stw.t21{font-family:var(--mono);color:var(--clay)}
+.stw.lv{color:var(--sage)}
+
+.dot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--muted);transform:translate(-50%,-50%)}
+.dot.live{width:12px;height:12px;background:var(--sage)}
+.dot.open{background:var(--bg);border:1.5px solid var(--muted)}
+.xmark{position:absolute;transform:translate(-50%,-50%);font-family:var(--mono);font-size:15px;line-height:1;color:var(--muted)}
+
+.lv-row{position:absolute;left:0;width:838px;height:20px;line-height:20px;font-size:14px}
+.cs{position:absolute;left:0;top:0;width:150px}
+.cs .sn{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink)}
+.cs .off{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:7px}
+.ct{position:absolute;left:160px;top:0;width:160px}
+.ct .t{font-size:13px}
+.ct .st1{font-size:12px;color:var(--muted);margin-left:6px}
+.ct .st1.sg{color:var(--sage)}
+.cv{position:absolute;left:330px;top:0;width:205px;white-space:nowrap}
+.cv b{font-weight:600}
+.cv .job{font-size:13px;color:var(--muted)}
+.m1{position:absolute;left:540px;top:0;width:100px;text-align:right}
+.m2{position:absolute;left:650px;top:0;width:80px;text-align:right}
+.m3{position:absolute;left:740px;top:0;width:98px;text-align:right}
+
+.pin{position:absolute;left:896px;width:302px;font-size:12px;line-height:16px;color:var(--muted)}
+.pin .w{color:var(--ink)}
+.pin .t{font-size:12px}
+.pm{position:absolute;left:880px;width:6px;height:6px;background:var(--muted)}
+.pm.clay{background:var(--clay)}
+
+.fv{font-size:16px;font-weight:600;line-height:20px}
+.f-lbl{position:absolute;top:757px}
+.f-val{position:absolute;top:733px}
+
+/* bands */
+.band{border-top:1px solid var(--hair);padding:16px 0;display:flex}
+.band .bl{width:160px;flex:none;padding-top:2px}
+.band .bl .sub{display:block;font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;margin-top:3px}
+.band .bc{display:flex;flex-wrap:wrap;gap:10px 34px;align-items:baseline}
+.pair .k{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-right:8px}
+.pair .v{color:var(--ink)}
+.pair .v .t{font-size:13px}
+
+.band.control .bc{align-items:center;gap:24px}
+button.suspend{
+  background:var(--lift);border:1px solid var(--muted);border-radius:2px;color:var(--ink);
+  font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  padding:12px 22px;cursor:pointer;
+}
+.conseq{font-size:13px;color:var(--muted)}
+.conseq .t{font-size:12px;color:var(--ink)}
+
+/* footer */
+footer{border-top:1px solid var(--hair);margin-top:8px;padding:22px 0 42px;text-align:center}
+footer p{font-family:var(--serif);font-size:13px;color:var(--muted);letter-spacing:.02em}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap navrow">
+    <div class="mark">Palingenesis</div>
+    <div class="links">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#" class="cur">Engine Room</a>
+    </div>
+    <div class="clock"><span>17:26:08</span> <span class="d">· Fri 22 Aug</span></div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <h1 class="lede">Nominal — ten closed, one struck · <span class="m">$107.13</span>/<span class="m">$500.00</span> · cycle 12 mid-Simulate · 13 opens <span class="t">18:00:00</span>.</h1>
+
+  <div class="figure">
+    <svg width="1200" height="784" viewBox="0 0 1200 784" aria-hidden="true">
+      <line x1="25" y1="52" x2="1175" y2="52"/>
+      <line x1="862.5" y1="52" x2="862.5" y2="719"/>
+      <line x1="848" y1="719" x2="877" y2="719"/>
+      <line x1="862.5" y1="150" x2="880" y2="150"/>
+      <line x1="862.5" y1="436" x2="880" y2="436"/>
+      <line x1="862.5" y1="592" x2="880" y2="592"/>
+    </svg>
+
+    <!-- day strip -->
+    <div class="tick" style="left:0"><div class="hh">06:00</div><div class="rid">r-2201</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:75px"><div class="hh">07:00</div><div class="rid">r-2202</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:150px"><div class="hh">08:00</div><div class="rid">r-2203</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:225px"><div class="hh">09:00</div><div class="rid">r-2204</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:300px"><div class="hh">10:00</div><div class="rid">r-2205</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:375px"><div class="hh">11:00</div><div class="rid">r-2206</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:450px"><div class="hh">12:00</div><div class="rid">r-2207</div><div class="stw">struck</div><div class="xmark" style="left:50%;top:52px">×</div></div>
+    <div class="tick" style="left:525px"><div class="hh">13:00</div><div class="rid">r-2208</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:600px"><div class="hh">14:00</div><div class="rid">r-2209</div><div class="stw t21">+21</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:675px"><div class="hh">15:00</div><div class="rid">r-2210</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:750px"><div class="hh">16:00</div><div class="rid">r-2211</div><div class="dot" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:825px"><div class="hh">17:00</div><div class="rid">r-2212</div><div class="stw lv">live</div><div class="dot live" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:900px"><div class="hh">18:00</div><div class="rid">r-2213</div><div class="dot open" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:975px"><div class="hh">19:00</div><div class="rid">r-2214</div><div class="dot open" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:1050px"><div class="hh">20:00</div><div class="rid">r-2215</div><div class="dot open" style="left:50%;top:52px"></div></div>
+    <div class="tick" style="left:1125px"><div class="hh">21:00</div><div class="rid">r-2216</div><div class="dot open" style="left:50%;top:52px"></div></div>
+
+    <!-- column heads -->
+    <div class="r" style="position:absolute;left:160px;top:100px;font-size:12px">r-2212</div>
+    <div class="hd" style="position:absolute;left:540px;top:100px;width:100px;text-align:right">Spent today</div>
+    <div class="hd" style="position:absolute;left:650px;top:100px;width:80px;text-align:right">Allot</div>
+    <div class="hd" style="position:absolute;left:740px;top:100px;width:98px;text-align:right">≈ Close</div>
+    <div class="hd" style="position:absolute;left:896px;top:100px">Incidents</div>
+
+    <!-- stations -->
+    <div class="dot" style="left:862.5px;top:150px"></div>
+    <div class="dot" style="left:862.5px;top:202px"></div>
+    <div class="dot" style="left:862.5px;top:306px"></div>
+    <div class="dot live" style="left:862.5px;top:436px"></div>
+    <div class="dot open" style="left:862.5px;top:592px"></div>
+    <div class="dot open" style="left:862.5px;top:683px"></div>
+
+    <!-- levels -->
+    <div class="lv-row" style="top:140px">
+      <span class="cs"><span class="sn">Open</span><span class="off">+0</span></span>
+      <span class="ct"><span class="t">17:00</span><span class="st1">done</span></span>
+      <span class="cv"><b>Scout</b><span class="job"> — stocks the docket</span></span>
+      <span class="m1"><span class="m">$8.62</span></span>
+      <span class="m2"><span class="m">$45</span></span>
+      <span class="m3"><span class="m">≈$12.40</span></span>
+    </div>
+    <div class="lv-row" style="top:192px">
+      <span class="cs"><span class="sn">Read</span><span class="off">+4</span></span>
+      <span class="ct"><span class="t">17:04</span><span class="st1">done</span></span>
+      <span class="cv"><b>Reader</b><span class="job"> — reads the stack</span></span>
+      <span class="m1"><span class="m">$19.84</span></span>
+      <span class="m2"><span class="m">$60</span></span>
+      <span class="m3"><span class="m">≈$28.90</span></span>
+    </div>
+    <div class="lv-row" style="top:296px">
+      <span class="cs"><span class="sn">Deliberate</span><span class="off">+12</span></span>
+      <span class="ct"><span class="t">17:12</span><span class="st1">done</span></span>
+      <span class="cv"><b>Council</b><span class="job"> — votes the verdict</span></span>
+      <span class="m1"><span class="m">$36.90</span></span>
+      <span class="m2"><span class="m">$130</span></span>
+      <span class="m3"><span class="m">≈$53.70</span></span>
+    </div>
+    <div class="lv-row" style="top:426px">
+      <span class="cs"><span class="sn">Simulate</span><span class="off">+22</span></span>
+      <span class="ct"><span class="t">17:22</span><span class="st1 sg">live</span></span>
+      <span class="cv"><b>Simulator</b><span class="job"> — runs the trial</span></span>
+      <span class="m1"><span class="m">$31.55</span></span>
+      <span class="m2"><span class="m">$175</span></span>
+      <span class="m3"><span class="m">≈$46.00</span></span>
+    </div>
+    <div class="lv-row" style="top:582px">
+      <span class="cs"><span class="sn">Record</span><span class="off">+34</span></span>
+      <span class="ct"><span class="t">17:34</span><span class="st1">booked</span></span>
+      <span class="cv"><b>Archivist</b><span class="job"> — writes lineage</span></span>
+      <span class="m1"><span class="m">$5.71</span></span>
+      <span class="m2"><span class="m">$40</span></span>
+      <span class="m3"><span class="m">≈$8.30</span></span>
+    </div>
+    <div class="lv-row" style="top:673px">
+      <span class="cs"><span class="sn">Close</span><span class="off">+41</span></span>
+      <span class="ct"><span class="t">17:41</span><span class="st1">booked</span></span>
+      <span class="cv"><b>Courier</b><span class="job"> — posts and closes</span></span>
+      <span class="m1"><span class="m">$4.51</span></span>
+      <span class="m2"><span class="m">$50</span></span>
+      <span class="m3"><span class="m">≈$6.60</span></span>
+    </div>
+
+    <!-- incident pins -->
+    <div class="pm" style="top:147px"></div>
+    <div class="pin" style="top:134px">
+      <div><span class="t">12:01</span> · <span class="w">feed empty</span> · <span class="r">r-2207</span></div>
+      <div>struck · kept on book · 0.0 lost</div>
+    </div>
+    <div class="pm clay" style="top:433px"></div>
+    <div class="pin" style="top:420px">
+      <div><span class="t">14:22</span> · <span class="clay">queue stall</span> · <span class="r">r-2209</span></div>
+      <div>requeued <span class="t">14:43</span> · closed <span class="t">15:02</span> · <span class="clay">21.0 lost</span></div>
+    </div>
+    <div class="pm" style="top:589px"></div>
+    <div class="pin" style="top:576px">
+      <div><span class="t">17:15</span> · <span class="w">checksum fail</span> · write 1</div>
+      <div>write 2 verified <span class="t">17:15:09</span> · 0.2 lost</div>
+    </div>
+
+    <!-- foot -->
+    <div class="f-val m1"><span class="fv m">$107.13</span></div>
+    <div class="f-val m2"><span class="fv m">$500.00</span></div>
+    <div class="f-val m3"><span class="fv m">≈$155.90</span></div>
+    <div class="f-lbl hd" style="left:540px;width:100px;text-align:right">Spent</div>
+    <div class="f-lbl hd" style="left:650px;width:80px;text-align:right">Cap</div>
+    <div class="f-lbl hd" style="left:740px;width:98px;text-align:right">≈ Close</div>
+    <div class="f-val" style="left:896px"><span class="fv">21.2 of 960 booked</span></div>
+    <div class="f-lbl hd" style="left:896px">Min lost</div>
+  </div>
+
+  <!-- chapters -->
+  <div class="band">
+    <div class="bl"><span class="hd">Volumes</span><span class="sub">to 17:26</span></div>
+    <div class="bc">
+      <span class="pair"><span class="k">Sources scouted</span><span class="v">132</span></span>
+      <span class="pair"><span class="k">Papers read</span><span class="v">64</span></span>
+      <span class="pair"><span class="k">Claims kept</span><span class="v">409</span></span>
+      <span class="pair"><span class="k">Trials run</span><span class="v">11</span></span>
+      <span class="pair"><span class="k">Verdicts recorded</span><span class="v">10</span></span>
+      <span class="pair"><span class="k">Digests posted</span><span class="v">10</span></span>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="bl"><span class="hd">Scheduler</span></div>
+    <div class="bc">
+      <span class="pair"><span class="k">Cadence</span><span class="v">one open / hour · <span class="t">06:00</span>–<span class="t">21:00</span></span></span>
+      <span class="pair"><span class="k">Late rule</span><span class="v">struck past <span class="t">+25</span></span></span>
+      <span class="pair"><span class="k">Worst today</span><span class="v"><span class="t clay">+21</span></span></span>
+      <span class="pair"><span class="k">Next open</span><span class="v"><span class="t">18:00:00</span> · cycle 13 · <span class="r">r-2213</span></span></span>
+      <span class="pair"><span class="k">Clock</span><span class="v">farm local · UTC−05</span></span>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="bl"><span class="hd">Data</span></div>
+    <div class="bc">
+      <span class="pair"><span class="k">Snapshot</span><span class="v"><span class="t">17:15:09</span> · 412 MB · verified</span></span>
+      <span class="pair"><span class="k">Archive</span><span class="v">1,283 runs · 9.6 GB · to <span class="t">16:43</span></span></span>
+      <span class="pair"><span class="k">Backfill</span><span class="v">0 owed</span></span>
+      <span class="pair"><span class="k">Last repair</span><span class="v">Aug 19</span></span>
+      <span class="pair"><span class="k">Next snap</span><span class="v"><span class="t">18:15:00</span> · hourly at :15</span></span>
+    </div>
+  </div>
+
+  <div class="band control">
+    <div class="bl"><span class="hd">Control</span></div>
+    <div class="bc">
+      <button class="suspend" type="button">Suspend generation</button>
+      <span class="conseq">Cycle 12 runs to <span class="t">17:41</span> · 13–16 do not open · resume reopens next booked hour.</span>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <p>Every claim sourced · every cost computed · every verdict recorded</p>
+</footer>
+
+</body>
+</html>
