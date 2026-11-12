@@ -192,6 +192,22 @@ def _save_profiles(data: dict[str, Any]) -> None:
 
 # ── HTTP client ────────────────────────────────────────────────────────────────
 
+class _SameOriginRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep Jira credentials on the configured origin across redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        def origin(url):
+            parts = urllib.parse.urlsplit(url)
+            return parts.scheme.lower(), parts.hostname, parts.port or (443 if parts.scheme.lower() == "https" else 80)
+
+        try:
+            if origin(req.full_url) != origin(newurl):
+                return None
+        except ValueError:
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class JiraClient:
     def __init__(self, url: str, email: str, token: str, *, server: bool = False):
         self.base = _validate_base_url(url)
@@ -223,7 +239,7 @@ class JiraClient:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.build_opener(_SameOriginRedirect()).open(req, timeout=30) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:

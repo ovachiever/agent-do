@@ -181,6 +181,7 @@ check_cmd "git guardrail tests" python3 "$SCRIPT_DIR/tests/test_git_guardrails.p
 check_cmd "git managed integration tests" python3 "$SCRIPT_DIR/tests/test_git_integration.py"
 check_cmd "worktree binding tests" python3 "$SCRIPT_DIR/tests/test_worktree_binding.py"
 check_cmd "jira tests" python3 "$SCRIPT_DIR/tests/test_jira.py"
+check_cmd "jira redirect credential tests" python3 "$SCRIPT_DIR/tests/test_jira_redirect.py"
 check_cmd "hardware tests" python3 "$SCRIPT_DIR/tests/test_hardware.py"
 check_cmd "meetings tests" python3 "$SCRIPT_DIR/tests/test_meetings.py"
 check_cmd "harness tests" python3 "$SCRIPT_DIR/tests/test_harness.py"
