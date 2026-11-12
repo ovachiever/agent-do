@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (103 tools)
+## Summary (104 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -99,6 +99,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [repl](#repl) | Control interactive REPLs (Python, Node, psql, etc.) | mixed | 5 |
 | [resend](#resend) | Resend domain management and DNS verification — exact records, verification state, and public DNS checks | mixed | 7 |
 | [screen](#screen) | Vision-based screen perception and control (macOS) | mixed | 9 |
+| [security](#security) | CVE discovery, dependency/runtime assessment and portfolio monitoring | mixed | 9 |
 | [sentry](#sentry) | Sentry error tracking, issue management, alerts, and releases | mixed | 12 |
 | [serial](#serial) | Serial port communication | mixed | 3 |
 | [sessions](#sessions) | Search and retrieve AI coding session history | read | 9 |
@@ -3883,6 +3884,84 @@ agent-do screen type 'hello world'
 
 - Read-only (snapshot/verify; safe to parallelize): `cursor`, `displays`, `elements`, `find`, `snapshot`
 - Write (connect/interact/save): `click`, `press`, `scroll`, `type`
+
+### security
+
+CVE discovery, dependency/runtime assessment and portfolio monitoring
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- prefer cve.now for compatible advisory discovery with NVD/GitHub fallback; no repository uploads
+- combine curated Java, Spring Boot, Angular, Node.js, and AKS searches with per-query coverage and target-match provenance
+- scan isolated dependency-file snapshots with OSV-Scanner v2; file-only mode does not execute target code
+- scan a local text/JSON list of GitHub repositories with per-repository commits, findings, and failure coverage
+- explicitly opt in to local Maven/Gradle build resolution with exact selected versions, scopes, and dependency paths
+- filter by CVSS, severity, advisory dates, package, published fixes, and CISA known exploitation
+- save unfiltered attributable reports with explicit coverage gaps and refilter them later
+- explicitly opt in to private scanner stderr capture for diagnosing unclassified coverage warnings
+- attach separately scoped Dependabot alert evidence through gh alerts when available
+- monitor configured local/GitHub portfolios with due intervals, scope-aware finding transitions, and durable digests
+- export reviewable recurring cron jobs and explicitly opt in to existing notify delivery
+- distinguish project declarations from observed Java/Python interpreters and imported runtime evidence
+- preserve NVD applicability conditions and monitor exact runtime inventory with per-component lifecycle evidence
+
+**Commands**
+
+- `find`: Discover advisories: find [--source auto|nvd|github|cve-now] [--technology SLUG] [--feed-filter critical|kev] [--source-status] [--target java --target spring-boot --target angular --target nodejs --target aks | --vendor V --product P | --ecosystem E --package P] [--cvss-min N] [--json]
+- `scan`: Assess dependencies: scan (--path DIR | --repo URL | --repos-file PATH) [--ref REF] [--resolve maven|gradle] [--cvss-min N] [--json]; resolution executes trusted local build code and permits build writes
+- `runtime`: Assess runtime evidence: runtime [--path DIR] [--local-java --java PATH --java-cpe CPE] [--local-python --python PATH --python-upstream] [--inventory PATH] [--image REF] [--rootfs DIR] [--kube-context CTX --namespace NS] [--inventory-only] [--json]; explicit local probing and collectors execute trusted installed helpers
+- `report`: List or select saved evidence: report [--list | --latest | --latest-complete | --file PATH] [--target NAME ...] [--json]
+- `doctor`: Check scanner and local feature prerequisites without network requests: doctor [--json]
+- `monitor init`: Create a portfolio without overwriting config: monitor init --config PATH [(--repos-file PATH | --path DIR)] [--runtime-inventory PATH] [--image REF] [--rootfs DIR] [--kube-context CTX --namespace NS] [--resolve maven|gradle] [--local-python --python PATH --python-upstream] [--interval-hours N] [--json]; at least one source/runtime input is required
+- `monitor run`: Assess and compare a portfolio: monitor run --config PATH [--due] [--allow-builds] [--allow-collectors] [--runtime-limit N] [--notify-recipient ALIAS] [--cvss-min N] [--json]
+- `monitor report`: Read/refilter a monitor digest: monitor report --config PATH [--file PATH] [--severity LIST] [--json]
+- `monitor schedule`: Export a reviewable cron entry without installing: monitor schedule --config PATH [--allow-builds] [--allow-collectors] [--runtime-limit N] [--notify-recipient ALIAS] [--json]
+
+**Examples**
+
+```bash
+# find Oracle JDK CVEs
+agent-do security find --vendor oracle --product jdk --json
+# find LiteLLM advisories
+agent-do security find --ecosystem pypi --package litellm --json
+# scan local dependencies
+agent-do security scan --path . --json
+# scan a GitHub repository at a specific ref
+agent-do security scan --repo https://github.com/owner/repo --ref main --json
+# scan all team repositories saved in a local file
+agent-do security scan --repos-file ./team-repos.txt --cvss-min 7 --include-unscored --json
+# list previous security assessments including failed scans
+agent-do security report --list --json
+# configure daily scans of my team repositories
+agent-do security monitor init --config ./team-security.json --repos-file ./team-repos.txt --interval-hours 24 --json
+# scan my portfolio and show newly detected and ongoing vulnerabilities
+agent-do security monitor run --config ./team-security.json --cvss-min 7 --include-unscored --json
+# resolve Spring Boot dependencies from Maven parents and BOMs before scanning
+agent-do security scan --path . --resolve maven --maven-profile prod --json
+# scan Gradle runtime and test dependencies at their selected versions
+agent-do security scan --path . --resolve gradle --gradle-configuration runtimeClasspath --gradle-configuration testRuntimeClasspath --json
+# search recent advisories across my Java, Angular, Node, and AKS stack
+agent-do security find --target java --target spring-boot --target angular --target nodejs --target aks --published-after 2026-10-15 --cvss-min 7 --include-unscored --json
+```
+
+**Credentials**
+
+- Optional: `NVD_API_KEY`, `GH_TOKEN`, `GITHUB_TOKEN`
+- Note: NVD_API_KEY raises upstream NVD request allowance; public advisory discovery can work without credentials.
+- Note: GitHub acquisition uses the installed gh authentication. Token presence alone does not prove access.
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `doctor`, `monitor report`, `monitor schedule`, `report`
+- Write (connect/interact/save): `find`, `monitor init`, `monitor run`, `runtime`, `scan`
+- sensitive (emits or persists secret material; guard output): `monitor run`, `runtime`
+- passthrough (arbitrary-payload escape hatch; beat decided by the argument): `monitor run`, `runtime`, `scan`
+- long_running (daemon/stream/session; may never return): `monitor run`
+- polymorphic (beat decided by payload or flag at call time): `runtime`, `scan`
+- composite (one call performs several beats internally): `find`, `monitor run`, `runtime`, `scan`
+- own_state (writes only its own cache/state; parallel-safe): `find`, `monitor init`, `monitor run`, `runtime`
 
 ### sentry
 

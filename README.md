@@ -12,7 +12,7 @@ agent-do is the workshop's answer to both problems: a standard, known shape, tha
 agent-do <tool> <command> [args...]
 ```
 
-Behind that shape sit 103 tools exposing 961 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
+Behind that shape sit 104 tools exposing 970 commands. What follows is the company as a worker meets it: the tools on the bench, the sign-in sheet, the job list on the wall, the journal, the foreman, and the owner's window; then why it holds together, and where it is going. The tools appear only as evidence that each faculty and each institution is real.
 
 ## The tools on the bench
 
@@ -127,5 +127,13 @@ Three moves, all on the board, in a program the board calls Moon: seven trunks l
 A team that runs ten agents without something like this pays for the same job twice, starts blocked work because the dependency graph lived in a document nobody read, ships work from a model that was too weak for it, and cannot say a month later which model wrote which commit. The usual remedy is to ask the people to be careful, and carefulness is a property of a person, which does not scale to five developers and ten agents with the lead asleep. This is the other remedy: a dharma held in the machine, so that nobody has to be careful. A vessel whose every act keeps a receipt, and a shop that reads the receipts to whoever arrives next. Intelligence is now the cheap part. What is scarce is an institution that intelligence can work inside of without remembering that it exists, and that is what was built here, on itself and on seven real builds, first.
 
 Give the mind a vessel whose every act keeps a receipt, and build every institution as if no habit survives the shift, because here none does; the handoff, never the recollection, is the continuity.
+
+Vulnerability discovery and local/GitHub source dependency scans are available through `agent-do security`; see [the scanning guide](docs/security/README.md) for setup, filters, evidence, and coverage limits, and [the parameter reference](docs/security/SECURITY_CLI_REFERENCE.md) for every option with example commands.
+
+Dependency remediation and draft update PRs are planned in [Planned upgrades](docs/security/PLANNED_UPGRADES.md); they are not implemented yet.
+
+Use [runtime assessment](docs/security/RUNTIME_ASSESSMENT.md) to distinguish Java build declarations from observed JDK versions and imported deployment inventory.
+
+Use [portfolio monitoring](docs/security/PORTFOLIO_MONITORING.md) for saved team configurations, scope-aware change digests, recurring cron exports, and explicitly requested notifications.
 
 The full system map is in [ARCHITECTURE.md](ARCHITECTURE.md); hook wiring is in [docs/INTEGRATION.md](docs/INTEGRATION.md); the tool catalog is generated into [docs/TOOLS.md](docs/TOOLS.md). MIT license.

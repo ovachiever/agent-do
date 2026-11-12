@@ -1,0 +1,67 @@
+// Injected only by an explicitly opted-in dependency-resolution scan.
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+
+gradle.projectsEvaluated {
+    def taskName = 'agentDoSecurityInventory'
+    if (gradle.rootProject.tasks.findByName(taskName) != null) {
+        throw new GradleException("Reserved task already exists: ${taskName}")
+    }
+    gradle.rootProject.tasks.register(taskName) {
+        doLast {
+            def result = [schema_version: 1, gradle_version: gradle.gradleVersion, projects: []]
+            def selected = System.getProperty('agentdo.security.configurations').split(',').toList()
+            gradle.rootProject.allprojects.sort { it.path }.each { project ->
+                def entry = [project: project.path, manifest: project.buildFile.absolutePath,
+                             configurations: [], missing_configurations: [], included_builds: []]
+                selected.each { name ->
+                    def configuration = project.configurations.findByName(name)
+                    if (configuration == null || !configuration.canBeResolved) {
+                        entry.missing_configurations.add(name)
+                        return
+                    }
+                    def graph = [configuration: name, root: null, components: [], edges: [], unresolved: [], file_dependencies: []]
+                    try {
+                        def resolution = configuration.incoming.resolutionResult
+                        graph.root = resolution.root.id.displayName
+                        resolution.allComponents.each { component ->
+                            def external = component.id instanceof ModuleComponentIdentifier
+                            graph.components.add([id: component.id.displayName, external: external,
+                                group: external ? component.id.group : null,
+                                name: external ? component.id.module : null,
+                                version: external ? component.id.version : null,
+                                selection_reasons: component.selectionReason.descriptions.collect { it.description }])
+                        }
+                        resolution.allDependencies.each { dependency ->
+                            if (dependency instanceof UnresolvedDependencyResult) {
+                                graph.unresolved.add([from: dependency.from.id.displayName,
+                                    requested: dependency.attempted.displayName])
+                            } else if (dependency instanceof ResolvedDependencyResult) {
+                                graph.edges.add([from: dependency.from.id.displayName,
+                                    to: dependency.selected.id.displayName,
+                                    requested: dependency.requested.displayName,
+                                    constraint: dependency.constraint])
+                            }
+                        }
+                        configuration.allDependencies.each { dependency ->
+                            if (dependency instanceof org.gradle.api.artifacts.FileCollectionDependency) {
+                                graph.file_dependencies.add([kind: 'file_collection', name: dependency.name])
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        graph.unresolved.add([kind: 'configuration_resolution_failed'])
+                    }
+                    entry.configurations.add(graph)
+                }
+                // An aggregator with no configurations is not a missing JVM application.
+                entry.has_resolvable_configurations = project.configurations.any { it.canBeResolved }
+                result.projects.add(entry)
+            }
+            result.included_builds = gradle.includedBuilds.collect { it.name }
+            def destination = new File(System.getProperty('agentdo.security.output'))
+            destination.setText(JsonOutput.toJson(result), 'UTF-8')
+        }
+    }
+}

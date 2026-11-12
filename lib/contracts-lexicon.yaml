@@ -354,6 +354,16 @@ patterns:
 # These were seeded from the 2026-06-11 stress-test evidence and grow during
 # review. `skip: true` excludes a verb from proposing (manual review item).
 overrides:
+  security:
+    runtime: {beats: [snapshot, interact, verify, save], attributes: [composite, polymorphic, passthrough, own_state, sensitive]}
+    find: {beats: [snapshot, save], attributes: [composite, own_state]}
+    scan: {beats: [snapshot, interact, save], attributes: [composite, polymorphic, passthrough]}
+    report: {beats: [snapshot]}
+    doctor: {beats: [verify]}
+    monitor init: {beats: [save], attributes: [own_state]}
+    monitor run: {beats: [snapshot, interact, verify, save], attributes: [composite, passthrough, own_state, long_running, sensitive]}
+    monitor report: {beats: [snapshot]}
+    monitor schedule: {beats: [snapshot]}
   deai:
     packs: {beats: [snapshot]}
     measure: {beats: [snapshot]}        # counts a local corpus; prints receipts without writing

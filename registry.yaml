@@ -1,4 +1,135 @@
 tools:
+  security:
+    description: CVE discovery, dependency/runtime assessment and portfolio monitoring
+    capabilities:
+    - prefer cve.now for compatible advisory discovery with NVD/GitHub fallback; no repository uploads
+    - combine curated Java, Spring Boot, Angular, Node.js, and AKS searches with per-query coverage and target-match provenance
+    - scan isolated dependency-file snapshots with OSV-Scanner v2; file-only mode does not execute target code
+    - scan a local text/JSON list of GitHub repositories with per-repository commits, findings, and failure coverage
+    - explicitly opt in to local Maven/Gradle build resolution with exact selected versions, scopes, and dependency paths
+    - filter by CVSS, severity, advisory dates, package, published fixes, and CISA known exploitation
+    - save unfiltered attributable reports with explicit coverage gaps and refilter them later
+    - explicitly opt in to private scanner stderr capture for diagnosing unclassified coverage warnings
+    - attach separately scoped Dependabot alert evidence through gh alerts when available
+    - monitor configured local/GitHub portfolios with due intervals, scope-aware finding transitions, and durable digests
+    - export reviewable recurring cron jobs and explicitly opt in to existing notify delivery
+    - distinguish project declarations from observed Java/Python interpreters and imported runtime evidence
+    - preserve NVD applicability conditions and monitor exact runtime inventory with per-component lifecycle evidence
+    commands:
+      find: 'Discover advisories: find [--source auto|nvd|github|cve-now] [--technology SLUG] [--feed-filter critical|kev] [--source-status] [--target java --target spring-boot --target angular --target nodejs --target aks | --vendor V --product P | --ecosystem E --package P] [--cvss-min N] [--json]'
+      scan: 'Assess dependencies: scan (--path DIR | --repo URL | --repos-file PATH) [--ref REF] [--resolve maven|gradle] [--cvss-min N] [--json]; resolution executes trusted local build code and permits build writes'
+      runtime: 'Assess runtime evidence: runtime [--path DIR] [--local-java --java PATH --java-cpe CPE] [--local-python --python PATH --python-upstream] [--inventory PATH] [--image REF] [--rootfs DIR] [--kube-context CTX --namespace NS] [--inventory-only] [--json]; explicit local probing and collectors execute trusted installed helpers'
+      report: 'List or select saved evidence: report [--list | --latest | --latest-complete | --file PATH] [--target NAME ...] [--json]'
+      doctor: 'Check scanner and local feature prerequisites without network requests: doctor [--json]'
+      monitor init: 'Create a portfolio without overwriting config: monitor init --config PATH [(--repos-file PATH | --path DIR)] [--runtime-inventory PATH] [--image REF] [--rootfs DIR] [--kube-context CTX --namespace NS] [--resolve maven|gradle] [--local-python --python PATH --python-upstream] [--interval-hours N] [--json]; at least one source/runtime input is required'
+      monitor run: 'Assess and compare a portfolio: monitor run --config PATH [--due] [--allow-builds] [--allow-collectors] [--runtime-limit N] [--notify-recipient ALIAS] [--cvss-min N] [--json]'
+      monitor report: 'Read/refilter a monitor digest: monitor report --config PATH [--file PATH] [--severity LIST] [--json]'
+      monitor schedule: 'Export a reviewable cron entry without installing: monitor schedule --config PATH [--allow-builds] [--allow-collectors] [--runtime-limit N] [--notify-recipient ALIAS] [--json]'
+    examples:
+    - intent: find Oracle JDK CVEs
+      command: agent-security find --vendor oracle --product jdk --json
+    - intent: find LiteLLM advisories
+      command: agent-security find --ecosystem pypi --package litellm --json
+    - intent: scan local dependencies
+      command: agent-security scan --path . --json
+    - intent: scan a GitHub repository at a specific ref
+      command: agent-security scan --repo https://github.com/owner/repo --ref main --json
+    - intent: scan all team repositories saved in a local file
+      command: agent-security scan --repos-file ./team-repos.txt --cvss-min 7 --include-unscored --json
+    - intent: list previous security assessments including failed scans
+      command: agent-security report --list --json
+    - intent: configure daily scans of my team repositories
+      command: agent-security monitor init --config ./team-security.json --repos-file ./team-repos.txt --interval-hours 24 --json
+    - intent: scan my portfolio and show newly detected and ongoing vulnerabilities
+      command: agent-security monitor run --config ./team-security.json --cvss-min 7 --include-unscored --json
+    - intent: resolve Spring Boot dependencies from Maven parents and BOMs before scanning
+      command: agent-security scan --path . --resolve maven --maven-profile prod --json
+    - intent: scan Gradle runtime and test dependencies at their selected versions
+      command: agent-security scan --path . --resolve gradle --gradle-configuration runtimeClasspath --gradle-configuration testRuntimeClasspath --json
+    - intent: search recent advisories across my Java, Angular, Node, and AKS stack
+      command: agent-security find --target java --target spring-boot --target angular --target nodejs --target aks --published-after 2026-10-15 --cvss-min 7 --include-unscored --json
+    routing:
+      discover_keywords: [security, cve, vulnerability, vulnerabilities, osv, dependabot, cvss]
+      prompt_patterns:
+      - '\b(scan|find|check)\b.*\b(cves?|vulnerabilit(?:y|ies))\b'
+      recommended_entrypoints:
+      - agent-do security doctor --json
+      - agent-do security scan --path . --json
+      default_command: doctor
+    credentials:
+      optional: [NVD_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+      notes:
+      - NVD_API_KEY raises upstream NVD request allowance; public advisory discovery can work without credentials.
+      - GitHub acquisition uses the installed gh authentication. Token presence alone does not prove access.
+    bounds:
+      '*':
+        source: none
+        why: >-
+          Caller-controlled --limit (100 source records), --max-bytes (16777216 per stream/file),
+          --scan-timeout (300 seconds), --cache-ttl (3600 seconds), and --retries (2) are operator
+          defaults, not published ceilings. Runtime collectors use caller-controlled --collect-timeout (300 seconds) and --database-max-age (86400 seconds). Truncation and incomplete coverage are explicit.
+          HTTP timeout defaults to lib/quantities.READ_PROBE_TIMEOUT_SECONDS. Upstream pagination
+          uses GitHub's documented maximum 100 records/page and NVD's 2000 records/page;
+          NVD date windows are limited to its documented 120-day API window.
+          In multi-target discovery --limit applies independently per component query;
+          profile query counts are measured from the versioned catalog and reported.
+          Repository-list scans run sequentially over all unique repo/ref entries in a
+          caller-supplied file bounded by --max-bytes; subprocess timeouts apply per call,
+          not to the full portfolio. No repository count cap is implied. Monitor configuration
+          uses the same caller-controlled --max-bytes bound. --interval-hours defaults to 24,
+          a whole positive number of hours chosen by the operator. Exported cron checks are
+          hourly and --due gates actual scans; cadence is an operator default, not a ceiling.
+          Runtime --limit and monitor --runtime-limit default to 1000 NVD records per component;
+          --probe-timeout uses the shared read-probe timeout. These are operator defaults.
+          Comparisons measure all retained findings without an arbitrary count/history cap.
+          NVD pacing uses the published 5 or 50 requests per 30 seconds without/with
+          an API key (6 or 0.6 seconds), shared by every query in the invocation.
+    contracts:
+      snapshot:
+      - find
+      - scan
+      - runtime
+      - report
+      - monitor run
+      - monitor report
+      - monitor schedule
+      interact:
+      - scan
+      - runtime
+      - monitor run
+      verify:
+      - runtime
+      - doctor
+      - monitor run
+      save:
+      - find
+      - scan
+      - runtime
+      - monitor init
+      - monitor run
+      attributes:
+        find:
+        - composite
+        - own_state
+        scan:
+        - composite
+        - polymorphic
+        - passthrough
+        runtime:
+        - composite
+        - polymorphic
+        - passthrough
+        - own_state
+        - sensitive
+        monitor init:
+        - own_state
+        monitor run:
+        - composite
+        - passthrough
+        - own_state
+        - long_running
+        - sensitive
+    concurrency: mixed
   design:
     description: Image-first design workflow with approved copy and measured browser polish
     capabilities:
