@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palingenesis · Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1B1917;
+    --surface:#211E1B;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --line:rgba(231,227,218,0.30);
+    --sage:hsl(158,30%,55%);
+    --clay:hsl(12,42%,58%);
+    --serif:'Source Serif 4',Georgia,serif;
+    --sans:'Source Sans 3',Arial,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);overflow-x:hidden;}
+  body{
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;text-decoration:none;}
+  .container{max-width:1320px;margin:0 auto;padding:0 40px;}
+  @media (max-width:900px){ .container{padding:0 24px;} }
+  @media (max-width:480px){ .container{padding:0 16px;} }
+
+  /* ---------- Masthead ---------- */
+  .masthead{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--hair);}
+  .masthead-inner{display:flex;align-items:center;gap:20px;padding:14px 0;flex-wrap:wrap;}
+  .brand{font-family:var(--serif);font-weight:600;font-size:20px;letter-spacing:0.01em;color:var(--ink);}
+  .nav{display:flex;gap:2px;flex-wrap:wrap;flex:1 1 auto;justify-content:center;}
+  .nav a{font-family:var(--sans);font-size:14px;font-weight:500;color:var(--muted);padding:10px 13px;min-height:24px;display:inline-flex;align-items:center;border-radius:2px;}
+  .nav a:hover{color:var(--ink);}
+  .nav a.active{color:var(--ink);position:relative;}
+  .nav a.active::after{content:"";position:absolute;left:13px;right:13px;bottom:5px;height:2px;background:var(--sage);}
+  .clock{font-family:var(--mono);font-size:13px;color:var(--muted);white-space:nowrap;}
+
+  /* ---------- Section rhythm ---------- */
+  section{padding:48px 0;border-bottom:1px solid var(--hair);}
+  section:last-of-type{border-bottom:none;}
+  @media (max-width:900px){ section{padding:32px 0;} }
+  h2{font-family:var(--serif);font-weight:600;font-size:23px;margin:0 0 22px;color:var(--ink);}
+
+  /* ---------- Opening + Standing (shared first view) ---------- */
+  .fold{padding:52px 0 40px;border-bottom:1px solid var(--hair);}
+  .fold-inner{display:flex;gap:60px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;}
+  .opening-col{flex:1 1 380px;max-width:520px;}
+  .room{font-family:var(--serif);font-weight:600;font-size:44px;margin:0 0 16px;letter-spacing:-0.01em;color:var(--ink);}
+  .lede{font-family:var(--sans);font-size:18px;color:var(--ink);margin:0;line-height:1.55;}
+  .standing-col{flex:1 1 520px;max-width:760px;}
+  .standing-meta{display:flex;gap:22px;margin:0 0 16px;flex-wrap:wrap;}
+  .standing-meta span{font-family:var(--mono);font-size:13px;color:var(--muted);}
+  .standing-tiles{display:grid;grid-template-columns:0.8fr 1fr 0.8fr 1.2fr 1.2fr;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:2px;overflow:hidden;}
+  .tile{position:relative;background:var(--surface);padding:16px 12px 14px;display:flex;flex-direction:column;min-height:100px;justify-content:center;}
+  .tile-label{font-family:var(--sans);font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);margin:0 20px 8px 0;line-height:1.3;}
+  .tile-figure{font-family:var(--mono);font-weight:600;font-size:19px;color:var(--ink);line-height:1.1;white-space:nowrap;letter-spacing:-0.02em;}
+  .tile::after{content:"▸";position:absolute;top:14px;right:12px;color:var(--sage);font-size:13px;}
+  @media (max-width:900px){ .fold-inner{flex-direction:column;gap:32px;} .standing-tiles{grid-template-columns:repeat(2,1fr);} .tile-figure{font-size:22px;white-space:normal;} .room{font-size:34px;} }
+  @media (max-width:480px){ .room{font-size:27px;} .lede{font-size:16px;} }
+
+  /* ---------- Hindcast strip ---------- */
+  .strip-wrap{position:relative;width:100%;}
+  .wide-strip{aspect-ratio:1000/240;display:block;}
+  .narrow-strip{aspect-ratio:260/900;display:none;max-width:420px;margin:0 auto;}
+  .strip-svg{position:absolute;inset:0;width:100%;height:100%;display:block;}
+  .wide-strip .ticks{position:absolute;left:0;right:0;top:88.75%;height:0;}
+  .wide-strip .ticks span{position:absolute;transform:translateX(-50%);font-family:var(--mono);font-weight:500;font-size:13px;color:var(--muted);white-space:nowrap;top:6px;}
+  .narrow-strip .ticks{position:absolute;top:0;bottom:0;left:0;width:15%;}
+  .narrow-strip .ticks span{position:absolute;transform:translateY(-50%);right:8px;width:200%;text-align:right;font-family:var(--mono);font-weight:500;font-size:12px;color:var(--muted);white-space:nowrap;}
+  @media (max-width:900px){ .wide-strip{display:none;} .narrow-strip{display:block;} }
+
+  .hc-legend{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-flow:column;grid-template-rows:repeat(2,auto);gap:10px 22px;margin-top:26px;padding-top:20px;border-top:1px solid var(--hair);}
+  .hc-legend p{font-family:var(--mono);font-size:13px;color:var(--ink);margin:0;position:relative;padding-left:15px;line-height:1.5;}
+  .hc-legend p::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;background:var(--sage);}
+  .hc-legend p.miss{color:var(--clay);}
+  .hc-legend p.miss::before{background:var(--clay);}
+  @media (max-width:900px){ .hc-legend{grid-template-columns:1fr;grid-auto-flow:row;} }
+
+  /* ---------- Runs ---------- */
+  .runs-list{display:flex;flex-direction:column;}
+  .run{background:var(--surface);border:1px solid var(--hair);border-top:none;border-left-width:2px;padding:20px 24px;position:relative;}
+  .run:first-child{border-top:1px solid var(--hair);}
+  .run:first-child,.runs-list .run:first-child{border-top-left-radius:2px;border-top-right-radius:2px;}
+  .run:last-child{border-bottom-left-radius:2px;border-bottom-right-radius:2px;}
+  .run.run-ok{border-left-color:var(--sage);}
+  .run.run-flag{border-left-color:var(--clay);}
+  .run.run-cannot{border-left-color:var(--clay);}
+  .run-id{font-family:var(--mono);font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);margin:0 0 9px;}
+  .run-id.flag{color:var(--clay);}
+  .run h3{font-family:var(--serif);font-weight:600;font-size:21px;margin:0 0 10px;color:var(--ink);}
+  .run-result{font-family:var(--mono);font-size:14px;color:var(--ink);margin:0 0 6px;position:relative;padding-left:17px;}
+  .run-result::before{content:"";position:absolute;left:0;top:6px;width:7px;height:7px;border-radius:50%;background:var(--muted);}
+  .run-result.state-ok::before{background:var(--sage);}
+  .run-result.state-flag::before{background:var(--clay);}
+  .run-result.state-cannot{color:var(--clay);}
+  .run-result.state-cannot::before{background:var(--clay);}
+  .run-ens{font-family:var(--sans);font-size:13px;color:var(--muted);margin:0 0 12px;}
+  .drill{display:inline-flex;align-items:center;gap:6px;font-family:var(--sans);font-size:13px;font-weight:500;color:var(--sage);min-height:24px;padding:4px 0;border-bottom:1px dotted var(--sage);}
+  .drill::before{content:"▸";font-size:11px;}
+
+  /* ---------- Cores ---------- */
+  .cores-list{display:flex;flex-direction:column;border:1px solid var(--hair);border-radius:2px;overflow:hidden;}
+  .core-row{font-family:var(--mono);font-size:14px;color:var(--ink);padding:14px 20px 14px 32px;border-bottom:1px solid var(--hair);position:relative;}
+  .core-row:last-child{border-bottom:none;}
+  .core-row::before{content:"";position:absolute;left:14px;top:50%;transform:translateY(-50%);width:7px;height:7px;border-radius:50%;background:var(--sage);}
+  .core-row.flag::before{background:var(--clay);}
+
+  /* ---------- Provenance disclosure ---------- */
+  .disclosure{border:1px solid var(--hair);border-radius:2px;background:var(--surface);}
+  .disclosure summary{font-family:var(--serif);font-weight:600;font-size:17px;padding:18px 22px;cursor:pointer;list-style:none;min-height:24px;display:flex;align-items:center;}
+  .disclosure summary::-webkit-details-marker{display:none;}
+  .disclosure summary::before{content:"▸";color:var(--sage);margin-right:10px;font-size:13px;display:inline-block;transition:transform .15s;}
+  .disclosure[open] summary::before{transform:rotate(90deg);}
+  .disclosure-body{padding:2px 22px 22px;border-top:1px solid var(--hair);}
+  .disclosure-body p{font-family:var(--sans);font-size:14px;color:var(--ink);margin:16px 0 0;line-height:1.6;}
+  .disclosure-body p.caption{color:var(--muted);font-size:13px;}
+
+  /* ---------- Colophon ---------- */
+  .colophon{border-bottom:none;padding:30px 0;}
+  .colophon-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;}
+  .colophon .caption{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .colophon .brand{font-size:16px;}
+  @media (max-width:480px){ .colophon-inner{flex-direction:column;align-items:flex-start;} }
+</style>
+</head>
+<body>
+
+<header class="masthead" data-group="masthead">
+  <div class="container masthead-inner">
+    <span class="brand" data-node="brand">Palingenesis</span>
+    <nav class="nav">
+      <a data-node="nav-today" href="#standing">Today</a>
+      <a data-node="nav-pipeline" href="#runs">Pipeline</a>
+      <a data-node="nav-library" href="#hindcasts">Library</a>
+      <a data-node="nav-portfolio" href="#cores">Portfolio</a>
+      <a data-node="nav-simulation" href="#opening" class="active">Simulation</a>
+      <a data-node="nav-engine" href="#colophon">Engine Room</a>
+    </nav>
+    <span class="clock" data-node="clock">17:26:08 · Fri 22 Aug</span>
+  </div>
+</header>
+
+<main class="container">
+
+  <section class="fold" id="opening" data-group="opening">
+    <div class="fold-inner">
+      <div class="opening-col">
+        <h1 class="room" data-node="room">Simulation</h1>
+        <p class="lede" data-node="lede">Nominal — three runs closed, two cannot simulate; litter core calibration due 30 Sep.</p>
+      </div>
+      <div class="standing-col" id="standing" data-group="standing">
+        <div class="standing-meta">
+          <span data-node="standing-model">Model · palingenesis-sim v0.9.3</span>
+          <span data-node="standing-site">Site · Majella House 4</span>
+        </div>
+        <div class="standing-tiles">
+          <a class="tile" href="#provenance">
+            <span class="tile-label" data-node="standing-tier-label">Tier</span>
+            <span class="tile-figure" data-node="standing-tier">T2</span>
+          </a>
+          <a class="tile" href="#hindcasts">
+            <span class="tile-label" data-node="standing-skill-label">Hindcast skill · 0.61 baseline</span>
+            <span class="tile-figure" data-node="standing-skill">0.82</span>
+          </a>
+          <a class="tile" href="#hindcasts">
+            <span class="tile-label" data-node="standing-cov-label">Coverage · n=41</span>
+            <span class="tile-figure" data-node="standing-cov">88%</span>
+          </a>
+          <a class="tile" href="#provenance">
+            <span class="tile-label" data-node="standing-cal-label">Calibrated · 14 mo telemetry</span>
+            <span class="tile-figure" data-node="standing-cal">2026-08-19</span>
+          </a>
+          <a class="tile" href="#provenance">
+            <span class="tile-label" data-node="standing-par-label">Site · published parameters</span>
+            <span class="tile-figure" data-node="standing-par">67% / 33%</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="hindcasts" data-group="hindcasts">
+    <h2 data-node="hc-title">Hindcasts · 8 scored</h2>
+
+    <div class="strip-wrap wide-strip">
+      <svg class="strip-svg" viewBox="0 0 1000 240" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Hindcast dated strip">
+        <line x1="10" y1="205" x2="990" y2="205" stroke="var(--hair)" stroke-width="1"/>
+        <line x1="40" y1="205" x2="40" y2="213" stroke="var(--muted)" stroke-width="1"/>
+        <line x1="326" y1="205" x2="326" y2="213" stroke="var(--muted)" stroke-width="1"/>
+        <line x1="674" y1="205" x2="674" y2="213" stroke="var(--muted)" stroke-width="1"/>
+        <line x1="960" y1="205" x2="960" y2="213" stroke="var(--muted)" stroke-width="1"/>
+
+        <!-- hc-1 -->
+        <line x1="25" y1="190" x2="25" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="17" y1="190" x2="33" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="17" y1="50" x2="33" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="25" cy="98.47" r="7" fill="var(--sage)"/>
+        <!-- hc-2 -->
+        <line x1="55" y1="190" x2="55" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="47" y1="190" x2="63" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="47" y1="50" x2="63" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="55" cy="120" r="7" fill="var(--sage)"/>
+        <!-- hc-3 (miss) -->
+        <line x1="311" y1="190" x2="311" y2="50" stroke="var(--clay)" stroke-width="2"/>
+        <line x1="303" y1="190" x2="319" y2="190" stroke="var(--clay)" stroke-width="2"/>
+        <line x1="303" y1="50" x2="319" y2="50" stroke="var(--clay)" stroke-width="2"/>
+        <line x1="311" y1="50" x2="311" y2="28.79" stroke="var(--clay)" stroke-width="2" stroke-dasharray="2,3"/>
+        <circle cx="311" cy="28.79" r="8" fill="var(--clay)"/>
+        <!-- hc-4 -->
+        <line x1="341" y1="190" x2="341" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="333" y1="190" x2="349" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="333" y1="50" x2="349" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="341" cy="102.5" r="7" fill="var(--sage)"/>
+        <!-- hc-5 -->
+        <line x1="659" y1="190" x2="659" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="651" y1="190" x2="667" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="651" y1="50" x2="667" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="659" cy="134" r="7" fill="var(--sage)"/>
+        <!-- hc-6 -->
+        <line x1="689" y1="190" x2="689" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="681" y1="190" x2="697" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="681" y1="50" x2="697" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="689" cy="111.25" r="7" fill="var(--sage)"/>
+        <!-- hc-7 -->
+        <line x1="945" y1="190" x2="945" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="937" y1="190" x2="953" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="937" y1="50" x2="953" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="945" cy="99.41" r="7" fill="var(--sage)"/>
+        <!-- hc-8 -->
+        <line x1="975" y1="190" x2="975" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <line x1="967" y1="190" x2="983" y2="190" stroke="var(--line)" stroke-width="2"/>
+        <line x1="967" y1="50" x2="983" y2="50" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="975" cy="120" r="7" fill="var(--sage)"/>
+      </svg>
+      <div class="ticks">
+        <span style="left:4%">2026-07-01</span>
+        <span style="left:32.6%">2026-07-15</span>
+        <span style="left:67.4%">2026-08-01</span>
+        <span style="left:96%">2026-08-15</span>
+      </div>
+    </div>
+
+    <div class="strip-wrap narrow-strip">
+      <svg class="strip-svg" viewBox="0 0 260 900" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Hindcast dated strip">
+        <line x1="20" y1="60" x2="240" y2="60" stroke="var(--hair)" stroke-width="1"/>
+        <line x1="20" y1="302.667" x2="240" y2="302.667" stroke="var(--hair)" stroke-width="1"/>
+        <line x1="20" y1="597.333" x2="240" y2="597.333" stroke="var(--hair)" stroke-width="1"/>
+        <line x1="20" y1="840" x2="240" y2="840" stroke="var(--hair)" stroke-width="1"/>
+        <line x1="110" y1="40" x2="110" y2="864" stroke="var(--hair)" stroke-width="1"/>
+        <line x1="230" y1="40" x2="230" y2="864" stroke="var(--hair)" stroke-width="1"/>
+
+        <!-- hc-1 -->
+        <line x1="110" y1="44" x2="230" y2="44" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="36" x2="110" y2="52" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="36" x2="230" y2="52" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="188.46" cy="44" r="7" fill="var(--sage)"/>
+        <!-- hc-2 -->
+        <line x1="110" y1="76" x2="230" y2="76" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="68" x2="110" y2="84" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="68" x2="230" y2="84" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="170" cy="76" r="7" fill="var(--sage)"/>
+        <!-- hc-3 (miss) -->
+        <line x1="110" y1="286.667" x2="230" y2="286.667" stroke="var(--clay)" stroke-width="2"/>
+        <line x1="110" y1="278.667" x2="110" y2="294.667" stroke="var(--clay)" stroke-width="2"/>
+        <line x1="230" y1="278.667" x2="230" y2="294.667" stroke="var(--clay)" stroke-width="2"/>
+        <line x1="230" y1="286.667" x2="248.18" y2="286.667" stroke="var(--clay)" stroke-width="2" stroke-dasharray="2,3"/>
+        <circle cx="248.18" cy="286.667" r="8" fill="var(--clay)"/>
+        <!-- hc-4 -->
+        <line x1="110" y1="318.667" x2="230" y2="318.667" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="310.667" x2="110" y2="326.667" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="310.667" x2="230" y2="326.667" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="185" cy="318.667" r="7" fill="var(--sage)"/>
+        <!-- hc-5 -->
+        <line x1="110" y1="581.333" x2="230" y2="581.333" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="573.333" x2="110" y2="589.333" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="573.333" x2="230" y2="589.333" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="158" cy="581.333" r="7" fill="var(--sage)"/>
+        <!-- hc-6 -->
+        <line x1="110" y1="613.333" x2="230" y2="613.333" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="605.333" x2="110" y2="621.333" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="605.333" x2="230" y2="621.333" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="177.5" cy="613.333" r="7" fill="var(--sage)"/>
+        <!-- hc-7 -->
+        <line x1="110" y1="824" x2="230" y2="824" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="816" x2="110" y2="832" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="816" x2="230" y2="832" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="187.65" cy="824" r="7" fill="var(--sage)"/>
+        <!-- hc-8 -->
+        <line x1="110" y1="856" x2="230" y2="856" stroke="var(--line)" stroke-width="2"/>
+        <line x1="110" y1="848" x2="110" y2="864" stroke="var(--line)" stroke-width="2"/>
+        <line x1="230" y1="848" x2="230" y2="864" stroke="var(--line)" stroke-width="2"/>
+        <circle cx="170" cy="856" r="7" fill="var(--sage)"/>
+      </svg>
+      <div class="ticks">
+        <span style="top:6.67%">2026-07-01</span>
+        <span style="top:33.63%">2026-07-15</span>
+        <span style="top:66.37%">2026-08-01</span>
+        <span style="top:93.33%">2026-08-15</span>
+      </div>
+    </div>
+
+    <div class="hc-legend">
+      <p data-node="hc-1">2026-07-01 · lay rate wk 48 · 91.2–93.8% · 92.9 · inside · 0.84</p>
+      <p data-node="hc-2">2026-07-01 · feed intake g/hen/d · 108–114 · 111 · inside · 0.79</p>
+      <p class="miss" data-node="hc-3">2026-07-15 · egg mass g/hen/d · 57.1–60.4 · 60.9 · outside +0.5 · 0.71</p>
+      <p data-node="hc-4">2026-07-15 · barn RH % · 61–69 · 66 · inside · 0.88</p>
+      <p data-node="hc-5">2026-08-01 · mortality cum % · 0.9–1.4 · 1.1 · inside · 0.83</p>
+      <p data-node="hc-6">2026-08-01 · shell thickness µm · 372–388 · 381 · inside · 0.80</p>
+      <p data-node="hc-7">2026-08-15 · margin $/dozen · 0.41–0.58 · 0.52 · inside · 0.77</p>
+      <p data-node="hc-8">2026-08-15 · water intake L/hen/d · 0.19–0.23 · 0.21 · inside · 0.86</p>
+    </div>
+  </section>
+
+  <section id="runs" data-group="runs">
+    <h2 data-node="runs-title">Runs today</h2>
+    <div class="runs-list">
+      <article class="run run-ok" data-group="run1">
+        <div class="run-id" data-node="r1-id">sim-4471 · T2</div>
+        <h3 data-node="r1-title">Biochar litter amendment, 12 t/ha equivalent bedding</h3>
+        <p class="run-result state-ok" data-node="r1-result">Litter moisture −11% · interval −14…−8 · in-domain</p>
+        <p class="run-ens" data-node="r1-ens">40 seasons × 3 weather years (2019, 2022, 2024) × 3 price paths (2024–26)</p>
+        <a class="drill" data-node="r1-drill" href="#provenance">Provenance</a>
+      </article>
+      <article class="run run-flag" data-group="run2">
+        <div class="run-id flag" data-node="r2-id">sim-4472 · T1 screening</div>
+        <h3 data-node="r2-title">Co-inoculated legume forage supplement</h3>
+        <p class="run-result state-flag" data-node="r2-result">Feed-cost proxy −3…+1% · randomized: amino-acid digestibility unknown</p>
+        <a class="drill" data-node="r2-drill" href="#provenance">Provenance</a>
+      </article>
+      <article class="run run-ok" data-group="run3">
+        <div class="run-id" data-node="r3-id">sim-4473 · T2</div>
+        <h3 data-node="r3-title">Summer ventilation setpoint +1.5°C</h3>
+        <p class="run-result state-ok" data-node="r3-result">Heat stress hours −22% · interval −28…−15 · mortality Δ −0.2 pts (−0.4…0.0) · in-domain</p>
+        <a class="drill" data-node="r3-drill" href="#provenance">Provenance</a>
+      </article>
+      <article class="run run-cannot" data-group="run4">
+        <div class="run-id" data-node="r4-id">sim-4474</div>
+        <h3 data-node="r4-title">Novel probiotic X-17</h3>
+        <p class="run-result state-cannot" data-node="r4-result">Cannot simulate — no gut-microbiome core · routed: field-trial design</p>
+      </article>
+      <article class="run run-cannot" data-group="run5">
+        <div class="run-id" data-node="r5-id">sim-4475</div>
+        <h3 data-node="r5-title">Cage-free transition, House 4</h3>
+        <p class="run-result state-cannot" data-node="r5-result">Cannot simulate — outside calibration domain · routed: telemetry acquisition</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="cores" data-group="cores">
+    <h2 data-node="cores-title">Cores</h2>
+    <div class="cores-list">
+      <div class="core-row" data-node="core-1">Hen physiology · calibrated 2026-08-19 · skill 0.85 · T2</div>
+      <div class="core-row" data-node="core-2">Barn environment · calibrated 2026-08-19 · skill 0.88 · T2</div>
+      <div class="core-row flag" data-node="core-3">Health risk · published parameters · T1</div>
+      <div class="core-row" data-node="core-4">Economics · live to 2026-08-21 · T2</div>
+      <div class="core-row flag" data-node="core-5">Litter / soil · calibration pending 30 Sep · T1</div>
+    </div>
+  </section>
+
+  <section>
+    <details class="disclosure" id="provenance" data-group="provenance">
+      <summary data-node="prov-title">Provenance · sim-4471</summary>
+      <div class="disclosure-body">
+        <p data-node="prov-body">Model v0.9.3 · calibration Majella House 4, 14 mo, 2026-08-19 · parameters 67% site / 33% published · skill 0.82 vs 0.61 · coverage 88% (n=41) · in-domain yes</p>
+        <p class="caption" data-node="prov-cannot">Not modeled: gut microbiome · individual-bird behavior · neighboring-farm spillover · feed-mill supply shocks</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<footer class="colophon" id="colophon" data-group="colophon">
+  <div class="container colophon-inner">
+    <span class="caption" data-node="feeds">ERA5 · PRISM · SSURGO · USDA NASS · USDA AMS · NAEMS · site telemetry 14 mo</span>
+    <span class="caption" data-node="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="brand" data-node="footer-brand">Palingenesis</span>
+  </div>
+</footer>
+
+</body>
+</html>

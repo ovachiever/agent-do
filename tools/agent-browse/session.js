@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.agent-browse', 'sessions');
 
@@ -28,8 +29,55 @@ function ensureSessionsDir() {
  * Get session directory path
  */
 function getSessionPath(name) {
+    if (!name || name === '.' || name === '..' || /[/\\\0]/.test(name)) {
+        throw new Error('[INVALID_SESSION_NAME] Session name must be a single directory name.');
+    }
     ensureSessionsDir();
     return path.join(SESSIONS_DIR, name);
+}
+
+const SESSION_FILES = ['storage.json', 'session-storage.json', 'state.json', 'meta.json'];
+const BOUND_FILES = ['storage.json', 'session-storage.json', 'state.json'];
+
+/** Read one completed import generation. Failed or interrupted refreshes block
+ * stale credentials even when a caller ignores import-browser's exit status. */
+function readSessionFiles(name) {
+    const sessionDir = getSessionPath(name);
+    const statusPath = path.join(sessionDir, 'import-status.json');
+    const readStatus = () => existsSync(statusPath) ? readFileSync(statusPath, 'utf8') : null;
+    const before = readStatus();
+    let receipt;
+    if (before !== null) {
+        try { receipt = JSON.parse(before); } catch {
+            throw new Error('[BROWSER_IMPORT_STALE] Invalid import receipt; re-import this session.');
+        }
+        if (receipt?.status !== 'ready' || !receipt.files) {
+            throw new Error('[BROWSER_IMPORT_STALE] The latest browser import failed or is incomplete; re-import before loading or exporting.');
+        }
+    }
+    const files = {};
+    for (const name of SESSION_FILES) {
+        const file = path.join(sessionDir, name);
+        if (existsSync(file)) {
+            const bytes = readFileSync(file);
+            if (receipt && BOUND_FILES.includes(name) &&
+                createHash('sha256').update(bytes).digest('hex') !== receipt.files[name]) {
+                throw new Error('[BROWSER_IMPORT_STALE] Saved data differs from the completed import; re-import this session.');
+            }
+            files[name] = JSON.parse(bytes.toString('utf8'));
+        } else if (receipt && BOUND_FILES.includes(name)) {
+            throw new Error('[BROWSER_IMPORT_STALE] Imported session is incomplete; re-import this session.');
+        }
+    }
+    if (readStatus() !== before) {
+        throw new Error('[BROWSER_IMPORT_STALE] Import changed while reading; retry after it completes.');
+    }
+    return files;
+}
+
+function clearImportReceipt(sessionDir) {
+    // A complete explicit save or portable import establishes new state.
+    rmSync(path.join(sessionDir, 'import-status.json'), { force: true });
 }
 
 /**
@@ -97,6 +145,7 @@ export async function saveSession(page, context, name, description = '') {
         path.join(sessionDir, 'meta.json'),
         JSON.stringify(meta, null, 2)
     );
+    clearImportReceipt(sessionDir);
     
     return {
         path: sessionDir,
@@ -108,14 +157,24 @@ export async function saveSession(page, context, name, description = '') {
  * Load session storage state for browser context creation
  */
 export function loadStorageState(name) {
-    const sessionDir = getSessionPath(name);
-    const storagePath = path.join(sessionDir, 'storage.json');
-    
-    if (!existsSync(storagePath)) {
+    return loadSessionSnapshot(name).storageState;
+}
+
+/** Read storage and per-origin sessionStorage from the same import generation. */
+export function loadSessionSnapshot(name) {
+    const files = readSessionFiles(name);
+    if (!files['storage.json']) {
         throw new Error(`Session '${name}' not found`);
     }
-    
-    return JSON.parse(readFileSync(storagePath, 'utf-8'));
+    let sessionOrigins = files['session-storage.json']?.origins;
+    if (!sessionOrigins) {
+        sessionOrigins = {};
+        const url = files['state.json']?.url;
+        if (url && /^https?:/.test(url)) {
+            sessionOrigins[new URL(url).origin] = files['session-storage.json'] || {};
+        }
+    }
+    return { storageState: files['storage.json'], sessionOrigins };
 }
 
 /**
@@ -218,15 +277,14 @@ export function exportSession(name, outputPath) {
         name,
     };
     
-    // Read all session files
-    for (const file of ['storage.json', 'session-storage.json', 'state.json', 'meta.json']) {
-        const filePath = path.join(sessionDir, file);
-        if (existsSync(filePath)) {
-            exported[file.replace('.json', '')] = JSON.parse(readFileSync(filePath, 'utf-8'));
-        }
+    const files = readSessionFiles(name);
+    if (!files['storage.json']) {
+        throw new Error(`Session '${name}' has no storage state`);
     }
-    
-    writeFileSync(outputPath, JSON.stringify(exported, null, 2));
+    for (const [file, content] of Object.entries(files)) {
+        exported[file.replace('.json', '')] = content;
+    }
+    writeFileSync(outputPath, JSON.stringify(exported, null, 2), { mode: 0o600 });
     return { path: outputPath, name };
 }
 
@@ -239,6 +297,9 @@ export function importSession(inputPath, name = null) {
     }
     
     const data = JSON.parse(readFileSync(inputPath, 'utf-8'));
+    if (!data.storage || !Array.isArray(data.storage.cookies) || !Array.isArray(data.storage.origins)) {
+        throw new Error('Import file must contain a complete storage state (cookies and origins).');
+    }
     const sessionName = name || data.name || `imported-${Date.now()}`;
     const sessionDir = getSessionPath(sessionName);
     
@@ -250,12 +311,8 @@ export function importSession(inputPath, name = null) {
     if (data.storage) {
         writeFileSync(path.join(sessionDir, 'storage.json'), JSON.stringify(data.storage, null, 2));
     }
-    if (data['session-storage']) {
-        writeFileSync(path.join(sessionDir, 'session-storage.json'), JSON.stringify(data['session-storage'], null, 2));
-    }
-    if (data.state) {
-        writeFileSync(path.join(sessionDir, 'state.json'), JSON.stringify(data.state, null, 2));
-    }
+    writeFileSync(path.join(sessionDir, 'session-storage.json'), JSON.stringify(data['session-storage'] || {}, null, 2));
+    writeFileSync(path.join(sessionDir, 'state.json'), JSON.stringify(data.state || {}, null, 2));
     
     // Update meta
     const meta = data.meta || {};
@@ -263,6 +320,7 @@ export function importSession(inputPath, name = null) {
     meta.importedAt = new Date().toISOString();
     meta.importedFrom = inputPath;
     writeFileSync(path.join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    clearImportReceipt(sessionDir);
     
     return { name: sessionName, path: sessionDir };
 }
