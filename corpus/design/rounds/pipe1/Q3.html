@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #1B1917;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-sel: rgba(231,227,218,0.06);
+    /* type scale: exactly four sizes */
+    --t-xs: 11px;  --lh-xs: 16px;
+    --t-sm: 13px;  --lh-sm: 20px;
+    --t-md: 16px;  --lh-md: 24px;
+    --t-lg: 22px;  --lh-lg: 32px;
+    /* column grid — pane content edges x = 51 · 348 · 532 · 716 · 900 · 1133, right edge 1389 */
+    --rail: 296px;
+    --insp: 304px;
+    --pad: 24px;
+    --key: 184px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: var(--t-sm);
+    line-height: var(--lh-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  .page{ width: 1440px; margin: 0 auto; padding: 24px 26px 32px; }
+
+  /* ---------- nav ---------- */
+  .brandrow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+  }
+  .brandrow .brand{ color: var(--ink); font-weight: 700; }
+  .rooms{
+    display:flex; gap: 24px;
+    padding: 8px 0 16px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.04em; color: var(--ink-dim);
+  }
+  .rooms .active{ color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--ink); }
+
+  /* ---------- status strip ---------- */
+  .scorecard{
+    border: 1px solid var(--rule);
+    padding: 16px var(--pad) 24px;
+    margin-bottom: 16px;
+  }
+  .stats{ display:grid; grid-template-columns: 297px 184px 184px 184px 233px 256px; }
+  .stat .lbl{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.08em; color: var(--ink-dim); }
+  .stat .num{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .stat .num.sage{ color: var(--sage); }
+  .stat .num.clay{ color: var(--clay); }
+
+  /* ---------- workstation frame ---------- */
+  .workstation{ position: relative; border: 1px solid var(--rule); }
+  .corner{ position:absolute; width:10px; height:10px; }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+
+  .grid3{ display:grid; grid-template-columns: var(--rail) 1px 1fr 1px var(--insp); align-items: stretch; }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: var(--pad); min-width: 0; }
+  .colhead{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    font-weight: 700; letter-spacing: 0.1em; color: var(--ink);
+    margin-bottom: 24px;
+  }
+  .blk + .blk{ margin-top: 24px; }
+  .blk.ruled{ padding-top: 24px; border-top: 1px solid var(--rule-soft); }
+  .sublabel{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+  .sublabel.strong{ color: var(--ink); font-weight: 700; }
+  .chev{ color: var(--ink-dim); text-align: right; }
+  .sage{ color: var(--sage); }
+  .clay{ color: var(--clay); }
+  .mid{ color: var(--ink-mid); }
+  .dim{ color: var(--ink-dim); }
+
+  /* ---------- LIFECYCLE rail ---------- */
+  .floor{ display:flex; align-items:center; gap: 16px; }
+  .floor .fv{ color: var(--ink); flex: 0 0 auto; }
+  .floor svg{ display:block; flex: 0 0 auto; }
+  .frow{ display:flex; justify-content:space-between; gap: 16px; color: var(--ink-mid); }
+  .frow b{ color: var(--ink); font-weight: 500; }
+  .frow .field{ flex: 1 1 auto; max-width: 152px; height: 20px; border-bottom: 1px solid var(--rule); }
+  .sgroup .gname{
+    display:flex; justify-content:space-between; gap: 16px;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-mid);
+    margin-bottom: 8px;
+  }
+  .sgroup .gname b{ color: var(--ink); font-weight: 500; }
+  .sgroup .gname.sage{ color: var(--sage); }
+  .sgroup .gname.clay{ color: var(--clay); }
+  .srow{ display:block; padding: 0 8px 0 6px; margin: 0 -8px; border-left: 2px solid transparent; color: var(--ink); }
+  .srow.selected{ background: var(--fill-sel); border-left-color: var(--ink); }
+  .srow .more{ color: var(--ink-dim); }
+
+  /* ---------- SELECTED ITEM ---------- */
+  .river svg{ display:block; width:100%; height:auto; }
+  .ptitle{ display:flex; align-items:baseline; justify-content:space-between; gap: 16px; }
+  .ptitle .name{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; letter-spacing: 0.04em; color: var(--ink); }
+  .ptitle .state{ color: var(--ink-mid); }
+  .thesis{ color: var(--ink); max-width: 640px; }
+  .scale svg{ display:block; width:100%; height:auto; }
+
+  .kv{ display:grid; grid-template-columns: var(--key) 1fr 16px; column-gap: 0; }
+  .kv .k{ color: var(--ink-mid); }
+  .kv .v{ color: var(--ink); }
+  .kv .v.q{ color: var(--ink); }
+  .judge + .judge{ margin-top: 16px; }
+  .ev{ display:grid; grid-template-columns: var(--key) var(--key) 1fr 16px; }
+  .ev .d{ color: var(--ink-mid); }
+  .ev .t{ color: var(--ink-mid); }
+  .ev .v{ color: var(--ink); }
+
+  /* ---------- ITEM INSPECTOR ---------- */
+  .ibig{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); }
+  .ival{ color: var(--ink); }
+  .ikv{ display:grid; grid-template-columns: 96px 1fr 16px; }
+  .ikv .k{ color: var(--ink-mid); }
+  .ikv .v{ color: var(--ink); }
+  .ikv.r .v{ text-align: right; }
+  .ikv .field{ height: 20px; border-bottom: 1px solid var(--rule); }
+  .comp{ display:grid; grid-template-columns: 40px 40px 16px 1fr; align-items:center; color: var(--ink); }
+  .comp .cv{ text-align: right; }
+  .comp svg{ display:block; width:100%; height:auto; }
+  .lin{ display:grid; grid-template-columns: 1fr 16px; color: var(--ink); }
+  .lin.more{ color: var(--ink-dim); }
+  .lgroup + .lgroup{ margin-top: 8px; }
+  .lgroup .lk{ color: var(--ink-mid); }
+
+  .tabs{ display:flex; flex-wrap:wrap; gap: 8px; }
+  .tab{
+    display:inline-flex; align-items:center; height: 24px; padding: 0 10px;
+    border: 1px solid var(--rule); color: var(--ink-mid);
+    font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .tab.on{ background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 600; }
+  .tab.clay{ color: var(--clay); border-color: var(--clay); }
+  .tabs.verbs{ margin-top: 8px; }
+
+  /* ---------- GENERATIONS foot ---------- */
+  .hdiv{ height: 1px; background: var(--rule); }
+  .foot{ padding: var(--pad); display:grid; grid-template-columns: 297px 552px 489px; align-items:center; }
+  .foot .t{ font-size: var(--t-xs); line-height: var(--lh-xs); font-weight: 700; letter-spacing: 0.1em; color: var(--ink); }
+  .foot .gen{ color: var(--ink-mid); }
+  .foot .gen b{ color: var(--ink); font-weight: 700; margin-right: 16px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brandrow">
+    <span class="brand">PALINGENESIS</span>
+    <span>Tue 15 Sep 2026</span>
+  </div>
+  <nav class="rooms">
+    <span>Today</span>
+    <span class="active">PIPELINE</span>
+    <span>Library</span>
+    <span>Portfolio</span>
+    <span>Simulation</span>
+    <span>Engine Room</span>
+  </nav>
+
+  <!-- status strip -->
+  <section class="scorecard">
+    <div class="stats">
+      <div class="stat"><div class="lbl">GENERATION</div><div class="num">G12</div></div>
+      <div class="stat"><div class="lbl">POPULATION</div><div class="num">40</div></div>
+      <div class="stat"><div class="lbl">SURVIVAL</div><div class="num">35%</div></div>
+      <div class="stat"><div class="lbl">BEST FITNESS</div><div class="num sage">0.91</div></div>
+      <div class="stat"><div class="lbl">COUNCIL</div><div class="num">14:00 / 20:00</div></div>
+      <div class="stat"><div class="lbl">NEEDS HAND</div><div class="num clay">4</div></div>
+    </div>
+  </section>
+
+  <div class="workstation">
+    <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+
+    <div class="grid3">
+      <!-- LIFECYCLE -->
+      <section class="col">
+        <div class="colhead">LIFECYCLE</div>
+
+        <div class="blk">
+          <div class="sublabel">Fitness floor</div>
+          <div class="floor">
+            <span class="fv">0.70</span>
+            <svg viewBox="0 0 184 20" width="184" height="20" role="img" aria-label="Fitness floor 0.70">
+              <line x1="4" y1="10" x2="180" y2="10" stroke="var(--rule)" stroke-width="1"/>
+              <line x1="4" y1="4" x2="4" y2="16" stroke="var(--ink-dim)" stroke-width="1"/>
+              <line x1="180" y1="4" x2="180" y2="16" stroke="var(--ink-dim)" stroke-width="1"/>
+              <circle cx="127.2" cy="10" r="3.5" fill="var(--ink)"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="frow"><span>Stage</span><b>All ▾</b></div>
+          <div class="frow"><span>Verdict</span><b>All ▾</b></div>
+          <div class="frow"><span>Strategy</span><b>All ▾</b></div>
+          <div class="frow"><span>Text</span><span class="field"></span></div>
+        </div>
+
+        <div class="blk">
+          <div class="frow"><span>Sort</span><b>Fitness ▾</b></div>
+        </div>
+
+        <div class="sgroup blk ruled">
+          <div class="gname"><span>EMBRYO</span><b>8</b></div>
+          <div class="srow"><span>item-0441 · G12 · 0.63</span></div>
+          <div class="srow"><span class="more">+7</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>CANDIDATE</span><b>7</b></div>
+          <div class="srow"><span>item-0433 · G12 · 0.76</span></div>
+          <div class="srow"><span class="more">+6</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>IN_EVALUATION</span><b>6</b></div>
+          <div class="srow"><span>item-0428 · G12 · 0.82</span></div>
+          <div class="srow"><span class="more">+5</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname sage"><span>GREENLIGHT</span><b>3</b></div>
+          <div class="srow"><span>item-0421 · G12 · 0.88</span></div>
+          <div class="srow"><span class="more">+2</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>LIMINAL</span><b>3</b></div>
+          <div class="srow"><span>item-0418 · G12 · 0.79</span></div>
+          <div class="srow"><span class="more">+2</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname clay"><span>VETOED</span><b>3</b></div>
+          <div class="srow"><span>item-0409 · G11 · 0.68</span></div>
+          <div class="srow"><span class="more">+2</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>SIMULATING</span><b>2</b></div>
+          <div class="srow selected"><span>● item-0417 · G12 · 0.91</span></div>
+          <div class="srow"><span class="more">+1</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>PILOT_READY</span><b>2</b></div>
+          <div class="srow"><span>item-0384 · G11 · 0.86</span></div>
+          <div class="srow"><span class="more">+1</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>IN_PILOT</span><b>2</b></div>
+          <div class="srow"><span>item-0367 · G10 · 0.84</span></div>
+          <div class="srow"><span class="more">+1</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>COMMERCIALIZING</span><b>1</b></div>
+          <div class="srow"><span>item-0344 · G9 · 0.81</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>LAUNCHED</span><b>1</b></div>
+          <div class="srow"><span>item-0291 · G8 · 0.87</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname"><span>ARCHIVED</span><b>1</b></div>
+          <div class="srow"><span>item-0217 · G6 · 0.72</span></div>
+        </div>
+        <div class="sgroup blk">
+          <div class="gname clay"><span>FAILED</span><b>1</b></div>
+          <div class="srow"><span>item-0182 · G5 · 0.74</span></div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- SELECTED ITEM -->
+      <section class="col">
+        <div class="colhead">SELECTED ITEM</div>
+
+        <!-- RIVER, promoted: the whole living population on one axis -->
+        <div class="river blk">
+          <div class="sublabel strong">RIVER</div>
+          <svg viewBox="0 0 736 96" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Lifecycle axis with stage counts; item-0417 at simulation">
+            <!-- stage names -->
+            <text x="40" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">embryo</text>
+            <text x="149.33" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">candidate</text>
+            <text x="258.67" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">evaluation</text>
+            <text x="368" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">council</text>
+            <text x="477.33" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">simulation</text>
+            <text x="586.67" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">pilot</text>
+            <text x="696" y="20" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">commerce</text>
+            <!-- axis: passed segments in ink-mid, ahead in rule -->
+            <line x1="40" y1="40" x2="477.33" y2="40" stroke="var(--ink-mid)" stroke-width="1"/>
+            <line x1="477.33" y1="40" x2="696" y2="40" stroke="var(--rule)" stroke-width="1"/>
+            <!-- nodes -->
+            <circle cx="40" cy="40" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="149.33" cy="40" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="258.67" cy="40" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="368" cy="40" r="4" fill="var(--ink)"/>
+            <circle cx="477.33" cy="40" r="7" fill="var(--bg)" stroke="var(--sage)" stroke-width="1.5"/>
+            <circle cx="477.33" cy="40" r="3" fill="var(--sage)"/>
+            <circle cx="586.67" cy="40" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <circle cx="696" cy="40" r="4" fill="var(--bg)" stroke="var(--ink-mid)" stroke-width="1"/>
+            <!-- items at each stage: rail counts, council = 3+3+3, pilot = 2+2, commerce = 1+1 -->
+            <text x="40" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">8</text>
+            <text x="149.33" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">7</text>
+            <text x="258.67" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">6</text>
+            <text x="368" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">9</text>
+            <text x="477.33" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">2</text>
+            <text x="586.67" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">4</text>
+            <text x="696" y="66" text-anchor="middle" font-size="13" fill="var(--ink)" font-family="'JetBrains Mono',monospace">2</text>
+            <text x="477.33" y="86" text-anchor="middle" font-size="11" fill="var(--sage)" font-family="'JetBrains Mono',monospace">item-0417</text>
+          </svg>
+        </div>
+
+        <div class="blk ruled">
+          <div class="ptitle"><span class="name">ITEM-0417</span><span class="state">SIMULATING · <span class="sage">GREENLIGHT</span></span></div>
+        </div>
+
+        <div class="thesis blk">Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) at no change in litter moisture, paying back in one flock.</div>
+
+        <div class="scale blk">
+          <div class="sublabel strong">FITNESS</div>
+          <svg viewBox="0 0 736 64" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Fitness 0.91 on a 0 to 1 scale">
+            <text x="8" y="12" text-anchor="start" font-size="13" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">0.0</text>
+            <text x="368" y="12" text-anchor="middle" font-size="13" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">0.5</text>
+            <text x="728" y="12" text-anchor="end" font-size="13" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">1.0</text>
+            <line x1="8" y1="32" x2="728" y2="32" stroke="var(--rule)" stroke-width="1"/>
+            <line x1="8" y1="26" x2="8" y2="38" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="368" y1="26" x2="368" y2="38" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="728" y1="26" x2="728" y2="38" stroke="var(--ink-dim)" stroke-width="1"/>
+            <circle cx="663.2" cy="32" r="5" fill="var(--sage)"/>
+            <text x="663.2" y="58" text-anchor="middle" font-size="13" fill="var(--sage)" font-family="'JetBrains Mono',monospace">0.91</text>
+          </svg>
+        </div>
+
+        <div class="blk">
+          <div class="judge">
+            <div class="kv"><span class="k">Council</span><span class="v sage">GREENLIGHT</span><span></span></div>
+            <div class="kv"><span class="k"></span><span class="v mid">Tue 15 Sep · 14:00</span><span class="chev">▸</span></div>
+          </div>
+          <div class="judge">
+            <div class="kv"><span class="k">Judge 01</span><span class="v sage">GREENLIGHT</span><span></span></div>
+            <div class="kv"><span class="k"></span><span class="v q">"The claimed effect is bounded and testable."</span><span class="chev">▸</span></div>
+          </div>
+          <div class="judge">
+            <div class="kv"><span class="k">Judge 02</span><span class="v sage">GREENLIGHT</span><span></span></div>
+            <div class="kv"><span class="k"></span><span class="v q">"The litter-moisture constraint is explicit."</span><span class="chev">▸</span></div>
+          </div>
+          <div class="judge">
+            <div class="kv"><span class="k">Judge 03</span><span class="v mid">LIMINAL</span><span></span></div>
+            <div class="kv"><span class="k"></span><span class="v q">"The one-flock payback needs simulation."</span><span class="chev">▸</span></div>
+          </div>
+        </div>
+
+        <div class="blk ruled">
+          <div class="sublabel strong">RECEIPTS</div>
+          <div class="kv"><span class="k">Thesis</span><span class="v">24%</span><span></span></div>
+          <div class="kv"><span class="k">Interval</span><span class="v">18–30%</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k">Constraint</span><span class="v">no litter-moisture change</span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k">Payback</span><span class="v">one flock</span><span class="chev">▸</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel strong">SEED PAPERS</div>
+          <div class="kv"><span class="k v">paper-01</span><span></span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k v">paper-02</span><span></span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k v">paper-03</span><span></span><span class="chev">▸</span></div>
+          <div class="kv"><span class="k dim">+ papers</span><span></span><span class="chev">▸</span></div>
+        </div>
+
+        <div class="blk ruled">
+          <div class="kv"><span class="k">Verdict</span><span class="v sage">GREENLIGHT</span><span></span></div>
+          <div class="kv"><span class="k">Simulation</span><span class="v">running</span><span></span></div>
+          <div class="kv"><span class="k">Pilot</span><span class="v dim">—</span><span></span></div>
+          <div class="kv"><span class="k">Sites</span><span class="v dim">—</span><span></span></div>
+          <div class="kv"><span class="k">Readings</span><span class="v dim">—</span><span></span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel strong">EVENTS</div>
+          <div class="ev"><span class="d">Tue 15 Sep 14:00</span><span class="t">Council</span><span class="v sage">GREENLIGHT</span><span class="chev">▸</span></div>
+          <div class="ev"><span class="d">Tue 15 Sep 14:06</span><span class="t">Simulation</span><span class="v">run-1842</span><span class="chev">▸</span></div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- ITEM INSPECTOR -->
+      <section class="col">
+        <div class="colhead">ITEM INSPECTOR</div>
+
+        <div class="blk">
+          <div class="sublabel">GENERATION</div>
+          <div class="ival">G12</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">FITNESS</div>
+          <div class="ibig">0.91</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">COMPONENTS</div>
+          <div class="comp"><span>C01</span><span class="cv">0.94</span><span></span>
+            <svg viewBox="0 0 160 20" role="img" aria-label="C01 0.94"><line x1="4" y1="10" x2="156" y2="10" stroke="var(--rule)" stroke-width="1"/><line x1="4" y1="4" x2="4" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><line x1="156" y1="4" x2="156" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><circle cx="146.9" cy="10" r="3" fill="var(--ink)"/></svg></div>
+          <div class="comp"><span>C02</span><span class="cv">0.92</span><span></span>
+            <svg viewBox="0 0 160 20" role="img" aria-label="C02 0.92"><line x1="4" y1="10" x2="156" y2="10" stroke="var(--rule)" stroke-width="1"/><line x1="4" y1="4" x2="4" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><line x1="156" y1="4" x2="156" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><circle cx="143.8" cy="10" r="3" fill="var(--ink)"/></svg></div>
+          <div class="comp"><span>C03</span><span class="cv">0.90</span><span></span>
+            <svg viewBox="0 0 160 20" role="img" aria-label="C03 0.90"><line x1="4" y1="10" x2="156" y2="10" stroke="var(--rule)" stroke-width="1"/><line x1="4" y1="4" x2="4" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><line x1="156" y1="4" x2="156" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><circle cx="140.8" cy="10" r="3" fill="var(--ink)"/></svg></div>
+          <div class="comp"><span>C04</span><span class="cv">0.89</span><span></span>
+            <svg viewBox="0 0 160 20" role="img" aria-label="C04 0.89"><line x1="4" y1="10" x2="156" y2="10" stroke="var(--rule)" stroke-width="1"/><line x1="4" y1="4" x2="4" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><line x1="156" y1="4" x2="156" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><circle cx="139.3" cy="10" r="3" fill="var(--ink)"/></svg></div>
+          <div class="comp"><span>C05</span><span class="cv">0.88</span><span></span>
+            <svg viewBox="0 0 160 20" role="img" aria-label="C05 0.88"><line x1="4" y1="10" x2="156" y2="10" stroke="var(--rule)" stroke-width="1"/><line x1="4" y1="4" x2="4" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><line x1="156" y1="4" x2="156" y2="16" stroke="var(--ink-dim)" stroke-width="1"/><circle cx="137.8" cy="10" r="3" fill="var(--ink)"/></svg></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">STRATEGY</div>
+          <div class="ival">biomimicry</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">MODE</div>
+          <div class="ival">research_backed</div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">LINEAGE</div>
+          <div class="lgroup">
+            <div class="lk">Parents</div>
+            <div class="lin"><span>item-0321</span><span class="chev">▸</span></div>
+            <div class="lin"><span>item-0338</span><span class="chev">▸</span></div>
+          </div>
+          <div class="lgroup">
+            <div class="lk">Siblings</div>
+            <div class="lin"><span>item-0415</span><span class="chev">▸</span></div>
+            <div class="lin"><span>item-0416</span><span class="chev">▸</span></div>
+            <div class="lin more"><span>+2</span><span></span></div>
+          </div>
+          <div class="tabs verbs"><span class="tab">Lineage view</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">SIMULATION</div>
+          <div class="ikv r"><span class="k">Run</span><span class="v">run-1842</span><span></span></div>
+          <div class="ikv r"><span class="k">Result</span><span class="v mid">pending</span><span></span></div>
+          <div class="ikv r"><span class="k">Interval</span><span class="v dim">—</span><span></span></div>
+          <div class="ikv r"><span class="k">In domain</span><span class="v dim">—</span><span></span></div>
+          <div class="ikv r"><span class="k">Hindcast</span><span class="v dim">—</span><span></span></div>
+          <div class="tabs verbs"><span class="tab">Open run</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">ITEM ACTS</div>
+          <div class="tabs"><span class="tab on">Open Dossier</span></div>
+          <div class="tabs verbs">
+            <span class="tab">Breed variants</span>
+            <span class="tab">Commission research</span>
+            <span class="tab">Re-evaluate</span>
+            <span class="tab">Send simulation</span>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">DISPOSITION</div>
+          <div class="tabs"><span class="tab">Park</span><span class="tab clay">Kill</span></div>
+        </div>
+
+        <div class="blk">
+          <div class="sublabel">ACT RECORD</div>
+          <div class="ikv"><span class="k">Reason</span><span class="field"></span><span></span></div>
+          <div class="ikv"><span class="k">Date</span><span class="v">15 Sep 2026</span><span></span></div>
+          <div class="ikv"><span class="k">Actor</span><span class="v">Owner</span><span></span></div>
+          <div class="tabs verbs"><span class="tab">Record act</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="hdiv"></div>
+
+    <!-- GENERATIONS -->
+    <section class="foot">
+      <span class="t">GENERATIONS</span>
+      <span class="gen"><b>G12</b>40 items · 35% survival · best 0.91</span>
+      <span class="tabs">
+        <span class="tab">G11 ▸</span><span class="tab">G10 ▸</span><span class="tab">G9 ▸</span><span class="tab">SPECIES ▸</span><span class="tab">LINEAGES ▸</span><span class="tab">RECORD ▸</span>
+      </span>
+    </section>
+  </div>
+
+</div>
+</body>
+</html>

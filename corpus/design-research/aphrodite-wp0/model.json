@@ -1,0 +1,48 @@
+{
+  "id": "aphrodite-wp0-v1",
+  "authority": "Agent-authored hypothesis, frozen before this evaluator's first historical score. Historical outcomes and source pages were already known. No fitted parameters and no claim of preregistration against unseen history.",
+  "domain": "Visible text roles and their geometry in desktop page observations. A candidate for relational fit, not an established general beauty scale.",
+  "parameters": {
+    "same_size_log_sigma": 0.22314355131420976,
+    "same_weight_log_sigma": 0.4054651081081644,
+    "same_rgb_sigma": 0.2,
+    "belongs_gap_body_target": 1.0,
+    "belongs_gap_body_sigma": 1.0,
+    "display_body_ratio": 3.0,
+    "section_body_ratio": 1.75,
+    "value_label_ratio": 1.5,
+    "distinction_log_sigma": 0.4054651081081644,
+    "chord_gap_display_ratio": 0.5,
+    "chord_residual_body_sigma": 1.0
+  },
+  "feature_weights": {"F01": 0.25, "F02": 0.25, "F03": 0.25, "F08": 0.25},
+  "role_binding": {
+    "author": "Codex, deterministic rules written for this experiment; no human semantic graph is claimed",
+    "precedence": ["hidden", "visual", "heading", "brand", "action", "value", "label", "prose", "detail"],
+    "hidden_classes": ["sr-only", "visually-hidden"],
+    "brand_classes": ["brand", "wordmark", "logo", "fleur", "mark", "glyph"],
+    "title_classes": ["title", "rtitle", "leaf-title", "rname", "iname", "sname", "svc-name", "topic", "thesis"],
+    "label_classes": ["label", "lbl", "lab", "kicker", "eyebrow", "seclabel", "sec-title", "k", "flabel"],
+    "value_pattern": "^[+$£€−-]?[0-9][0-9,.: /%+$£€−-]*$",
+    "prose_tags": ["p", "li", "blockquote"],
+    "label_tags": ["label", "dt", "th", "caption"],
+    "action_tags": ["a", "button", "input", "select"],
+    "display_heading_level": 1,
+    "main_variant": "local_then_following",
+    "sensitivity_variant": "local_only"
+  },
+  "choices": {
+    "same_role": "Consecutive observed nodes of each canonical role in DOM order. Mean within each role, then mean across roles. No spatial proximity required. Family match is an exact string-equality indicator, not a font quality judgment.",
+    "belongs_to": "For each display, section or value, first subsequent prose, label or detail in the same recorded container, stopping at the next display/section/value in that container. If none, main variant uses first subsequent support before the next dominant node globally; local_only never falls back. This is an inferred relation, not semantic truth.",
+    "geometry": "Euclidean minimum rectangle-to-rectangle separation divided by support font size. Includes horizontal separation. Overlap gives zero separation; mechanical overlap is not diagnosed by this model.",
+    "F01": "Equal mean of role-balanced same-role affinity U and belongs-to affinity G. Same-role affinity is the arithmetic mean of size, weight, foreground color and family agreement.",
+    "F02": "U times D, where D is mean affinity to display/support=3, section/support=1.75, value/support=1.5. These targets are proposals, not corpus facts.",
+    "F03": "Mean K((gap - 0.5 * dominant font size) / support font size; 0, 1). A fixed cross-channel chord, with all dimensions divided by support size. No per-page note assignment or optimized latent variable.",
+    "F08": "For every belongs-to edge whose support has a same-role peer, use the nearest peer in DOM index (lower index breaks ties). Mean product of its chord affinity, distinction affinity, and support-peer identity affinity. Three real nodes form each constellation. Product is a conjunction hypothesis; it is not by itself evidence of ordinal interaction.",
+    "additive": "Replace U*D by (U+D)/2 and each F08 product by the mean of its three factors; keep F01/F03 and the four weights fixed. This is the product ablation, not an independent-ingredient beauty baseline. The controlled crossover separately tests independent size-plus-space utility.",
+    "eligibility": "Each required feature must have at least one measured relation; no empty-set=1 or missing-channel=0. Unsupported score is null with its missing features named. Input observations must have finite positive box and type dimensions.",
+    "color": "Root-mean-square distance of the three recorded sRGB foreground channel differences divided by 255, not perceptual color distance. Background composition, image colors and font optical mass are not observed by this model.",
+    "averaging": "Uniform relation means except same_role is first averaged within roles. Four fixed equal feature weights; correlated features are not four independent pieces of evidence. No weighting by number of repeated items or decoration volume.",
+    "unmeasured": ["meaning", "material", "image composition", "font optical character", "motion", "task usefulness", "semantic correctness", "responsive behavior", "capture completeness"]
+  }
+}

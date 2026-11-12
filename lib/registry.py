@@ -116,7 +116,7 @@ def build_registry_context(registry: dict) -> str:
 
         commands = info.get('commands', {})
         if commands:
-            cmd_list = ', '.join(commands.keys())
+            cmd_list = ','.join(commands.keys())
             lines.append(f"Commands: {cmd_list}")
 
         # Compact safety line from contracts: writes and the flags that

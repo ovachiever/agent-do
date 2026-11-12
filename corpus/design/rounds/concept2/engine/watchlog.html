@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Engine Room — Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --bg2:#211E1B;
+    --bg3:#262220;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair2:rgba(231,227,218,0.08);
+    --sage:hsl(158,30%,55%);
+    --sage-dim:hsla(158,30%,55%,0.4);
+    --serif:Georgia,'Times New Roman',Times,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{background:var(--bg);}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font:15px/1.6 var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  .wrap{max-width:1352px;margin:0 auto;padding:0 44px;}
+  ::selection{background:var(--sage);color:#1B1917;}
+  a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--sage);outline-offset:2px;}
+
+  /* ---------- labels & chips ---------- */
+  .lab{
+    font:600 12px var(--sans);
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--fnt);
+  }
+  .lab-ink{color:var(--mut);}
+  .chip{
+    display:inline-flex;align-items:center;
+    height:24px;padding:0 9px;
+    border:1px solid var(--hair);border-radius:3px;
+    font:600 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--mut);white-space:nowrap;
+  }
+  .chip-open{border-color:var(--sage-dim);color:var(--sage);}
+  .mach{font:600 12px var(--mono);letter-spacing:.06em;color:var(--mut);}
+  .mach-ink{color:var(--ink);}
+  .master-sig{font:italic 14px var(--serif);color:var(--mut);}
+  .id{font:12.5px var(--mono);}
+  .dot{
+    display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:var(--sage);flex:none;
+  }
+
+  /* ---------- top nav ---------- */
+  .top{border-bottom:1px solid var(--hair);}
+  .topbar{display:flex;align-items:stretch;height:60px;gap:34px;}
+  .brand{
+    display:flex;align-items:center;
+    font:400 19px var(--serif);letter-spacing:.02em;color:var(--ink);
+    text-decoration:none;
+  }
+  .mainnav{display:flex;align-items:stretch;gap:4px;}
+  .navlink{
+    position:relative;display:flex;align-items:center;
+    padding:0 14px;color:var(--mut);text-decoration:none;
+    font:400 13.5px var(--sans);
+  }
+  .navlink:hover{color:var(--ink);}
+  .navlink.active{color:var(--ink);}
+  .navlink.active::after{
+    content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;
+    background:var(--sage);
+  }
+  .topmeta{
+    margin-left:auto;display:flex;align-items:center;gap:18px;
+  }
+  .clock{font:12px var(--mono);color:var(--fnt);letter-spacing:.04em;}
+  .mastername{font:italic 13.5px var(--serif);color:var(--mut);}
+
+  /* ---------- masthead ---------- */
+  .masthead{
+    display:flex;justify-content:space-between;gap:48px;
+    padding:30px 0 24px;
+  }
+  .masthead h1{
+    font:400 34px/1.15 var(--serif);color:var(--ink);
+    margin:10px 0 12px;
+  }
+  .law{
+    font:italic 15px/1.75 var(--serif);color:var(--mut);
+    max-width:66ch;
+  }
+  .mast-right{text-align:right;flex:none;padding-top:4px;}
+  .mast-date{font:400 16px var(--serif);color:var(--ink);margin-bottom:8px;}
+  .mast-line{font:12px/1.8 var(--sans);color:var(--fnt);}
+  .mast-chain{font:12px/1.8 var(--mono);color:var(--fnt);}
+
+  /* ---------- current watch ---------- */
+  .watch{position:relative;padding-bottom:8px;}
+  .watch::before{
+    content:"";position:absolute;left:-24px;top:0;bottom:0;width:2px;
+    background:var(--sage);
+  }
+  .whead{
+    display:flex;align-items:flex-end;gap:20px;
+    border-top:1px solid var(--hair);
+    padding:24px 0 18px;
+  }
+  .w-over{margin-bottom:7px;}
+  .w-title{font:400 22px/1.2 var(--serif);color:var(--ink);}
+  .w-span{font:400 14px var(--mono);color:var(--mut);margin-left:10px;letter-spacing:.02em;}
+  .w-chips{padding-bottom:2px;}
+  .w-kept{margin-left:auto;font:13px var(--sans);color:var(--fnt);padding-bottom:3px;}
+
+  /* counter strip */
+  .counters{
+    display:grid;grid-template-columns:repeat(5,1fr);
+    border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);
+    padding:14px 0;
+    font-variant-numeric:tabular-nums;
+  }
+  .counter{padding:2px 26px;border-left:1px solid var(--hair2);}
+  .counter:first-child{padding-left:2px;border-left:none;}
+  .c-val{font:500 21px var(--sans);color:var(--ink);margin:7px 0 5px;}
+  .c-of{font:400 13px var(--sans);color:var(--mut);}
+  .c-src{font:12px/1.5 var(--sans);color:var(--fnt);}
+
+  /* conditions */
+  .conds{padding:18px 0 2px;}
+  .conds p{
+    font:15.5px/1.75 var(--serif);color:var(--mut);
+    margin-top:8px;max-width:118ch;
+  }
+  .conds p strong{color:var(--ink);font-weight:400;}
+
+  /* standing orders band */
+  .orders{
+    display:flex;flex-wrap:wrap;align-items:center;gap:28px;
+    border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);
+    margin-top:18px;padding:15px 0;
+  }
+  .o-head{flex:none;min-width:150px;}
+  .o-head .sub{font:12px/1.6 var(--sans);color:var(--fnt);margin-top:4px;letter-spacing:0;text-transform:none;}
+  .o-text{flex:1;font:15px/1.65 var(--serif);color:var(--mut);max-width:56ch;}
+  .o-text strong{color:var(--ink);font-weight:400;}
+  .o-next{flex:none;text-align:right;padding-right:4px;}
+  .o-next .c-val{font-size:18px;margin:5px 0 3px;}
+  .o-actions{flex:none;display:flex;gap:10px;}
+  .o-foot{
+    flex-basis:100%;display:flex;justify-content:space-between;gap:40px;
+    border-top:1px solid var(--hair2);margin-top:2px;padding-top:11px;
+  }
+  .o-foot p{font:12px/1.6 var(--sans);color:var(--fnt);max-width:66ch;}
+  .o-foot p + p{text-align:right;}
+
+  /* buttons */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    height:34px;padding:0 16px;
+    background:transparent;color:var(--ink);
+    border:1px solid var(--hair);border-radius:4px;
+    font:500 13px var(--sans);letter-spacing:.02em;
+    cursor:pointer;white-space:nowrap;
+  }
+  .btn:hover{background:var(--bg2);border-color:rgba(231,227,218,0.34);}
+  .btn-primary{
+    background:var(--sage);border-color:var(--sage);color:#1B1917;
+  }
+  .btn-primary:hover{background:hsl(158,32%,60%);border-color:hsl(158,32%,60%);}
+
+  /* ---------- two-column spread ---------- */
+  .cols{
+    display:grid;grid-template-columns:1fr 468px;gap:0 40px;
+    margin-top:24px;
+  }
+  .colr{border-left:1px solid var(--hair2);padding-left:36px;}
+  .shead{margin:28px 0 10px;}
+  .shead:first-child{margin-top:2px;}
+  .shead .sub{
+    font:12px/1.6 var(--sans);color:var(--fnt);
+    letter-spacing:0;text-transform:none;margin-top:4px;max-width:64ch;
+  }
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;}
+  th{
+    font:600 12px var(--sans);letter-spacing:.09em;text-transform:uppercase;
+    color:var(--fnt);text-align:left;
+    padding:6px 10px 8px;border-bottom:1px solid var(--hair);
+    white-space:nowrap;
+  }
+  th.num{text-align:right;}
+  td{
+    font:13px/1.5 var(--sans);color:var(--mut);
+    padding:9px 10px;border-bottom:1px solid var(--hair2);
+    vertical-align:top;
+  }
+  td.num{text-align:right;white-space:nowrap;}
+  td.t{font:12.5px var(--mono);color:var(--mut);white-space:nowrap;}
+  td:first-child,th:first-child{padding-left:2px;}
+  td:last-child,th:last-child{padding-right:2px;}
+  tr.latest td{color:var(--ink);}
+  tr.latest td.t{color:var(--ink);}
+  tr.latest td:first-child{box-shadow:inset 2px 0 0 var(--sage);padding-left:10px;}
+  s{color:var(--fnt);text-decoration-line:line-through;}
+  .x{
+    display:inline-block;padding:2px 1px;
+    color:var(--mut);text-decoration:underline;
+    text-decoration-color:rgba(231,227,218,0.3);text-underline-offset:3px;
+  }
+  .x:hover{color:var(--ink);}
+  .due{
+    font:italic 13.5px/1.7 var(--serif);color:var(--fnt);
+    margin-top:11px;
+  }
+
+  /* entries stream */
+  .entry{padding:16px 0 15px;border-bottom:1px solid var(--hair2);}
+  .e-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;}
+  .e-time{font:13px var(--mono);color:var(--ink);letter-spacing:.02em;}
+  .e-by{margin-left:auto;font:12px var(--sans);color:var(--fnt);}
+  .e-what{font:15px/1.7 var(--serif);color:var(--ink);max-width:76ch;}
+  .e-act{font:14.5px/1.7 var(--serif);color:var(--mut);margin-top:6px;max-width:76ch;}
+  .alab{
+    font:600 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--fnt);margin-right:6px;
+  }
+  .e-meta{font:12px/1.6 var(--sans);color:var(--fnt);margin-top:8px;}
+  .e-meta .mach{font-size:12px;}
+  .continues{font:italic 13.5px/1.7 var(--serif);color:var(--fnt);margin-top:16px;}
+
+  /* plant */
+  .grouplab{
+    font:600 12px var(--sans);letter-spacing:.13em;text-transform:uppercase;
+    color:var(--fnt);margin:6px 0 2px;
+  }
+  .grouplab + .grouplab{margin-top:16px;}
+  .gnote{font:12px/1.6 var(--sans);color:var(--fnt);}
+  .svc{display:flex;gap:12px;align-items:flex-start;padding:11px 0 10px;border-bottom:1px solid var(--hair2);}
+  .svc .dot{margin-top:5px;}
+  .svc-name{font:600 12px var(--mono);letter-spacing:.09em;color:var(--ink);}
+  .duty{font:400 12px var(--sans);letter-spacing:.01em;color:var(--fnt);text-transform:none;margin-left:6px;}
+  .svc-line{font:13px/1.6 var(--sans);color:var(--mut);margin-top:3px;max-width:52ch;}
+  .aux{display:flex;gap:12px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--hair2);font:13px/1.55 var(--sans);color:var(--mut);}
+  .aux .dot{position:relative;top:-1px;}
+  .aux b{font:600 12px var(--mono);letter-spacing:.09em;color:var(--ink);font-weight:600;margin-right:2px;}
+
+  /* ledger */
+  .l-top{display:flex;align-items:baseline;gap:10px;margin:4px 0 10px;font-variant-numeric:tabular-nums;}
+  .l-big{font:500 26px var(--sans);color:var(--ink);}
+  .l-cap{font:14px var(--sans);color:var(--mut);}
+  .meter{height:8px;background:var(--hair2);margin:2px 0 16px;}
+  .meter i{display:block;height:100%;width:59.2%;background:var(--sage);}
+  .ltbl td{padding:6px 10px;}
+  .ltbl tr.total td{border-top:1px solid var(--hair);border-bottom:none;color:var(--ink);font-weight:500;}
+  .l-note{font:12px/1.7 var(--sans);color:var(--fnt);margin-top:10px;}
+  .l-capline{font:13.5px/1.7 var(--serif);color:var(--mut);margin-top:12px;max-width:56ch;}
+  .l-capline strong{color:var(--ink);font-weight:400;}
+
+  /* sweeps */
+  .sweep{padding:11px 0 10px;border-bottom:1px solid var(--hair2);}
+  .sw-title{font:400 14.5px/1.5 var(--serif);color:var(--ink);}
+  .sw-title .id{color:var(--fnt);margin-left:6px;}
+  .sweep p{font:13px/1.6 var(--sans);color:var(--mut);margin-top:4px;max-width:54ch;}
+  .queue{font:13px/1.65 var(--sans);color:var(--mut);margin-top:12px;max-width:54ch;}
+  .queue strong{color:var(--ink);font-weight:500;}
+
+  /* stores band */
+  .stores{
+    display:grid;grid-template-columns:1fr 1fr 1fr;
+    border-top:1px solid var(--hair);
+    margin-top:30px;padding:20px 0 4px;
+  }
+  .store{padding:0 30px;border-left:1px solid var(--hair2);}
+  .store:first-child{padding-left:2px;border-left:none;}
+  .store p{font:13px/1.7 var(--sans);color:var(--mut);margin-top:9px;max-width:46ch;}
+  .store p strong{color:var(--ink);font-weight:500;}
+  .store .fine{font-size:12px;color:var(--fnt);margin-top:7px;}
+
+  /* ---------- sealed watches ---------- */
+  .sealed-sec{border-top:1px solid var(--hair);margin-top:42px;padding-top:26px;}
+  .rubric{
+    font:italic 13.5px/1.75 var(--serif);color:var(--mut);
+    margin-top:6px;max-width:92ch;
+  }
+  .sealedw{
+    position:relative;
+    background:var(--bg2);
+    border:1px solid var(--hair2);
+    border-left:2px solid var(--hair);
+    border-radius:2px;
+    margin-top:14px;
+  }
+  summary{
+    display:flex;align-items:center;gap:16px;
+    padding:14px 18px;cursor:pointer;list-style:none;
+  }
+  summary::-webkit-details-marker{display:none;}
+  summary:hover{background:var(--bg3);}
+  .chev{
+    font:12px var(--sans);color:var(--fnt);flex:none;
+    display:inline-block;transform:translateY(-1px);
+  }
+  details[open] .chev{transform:rotate(90deg);}
+  .sw-id{flex:1;min-width:0;}
+  .sw-name{font:400 17px/1.3 var(--serif);color:var(--ink);}
+  .sw-name .w-span{font-size:13px;}
+  .sw-meta{font:12.5px/1.6 var(--sans);color:var(--fnt);margin-top:3px;}
+  .sw-sign{flex:none;text-align:right;font:12px/1.7 var(--sans);color:var(--fnt);}
+  .needsign summary{padding-right:248px;}
+  .countersign-btn{position:absolute;right:16px;top:16px;}
+  .sw-body{border-top:1px solid var(--hair2);padding:16px 18px 20px;}
+  .sw-body .shead{margin:18px 0 8px;}
+  .sw-body .shead:first-child{margin-top:0;}
+  .sw-conds{font:14px/1.7 var(--serif);color:var(--mut);max-width:110ch;}
+  .sw-body .entry{padding:13px 0 12px;}
+  .sw-body .e-what{font-size:14.5px;}
+  .handover{
+    font:14px/1.7 var(--serif);color:var(--mut);
+    border-top:1px solid var(--hair2);margin-top:16px;padding-top:14px;
+  }
+  .handover strong{color:var(--ink);font-weight:400;}
+
+  /* day seal */
+  .dayseal{
+    display:flex;justify-content:space-between;align-items:center;gap:32px;
+    background:var(--bg2);
+    border:1px solid var(--hair2);border-left:2px solid var(--hair);
+    border-radius:2px;
+    padding:16px 18px;margin-top:22px;
+  }
+  .dayseal p{font:13.5px/1.65 var(--serif);color:var(--mut);margin-top:6px;max-width:96ch;}
+  .vol{margin-top:18px;}
+  .vol a{
+    display:inline-block;padding:5px 0;
+    font:13.5px var(--sans);color:var(--mut);text-decoration:underline;
+    text-decoration-color:rgba(231,227,218,0.3);text-underline-offset:3px;
+  }
+  .vol a:hover{color:var(--ink);}
+
+  /* footer */
+  .foot{
+    border-top:1px solid var(--hair);
+    margin-top:54px;padding:22px 0 42px;
+    display:flex;justify-content:space-between;align-items:baseline;gap:24px;
+  }
+  .motto{font:italic 13.5px var(--serif);color:var(--mut);}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap topbar">
+    <a class="brand" href="#">Palingenesis</a>
+    <nav class="mainnav" aria-label="Primary">
+      <a class="navlink" href="#">Today</a>
+      <a class="navlink" href="#">Pipeline</a>
+      <a class="navlink" href="#">Library</a>
+      <a class="navlink active" href="#" aria-current="page">Engine Room</a>
+    </nav>
+    <div class="topmeta">
+      <span class="mastername">E.&#8202;Vance — Master</span>
+      <span class="clock">14:47:31 UTC</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="masthead">
+    <div>
+      <div class="lab">Machinery Watch Log &nbsp;·&nbsp; Leaf 215 &nbsp;·&nbsp; opened 20 January 2026</div>
+      <h1>Engine Room</h1>
+      <p class="law">The machine keeps its own watch. Readings go down on the half hour; exceptions are entered
+      the moment they occur, with the action taken beside them; each watch is sealed at handover; nothing is
+      erased — a wrong figure is struck through and kept. The master reads, and countersigns.</p>
+    </div>
+    <div class="mast-right">
+      <div class="mast-date">Friday 22 August 2026</div>
+      <div class="mast-line">Kept in universal time · watches of four hours · the leaf turns at 00:00</div>
+      <div class="mast-chain">chain a9f4…e41c · verified 14:45:12 — intact</div>
+    </div>
+  </div>
+
+  <!-- ============ THE CURRENT WATCH — OPEN ============ -->
+  <section class="watch" aria-label="Current watch">
+
+    <div class="whead">
+      <div>
+        <div class="lab w-over">Now standing · fourth watch of six</div>
+        <h2 class="w-title">Afternoon watch<span class="w-span">12:00 – 16:00 UTC</span></h2>
+      </div>
+      <div class="w-chips"><span class="chip chip-open">Open — entries continue</span></div>
+      <div class="w-kept">Kept by <span class="mach mach-ink">SCHEDULER</span> · opened 12:00:00 · hands over at 16:00</div>
+    </div>
+
+    <div class="counters">
+      <div class="counter">
+        <div class="lab">Spend today</div>
+        <div class="c-val">$296.14 <span class="c-of">of $500.00</span></div>
+        <div class="c-src">Metered live by <span class="mach">LGR</span> · posted 14:47:02</div>
+      </div>
+      <div class="counter">
+        <div class="lab">Last reading</div>
+        <div class="c-val">14:30 <span class="c-of">six of eight</span></div>
+        <div class="c-src">Next goes down 15:00 · by <span class="mach">SEN</span></div>
+      </div>
+      <div class="counter">
+        <div class="lab">Intake queue</div>
+        <div class="c-val">11 <span class="c-of">findings</span></div>
+        <div class="c-src">Counted at the 14:30 reading · fed by two sweeps</div>
+      </div>
+      <div class="counter">
+        <div class="lab">Next cycle</div>
+        <div class="c-val">15:42 <span class="c-of">c-1847</span></div>
+        <div class="c-src">Order 6 — one cycle every 90 minutes</div>
+      </div>
+      <div class="counter">
+        <div class="lab">Plant</div>
+        <div class="c-val">9 of 9 <span class="c-of">answering</span></div>
+        <div class="c-src">Probe 14:46:31 · by <span class="mach">SEN</span></div>
+      </div>
+    </div>
+
+    <div class="conds">
+      <div class="lab">Conditions on taking the watch</div>
+      <p>Watch taken at <strong>12:00:00 UTC</strong> by <span class="mach">SCHEDULER</span> from the forenoon
+      watch, whole and in order: nine services running, none degraded; spend <strong>$181.22</strong> of the
+      $500.00 day; intake queue fourteen deep; one sweep standing; standing orders 1–9 unchanged. The forenoon
+      leaf sealed 12:00:04, signed <span class="mach">SCH</span> — its seal stands
+      <a class="x" href="#sealed">below</a>, awaiting the master&rsquo;s countersign.</p>
+    </div>
+
+    <div class="orders">
+      <div class="o-head">
+        <div class="lab lab-ink">Standing orders</div>
+        <div class="sub">Orders 1–9 in force</div>
+      </div>
+      <p class="o-text">One generation cycle every ninety minutes while spend stands under the cap and intake
+      holds below forty. <strong>Cycles yield to nothing; backfills yield to cycles; the cap yields to no
+      one.</strong></p>
+      <div class="o-next">
+        <div class="lab">Next cycle</div>
+        <div class="c-val">15:42 <span class="c-of">in 55 min</span></div>
+      </div>
+      <div class="o-actions">
+        <button class="btn" type="button">Suspend generation</button>
+        <button class="btn" type="button">Amend an order…</button>
+      </div>
+      <div class="o-foot">
+        <p>Last amendment 3 August — order 6, cadence 120 to 90 minutes; proposed by <span class="mach">COUNCIL</span>
+        from four weeks of yield-per-dollar; countersigned <span class="master-sig">E.V.</span></p>
+        <p>Suspension enters the log, takes effect before the next cycle, and interrupts nothing running.
+        Resumption requires the master&rsquo;s countersign.</p>
+      </div>
+    </div>
+
+    <div class="cols">
+
+      <!-- ======== LEFT: THE RECORD ======== -->
+      <div class="coll">
+
+        <div class="shead">
+          <div class="lab lab-ink">Readings — on the half hour</div>
+          <div class="sub">Taken by SENTRY and written to the log unedited.</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th><th class="num">Spend to date</th><th class="num">Intake</th>
+              <th>Cycles</th><th>Notes</th><th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="t">12:00</td><td class="num">$181.22</td><td class="num">14</td>
+              <td><span class="id">c-1844</span> simulating</td>
+              <td>Watch taken over; conditions above</td><td class="t">SEN</td>
+            </tr>
+            <tr>
+              <td class="t">12:30</td><td class="num">$196.05</td><td class="num">14</td>
+              <td><span class="id">c-1844</span> simulating</td>
+              <td>—</td><td class="t">SEN</td>
+            </tr>
+            <tr>
+              <td class="t">13:00</td><td class="num">$214.61</td><td class="num">13</td>
+              <td><span class="id">c-1845</span> in council · <span class="id">c-1844</span> re-running</td>
+              <td>Run voided 12:44, re-queued — <a class="x" href="#e-1244">see the entry</a></td><td class="t">SEN</td>
+            </tr>
+            <tr>
+              <td class="t">13:30</td><td class="num"><s>$241.10</s> $244.10</td><td class="num">12</td>
+              <td><span class="id">c-1845</span> simulating</td>
+              <td>Spend corrected 13:34 — <a class="x" href="#e-1334">struck, kept</a></td><td class="t">SEN</td>
+            </tr>
+            <tr>
+              <td class="t">14:00</td><td class="num">$262.03</td><td class="num">12</td>
+              <td><span class="id">c-1845</span> simulating</td>
+              <td>—</td><td class="t">SEN</td>
+            </tr>
+            <tr class="latest">
+              <td class="t">14:30</td><td class="num">$289.79</td><td class="num">11</td>
+              <td><span class="id">c-1846</span> in council</td>
+              <td>Snapshot verify running long — <a class="x" href="#e-1431">see 14:31</a></td><td class="t">SEN</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="due">Six of eight readings taken. The next goes down at 15:00:00, by SENTRY, unedited.</p>
+
+        <div class="shead">
+          <div class="lab lab-ink">Remarks &amp; exceptions — entered as they occur</div>
+          <div class="sub">Each carries the action taken and the initials of the service that took it.</div>
+        </div>
+
+        <article class="entry" id="e-1244">
+          <div class="e-head">
+            <span class="e-time">12:44:31</span>
+            <span class="chip">Fault</span>
+            <span class="e-by">entered by <span class="mach">SIM</span></span>
+          </div>
+          <p class="e-what"><span class="id">c-1844</span>&rsquo;s deficit-irrigation series went non-finite at hour
+          1,410 of the season model — evapotranspiration returned NaN under the low-aquifer scenario.</p>
+          <p class="e-act"><span class="alab">Action taken</span>Run voided and struck. The candidate re-queued
+          with its seed pinned; the clean re-run finished 13:20 and the verdict followed at 13:48. The voided
+          run&rsquo;s $1.84 stays on the ledger — voided work still cost money.</p>
+          <p class="e-meta">Closed 13:24 · initialed <span class="mach">SIM</span> · fault cost $1.84, kept</p>
+        </article>
+
+        <article class="entry" id="e-1305">
+          <div class="e-head">
+            <span class="e-time">13:05:12</span>
+            <span class="chip">Remark</span>
+            <span class="e-by">entered by <span class="mach">RDR</span></span>
+          </div>
+          <p class="e-what">Sweep <span class="id">swp-292</span> raised: &ldquo;biochar economics on smallholder
+          plots,&rdquo; at <span class="mach">COUNCIL</span>&rsquo;s request out of <span class="id">c-1843</span>&rsquo;s
+          verdict. About ninety sources scoped, budgeted at $0.25 the source.</p>
+          <p class="e-meta">Initialed <span class="mach">RDR</span> · scoped budget $22.50</p>
+        </article>
+
+        <article class="entry" id="e-1334">
+          <div class="e-head">
+            <span class="e-time">13:34:02</span>
+            <span class="chip">Correction</span>
+            <span class="e-by">entered by <span class="mach">LGR</span></span>
+          </div>
+          <p class="e-what">The 13:30 reading first went down at $241.10; SIMULATOR&rsquo;s tokens for the
+          <span class="id">c-1844</span> re-run had not yet posted to the meter.</p>
+          <p class="e-act"><span class="alab">Action taken</span>Corrected to $244.10 four minutes after the
+          reading. The first figure stands struck in the table — struck, never erased.</p>
+          <p class="e-meta">Closed 13:34 · initialed <span class="mach">LGR</span> · variance $3.00</p>
+        </article>
+
+        <article class="entry" id="e-1358">
+          <div class="e-head">
+            <span class="e-time">13:58:44</span>
+            <span class="chip">Degradation</span>
+            <span class="e-by">entered by <span class="mach">RDR</span></span>
+          </div>
+          <p class="e-what">AgriFeed&nbsp;EU answered 429 to fourteen consecutive fetches during sweep
+          <span class="id">swp-291</span>.</p>
+          <p class="e-act"><span class="alab">Action taken</span>Source shelved for two hours under standing
+          order 7; the sweep continues on the eleven sources still answering. The shelf lifts itself at 15:58
+          and retries once before asking anyone.</p>
+          <p class="e-meta">Closed 14:03 · initialed <span class="mach">RDR</span> · cost of the refused fetches $0.02</p>
+        </article>
+
+        <article class="entry" id="e-1426">
+          <div class="e-head">
+            <span class="e-time">14:26:12</span>
+            <span class="chip">Remark</span>
+            <span class="e-by">entered by <span class="mach">ARC</span></span>
+          </div>
+          <p class="e-what">Verdict filed on <span class="id">c-1845</span>: advance to field review.
+          Deficit-drip scheduling for almond rootstock; the simulator projects an 11% water saving at yield
+          parity, confidence interval filed with the verdict. Ninth verdict of the day.</p>
+          <p class="e-meta">Initialed <span class="mach">ARC</span> · cycle cost $3.11, metered seat by seat ·
+          verdict <span class="id">v-1703</span></p>
+        </article>
+
+        <article class="entry" id="e-1431">
+          <div class="e-head">
+            <span class="e-time">14:31:07</span>
+            <span class="chip">Watch item</span>
+            <span class="chip chip-open">Open</span>
+            <span class="e-by">entered by <span class="mach">VLT</span></span>
+          </div>
+          <p class="e-what">Verification of the 14:12 snapshot passed its ten-minute allowance at 14:29 and has
+          not yet answered.</p>
+          <p class="e-act"><span class="alab">Action taken</span>Second pass running against the secondary copy;
+          the primary is held out of rotation until the checksum speaks. Generation is unaffected. If the second
+          pass fails, VAULT wakes the master.</p>
+          <p class="e-meta">Open · next word by the 15:00 reading</p>
+        </article>
+
+        <p class="continues">The watch stands until 16:00, then seals, signs, and hands over to the evening
+        watch. Two readings remain.</p>
+
+      </div>
+
+      <!-- ======== RIGHT: THE PLANT ======== -->
+      <div class="colr">
+
+        <div class="shead">
+          <div class="lab lab-ink">The plant — settled order</div>
+          <div class="sub">Main plant first, auxiliaries after. The order never varies, so absence shows.</div>
+        </div>
+
+        <div class="grouplab">Main plant</div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <div class="svc-name">READER<span class="duty">· ingest</span></div>
+            <p class="svc-line">Running since Tuesday&rsquo;s deploy (2.31.4, 03:58 UTC) — three days, ten hours
+            unbroken. 1,412 documents read today; 84 of them for sweep swp-291.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <div class="svc-name">COUNCIL<span class="duty">· deliberation</span></div>
+            <p class="svc-line">Running since Tuesday 03:58. Sitting now on c-1846 — three of five seats
+            returned; deliberation opened 14:12.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <div class="svc-name">SIMULATOR<span class="duty">· trial</span></div>
+            <p class="svc-line">Running since 06:10 today — restarted once, cleanly, for the memory fault
+            entered at 05:52. Eleven season models run today; one voided and struck.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <div class="svc-name">ARCHIVIST<span class="duty">· record</span></div>
+            <p class="svc-line">Running since Tuesday 03:58. Nine verdicts filed today, the latest at 14:26
+            (v-1703); 1,703 lifetime.</p>
+          </div>
+        </div>
+
+        <div class="grouplab">Auxiliaries</div>
+        <div class="aux"><span class="dot"></span><p><b>SCHEDULER</b> Keeps the watch. Opened this one at 12:00:00; seals it at 16:00.</p></div>
+        <div class="aux"><span class="dot"></span><p><b>LEDGER</b> Meters every call as it is made. Last posted 14:47:02; reconciles nightly at 00:10.</p></div>
+        <div class="aux"><span class="dot"></span><p><b>SENTRY</b> Probes twice a minute; writes the half-hour readings. Last probe 14:46:31 — nine of nine answered.</p></div>
+        <div class="aux"><span class="dot"></span><p><b>COURIER</b> Holds the mail. Morning digest went 08:05; queue empty.</p></div>
+        <div class="aux"><span class="dot"></span><p><b>VAULT</b> Re-verifying the 14:12 snapshot against the secondary — the open item at 14:31. Snapshots on the even hours.</p></div>
+
+        <div class="shead">
+          <div class="lab lab-ink">The day&rsquo;s ledger</div>
+          <div class="sub">Every call metered by LEDGER at the moment it is made.</div>
+        </div>
+        <div class="l-top">
+          <span class="l-big">$296.14</span>
+          <span class="l-cap">of $500.00 · 59.2% of the cap</span>
+        </div>
+        <div class="meter" role="img" aria-label="59.2 percent of the daily cap spent"><i></i></div>
+        <table class="ltbl">
+          <thead>
+            <tr><th>Service</th><th class="num">Calls</th><th class="num">Spend</th><th class="num">Of spend</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="t">COUNCIL</td><td class="num">1,140</td><td class="num">$118.77</td><td class="num">40.1%</td></tr>
+            <tr><td class="t">SIMULATOR</td><td class="num">96</td><td class="num">$74.90</td><td class="num">25.3%</td></tr>
+            <tr><td class="t">READER</td><td class="num">1,616</td><td class="num">$61.40</td><td class="num">20.7%</td></tr>
+            <tr><td class="t">ARCHIVIST</td><td class="num">214</td><td class="num">$18.22</td><td class="num">6.2%</td></tr>
+            <tr><td class="t">SENTRY</td><td class="num">74</td><td class="num">$9.14</td><td class="num">3.1%</td></tr>
+            <tr><td class="t">VAULT</td><td class="num">22</td><td class="num">$8.03</td><td class="num">2.7%</td></tr>
+            <tr><td class="t">COURIER</td><td class="num">3</td><td class="num">$3.71</td><td class="num">1.3%</td></tr>
+            <tr><td class="t">SCHEDULER</td><td class="num">28</td><td class="num">$1.42</td><td class="num">0.5%</td></tr>
+            <tr><td class="t">LEDGER</td><td class="num">15</td><td class="num">$0.55</td><td class="num">0.2%</td></tr>
+            <tr class="total"><td class="t">TOTAL</td><td class="num">3,208</td><td class="num">$296.14</td><td class="num">59.2% of cap</td></tr>
+          </tbody>
+        </table>
+        <p class="l-note">Reconciled nightly against the provider&rsquo;s invoice at 00:10 — Thursday&rsquo;s
+        variance: $0.00. Voided work stays on the ledger.</p>
+        <p class="l-capline"><strong>The cap is hard.</strong> At $500.00 the plant stands down generation and
+        holds the watch; reading and archiving continue on the residue. Last stood down 14 August, 22:41 —
+        cleanly; resumed at the turn of the leaf by standing order 2.</p>
+
+        <div class="shead">
+          <div class="lab lab-ink">Sweeps &amp; intake</div>
+          <div class="sub">Research underway. Sweeps are raised and retired only through this log.</div>
+        </div>
+        <div class="sweep">
+          <div class="sw-title">&ldquo;Drought-tolerant root architectures&rdquo;<span class="id">swp-291</span></div>
+          <p>Raised 09:12 under READER, out of verdict v-1697. 84 of ~140 sources read; $18.61 metered against a
+          $35.00 scope — $0.22 the source, running under budget.</p>
+        </div>
+        <div class="sweep">
+          <div class="sw-title">&ldquo;Biochar economics, smallholder plots&rdquo;<span class="id">swp-292</span></div>
+          <p>Raised 13:05 at COUNCIL&rsquo;s request. 22 of ~90 sources read; $4.95 metered against $22.50
+          scoped.</p>
+        </div>
+        <p class="queue">Intake stands <strong>eleven deep</strong> — sweep findings awaiting a council seat;
+        median age 2h 40m. The 15:42 cycle draws from the head of the queue.</p>
+
+      </div>
+    </div>
+
+    <!-- stores band -->
+    <div class="stores">
+      <div class="store">
+        <div class="lab lab-ink">Last snapshot</div>
+        <p>Taken <strong>14:12 UTC</strong>, 4.7 GB: 38,214 sources, 1,703 verdicts, the ledger, and this log.
+        Verification ran past its allowance and is re-running — the open item at 14:31.</p>
+        <p class="fine">Snapshots go down on the even hours at :12 and keep ninety days.</p>
+      </div>
+      <div class="store">
+        <div class="lab lab-ink">Backfill</div>
+        <p>Field-trial corpus 2019–2021: <strong>61,204 of 74,800</strong> records, 81.8%. Runs only while the
+        day&rsquo;s spend sits under 70% of cap — live work eats first. Running at this reading (59.2%).</p>
+        <p class="fine">Resumed 12 August after the recovery drill; finishes near Sunday.</p>
+      </div>
+      <div class="store">
+        <div class="lab lab-ink">Recovery</div>
+        <p>Last full drill 11 August: cold start to a clean, serving plant in <strong>18m 40s</strong>, every
+        checksum true.</p>
+        <p class="fine">Drills monthly under standing order 4 — next 8 September, rehearsed from the secondary
+        copy.</p>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ============ SEALED WATCHES ============ -->
+  <section class="sealed-sec" id="sealed" aria-label="Sealed watches">
+    <div class="shead">
+      <div class="lab lab-ink">Sealed watches — the standing record</div>
+      <p class="rubric">A watch seals at handover, and after the seal nothing in it changes. What was wrong is
+      corrected in the open — struck through, initialed, kept — never rewritten. The master countersigns each
+      seal on reading it.</p>
+    </div>
+
+    <!-- Forenoon -->
+    <details class="sealedw needsign">
+      <summary>
+        <span class="chev">&#9656;</span>
+        <span class="sw-id">
+          <span class="sw-name">Forenoon watch<span class="w-span">08:00 – 12:00</span></span>
+          <span class="sw-meta">Kept by SCHEDULER · 8 readings · 1 exception, closed · spend $83.90 ($97.32 →
+          $181.22) · sealed 12:00:04, signed <span class="mach">SCH</span></span>
+        </span>
+        <span class="chip chip-open">Awaiting countersign</span>
+      </summary>
+      <button class="btn btn-primary countersign-btn" type="button">Countersign this watch</button>
+      <div class="sw-body">
+        <div class="shead"><div class="lab">Conditions at takeover</div></div>
+        <p class="sw-conds">Taken over 08:00:00 whole and in order: nine running, spend $97.32, intake fifteen,
+        no sweeps standing, orders unchanged. Signed <span class="mach">SCH</span>.</p>
+
+        <div class="shead"><div class="lab">Readings</div></div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th class="num">Spend to date</th><th class="num">Intake</th><th>Cycles</th><th>Notes</th><th>By</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="t">08:00</td><td class="num">$97.32</td><td class="num">15</td><td><span class="id">c-1841</span> simulating</td><td>Watch taken over</td><td class="t">SEN</td></tr>
+            <tr><td class="t">08:30</td><td class="num">$106.18</td><td class="num">15</td><td><span class="id">c-1842</span> in council</td><td>Digest sent 08:05</td><td class="t">SEN</td></tr>
+            <tr><td class="t">09:00</td><td class="num">$118.02</td><td class="num">15</td><td><span class="id">c-1842</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">09:30</td><td class="num">$131.44</td><td class="num">16</td><td><span class="id">c-1842</span> simulating</td><td>swp-291 raised 09:12</td><td class="t">SEN</td></tr>
+            <tr><td class="t">10:00</td><td class="num">$141.87</td><td class="num">16</td><td><span class="id">c-1843</span> in council</td><td>Seat four re-polled — see 09:47</td><td class="t">SEN</td></tr>
+            <tr><td class="t">10:30</td><td class="num">$153.29</td><td class="num">16</td><td><span class="id">c-1843</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">11:00</td><td class="num">$162.75</td><td class="num">15</td><td><span class="id">c-1843</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">11:30</td><td class="num">$173.06</td><td class="num">14</td><td><span class="id">c-1844</span> in council</td><td>—</td><td class="t">SEN</td></tr>
+          </tbody>
+        </table>
+
+        <div class="shead"><div class="lab">Remarks &amp; exceptions</div></div>
+        <article class="entry">
+          <div class="e-head">
+            <span class="e-time">08:05:30</span><span class="chip">Remark</span>
+            <span class="e-by">entered by <span class="mach">CUR</span></span>
+          </div>
+          <p class="e-what">Morning digest sent to the master: Thursday sealed at $438.12, fourteen verdicts, no
+          open items. One mail, $0.03.</p>
+          <p class="e-meta">Initialed <span class="mach">CUR</span></p>
+        </article>
+        <article class="entry">
+          <div class="e-head">
+            <span class="e-time">09:12:09</span><span class="chip">Remark</span>
+            <span class="e-by">entered by <span class="mach">RDR</span></span>
+          </div>
+          <p class="e-what">Sweep <span class="id">swp-291</span> raised: &ldquo;drought-tolerant root
+          architectures,&rdquo; seeded from Wednesday&rsquo;s verdict <span class="id">v-1697</span>. About 140
+          sources scoped at $0.25 the source.</p>
+          <p class="e-meta">Initialed <span class="mach">RDR</span> · scoped budget $35.00</p>
+        </article>
+        <article class="entry">
+          <div class="e-head">
+            <span class="e-time">09:47:51</span><span class="chip">Fault</span>
+            <span class="e-by">entered by <span class="mach">CNL</span></span>
+          </div>
+          <p class="e-what">Seat four of five timed out at ninety seconds during <span class="id">c-1843</span>&rsquo;s
+          deliberation.</p>
+          <p class="e-act"><span class="alab">Action taken</span>Seat re-polled once, per standing order 3; it
+          answered in forty-one seconds. Deliberation ran six minutes long; the verdict was unanimous, filed
+          10:31.</p>
+          <p class="e-meta">Closed 09:55 · initialed <span class="mach">CNL</span> · cost of the dead seat $0.31, kept</p>
+        </article>
+
+        <p class="handover"><strong>Handed over 12:00:04</strong>, signed <span class="mach">SCH</span> — nine
+        running, spend $181.22, intake fourteen, one sweep standing. Sealed; awaiting the master&rsquo;s
+        countersign.</p>
+      </div>
+    </details>
+
+    <!-- Morning -->
+    <details class="sealedw">
+      <summary>
+        <span class="chev">&#9656;</span>
+        <span class="sw-id">
+          <span class="sw-name">Morning watch<span class="w-span">04:00 – 08:00</span></span>
+          <span class="sw-meta">Kept by SCHEDULER · 8 readings · 1 exception, closed · spend $61.10 ($36.22 →
+          $97.32) · sealed 08:00:02, signed <span class="mach">SCH</span></span>
+        </span>
+        <span class="sw-sign">Countersigned <span class="master-sig">E.V.</span> · 08:12</span>
+      </summary>
+      <div class="sw-body">
+        <div class="shead"><div class="lab">Conditions at takeover</div></div>
+        <p class="sw-conds">Taken over 04:00:00: nine running, spend $36.22, intake fifteen, orders unchanged.
+        Signed <span class="mach">SCH</span>.</p>
+
+        <div class="shead"><div class="lab">Readings</div></div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th class="num">Spend to date</th><th class="num">Intake</th><th>Cycles</th><th>Notes</th><th>By</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="t">04:00</td><td class="num">$36.22</td><td class="num">15</td><td><span class="id">c-1839</span> in council</td><td>Watch taken over</td><td class="t">SEN</td></tr>
+            <tr><td class="t">04:30</td><td class="num">$41.77</td><td class="num">15</td><td><span class="id">c-1839</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">05:00</td><td class="num">$48.30</td><td class="num">15</td><td><span class="id">c-1839</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">05:30</td><td class="num">$55.12</td><td class="num">15</td><td><span class="id">c-1840</span> in council</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">06:00</td><td class="num">$60.94</td><td class="num">15</td><td><span class="id">c-1840</span> checkpointed</td><td>Eight of nine — SIMULATOR draining; see 05:52</td><td class="t">SEN</td></tr>
+            <tr><td class="t">06:30</td><td class="num">$68.71</td><td class="num">15</td><td><span class="id">c-1840</span> resumed</td><td>SIMULATOR back 06:10 — nine of nine</td><td class="t">SEN</td></tr>
+            <tr><td class="t">07:00</td><td class="num">$77.25</td><td class="num">15</td><td><span class="id">c-1841</span> in council</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">07:30</td><td class="num">$87.16</td><td class="num">15</td><td><span class="id">c-1841</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+          </tbody>
+        </table>
+
+        <div class="shead"><div class="lab">Remarks &amp; exceptions</div></div>
+        <article class="entry">
+          <div class="e-head">
+            <span class="e-time">05:52:18</span><span class="chip">Fault</span>
+            <span class="e-by">entered by <span class="mach">SEN</span></span>
+          </div>
+          <p class="e-what">SIMULATOR&rsquo;s resident memory crossed its allowance while <span class="id">c-1840</span>&rsquo;s
+          season model was loading.</p>
+          <p class="e-act"><span class="alab">Action taken</span>The run checkpointed and the service drained,
+          restarted clean at 06:10; the run resumed from checkpoint with no verdict lost. The leak traced to the
+          soil-chemistry module; the patch is queued as change <span class="id">c/512</span> for the Tuesday
+          window.</p>
+          <p class="e-meta">Closed 06:14 · initialed <span class="mach">SEN</span> · plant stood eight of nine
+          for twelve minutes — recorded as such</p>
+        </article>
+
+        <p class="handover"><strong>Handed over 08:00:02</strong>, signed <span class="mach">SCH</span> — nine
+        running, spend $97.32. Countersigned <span class="master-sig">E.V.</span> 08:12.</p>
+      </div>
+    </details>
+
+    <!-- Middle -->
+    <details class="sealedw">
+      <summary>
+        <span class="chev">&#9656;</span>
+        <span class="sw-id">
+          <span class="sw-name">Middle watch<span class="w-span">00:00 – 04:00</span></span>
+          <span class="sw-meta">Kept by SCHEDULER · 8 readings · no exceptions — a quiet watch, recorded as such
+          · spend $36.22 from the turn of the leaf · sealed 04:00:03, signed <span class="mach">SCH</span></span>
+        </span>
+        <span class="sw-sign">Countersigned <span class="master-sig">E.V.</span> · 08:12</span>
+      </summary>
+      <div class="sw-body">
+        <div class="shead"><div class="lab">Conditions at takeover</div></div>
+        <p class="sw-conds">Taken over 00:00:00 at the turn of the leaf: nine running, ledger reset to zero,
+        intake sixteen carried over from Thursday, orders unchanged. Signed <span class="mach">SCH</span>.</p>
+
+        <div class="shead"><div class="lab">Readings</div></div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th class="num">Spend to date</th><th class="num">Intake</th><th>Cycles</th><th>Notes</th><th>By</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="t">00:00</td><td class="num">$0.00</td><td class="num">16</td><td><span class="id">c-1836</span> simulating</td><td>Leaf turned; ledger reset; Thursday sealed</td><td class="t">SEN</td></tr>
+            <tr><td class="t">00:30</td><td class="num">$3.12</td><td class="num">16</td><td><span class="id">c-1836</span> simulating</td><td>Thursday reconciled 00:10 — variance $0.00</td><td class="t">SEN</td></tr>
+            <tr><td class="t">01:00</td><td class="num">$7.44</td><td class="num">16</td><td><span class="id">c-1837</span> in council</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">01:30</td><td class="num">$11.90</td><td class="num">15</td><td><span class="id">c-1837</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">02:00</td><td class="num">$15.31</td><td class="num">15</td><td><span class="id">c-1837</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">02:30</td><td class="num">$19.02</td><td class="num">15</td><td><span class="id">c-1838</span> in council</td><td>Snapshot 02:12, verified 02:19</td><td class="t">SEN</td></tr>
+            <tr><td class="t">03:00</td><td class="num">$24.87</td><td class="num">15</td><td><span class="id">c-1838</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+            <tr><td class="t">03:30</td><td class="num">$30.15</td><td class="num">15</td><td><span class="id">c-1838</span> simulating</td><td>—</td><td class="t">SEN</td></tr>
+          </tbody>
+        </table>
+
+        <div class="shead"><div class="lab">Remarks &amp; exceptions</div></div>
+        <article class="entry">
+          <div class="e-head">
+            <span class="e-time">00:10:41</span><span class="chip">Remark</span>
+            <span class="e-by">entered by <span class="mach">LGR</span></span>
+          </div>
+          <p class="e-what">Thursday reconciled against the provider&rsquo;s invoice: 41,206 calls metered,
+          variance $0.00. The day sealed at $438.12 of $500.00.</p>
+          <p class="e-meta">Initialed <span class="mach">LGR</span></p>
+        </article>
+        <article class="entry">
+          <div class="e-head">
+            <span class="e-time">02:19:03</span><span class="chip">Remark</span>
+            <span class="e-by">entered by <span class="mach">VLT</span></span>
+          </div>
+          <p class="e-what">The 02:12 snapshot — 4.6 GB — verified in seven minutes, checksum clean.</p>
+          <p class="e-meta">Initialed <span class="mach">VLT</span></p>
+        </article>
+
+        <p class="handover"><strong>Handed over 04:00:03</strong>, signed <span class="mach">SCH</span> — nine
+        running, spend $36.22. Countersigned <span class="master-sig">E.V.</span> 08:12.</p>
+      </div>
+    </details>
+
+    <!-- Day seal -->
+    <div class="dayseal">
+      <div>
+        <div class="lab lab-ink">Thursday 21 August — day sealed</div>
+        <p>Six watches, forty-eight readings, sixteen cycles begun, fourteen verdicts filed. $438.12 of $500.00,
+        reconciled to the invoice at $0.00 variance. Three exceptions, each closed with its action.</p>
+      </div>
+      <div class="sw-sign">Sealed 00:00:02 · countersigned <span class="master-sig">E.V.</span> · Friday 08:12</div>
+    </div>
+
+    <p class="vol"><a href="#">The volume holds 215 leaves, each sealed like this one — the log opened
+    20 January 2026 and has never missed a reading. Open the volume &#9656;</a></p>
+
+  </section>
+
+  <footer class="foot">
+    <p class="motto">Every claim sourced · every cost computed · every verdict recorded</p>
+    <p class="lab">Machinery watch log · kept in UTC · the leaf turns at 00:00</p>
+  </footer>
+
+</main>
+
+</body>
+</html>

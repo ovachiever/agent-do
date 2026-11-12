@@ -121,6 +121,9 @@ def load_tool_credentials_env(tool_name: str) -> dict:
         return env
 
     for key in keys:
+        if key.upper() == "OPENAI_API_KEY":
+            # Routing a general tool must not open an OpenAI Keychain prompt.
+            continue
         if env.get(key):
             continue
         result = subprocess.run(

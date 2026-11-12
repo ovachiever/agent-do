@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Engine Room</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --card:#211E1B;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair2:rgba(231,227,218,0.30);
+    --sage:hsl(158,30%,55%);
+    --sage-deep:hsl(158,30%,44%);
+    --rail:#3E5B4F;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{color-scheme:dark}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:14px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--sage);color:var(--ground)}
+  .wrap{max-width:1360px;margin:0 auto;padding:0 40px}
+  .num{font-variant-numeric:tabular-nums}
+  .mono{font-family:var(--mono)}
+  .fn{color:var(--sage);font-weight:400;font-style:normal}
+  a{color:inherit}
+
+  /* ---------- top nav ---------- */
+  .nav{border-bottom:1px solid var(--hair)}
+  .nav .wrap{display:flex;align-items:center;height:56px;gap:36px}
+  .brand{font-family:var(--serif);font-size:19px;letter-spacing:0.01em;color:var(--ink)}
+  .navlinks{display:flex;gap:4px;flex:1}
+  .navlinks a{
+    display:inline-flex;align-items:center;height:56px;padding:0 13px;
+    font-size:13px;color:var(--muted);text-decoration:none;letter-spacing:0.02em;
+  }
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.active{color:var(--ink);box-shadow:inset 0 -2px 0 var(--sage)}
+  .navstate{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .navstate .clock{font-family:var(--mono);color:var(--ink)}
+  .pip{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sage)}
+
+  /* ---------- masthead ---------- */
+  .masthead{padding:30px 0 26px}
+  .masthead .wrap{display:flex;gap:44px;align-items:stretch}
+  .mast-left{flex:1;min-width:0}
+  .lab{
+    font-size:12px;letter-spacing:0.14em;text-transform:uppercase;
+    color:var(--muted);font-family:var(--sans);
+  }
+  h1{font-family:var(--serif);font-size:30px;font-weight:400;letter-spacing:0.005em;margin:6px 0 8px}
+  .trustline{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--faint)}
+  .statusline{
+    font-family:var(--serif);font-size:17px;line-height:1.6;color:var(--ink);
+    margin-top:14px;max-width:760px;
+  }
+  .statusline .g{color:var(--sage)}
+
+  .possession{
+    width:340px;flex:none;border:1px solid var(--hair);background:var(--card);
+    border-radius:3px;padding:18px 20px;align-self:flex-start;
+  }
+  .possession p.state{font-family:var(--serif);font-size:13px;color:var(--muted);margin:8px 0 14px;line-height:1.55}
+  .possession p.state b{color:var(--ink);font-weight:400}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--sans);font-size:14px;font-weight:600;
+    background:var(--sage);color:var(--ground);border:1px solid var(--sage);
+    border-radius:3px;height:40px;padding:0 18px;width:100%;cursor:pointer;
+  }
+  .btn:hover{background:var(--sage-deep);border-color:var(--sage-deep)}
+  .btn:focus-visible,.btn2:focus-visible,.navlinks a:focus-visible{outline:2px solid var(--sage);outline-offset:2px}
+  .btn2{
+    display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--sans);font-size:13px;font-weight:500;
+    background:transparent;color:var(--ink);border:1px solid var(--hair2);
+    border-radius:3px;height:32px;padding:0 14px;cursor:pointer;
+  }
+  .btn2:hover{border-color:var(--sage);color:var(--ink)}
+  .possession .fine{font-size:12px;color:var(--faint);margin-top:12px;line-height:1.55}
+
+  /* ---------- timetable ---------- */
+  .tt-head{display:flex;align-items:baseline;justify-content:space-between;gap:24px;margin:6px 0 10px}
+  .tt-head .note{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--faint);text-align:right}
+  .ttcard{border:1px solid var(--hair);background:var(--card);border-radius:3px;overflow:hidden}
+  table.wtt{width:100%;border-collapse:collapse;table-layout:fixed}
+  .wtt th,.wtt td{border-left:1px solid var(--hair);vertical-align:top}
+  .wtt th:first-child,.wtt td:first-child{border-left:none}
+  .wtt thead th{
+    border-bottom:3px double var(--hair2);
+    padding:12px 10px 11px;text-align:center;font-weight:400;
+  }
+  .wtt thead th.stcol{width:216px;text-align:left;padding-left:20px}
+  .wid{font-family:var(--mono);font-size:15px;color:var(--ink);display:block}
+  .wsub{display:block;font-size:12px;color:var(--muted);margin-top:3px}
+  .wsub.g{color:var(--sage)}
+  .wsub.x{color:var(--faint);text-decoration:line-through}
+  .wsub .nostrike{text-decoration:none;display:inline-block}
+
+  .wtt tbody th.st{
+    text-align:left;font-weight:400;padding:9px 12px 9px 34px;position:relative;
+  }
+  .st::before{
+    content:"";position:absolute;left:13px;top:0;bottom:0;width:2px;background:var(--rail);
+  }
+  .st.first::before{top:50%}
+  .st.last::before{bottom:50%}
+  .st::after{
+    content:"";position:absolute;left:9px;top:50%;transform:translateY(-50%);
+    width:10px;height:10px;border-radius:50%;background:var(--muted);
+  }
+  .st.term::after{background:var(--card);border:2px solid var(--muted)}
+  .stname{display:block;font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink)}
+  .strole{display:block;font-family:var(--serif);font-style:italic;font-size:12px;color:var(--faint);margin-top:2px}
+
+  .wtt tbody td{padding:9px 10px;text-align:center}
+  .wtt tbody tr+tr td,.wtt tbody tr+tr th{border-top:1px solid var(--hair)}
+  .bk{display:block;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .an{display:block;font-size:12px;margin-top:2px;line-height:1.35}
+  .an.ok{color:var(--sage)}
+  .an.mm{color:var(--muted)}
+  .an.late{color:var(--ink);font-weight:600}
+  .an.run{color:var(--sage)}
+  .an.off{color:var(--faint)}
+  td.cx .bk{color:var(--faint);text-decoration:line-through}
+  td.cx .an{color:var(--faint)}
+  .col-now{background:rgba(106,175,150,0.06)}
+  th.col-now{box-shadow:inset 0 2px 0 var(--sage)}
+
+  .wtt .tally th,.wtt .tally td{border-top:3px double var(--hair2)}
+  .wtt .tally + .tally th,.wtt .tally + .tally td{border-top:1px solid var(--hair)}
+  .wtt .tally th{text-align:left;font-weight:400;padding:9px 12px 9px 34px}
+  .wtt .tally .stname{color:var(--muted)}
+  .verdict td{font-family:var(--serif);font-style:italic;font-size:12px;color:var(--muted);padding:10px 10px}
+  .verdict td b{color:var(--ink);font-weight:400;font-style:normal}
+  .meter td{font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums;padding:10px}
+  .meter td .g{color:var(--sage);font-size:12px}
+  .meter td.dim,.verdict td.dim{color:var(--faint)}
+
+  .ttnotes{margin:14px 2px 0;max-width:1100px}
+  .ttnotes p{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--muted);margin:5px 0;line-height:1.55}
+  .ttnotes p b{color:var(--ink);font-weight:400;font-style:normal}
+
+  /* ---------- section grid ---------- */
+  .cols{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:28px}
+  .card{border:1px solid var(--hair);background:var(--card);border-radius:3px;padding:20px 22px 22px}
+  .card h2{font-family:var(--serif);font-size:19px;font-weight:400;margin:5px 0 12px}
+  .card .intro{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--faint);margin-bottom:12px;line-height:1.55}
+
+  /* systems */
+  .grouplab{font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--faint);margin:12px 0 2px}
+  .sys{list-style:none}
+  .sys li{display:flex;gap:12px;padding:9px 0;border-top:1px solid var(--hair)}
+  .sys li:first-child{border-top:none}
+  .sys .dot{flex:none;margin-top:5px;width:8px;height:8px;border-radius:50%;background:var(--sage)}
+  .sys .body{flex:1;min-width:0}
+  .sname{font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink)}
+  .srole{font-family:var(--serif);font-style:italic;font-size:12px;color:var(--faint);margin-left:7px}
+  .ssent{font-size:13px;color:var(--muted);margin-top:2px;line-height:1.5}
+  .ssent b{color:var(--ink);font-weight:400}
+
+  /* ledger */
+  .bigspend{display:flex;align-items:baseline;gap:8px;margin:2px 0 4px}
+  .bigspend .amt{font-size:27px;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:0.01em}
+  .bigspend .cap{font-size:15px;color:var(--muted)}
+  .provline{font-size:12px;color:var(--faint);margin-bottom:12px}
+  .bar{border:1px solid var(--hair2);border-radius:2px;height:14px;padding:2px;margin-bottom:6px}
+  .bar .fill{height:8px;width:52.3%;background:var(--sage);border-radius:1px}
+  .barscale{display:flex;justify-content:space-between;font-size:12px;color:var(--faint);margin-bottom:14px}
+  .ledg{list-style:none;margin-bottom:2px}
+  .ledg li{display:flex;align-items:baseline;gap:10px;padding:7px 0;border-top:1px solid var(--hair)}
+  .ledg .lname{font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink);flex:none}
+  .ledg .lnote{font-family:var(--serif);font-style:italic;font-size:12px;color:var(--faint);flex:1;min-width:0}
+  .ledg .lamt{font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .ledg li.total{border-top:3px double var(--hair2)}
+  .ledg li.total .lamt{font-weight:600;font-size:15px}
+  .ledgersent{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--muted);margin-top:12px;line-height:1.6}
+  .ledgersent b{color:var(--ink);font-weight:400;font-style:normal}
+
+  /* scheduler */
+  .next{margin:14px 0 14px;padding:14px 16px;border:1px solid var(--hair);border-radius:3px}
+  .next .nid{font-family:var(--mono);font-size:20px;color:var(--ink);margin-top:4px}
+  .next .nid .t{font-family:var(--sans);font-variant-numeric:tabular-nums}
+  .next .nsub{font-size:13px;color:var(--muted);margin-top:3px}
+  .next .nsub b{color:var(--sage);font-weight:400}
+  .schedp{font-family:var(--serif);font-size:13.5px;color:var(--muted);line-height:1.6;margin:10px 0}
+  .schedp b{color:var(--ink);font-weight:400}
+  .btnrow{display:flex;gap:10px;margin:14px 0 10px}
+  .finelaw{font-size:12px;color:var(--faint);line-height:1.55}
+
+  /* research */
+  .sweep{padding:10px 0;border-top:1px solid var(--hair)}
+  .sweep:first-of-type{border-top:none}
+  .sweep .shead{display:flex;align-items:baseline;gap:10px}
+  .sid{font-family:var(--mono);font-size:14px;color:var(--ink)}
+  .stitle{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--ink)}
+  .ssent2{font-size:13px;color:var(--muted);margin-top:3px;line-height:1.55}
+  .ssent2 b{color:var(--ink);font-weight:400}
+  .ssent2 .g{color:var(--sage)}
+  .queue{list-style:none;margin-top:4px}
+  .queue li{display:flex;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid var(--hair)}
+  .queue .qt{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--muted);flex:1;min-width:0}
+  .queue .qm{font-size:12px;color:var(--faint);flex:none;font-variant-numeric:tabular-nums}
+
+  /* permanent way */
+  .pway{list-style:none}
+  .pway li{padding:9px 0;border-top:1px solid var(--hair)}
+  .pway li:first-child{border-top:none}
+  .pway .plab{font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--faint);display:block;margin-bottom:2px}
+  .pway p{font-size:13px;color:var(--muted);line-height:1.55}
+  .pway p b{color:var(--ink);font-weight:400}
+  .pway p .g{color:var(--sage)}
+
+  /* occurrences */
+  .occ{padding:11px 0;border-top:1px solid var(--hair)}
+  .occ:first-of-type{border-top:none}
+  .ohead{display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap}
+  .otime{font-family:var(--mono);font-size:14px;color:var(--ink)}
+  .owhere{font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+  .chip{
+    font-size:12px;letter-spacing:0.1em;text-transform:uppercase;
+    border:1px solid var(--sage);color:var(--sage);border-radius:3px;
+    padding:2px 8px;margin-left:auto;white-space:nowrap;
+  }
+  .chip.open{border-color:var(--hair2);color:var(--ink)}
+  .obody{font-family:var(--serif);font-size:13px;color:var(--muted);line-height:1.6}
+  .obody b{color:var(--ink);font-weight:400}
+  .occ .btn2{margin-top:10px}
+  .priorline{font-size:12px;color:var(--faint);margin-top:12px;line-height:1.55;border-top:1px solid var(--hair);padding-top:10px}
+
+  /* footer */
+  footer{margin-top:36px;border-top:1px solid var(--hair)}
+  footer .wrap{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 40px 34px}
+  .motto{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--muted)}
+  .colophon{font-size:12px;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <span class="brand">Palingenesis</span>
+    <div class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#" class="active">Engine&nbsp;Room</a>
+    </div>
+    <span class="navstate"><span class="pip"></span> the line is open&nbsp;·&nbsp;<span class="clock num">15:31</span></span>
+  </div>
+</nav>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="mast-left">
+      <span class="lab">Operator’s book · the one doorway</span>
+      <h1>Engine Room</h1>
+      <p class="trustline">Friday 22 August · Working Timetable No.&nbsp;34 · as at 15:31. Every time on this page is booked; the day is annotated against the book, and nothing overwrites it.</p>
+      <p class="statusline">The line is open. Three workings have closed — two right time, one brought back from twenty-one minutes down to twelve. <span class="g">G-1846 stands in trials at the Simulator;</span> G-1847 departs 17:00.</p>
+    </div>
+    <aside class="possession">
+      <span class="lab">Possession · your authority</span>
+      <p class="state"><b>No possession is held.</b> The timetable has run unbroken since the 05:00 departure. Friday’s standing possession P-449 was taken at 01:00 and handed back 04:45, on time.</p>
+      <button type="button" class="btn">Take possession of the line</button>
+      <p class="fine">Possession halts departures only; a working already on the line runs to its close. A path that falls inside a possession is cancelled against it and recorded — as G-1842 was this morning — never erased.</p>
+    </aside>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="tt-head">
+    <span class="lab">The day’s workings — working timetable</span>
+    <span class="note">Stations read down; workings read across. Booked figures stand; the actual working is written beneath, never over.</span>
+  </div>
+
+  <div class="ttcard">
+    <table class="wtt">
+      <thead>
+        <tr>
+          <th class="stcol"><span class="lab">The line</span><span class="strole">times are booked arrivals</span></th>
+          <th>
+            <span class="wid">G-1842</span>
+            <span class="wsub x"><span class="nostrike">02:00 · cancelled&nbsp;<b class="fn">²</b></span></span>
+          </th>
+          <th><span class="wid">G-1843</span><span class="wsub">05:00 · closed</span></th>
+          <th><span class="wid">G-1844</span><span class="wsub">08:00 · closed, +12</span></th>
+          <th><span class="wid">G-1845</span><span class="wsub">11:00 · closed</span></th>
+          <th class="col-now"><span class="wid">G-1846</span><span class="wsub g">14:00 · on the line ●</span></th>
+          <th><span class="wid">G-1847</span><span class="wsub">17:00 · next away</span></th>
+          <th><span class="wid">G-1848</span><span class="wsub">20:00 · Q, as required&nbsp;<b class="fn">⁴</b></span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th class="st term first"><span class="stname">Open</span><span class="strole">departure · the working begins</span></th>
+          <td class="cx"><span class="bk">02:00</span><span class="an">did not run</span></td>
+          <td><span class="bk">05:00</span><span class="an ok">right time</span></td>
+          <td><span class="bk">08:00</span><span class="an ok">right time</span></td>
+          <td><span class="bk">11:00</span><span class="an ok">right time</span></td>
+          <td class="col-now"><span class="bk">14:00</span><span class="an ok">right time</span></td>
+          <td><span class="bk">17:00</span><span class="an off">—</span></td>
+          <td><span class="bk">20:00</span><span class="an off">—</span></td>
+        </tr>
+        <tr>
+          <th class="st"><span class="stname">Reader</span><span class="strole">intake · 26′ booked</span></th>
+          <td class="cx"><span class="bk">02:02</span><span class="an">—</span></td>
+          <td><span class="bk">05:02</span><span class="an ok">right time</span></td>
+          <td><span class="bk">08:02</span><span class="an ok">right time</span></td>
+          <td><span class="bk">11:02</span><span class="an ok">right time</span></td>
+          <td class="col-now"><span class="bk">14:02</span><span class="an ok">right time&nbsp;<b class="fn">³</b></span></td>
+          <td><span class="bk">17:02</span><span class="an off">—</span></td>
+          <td><span class="bk">20:02</span><span class="an off">—</span></td>
+        </tr>
+        <tr>
+          <th class="st"><span class="stname">Council</span><span class="strole">deliberation · 34′ booked</span></th>
+          <td class="cx"><span class="bk">02:28</span><span class="an">—</span></td>
+          <td><span class="bk">05:28</span><span class="an ok">right time</span></td>
+          <td><span class="bk">08:28</span><span class="an ok">right time</span></td>
+          <td><span class="bk">11:28</span><span class="an mm">11:29 · +1</span></td>
+          <td class="col-now"><span class="bk">14:28</span><span class="an ok">right time</span></td>
+          <td><span class="bk">17:28</span><span class="an off">—</span></td>
+          <td><span class="bk">20:28</span><span class="an off">—</span></td>
+        </tr>
+        <tr>
+          <th class="st"><span class="stname">Simulator</span><span class="strole">trials · 38′ + 2′ margin</span></th>
+          <td class="cx"><span class="bk">03:02</span><span class="an">—</span></td>
+          <td><span class="bk">06:02</span><span class="an ok">right time</span></td>
+          <td><span class="bk">09:02</span><span class="an late">09:23 · +21&nbsp;<b class="fn">¹</b></span></td>
+          <td><span class="bk">12:02</span><span class="an ok">right time</span></td>
+          <td class="col-now"><span class="bk">15:02</span><span class="an run">15:04 · in trials ●<br>27′ of 38′ booked</span></td>
+          <td><span class="bk">18:02</span><span class="an off">—</span></td>
+          <td><span class="bk">21:02</span><span class="an off">—</span></td>
+        </tr>
+        <tr>
+          <th class="st"><span class="stname">Archivist</span><span class="strole">record · 8′ + 2′ margin</span></th>
+          <td class="cx"><span class="bk">03:42</span><span class="an">—</span></td>
+          <td><span class="bk">06:42</span><span class="an mm">06:43 · +1</span></td>
+          <td><span class="bk">09:42</span><span class="an late">09:56 · +14</span></td>
+          <td><span class="bk">12:42</span><span class="an ok">right time</span></td>
+          <td class="col-now"><span class="bk">15:42</span><span class="an off">—</span></td>
+          <td><span class="bk">18:42</span><span class="an off">—</span></td>
+          <td><span class="bk">21:42</span><span class="an off">—</span></td>
+        </tr>
+        <tr>
+          <th class="st term last"><span class="stname">Close</span><span class="strole">arrival · verdict recorded</span></th>
+          <td class="cx"><span class="bk">03:52</span><span class="an">—</span></td>
+          <td><span class="bk">06:52</span><span class="an mm">06:54 · +2</span></td>
+          <td><span class="bk">09:52</span><span class="an late">10:04 · +12</span></td>
+          <td><span class="bk">12:52</span><span class="an mm">12:53 · +1</span></td>
+          <td class="col-now"><span class="bk">15:52</span><span class="an off">—</span></td>
+          <td><span class="bk">18:52</span><span class="an off">—</span></td>
+          <td><span class="bk">21:52</span><span class="an off">—</span></td>
+        </tr>
+      </tbody>
+      <tbody>
+        <tr class="tally verdict">
+          <th><span class="stname">Verdict</span><span class="strole">recorded at close</span></th>
+          <td class="dim">—</td>
+          <td><b>Two claims advanced</b> to the Pipeline.</td>
+          <td><b>One advanced;</b> one held for a second source.</td>
+          <td>Returned — the evidence did not carry.</td>
+          <td class="col-now">In trials.</td>
+          <td class="dim">—</td>
+          <td class="dim">—</td>
+        </tr>
+        <tr class="tally meter">
+          <th><span class="stname">Metered spend</span><span class="strole">computed at the call</span></th>
+          <td class="dim">—</td>
+          <td>$61.42</td>
+          <td>$73.85&nbsp;<b class="fn">¹</b></td>
+          <td>$57.90</td>
+          <td class="col-now">$31.07 <span class="g">· metering</span></td>
+          <td class="dim">—</td>
+          <td class="dim">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ttnotes">
+    <p>Times are booked arrivals at each point. Two-minute recovery margins ride at Simulator and Close; a working inside its margin is right time.</p>
+    <p><b class="fn">¹</b>&nbsp; G-1844 was not taken at the Simulator at its booked 09:02; the service was restarted 09:07 and the working taken 09:23, twenty-one down, closing twelve down at 10:04. Occurrence 1 in the register; the $8.12 retry rides on the working’s metered line.</p>
+    <p><b class="fn">²</b>&nbsp; The 02:00 path stands in the book and is cancelled against Friday possession P-449 (01:00–04:45, snapshot and permanent way). A cancelled path is recorded, never erased.</p>
+    <p><b class="fn">³</b>&nbsp; Special working S-112 stood aside at the Reader, 14:02–14:26, while G-1846 called: scheduled workings hold precedence over specials.</p>
+    <p><b class="fn">⁴</b>&nbsp; Q — runs as required. G-1848 asks $75 of ledger headroom at 19:45; on the present ledger it runs.</p>
+  </div>
+
+  <div class="cols">
+
+    <!-- SYSTEMS -->
+    <section class="card">
+      <span class="lab">Systems · in running order</span>
+      <h2>The Line</h2>
+      <p class="intro">The stations of the line, in the order every working calls; then the box, which works the line but stands off it.</p>
+      <div class="grouplab">On the line</div>
+      <ul class="sys">
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Reader</span><span class="srole">station · intake</span>
+          <p class="ssent">Running <b>83 hours unbroken</b>, since 04:31 Tuesday 19 August. <b>1,204 documents</b> taken today; last intake 15:26.</p>
+        </div></li>
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Council</span><span class="srole">station · deliberation</span>
+          <p class="ssent">Running <b>83 hours unbroken</b>. Four sittings held today; the median sitting ran <b>32 minutes</b> against 34 booked.</p>
+        </div></li>
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Simulator</span><span class="srole">station · trials</span>
+          <p class="ssent">Running — <b>restarted 09:07</b> this morning by the watchdog (occurrence 1); steady the <b>six hours</b> since.</p>
+        </div></li>
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Archivist</span><span class="srole">station · record</span>
+          <p class="ssent">Running <b>83 hours unbroken</b>. <b>41,882 entries</b> held; last write 15:30.</p>
+        </div></li>
+      </ul>
+      <div class="grouplab">The box</div>
+      <ul class="sys">
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Signals</span><span class="srole">scheduler · works the timetable</span>
+          <p class="ssent">Running <b>21 days unbroken</b>, since 1 August. Holds the book; grants and records possession.</p>
+        </div></li>
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Meter</span><span class="srole">ledger · counts every call</span>
+          <p class="ssent">Running <b>21 days unbroken</b>. <b>1,846 calls</b> metered today; the books balanced at last close.</p>
+        </div></li>
+        <li><span class="dot"></span><div class="body">
+          <span class="sname">Librarian</span><span class="srole">serves the Library</span>
+          <p class="ssent">Running <b>21 days unbroken</b>. 88 fetches served today; none refused.</p>
+        </div></li>
+      </ul>
+    </section>
+
+    <!-- LEDGER -->
+    <section class="card">
+      <span class="lab">Spend · metered at the call</span>
+      <h2>The Day’s Ledger</h2>
+      <div class="bigspend"><span class="amt">$261.50</span><span class="cap">of $500.00</span></div>
+      <p class="provline">as at 15:31 · 1,846 calls metered · last entry 15:30</p>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="barscale"><span>$0</span><span>cap $500 — set by you, 3 May</span></div>
+      <ul class="ledg">
+        <li><span class="lname">Reader</span><span class="lnote">1,204 documents, priced per document</span><span class="lamt">$14.98</span></li>
+        <li><span class="lname">Council</span><span class="lnote">four sittings</span><span class="lamt">$89.10</span></li>
+        <li><span class="lname">Simulator</span><span class="lnote">incl. $8.12 retry on G-1844</span><span class="lamt">$104.51</span></li>
+        <li><span class="lname">Archivist</span><span class="lnote">incl. $6.20 night work under P-449</span><span class="lamt">$16.08</span></li>
+        <li><span class="lname">Librarian</span><span class="lnote">88 fetches</span><span class="lamt">$5.77</span></li>
+        <li><span class="lname">Specials</span><span class="lnote">S-311 closed · S-112 running</span><span class="lamt">$31.06</span></li>
+        <li class="total"><span class="lname">Today</span><span class="lnote">the ledger closes 24:00; nothing carries over</span><span class="lamt">$261.50</span></li>
+      </ul>
+      <p class="ledgersent">Summed by station or by working, the day reads alike: <b>$261.50</b>. Headroom stands at <b>$238.50</b> — the evening’s two paths ask ≈$129 together at the day’s mean of $64.39, and the cap holds them.</p>
+    </section>
+
+    <!-- SCHEDULER -->
+    <section class="card">
+      <span class="lab">Scheduler</span>
+      <h2>Signals &amp; Cadence</h2>
+      <p class="schedp">Seven paths stand daily: <b>02:00</b>, then every three hours from <b>05:00 to 20:00</b>. On Fridays the 02:00 path yields to possession P-449 and is cancelled against it, as this morning.</p>
+      <div class="next">
+        <span class="lab">Next departure</span>
+        <div class="nid">G-1847 <span class="t">· 17:00</span></div>
+        <p class="nsub"><b>in 1 hour 29 minutes</b> — a full working, booked to close 18:52.</p>
+      </div>
+      <p class="schedp"><b>G-1848 (20:00) is a Q-path</b> — it runs as required, asking $75 of headroom at 19:45. On the present ledger, it runs.</p>
+      <div class="btnrow">
+        <button type="button" class="btn2">Alter the cadence</button>
+        <button type="button" class="btn2">Cancel a path</button>
+      </div>
+      <p class="finelaw">Changes take effect from the next booked path and are entered in the register. Possession of the line is taken from the head of this page; while you hold it, nothing departs and nothing is charged.</p>
+    </section>
+
+    <!-- RESEARCH -->
+    <section class="card">
+      <span class="lab">Research · sweeps &amp; queue</span>
+      <h2>Special Workings</h2>
+      <div class="sweep">
+        <div class="shead"><span class="sid">S-112</span><span class="stitle">Graft-union microclimate, 2015–2026</span></div>
+        <p class="ssent2"><span class="g">On the line since 13:05.</span> <b>412 of 987 documents</b> read; <b>$18.40</b> metered. Stood aside 14:02–14:26 while G-1846 called at the Reader. Clears ≈18:20 at the present rate.</p>
+      </div>
+      <div class="sweep">
+        <div class="shead"><span class="sid">S-311</span><span class="stitle">Bacillus-consortium field trials, replication set</span></div>
+        <p class="ssent2">Cleared 09:44 — 233 documents, <b>three claims raised</b> and passed to the Pipeline; <b>$12.66</b> metered.</p>
+      </div>
+      <div class="grouplab">Queue · three stand</div>
+      <ul class="queue">
+        <li><span class="sid">S-314</span><span class="qt">Rootstock incompatibility signals</span><span class="qm">61 sources · ≈$7</span></li>
+        <li><span class="sid">S-315</span><span class="qt">Cold-chain loss on smallholder routes</span><span class="qm">140 sources · ≈$16</span></li>
+        <li><span class="sid">S-316</span><span class="qt">Mycorrhizal inoculant field results</span><span class="qm">88 sources · ≈$10</span></li>
+      </ul>
+      <p class="intro" style="margin:10px 0 0">Next is pathed through tonight’s quiet hours from 21:30. ≈ figures are priced at today’s metered rate and marked as estimates.</p>
+    </section>
+
+    <!-- DATA -->
+    <section class="card">
+      <span class="lab">Data · snapshots &amp; recovery</span>
+      <h2>Permanent Way</h2>
+      <ul class="pway">
+        <li><span class="plab">Weekly snapshot</span>
+          <p>Taken <b>04:31 this morning</b> under P-449 — 41.2&nbsp;GB, <span class="g">verified against its manifest</span> before the line was handed back. $2.30 metered.</p></li>
+        <li><span class="plab">Nightly snapshot</span>
+          <p>Light snapshot runs 02:10 in the quiet hours; on Fridays the deep snapshot stands in its place. Last light: <b>02:13 yesterday, verified</b>. Next tonight.</p></li>
+        <li><span class="plab">Backfill</span>
+          <p><b>B-77, weather archive 2019–2022</b> — completed 03:12 under possession; <b>184,301 rows</b> recovered and reconciled; $3.90 metered.</p></li>
+        <li><span class="plab">Recovery</span>
+          <p><span class="g">Nothing awaits recovery.</span> Last restore drill 9 August — passed, cold to serving in <b>12 minutes 40 seconds</b>.</p></li>
+      </ul>
+    </section>
+
+    <!-- INCIDENTS -->
+    <section class="card">
+      <span class="lab">Incidents</span>
+      <h2>Register of Occurrences</h2>
+      <p class="intro">Two occurrences today. The register stood clear for seven days before the first.</p>
+      <div class="occ">
+        <div class="ohead"><span class="otime">09:04</span><span class="owhere">Simulator · G-1844</span><span class="chip">Closed 10:04</span></div>
+        <p class="obody">The working was not taken at its booked 09:02; by 09:04 the call stood unanswered and the watchdog was raised. The Simulator was restarted 09:07; the working was taken 09:23, twenty-one minutes down, and <b>closed twelve down at 10:04</b>. The retry metered $8.12, carried on the working’s ledger line.</p>
+      </div>
+      <div class="occ">
+        <div class="ohead"><span class="otime">13:58</span><span class="owhere">Reader · S-112</span><span class="chip open">Open · for the owner</span></div>
+        <p class="obody">Three papers behind a paywall (<i>Acta Horticulturae</i>) met mid-sweep; they were set aside and logged, and the sweep ran on. Nothing was metered against the stop. <b>The set-aside list stands for your decision.</b></p>
+        <button type="button" class="btn2">Review the set-aside papers</button>
+      </div>
+      <p class="priorline">Before today — 15 August: a Council sitting overran its hour and was adjourned by standing rule; closed the same day.</p>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="colophon">Engine Room · Working Timetable No. 34 · Friday 22 August, as at 15:31</span>
+  </div>
+</footer>
+
+</body>
+</html>
