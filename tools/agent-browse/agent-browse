@@ -212,9 +212,11 @@ READING:
 WAITING:
   wait <selector|ms>             Wait for element or milliseconds
   wait --text <text>             Wait for text to appear
+  wait --fn <expression>         Wait for a JavaScript predicate
   wait --url <pattern>           Wait for URL to match
-  wait --stable                  Wait for network idle + DOM stable
+  wait --stable                  Wait for network idle
   wait --load                    Wait for load event
+    --timeout-ms <ms>            Bound a condition wait in the browser
 
 SCREENSHOTS & RECORDING:
   screenshot [path]              Take screenshot
@@ -292,10 +294,14 @@ SESSIONS:
   session load <name>            Restore saved session state
   session delete <name>          Delete a saved session
   session export <name> <file>   Export session to portable file
+                                Refuses a failed or incomplete browser import
+  session verify <name>          Check YouTube sign-in in a fresh headless browser
+    --site youtube               Check /account; exit 2 if signed out or unverified
   session import <file> [name]   Import session from file
   session import-browser <name>  Import cookies and browser storage from a real browser
     --browser comet|atlas|chrome|arc|edge|brave  Browser to import from (default: comet)
     --domain ".google.com"           Filter cookies by domain
+                                Import is not proof of login; run session verify next
   session active                 List active daemon sessions
 
 TABS:
@@ -851,17 +857,44 @@ EOF
 }
 
 build_wait_cmd() {
-    local target="$1"
-    # Check if it's a number (milliseconds)
-    if [[ "$target" =~ ^[0-9]+$ ]]; then
-        cat << EOF
-{"id":"$(cmd_id)","action":"wait","timeout":$target}
-EOF
-    else
-        cat << EOF
-{"id":"$(cmd_id)","action":"wait","selector":"$target"}
-EOF
-    fi
+    python3 - "$(cmd_id)" "$@" <<'PYEOF'
+import json
+import sys
+
+args = sys.argv[2:]
+command = {"id": sys.argv[1], "action": "wait"}
+try:
+    target = args.pop(0)
+    if target in ("--text", "--url", "--fn"):
+        value = args.pop(0)
+        if not value:
+            raise ValueError("wait condition must not be empty")
+        if target == "--fn":
+            command.update(action="waitforfunction", expression=value)
+        else:
+            command[target[2:]] = value
+    elif target in ("--stable", "--load"):
+        command["state"] = "networkidle"
+    elif target.isascii() and target.isdigit():
+        if int(target) <= 0:
+            raise ValueError("wait duration must be positive")
+        command["timeout"] = int(target)
+    elif target.startswith("--") or not target:
+        raise ValueError("unknown or empty wait condition")
+    else:
+        command["selector"] = target
+    if args:
+        if len(args) != 2 or args[0] != "--timeout-ms" or "timeout" in command:
+            raise ValueError("expected --timeout-ms <positive integer> after a condition")
+        timeout = int(args[1])
+        if timeout <= 0:
+            raise ValueError("wait timeout must be positive")
+        command["timeout"] = timeout
+except (IndexError, ValueError) as error:
+    print("Usage: agent-browse wait <selector|ms|--text text|--fn expression|--url pattern|--stable> [--timeout-ms ms]: " + str(error), file=sys.stderr)
+    sys.exit(1)
+print(json.dumps(command))
+PYEOF
 }
 
 build_eval_cmd() {
@@ -1216,24 +1249,7 @@ main() {
             
         # Waiting
         wait)
-            if [[ $# -eq 0 ]]; then
-                echo "Usage: agent-browse wait <selector|ms|--text|--url|--stable>" >&2
-                exit 1
-            fi
-            case "$1" in
-                --text)
-                    json='{"id":"'$(cmd_id)'","action":"wait","text":"'"$2"'"}'
-                    ;;
-                --url)
-                    json='{"id":"'$(cmd_id)'","action":"wait","url":"'"$2"'"}'
-                    ;;
-                --stable|--load)
-                    json='{"id":"'$(cmd_id)'","action":"wait","state":"networkidle"}'
-                    ;;
-                *)
-                    json=$(build_wait_cmd "$1")
-                    ;;
-            esac
+            json=$(build_wait_cmd "$@") || return 1
             ;;
             
         # Screenshots
@@ -1350,7 +1366,19 @@ main() {
                     ;;
                 export)
                     [[ $# -lt 3 ]] && { echo "Usage: agent-browse session export <name> <file>" >&2; exit 1; }
-                    json='{"id":"'$(cmd_id)'","action":"session_export","name":"'"$2"'","path":"'"$3"'"}'
+                    node "$DAEMON_DIR/session-cli.js" export "$2" "$3"
+                    exit $?
+                    ;;
+                verify)
+                    [[ $# -lt 2 ]] && { echo "Usage: agent-browse session verify <name> [--site youtube]" >&2; exit 2; }
+                    local verify_name="$2" verify_site="youtube"
+                    shift 2
+                    if [[ $# -gt 0 ]]; then
+                        [[ $# -eq 2 && "$1" == "--site" ]] || { echo "Usage: agent-browse session verify <name> [--site youtube]" >&2; exit 2; }
+                        verify_site="$2"
+                    fi
+                    node "$DAEMON_DIR/session-cli.js" verify "$verify_name" "$verify_site"
+                    exit $?
                     ;;
                 import)
                     [[ $# -lt 2 ]] && { echo "Usage: agent-browse session import <file> [name]" >&2; exit 1; }
@@ -1391,7 +1419,7 @@ main() {
                     ;;
                 *)
                     echo "Unknown session command: $1" >&2
-                    echo "Usage: session list|save|load|delete|export|import|import-browser|active" >&2
+                    echo "Usage: session list|save|load|delete|export|verify|import|import-browser|active" >&2
                     exit 1
                     ;;
             esac

@@ -1,6 +1,6 @@
 """Bounds — the caps a command ships, and where each one came from.
 
-The contracts layer already holds one abstract property across 95 tools without
+The contracts layer already holds one abstract property across every registry tool without
 anyone remembering to: every verb declares which beats it performs. This module
 adds the second property. A command that caps its output declares where the cap
 came from, and the declaration is checked against the quantity authority rather

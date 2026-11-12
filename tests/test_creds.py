@@ -216,7 +216,138 @@ def configure_fake_security(tmpdir: Path, dump_text: str, dump_exit: int = 0) ->
     }
 
 
+def test_explicit_openai_keychain_reads() -> None:
+    """Count real CLI lookup attempts against a synthetic Keychain boundary."""
+    with tempfile.TemporaryDirectory() as tmpdir_str:
+        tmpdir = Path(tmpdir_str)
+        fake_bin = tmpdir / "bin"
+        fake_bin.mkdir()
+        log = tmpdir / "keychain-calls.jsonl"
+        home = tmpdir / "agent-home"
+        home.mkdir()
+        (home / "registry.yaml").write_text(textwrap.dedent("""\
+            tools:
+              promptdemo:
+                description: synthetic local tool with an optional OpenAI feature
+                credentials:
+                  required: [OTHER_API_KEY]
+                  optional: [OPENAI_API_KEY]
+            """), encoding="utf-8")
+        write_executable(fake_bin / "agent-promptdemo", textwrap.dedent("""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            [[ -z "${OPENAI_API_KEY:-}" ]]
+            [[ "${OTHER_API_KEY:-}" == "synthetic-other-value" ]]
+            printf 'local-tool-ok\\n'
+            """))
+        write_executable(fake_bin / "security", textwrap.dedent("""\
+            #!/usr/bin/env python3
+            import json, os, sys
+            from pathlib import Path
+            args = sys.argv[1:]
+            key = args[args.index('-a') + 1] if '-a' in args else ''
+            reveal = '-w' in args or '-g' in args
+            with Path(os.environ['FAKE_KEYCHAIN_LOG']).open('a') as out:
+                out.write(json.dumps({'key': key, 'reveal': reveal, 'command': args[0]}) + '\\n')
+            if not args or args[0] != 'find-generic-password':
+                raise SystemExit(90)
+            values = {'OPENAI_API_KEY': 'synthetic-openai-value', 'OTHER_API_KEY': 'synthetic-other-value'}
+            if key not in values:
+                raise SystemExit(44)
+            if reveal:
+                if os.environ.get('FAKE_KEYCHAIN_DENY') == '1':
+                    raise SystemExit(51)
+                print(values[key])
+            else:
+                print('attributes-only')
+            """))
+        env = {
+            key: value for key, value in os.environ.items()
+            if not any(word in key.upper() for word in ('API_KEY', 'SECRET', 'TOKEN', 'PASSWORD'))
+        }
+        env.update({
+            "AGENT_DO_HOME": str(home),
+            "AGENT_DO_CREDS_PLATFORM": "macos",
+            "AGENT_DO_CREDS_SERVICE": "agent-do-test",
+            "AGENT_DO_TELEMETRY_SUPPRESS": "1",
+            "FAKE_KEYCHAIN_LOG": str(log),
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+        })
+
+        def calls() -> list[dict]:
+            return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+        def openai_reads() -> list[dict]:
+            return [row for row in calls() if row['key'] == 'OPENAI_API_KEY' and row['reveal']]
+
+        for args in (('--help',), ('state', '--json'), ()):
+            result = run('./agent-do', 'promptdemo', *args, env=env)
+            require(result.returncode == 0, f"local dispatch failed: {result.stderr}")
+            require(result.stdout.strip() == 'local-tool-ok', f"unexpected local output: {result.stdout}")
+        require(not any(row['key'] == 'OPENAI_API_KEY' for row in calls()),
+                f"general tools must not look up OpenAI at all: {calls()}")
+        require(any(row['key'] == 'OTHER_API_KEY' and row['reveal'] for row in calls()),
+                'other credential preloading must remain available')
+
+        # Exercise the installed commands reported in the incident, through
+        # the production dispatcher but with an entirely synthetic Keychain.
+        log.write_text('')
+        for tool in ('manna', 'obsidian'):
+            result = run('./agent-do', tool, '--help', env=env)
+            require(result.returncode == 0, f"{tool} help failed: {result.stderr}")
+        require(not any(row['key'] == 'OPENAI_API_KEY' for row in calls()),
+                f"Manna/Obsidian help must not look up OpenAI: {calls()}")
+
+        log.write_text('')
+        for args in (('get', 'OPENAI_API_KEY'), ('get', 'OPENAI_API_KEY', '--source'),
+                     ('get', 'OPENAI_API_KEY', '--json'), ('check', '--json', 'OPENAI_API_KEY'),
+                     ('check', '--tool', 'models', '--json')):
+            result = run('./agent-do', 'creds', *args, env=env)
+            require(result.returncode == 0, f"metadata check failed: {args}: {result.stderr}")
+            require('synthetic-openai-value' not in result.stdout, 'status exposed a secret')
+        require(not openai_reads(), f"metadata checks must not unlock the key: {calls()}")
+
+        log.write_text('')
+        implicit = run('bash', '-c', 'source lib/creds-helper.sh; creds_get OPENAI_API_KEY', env=env)
+        require(implicit.returncode == 2, f"implicit shared-helper read must refuse: {implicit.stderr}")
+        require(not calls(), 'implicit shared-helper read reached Keychain')
+
+        for args in (('get', 'openai_api_key', '--reveal'), ('export', 'OPENAI_API_KEY')):
+            log.write_text('')
+            result = run('./agent-do', 'creds', *args, env=env)
+            require(result.returncode == 0, f"explicit read failed: {args}: {result.stderr}")
+            require('synthetic-openai-value' in result.stdout, 'explicit read did not return its synthetic value')
+            require(len(openai_reads()) == 1, f"explicit read must unlock exactly once: {calls()}")
+
+            log.write_text('')
+            denied = run('./agent-do', 'creds', *args, env={**env, 'FAKE_KEYCHAIN_DENY': '1'})
+            require(denied.returncode == 51, f"denial must propagate: {args}: {denied.returncode}")
+            require(not denied.stdout, f"denial must not produce a value: {denied.stdout}")
+            require(len(openai_reads()) == 1, f"denial must not retry: {calls()}")
+
+        log.write_text('')
+        bulk = run('./agent-do', 'creds', 'export', '--tool', 'models', env=env)
+        require(bulk.returncode == 2 and not bulk.stdout, 'bulk export must require the OpenAI key to be named')
+        require(not calls(), f"bulk refusal must precede all credential reads: {calls()}")
+
+        log.write_text('')
+        routed = run('python3', '-c', textwrap.dedent("""\
+            import importlib.machinery, importlib.util
+            loader = importlib.machinery.SourceFileLoader('intent_router', 'bin/intent-router')
+            spec = importlib.util.spec_from_loader(loader.name, loader)
+            module = importlib.util.module_from_spec(spec)
+            loader.exec_module(module)
+            env = module.load_tool_credentials_env('promptdemo')
+            assert 'OPENAI_API_KEY' not in env
+            assert env.get('OTHER_API_KEY') == 'synthetic-other-value'
+            """), env=env)
+        require(routed.returncode == 0, f"intent-router credential regression: {routed.stderr}")
+        require(not any(row['key'] == 'OPENAI_API_KEY' for row in calls()),
+                f"intent routing must not request OpenAI implicitly: {calls()}")
+
+
 def main() -> int:
+    test_explicit_openai_keychain_reads()
     registry = load_registry()
 
     render_info = get_tool_info(registry, "render")

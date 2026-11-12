@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --panel:#211E1B;
+    --well:#181614;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --rule:rgba(231,227,218,0.14);
+    --rule-soft:rgba(231,227,218,0.08);
+    --sage:hsl(158,30%,55%);
+    --sage-deep:hsl(158,30%,42%);
+    --sage-ink:#14201B;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{color-scheme:dark}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font:14px/1.5 var(--sans);
+    min-width:1280px;
+  }
+  ::selection{background:var(--sage);color:var(--sage-ink)}
+  a{color:inherit;text-decoration:none}
+
+  .container{max-width:1332px;margin:0 auto;padding:0 34px}
+
+  .label{
+    font-family:var(--sans);
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+
+  /* ---------- inline link affordance (≥24px hit target, visible underline) ---------- */
+  .lk{
+    display:inline-block;
+    padding:5px 2px;
+    margin:-5px -2px;
+    text-decoration:underline;
+    text-underline-offset:3px;
+    text-decoration-color:var(--faint);
+  }
+  .lk:hover{text-decoration-color:var(--sage);color:var(--ink)}
+  .lk-sage{color:var(--sage)}
+  .lk-sage:hover{text-decoration-color:var(--sage)}
+
+  .mono{font-family:var(--mono)}
+
+  /* ================= NAV ================= */
+  .nav{border-bottom:1px solid var(--rule);background:var(--ground)}
+  .nav-inner{display:flex;align-items:stretch;justify-content:space-between;height:64px}
+  .wordmark{
+    font-family:var(--serif);
+    font-size:20px;
+    letter-spacing:.02em;
+    color:var(--ink);
+    display:flex;align-items:center;
+  }
+  .wordmark .tick{color:var(--sage);margin-right:9px;font-size:14px}
+  .nav-right{display:flex;align-items:stretch;gap:4px}
+  .nav-link{
+    display:flex;align-items:center;
+    padding:0 16px;
+    font-size:13.5px;
+    color:var(--muted);
+    border-bottom:2px solid transparent;
+    border-top:2px solid transparent;
+  }
+  .nav-link:hover{color:var(--ink)}
+  .nav-link.active{color:var(--ink);border-bottom-color:var(--sage)}
+  .nav-census{
+    display:flex;align-items:center;
+    margin-left:18px;padding-left:20px;
+    border-left:1px solid var(--rule);
+    font-family:var(--mono);font-size:12px;color:var(--faint);
+  }
+
+  /* ================= PAGE HEAD ================= */
+  .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:48px;padding:42px 0 30px}
+  .page-head h1{
+    font-family:var(--serif);
+    font-size:33px;
+    font-weight:400;
+    line-height:1.22;
+    color:var(--ink);
+    margin:12px 0 14px;
+    max-width:720px;
+  }
+  .census-line{font-size:14px;color:var(--muted);max-width:760px}
+  .census-line strong{color:var(--ink);font-weight:600}
+  .census-line .prov{color:var(--faint);font-family:var(--mono);font-size:12px}
+
+  .trace{width:400px;flex:none}
+  .trace-row{display:flex;gap:8px;margin-top:9px}
+  .trace-input{
+    flex:1;height:38px;
+    background:var(--well);
+    border:1px solid var(--rule);
+    border-radius:3px;
+    color:var(--ink);
+    font-family:var(--mono);font-size:13px;
+    padding:0 12px;
+  }
+  .trace-input::placeholder{color:var(--faint)}
+  .trace-input:focus{outline:none;border-color:var(--muted)}
+  .btn{
+    height:38px;padding:0 16px;
+    background:var(--panel);
+    border:1px solid var(--rule);
+    border-radius:3px;
+    color:var(--ink);
+    font-family:var(--sans);font-size:13.5px;font-weight:600;
+    cursor:pointer;
+  }
+  .btn:hover{border-color:var(--muted)}
+  .btn-primary{
+    background:var(--sage);
+    border-color:var(--sage);
+    color:var(--sage-ink);
+  }
+  .btn-primary:hover{background:var(--sage-deep);border-color:var(--sage-deep)}
+  .trace-hint{margin-top:8px;font-size:12px;color:var(--faint)}
+
+  /* ================= CHAIN STRIP ================= */
+  .chain{display:grid;grid-template-columns:1fr 300px;gap:26px;margin-bottom:52px}
+  .chain-run{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    border:1px solid var(--rule);
+    border-radius:4px;
+    background:var(--panel);
+  }
+  .cell{padding:18px 20px 16px;display:flex;flex-direction:column}
+  .chain-run .cell + .cell{border-left:1px solid var(--rule)}
+  .cell-head{display:flex;justify-content:space-between;align-items:baseline}
+  .cell-head .arrow{color:var(--faint);font-size:15px}
+  .big{font-size:27px;font-weight:600;letter-spacing:-0.01em;color:var(--ink);margin:10px 0 8px}
+  .big .unit{font-size:12px;font-weight:400;color:var(--muted);margin-left:8px;letter-spacing:0}
+  .det{font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:3px}
+  .det .k{color:var(--ink)}
+  .prov{margin-top:auto;padding-top:10px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .cell-renewal{
+    border:1px solid var(--rule);
+    border-radius:4px;
+    background:transparent;
+    padding:18px 20px 16px;
+    display:flex;flex-direction:column;
+  }
+  .cell-renewal .label{color:var(--ink)}
+
+  /* ================= SECTIONS ================= */
+  .section{margin-bottom:52px}
+  .sec-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--rule);padding-bottom:10px;margin-bottom:4px}
+  .sec-meta{font-size:12.5px;color:var(--faint)}
+  .sec-meta .mono{font-size:12px}
+  .sec-meta strong{color:var(--muted);font-weight:600}
+
+  /* ================= GERMINATING NOW ================= */
+  .germ-intro{
+    font-family:var(--serif);font-style:italic;font-size:15px;color:var(--muted);
+    padding:14px 0 4px;
+  }
+  .germ-row{
+    display:grid;grid-template-columns:16px 1fr 280px;gap:0 14px;
+    padding:17px 0;border-top:1px solid var(--rule-soft);
+  }
+  .germ-row:first-of-type{border-top:none}
+  .seed{width:8px;height:8px;background:var(--sage);border-radius:2px;margin-top:7px}
+  .g-line1{font-size:15.5px;line-height:1.45}
+  .g-line1 .accid{font-family:var(--mono);font-size:13px;color:var(--ink);margin-right:10px}
+  .g-title{font-family:var(--serif);color:var(--ink)}
+  .g-origin{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .g-feeds{font-size:13px;color:var(--muted);margin-top:7px}
+  .g-feeds .arr{color:var(--faint);margin-right:6px}
+  .g-feeds .dossier{color:var(--ink);font-weight:600}
+  .g-feeds .claim{font-family:var(--serif);font-style:italic;color:var(--ink)}
+  .g-feeds .ev{font-family:var(--mono);font-size:12.5px}
+  .g-meta{text-align:right;font-size:13px;color:var(--ink);padding-top:2px}
+  .g-meta .sub{display:block;font-size:12px;color:var(--faint);margin-top:5px}
+
+  /* ================= GRID: REGISTER + RAIL ================= */
+  .split{display:grid;grid-template-columns:1fr 396px;gap:30px;align-items:start;margin-bottom:52px}
+
+  /* ---- filters ---- */
+  .filters{display:flex;align-items:center;gap:8px;padding:14px 0 2px;flex-wrap:wrap}
+  .chip{
+    height:28px;padding:0 12px;
+    display:inline-flex;align-items:center;gap:6px;
+    background:transparent;
+    border:1px solid var(--rule);
+    border-radius:3px;
+    color:var(--muted);
+    font-family:var(--sans);font-size:12.5px;
+    cursor:pointer;
+  }
+  .chip .ct{font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .chip:hover{border-color:var(--muted);color:var(--ink)}
+  .chip.on{background:var(--panel);border-color:var(--muted);color:var(--ink)}
+  .chip-div{width:1px;height:20px;background:var(--rule);margin:0 4px}
+  .legend{font-size:12px;color:var(--faint);margin:10px 0 8px}
+  .legend .g{color:var(--sage)}
+
+  /* ---- register table ---- */
+  table{width:100%;border-collapse:collapse}
+  th{
+    text-align:left;
+    font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--faint);
+    padding:10px 12px 9px;
+    border-bottom:1px solid var(--rule);
+    white-space:nowrap;
+  }
+  td{
+    padding:13px 12px;
+    border-bottom:1px solid var(--rule-soft);
+    vertical-align:top;
+    font-size:13px;
+  }
+  tbody tr:hover{background:rgba(231,227,218,0.02)}
+  tr.bench td{background:rgba(231,227,218,0.025)}
+  tr.bench td:first-child{border-left:2px solid var(--faint)}
+  .acc-cell .accid{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .kind{display:block;margin-top:5px;font-size:12px;letter-spacing:.1em;color:var(--faint)}
+  .t-name{font-family:var(--serif);font-size:14.5px;color:var(--ink);line-height:1.4}
+  .t-name.dead{text-decoration:line-through;text-decoration-color:var(--faint);color:var(--muted)}
+  .t-origin{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .dots{display:flex;gap:6px;margin:3px 0 7px}
+  .dot{width:9px;height:9px;border:1px solid var(--rule);border-radius:2px;background:transparent}
+  .dot.on{background:var(--ink);border-color:var(--ink)}
+  .dot.g-on{background:var(--sage);border-color:var(--sage)}
+  .chain-note{font-size:12px;color:var(--muted)}
+  .via-note{font-size:12px;color:var(--faint);font-family:var(--mono);margin-top:3px}
+  .v-word{font-size:13px;color:var(--ink)}
+  .v-word.low{color:var(--muted)}
+  .vbar{width:64px;height:6px;border:1px solid var(--rule);border-radius:2px;margin:7px 0 6px;background:transparent}
+  .vfill{height:100%;background:var(--muted)}
+  .v-sub{font-size:12px;color:var(--faint)}
+  .p-count{color:var(--ink)}
+  .p-refs{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-top:4px}
+  .p-none{color:var(--faint);font-style:italic}
+  .table-foot{display:flex;justify-content:space-between;align-items:center;padding:14px 2px 0;font-size:12.5px;color:var(--faint)}
+
+  /* ---- rail panels ---- */
+  .rail{display:flex;flex-direction:column;gap:26px}
+  .panel{border:1px solid var(--rule);border-radius:4px;background:var(--panel);padding:20px 22px}
+  .panel .sec-head{border-bottom:1px solid var(--rule);padding-bottom:10px;margin-bottom:0}
+  .bench-item{padding:14px 0;border-bottom:1px solid var(--rule-soft)}
+  .bench-item .row1{font-size:13px;line-height:1.45}
+  .bench-item .row1 .accid{font-family:var(--mono);color:var(--ink)}
+  .bench-item .row1 .bname{color:var(--muted)}
+  .bench-why{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .bench-act{font-size:12.5px;color:var(--faint);margin-top:4px}
+  .bench-act .k{color:var(--muted)}
+  .doctrine{
+    font-family:var(--serif);font-style:italic;
+    font-size:13px;color:var(--faint);
+    padding:13px 0 2px;line-height:1.55;
+  }
+  .panel-foot{padding-top:12px;font-size:12.5px}
+
+  .log-row{display:grid;grid-template-columns:52px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule-soft)}
+  .log-time{font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:2px}
+  .log-body{font-size:12.5px;color:var(--muted);line-height:1.5}
+  .log-body .k{color:var(--ink)}
+  .log-total{display:grid;grid-template-columns:52px 1fr;gap:12px;padding:12px 0 2px}
+  .log-total .sum{font-size:12.5px;color:var(--ink)}
+
+  /* ================= SWEEPS ================= */
+  .sweeps-intro{font-size:12.5px;color:var(--faint)}
+  .sw-id{font-family:var(--mono);font-size:12.5px;color:var(--faint)}
+  .sw-name{font-family:var(--serif);font-size:15px;color:var(--ink);margin-top:4px;line-height:1.35}
+  .sw-terr{font-size:13px;color:var(--muted);line-height:1.5;max-width:340px}
+  .sw-by{font-size:13px;color:var(--ink)}
+  .sw-role{font-size:12.5px;color:var(--faint);margin-top:4px;line-height:1.45}
+  .sw-status{font-size:13px;color:var(--ink);white-space:nowrap}
+  .sw-status .glyph{margin-right:7px;color:var(--muted)}
+  .sw-status .glyph.live{color:var(--sage)}
+  .sw-sub{font-size:12.5px;color:var(--faint);margin-top:4px;white-space:nowrap}
+  .sw-yield{font-size:13px;color:var(--muted);line-height:1.5}
+  .sw-yield .k{color:var(--ink)}
+  .sw-cost{font-size:13px;color:var(--ink);font-family:var(--mono);white-space:nowrap}
+  .sw-cost-sub{font-size:12px;color:var(--faint);margin-top:4px;font-family:var(--mono);white-space:nowrap}
+  .sweep-doctrine{
+    font-family:var(--serif);font-style:italic;
+    font-size:13.5px;color:var(--faint);
+    padding:16px 2px 0;
+  }
+
+  /* ================= FOOTER ================= */
+  footer{border-top:1px solid var(--rule);margin-top:10px}
+  .foot-inner{display:flex;justify-content:space-between;align-items:center;padding:24px 0 40px;font-size:12.5px;color:var(--faint)}
+  .foot-inner .motto{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<div class="nav">
+  <div class="container nav-inner">
+    <a class="wordmark" href="#"><span class="tick">✳</span>Palingenesis</a>
+    <div class="nav-right">
+      <a class="nav-link" href="#">Today</a>
+      <a class="nav-link" href="#">Pipeline</a>
+      <a class="nav-link active" href="#">Library</a>
+      <a class="nav-link" href="#">Engine&nbsp;Room</a>
+      <span class="nav-census">census 06:12</span>
+    </div>
+  </div>
+</div>
+
+<main class="container">
+
+  <!-- ============ PAGE HEAD ============ -->
+  <header class="page-head">
+    <div>
+      <div class="label">The Library · Accession Registry</div>
+      <h1>What the machine has read — and what is growing from it.</h1>
+      <p class="census-line">
+        <strong>2,864</strong> accessions held · <strong>2,748</strong> viable ·
+        <strong>31</strong> germinating in live work this morning · <strong>116</strong> on the renewal bench
+        &nbsp;<span class="prov">— census 06:12, counted not estimated</span>
+      </p>
+    </div>
+    <div class="trace">
+      <div class="label">Trace a claim</div>
+      <form class="trace-row" action="#">
+        <input class="trace-input" type="text" placeholder="EV-9112 · ACC-P-2214 · or paste a claim…">
+        <button class="btn" type="button">Trace</button>
+      </form>
+      <div class="trace-hint">Every claim in every dossier resolves to an accession here.</div>
+    </div>
+  </header>
+
+  <!-- ============ PROVENANCE CHAIN ============ -->
+  <section class="chain" aria-label="Provenance chain">
+    <div class="chain-run">
+      <div class="cell">
+        <div class="cell-head"><span class="label">Collected</span><span class="arrow">→</span></div>
+        <div class="big">61<span class="unit">last 24 h</span></div>
+        <div class="det"><span class="k">43</span> via sweep <span class="mono">SWP-019</span> — manure valorization · <span class="k">6</span> watchlist · <span class="k">12</span> market pulls</div>
+        <div class="det">17 awaiting verification</div>
+        <div class="prov">intake log · 06:31</div>
+      </div>
+      <div class="cell">
+        <div class="cell-head"><span class="label">Verified</span><span class="arrow">→</span></div>
+        <div class="big">44<span class="unit">examined overnight</span></div>
+        <div class="det"><span class="k">39</span> admitted to the vault · <span class="k">5</span> refused</div>
+        <div class="det">3 duplicate · 1 retracted upstream · 1 unreadable</div>
+        <div class="prov">verifier journal · 06:04</div>
+      </div>
+      <div class="cell">
+        <div class="cell-head"><span class="label">Stored</span><span class="arrow">→</span></div>
+        <div class="big">2,864<span class="unit">accessions held</span></div>
+        <div class="det"><span class="k">2,748</span> viable · papers 2,317 · market series 214 · datasets &amp; reports 258 · standards &amp; patents 75</div>
+        <div class="prov">census 06:12 · counted</div>
+      </div>
+      <div class="cell">
+        <div class="cell-head"><span class="label">Germinated</span></div>
+        <div class="big">894<span class="unit">with living progeny</span></div>
+        <div class="det"><span class="k">3,187</span> evidence records grown · <span class="k">31</span> drawn on by live builds today</div>
+        <div class="det">38% of accessions stored ≥ 90 d have germinated at least once</div>
+        <div class="prov">grow-out test · nightly 02:30</div>
+      </div>
+    </div>
+    <div class="cell-renewal">
+      <div class="cell-head"><span class="label">Renewal due</span></div>
+      <div class="big">116<span class="unit">flagged</span></div>
+      <div class="det"><span class="k">104</span> market series past window · <span class="k">9</span> papers superseded · <span class="k">3</span> sources gone dark</div>
+      <div class="det">Renewal appends a fresh state to the chain — nothing is overwritten.</div>
+      <div class="prov">viability sweep · 06:12</div>
+    </div>
+  </section>
+
+  <!-- ============ GERMINATING NOW ============ -->
+  <section class="section" aria-label="Germinating now">
+    <div class="sec-head">
+      <span class="label">Germinating now</span>
+      <span class="sec-meta"><strong>31</strong> accessions feeding live builds · build monitor <span class="mono">09:41</span> · <a class="lk" href="#register">view all in the register</a></span>
+    </div>
+    <p class="germ-intro">The vault is judged by what grows out of it. These are being drawn on this morning.</p>
+
+    <div class="germ-row">
+      <span class="seed"></span>
+      <div>
+        <div class="g-line1"><a class="lk accid" href="#acc-p-2214">ACC-P-2214</a><span class="g-title">Phosphorus recovery as struvite from poultry-litter leachate at ambient temperature</span></div>
+        <div class="g-origin">Water Research 218 · 2023 · collected via SWP-011 · verified 2026-03-11</div>
+        <div class="g-feeds"><span class="arr">→</span><span class="dossier">D-031 · Struvite at Barn Scale</span> — drawing <span class="claim">“87–93% phosphorus recovery at Mg:P molar ratio 1.3”</span> · <a class="lk lk-sage ev" href="#acc-p-2214">EV-9112</a></div>
+      </div>
+      <div class="g-meta">drawn 4× since 06:00 · last 09:41<span class="sub">viability: enduring — settled, replicated ×3</span></div>
+    </div>
+
+    <div class="germ-row">
+      <span class="seed"></span>
+      <div>
+        <div class="g-line1"><a class="lk accid" href="#acc-s-0142">ACC-S-0142</a><span class="g-title">DL-Methionine spot price, EU delivered</span></div>
+        <div class="g-origin">Feedinfo · refreshed 06:00 today · $0.04 per pull, metered</div>
+        <div class="g-feeds"><span class="arr">→</span><span class="dossier">D-029 · Precision Amino Rationing</span> — drawing <span class="claim">“€2.41/kg delivered, −6% month on month”</span> · <a class="lk lk-sage ev" href="#acc-s-0142">EV-9130</a></div>
+      </div>
+      <div class="g-meta">drawn 2× · last 08:52<span class="sub">viability: 7-day window, refreshed 06:00</span></div>
+    </div>
+
+    <div class="germ-row">
+      <span class="seed"></span>
+      <div>
+        <div class="g-line1"><a class="lk accid" href="#acc-p-1877">ACC-P-1877</a><span class="g-title">Hermetia illucens larvae meal in laying-hen diets: a meta-analysis of 31 trials</span></div>
+        <div class="g-origin">Poultry Science 103 · 2024 · caught by watchlist · verified 2026-05-02</div>
+        <div class="g-feeds"><span class="arr">→</span><span class="dossier">G-118 under D-027 · The Larvae Line</span> — drawing <span class="claim">“no egg-mass penalty at ≤ 8% inclusion”</span> · <a class="lk lk-sage ev" href="#acc-p-1877">EV-8871</a></div>
+      </div>
+      <div class="g-meta">drawn 1× · 07:15<span class="sub">viability: enduring — meta-analysis</span></div>
+    </div>
+
+    <div class="germ-row">
+      <span class="seed"></span>
+      <div>
+        <div class="g-line1"><a class="lk accid" href="#acc-d-0533">ACC-D-0533</a><span class="g-title">Feed Grain Outlook: August 2026</span></div>
+        <div class="g-origin">USDA ERS · published 2026-08-13 · collected same day, scheduled pull</div>
+        <div class="g-feeds"><span class="arr">→</span><span class="dossier">D-031 · Struvite at Barn Scale</span> (cost model) — drawing <span class="claim">“corn season-average $4.35–4.55/bu”</span> · <a class="lk lk-sage ev" href="#acc-d-0533">EV-9104</a></div>
+      </div>
+      <div class="g-meta">drawn 3× · last 09:12<span class="sub">viability: monthly — next issue 09-13</span></div>
+    </div>
+  </section>
+
+  <!-- ============ REGISTER + RAIL ============ -->
+  <div class="split">
+
+    <!-- ---- THE REGISTER ---- -->
+    <section id="register" aria-label="The register">
+      <div class="sec-head">
+        <span class="label">The register</span>
+        <span class="sec-meta">12 of <strong>2,864</strong> shown · ordered by last activity · <span class="mono">census 06:12</span></span>
+      </div>
+
+      <div class="filters">
+        <button class="chip on" type="button">All kinds <span class="ct">2,864</span></button>
+        <button class="chip" type="button">Papers <span class="ct">2,317</span></button>
+        <button class="chip" type="button">Market series <span class="ct">214</span></button>
+        <button class="chip" type="button">Datasets &amp; reports <span class="ct">258</span></button>
+        <button class="chip" type="button">Standards &amp; patents <span class="ct">75</span></button>
+        <span class="chip-div"></span>
+        <button class="chip" type="button">Germinated only <span class="ct">894</span></button>
+        <button class="chip" type="button">Renewal due <span class="ct">116</span></button>
+      </div>
+      <div class="legend">Chain reads left to right: collected → verified → stored → germinated. <span class="g">A sage terminal square</span> marks living progeny.</div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Accession</th>
+            <th>Name &amp; origin</th>
+            <th>Chain</th>
+            <th>Viability</th>
+            <th>Grown from it</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <tr id="acc-p-3121">
+            <td class="acc-cell"><span class="accid">ACC-P-3121</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name">Windrow composting of layer manure: pathogen kill kinetics at commercial scale</div>
+                <div class="t-origin">Journal of Environmental Quality 54 · 2025</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                <div class="chain-note">collected 03:12 · in verification</div>
+                <div class="via-note">via SWP-019</div></td>
+            <td><div class="v-word low">Pending</div><div class="v-sub">assigned when stored</div></td>
+            <td><span class="p-none">— none yet</span></td>
+          </tr>
+
+          <tr id="acc-p-3119">
+            <td class="acc-cell"><span class="accid">ACC-P-3119</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name">Anaerobic co-digestion of poultry litter and food waste at mesophilic temperatures</div>
+                <div class="t-origin">Bioresource Technology 412 · 2024</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span></div>
+                <div class="chain-note">verified 06:04 · indexing</div>
+                <div class="via-note">via SWP-019</div></td>
+            <td><div class="v-word low">Pending</div><div class="v-sub">assigned when stored</div></td>
+            <td><span class="p-none">— none yet</span></td>
+          </tr>
+
+          <tr id="acc-p-2214">
+            <td class="acc-cell"><span class="accid">ACC-P-2214</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name">Phosphorus recovery as struvite from poultry-litter leachate at ambient temperature</div>
+                <div class="t-origin">Water Research 218 · 2023 · verified 2026-03-11</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×6 · last 09:41</div>
+                <div class="via-note">via SWP-011</div></td>
+            <td><div class="v-word">Enduring</div><div class="vbar"><div class="vfill" style="width:100%"></div></div><div class="v-sub">settled science · replicated ×3</div></td>
+            <td><span class="p-count">6 evidence records</span><div class="p-refs">D-031 · D-024</div></td>
+          </tr>
+
+          <tr id="acc-s-0142">
+            <td class="acc-cell"><span class="accid">ACC-S-0142</span><span class="kind">MARKET</span></td>
+            <td><div class="t-name">DL-Methionine spot price, EU delivered</div>
+                <div class="t-origin">Feedinfo · pulled 06:00 today · $0.04/pull</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×11 · last 08:52</div>
+                <div class="via-note">scheduled pull</div></td>
+            <td><div class="v-word">Viable</div><div class="vbar"><div class="vfill" style="width:86%"></div></div><div class="v-sub">7-day window · 6 d left</div></td>
+            <td><span class="p-count">11 evidence records</span><div class="p-refs">D-029 · D-031</div></td>
+          </tr>
+
+          <tr id="acc-p-1877">
+            <td class="acc-cell"><span class="accid">ACC-P-1877</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name">Hermetia illucens larvae meal in laying-hen diets: a meta-analysis of 31 trials</div>
+                <div class="t-origin">Poultry Science 103 · 2024 · verified 2026-05-02</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×9 · last 07:15</div>
+                <div class="via-note">via watchlist</div></td>
+            <td><div class="v-word">Enduring</div><div class="vbar"><div class="vfill" style="width:100%"></div></div><div class="v-sub">meta-analysis · 31 trials</div></td>
+            <td><span class="p-count">9 evidence records</span><div class="p-refs">D-027 · G-118</div></td>
+          </tr>
+
+          <tr id="acc-d-0533">
+            <td class="acc-cell"><span class="accid">ACC-D-0533</span><span class="kind">DATASET</span></td>
+            <td><div class="t-name">Feed Grain Outlook: August 2026</div>
+                <div class="t-origin">USDA ERS · published 08-13 · collected 08-13</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×4 · last 09:12</div>
+                <div class="via-note">scheduled pull</div></td>
+            <td><div class="v-word">Viable</div><div class="vbar"><div class="vfill" style="width:70%"></div></div><div class="v-sub">monthly · next issue 09-13</div></td>
+            <td><span class="p-count">4 evidence records</span><div class="p-refs">D-031</div></td>
+          </tr>
+
+          <tr id="acc-s-0098" class="bench">
+            <td class="acc-cell"><span class="accid">ACC-S-0098</span><span class="kind">MARKET</span></td>
+            <td><div class="t-name">L-Lysine HCl spot price, US Midwest</div>
+                <div class="t-origin">Feedinfo · last viable pull 08-13</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">window lapsed 08-20</div>
+                <div class="via-note">scheduled pull</div></td>
+            <td><div class="v-word low">Renewal due</div><div class="vbar"></div><div class="v-sub">refresh queued 02:00 tonight</div></td>
+            <td><span class="p-count">7 evidence records</span><div class="p-refs">D-029 · pinned to 08-13 state</div></td>
+          </tr>
+
+          <tr id="acc-p-0871" class="bench">
+            <td class="acc-cell"><span class="accid">ACC-P-0871</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name dead">Manure management in laying operations: a review</div>
+                <div class="t-origin">Poultry Science 93 · 2014 · collected 2026-02-21</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×3 · superseded</div>
+                <div class="via-note">founding batch</div></td>
+            <td><div class="v-word low">Superseded 08-19</div><div class="vbar"></div><div class="v-sub">by <a class="lk" href="#acc-p-3102">ACC-P-3102</a></div></td>
+            <td><span class="p-count">3 evidence records</span><div class="p-refs">D-024 · 2 reassigned</div></td>
+          </tr>
+
+          <tr id="acc-p-3102">
+            <td class="acc-cell"><span class="accid">ACC-P-3102</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name">Circular nutrient recovery in poultry systems: a 2025 review</div>
+                <div class="t-origin">Annual Review of Environment &amp; Resources 50 · 2025 · stored 08-19</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot"></span></div>
+                <div class="chain-note">stored 08-19 · not yet drawn</div>
+                <div class="via-note">via SWP-017</div></td>
+            <td><div class="v-word">Enduring</div><div class="vbar"><div class="vfill" style="width:100%"></div></div><div class="v-sub">current review</div></td>
+            <td><span class="p-none">none yet — candidate in 2 open claims</span></td>
+          </tr>
+
+          <tr id="acc-n-0075">
+            <td class="acc-cell"><span class="accid">ACC-N-0075</span><span class="kind">STANDARD</span></td>
+            <td><div class="t-name">Water Reuse Guidelines — agricultural module, 2025 edition</div>
+                <div class="t-origin">US EPA · collected 08-17</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×2 · 08-20</div>
+                <div class="via-note">via SWP-018</div></td>
+            <td><div class="v-word">Enduring</div><div class="vbar"><div class="vfill" style="width:100%"></div></div><div class="v-sub">revision cycle ≈ 5 y</div></td>
+            <td><span class="p-count">2 evidence records</span><div class="p-refs">D-033</div></td>
+          </tr>
+
+          <tr id="acc-s-0104" class="bench">
+            <td class="acc-cell"><span class="accid">ACC-S-0104</span><span class="kind">MARKET</span></td>
+            <td><div class="t-name">Natural gas, industrial price, Iowa</div>
+                <div class="t-origin">US EIA · last viable pull 08-10</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">window lapsed 08-17</div>
+                <div class="via-note">scheduled pull</div></td>
+            <td><div class="v-word low">Renewal due</div><div class="vbar"></div><div class="v-sub">EIA publishes 08-26 · pull queued</div></td>
+            <td><span class="p-count">2 evidence records</span><div class="p-refs">D-031 · energy model</div></td>
+          </tr>
+
+          <tr id="acc-p-2990">
+            <td class="acc-cell"><span class="accid">ACC-P-2990</span><span class="kind">PAPER</span></td>
+            <td><div class="t-name">Acid-free separation of eggshell membrane: bench methods</div>
+                <div class="t-origin">Preprint, bioRxiv · 2026 · not yet peer-reviewed</div></td>
+            <td><div class="dots"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot g-on"></span></div>
+                <div class="chain-note">germinated ×1 · 08-18</div>
+                <div class="via-note">via watchlist</div></td>
+            <td><div class="v-word">Provisional</div><div class="vbar"><div class="vfill" style="width:40%"></div></div><div class="v-sub">preprint · replication watch</div></td>
+            <td><span class="p-count">1 evidence record</span><div class="p-refs">D-033 · flagged provisional</div></td>
+          </tr>
+
+        </tbody>
+      </table>
+      <div class="table-foot">
+        <span>Rows on the renewal bench are edged and dimmed — they hold their place; the chain is never rewritten.</span>
+        <a class="lk" href="#">Open the full register — 2,864 →</a>
+      </div>
+    </section>
+
+    <!-- ---- RAIL ---- -->
+    <aside class="rail">
+
+      <section class="panel" aria-label="Renewal bench">
+        <div class="sec-head">
+          <span class="label">Renewal bench</span>
+          <span class="sec-meta"><strong>116</strong> due · <span class="mono">06:12</span></span>
+        </div>
+
+        <div class="bench-item">
+          <div class="row1"><a class="lk accid" href="#acc-s-0098">ACC-S-0098</a> <span class="bname">— L-Lysine HCl spot, US Midwest</span></div>
+          <div class="bench-why">Window lapsed 08-20 · 7 evidence records pinned to the 08-13 state.</div>
+          <div class="bench-act"><span class="k">Refresh queued 02:00 tonight</span> · $0.04/pull</div>
+        </div>
+
+        <div class="bench-item">
+          <div class="row1"><a class="lk accid" href="#acc-s-0104">ACC-S-0104</a> <span class="bname">— Natural gas, industrial, Iowa</span></div>
+          <div class="bench-why">Lapsed 08-17 · EIA publishes next on 08-26.</div>
+          <div class="bench-act"><span class="k">Pull scheduled 08-26 02:00</span> · $0.04</div>
+        </div>
+
+        <div class="bench-item">
+          <div class="row1"><a class="lk accid" href="#acc-p-0871">ACC-P-0871</a> <span class="bname">— Manure management review, 2014</span></div>
+          <div class="bench-why">Superseded by ACC-P-3102, the 2025 review.</div>
+          <div class="bench-act"><span class="k">Swap filed with D-024</span> · awaiting dossier rebuild</div>
+        </div>
+
+        <div class="bench-item" style="border-bottom:none">
+          <div class="row1"><span class="accid mono">ACC-D-0417</span> <span class="bname">— Iowa custom rates survey, 2024</span></div>
+          <div class="bench-why">Source dark since 08-15 (404 on recollection attempt).</div>
+          <div class="bench-act"><span class="k">Recollection commissioned → SWP-022</span> · starts 08-23</div>
+        </div>
+
+        <div class="doctrine">Renewal appends a fresh state to the same accession. The chain keeps every prior state; nothing is overwritten.</div>
+        <div class="panel-foot"><a class="lk" href="#">Open the bench — all 116 →</a></div>
+      </section>
+
+      <section class="panel" aria-label="Overnight intake">
+        <div class="sec-head">
+          <span class="label">Overnight intake</span>
+          <span class="sec-meta">collection log · 24 h</span>
+        </div>
+
+        <div class="log-row">
+          <span class="log-time">02:00</span>
+          <span class="log-body"><span class="k">12 scheduled market pulls</span> — Feedinfo ×7 · USDA AMS ×3 · EIA ×2 · $0.48 metered</span>
+        </div>
+        <div class="log-row">
+          <span class="log-time">02:30</span>
+          <span class="log-body"><span class="k">Nightly grow-out test</span> — 200 stored accessions sampled · 38% have germinated at least once</span>
+        </div>
+        <div class="log-row">
+          <span class="log-time">03:12</span>
+          <span class="log-body"><span class="k">SWP-019 landed 43 papers</span> on manure valorization · reading metered $11.84</span>
+        </div>
+        <div class="log-row">
+          <span class="log-time">04:40</span>
+          <span class="log-body"><span class="k">Watchlist caught 6</span> — new citations touching held accessions</span>
+        </div>
+        <div class="log-row">
+          <span class="log-time">06:04</span>
+          <span class="log-body"><span class="k">Verification pass</span> — 39 admitted · 5 refused: 3 duplicate · 1 retracted · 1 unreadable</span>
+        </div>
+        <div class="log-row" style="border-bottom:none">
+          <span class="log-time">06:12</span>
+          <span class="log-body"><span class="k">Census</span> — registry totals recounted, never estimated</span>
+        </div>
+        <div class="log-total">
+          <span class="log-time"></span>
+          <span class="sum">Last 24 h: 61 collected · 39 accessioned · $12.32 metered</span>
+        </div>
+      </section>
+
+    </aside>
+  </div>
+
+  <!-- ============ COMMISSIONED SWEEPS ============ -->
+  <section class="section" aria-label="Commissioned sweeps">
+    <div class="sec-head">
+      <span class="label">Commissioned sweeps — collecting expeditions</span>
+      <span class="sec-meta" style="display:flex;align-items:center;gap:16px">
+        <span class="sweeps-intro">4 open · 1 returned this week</span>
+        <button class="btn btn-primary" type="button">Commission a sweep</button>
+      </span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Sweep</th>
+          <th>Territory</th>
+          <th>Commissioned by</th>
+          <th>Status</th>
+          <th>Yield</th>
+          <th>Cost, metered</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td><span class="sw-id">SWP-019</span><div class="sw-name">Nutrient Loop Survey</div></td>
+          <td><div class="sw-terr">Manure valorization — struvite recovery, black-soldier-fly economics, composting at commercial scale · 2015–2026 literatures</div></td>
+          <td><div class="sw-by">R. Calloway</div><div class="sw-role">Agronomy Lead</div></td>
+          <td><div class="sw-status"><span class="glyph live">●</span>Reading — 43 of ≈120</div><div class="sw-sub">lands 08-24</div></td>
+          <td><div class="sw-yield"><span class="k">43 collected</span> · 39 accessioned so far</div></td>
+          <td><div class="sw-cost">$11.84</div><div class="sw-cost-sub">ceiling $34</div></td>
+        </tr>
+
+        <tr>
+          <td><span class="sw-id">SWP-020</span><div class="sw-name">August Heat Reading</div></td>
+          <td><div class="sw-terr">Heat stress in layer barns — mitigation trials, ventilation retrofits, mortality economics</div></td>
+          <td><div class="sw-by">M. Okafor</div><div class="sw-role">Operations</div></td>
+          <td><div class="sw-status"><span class="glyph">○</span>Queued №2</div><div class="sw-sub">starts tonight 02:00</div></td>
+          <td><div class="sw-yield">≈85 papers expected</div></td>
+          <td><div class="sw-cost">est. $22.10</div><div class="sw-cost-sub">ceiling $30</div></td>
+        </tr>
+
+        <tr>
+          <td><span class="sw-id">SWP-021</span><div class="sw-name">Membrane Market Survey</div></td>
+          <td><div class="sw-terr">Eggshell-membrane valorization — extraction methods, patent activity, buyer landscape</div></td>
+          <td><div class="sw-by">Palingenesis</div><div class="sw-role">auto-commissioned — evidence gap: D-033, claim 4 had no source</div></td>
+          <td><div class="sw-status"><span class="glyph">○</span>Queued №3</div><div class="sw-sub">starts 08-23</div></td>
+          <td><div class="sw-yield">≈60 documents expected</div></td>
+          <td><div class="sw-cost">est. $15.70</div><div class="sw-cost-sub">ceiling $20</div></td>
+        </tr>
+
+        <tr>
+          <td><span class="sw-id">SWP-022</span><div class="sw-name">Custom Rates Recollection</div></td>
+          <td><div class="sw-terr">Iowa custom rates — recollect dark source ACC-D-0417 plus county extension mirrors</div></td>
+          <td><div class="sw-by">Registry keeper</div><div class="sw-role">auto — renewal of a source gone dark</div></td>
+          <td><div class="sw-status"><span class="glyph">○</span>Queued №4</div><div class="sw-sub">starts 08-23</div></td>
+          <td><div class="sw-yield">≈9 documents expected</div></td>
+          <td><div class="sw-cost">est. $1.90</div><div class="sw-cost-sub">ceiling $4</div></td>
+        </tr>
+
+        <tr>
+          <td><span class="sw-id">SWP-018</span><div class="sw-name">Clean Water File</div></td>
+          <td><div class="sw-terr">Water-reuse standards — EPA, EU, and state agricultural modules</div></td>
+          <td><div class="sw-by">R. Calloway</div><div class="sw-role">Agronomy Lead</div></td>
+          <td><div class="sw-status"><span class="glyph">✓</span>Returned 08-19</div><div class="sw-sub">closed</div></td>
+          <td><div class="sw-yield"><span class="k">61 read · 58 accessioned</span> · 9 already germinated</div></td>
+          <td><div class="sw-cost">$16.40 final</div><div class="sw-cost-sub">ceiling $25</div></td>
+        </tr>
+
+      </tbody>
+    </table>
+    <div class="sweep-doctrine">A sweep is priced before it reads — a territory, a ceiling, an expected yield. Its return is counted in accessions, then in germinations.</div>
+  </section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="container foot-inner">
+    <span>Palingenesis · The Library — registry is append-only · 2,864 accessions since 2026-02-14 · 12 deaccessioned, records retained</span>
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+  </div>
+</footer>
+
+</body>
+</html>
