@@ -1,0 +1,1685 @@
+<title>Pipeline, From the Sketch</title>
+<script type="application/json" id="fb-state">{"feedback":{},"submitted_at":null}</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>  :root { --bg:#141312; --ink:#EDEAE3; --muted:#A69D90; --faint:#7A7267; --hairline:rgba(237,234,227,0.14); --green:hsl(152,45%,55%); --green-dim:hsla(152,45%,55%,0.35); --serif:'Source Serif 4', Georgia, serif; --sans:'Source Sans 3', -apple-system, sans-serif; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--ink); font-family:var(--serif); font-size:17px; line-height:1.6; }
+  .shell { max-width:110rem; margin:0 auto; padding:0 2.5rem 5rem; }
+  header.mast { display:flex; align-items:baseline; gap:2rem; flex-wrap:wrap; padding:1.4rem 0; border-bottom:1px solid var(--hairline); font-family:var(--sans); }
+  .wordmark { font-family:var(--serif); font-size:13px; letter-spacing:0.14em; text-transform:uppercase; }
+  .mast .meta { color:var(--faint); font-size:13.5px; margin-left:auto; }
+  .kicker { font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--green); display:block; border-top:1px solid var(--hairline); padding-top:1.4rem; }
+  h1 { font-size:clamp(30px,3.4vw,42px); line-height:1.1; letter-spacing:-0.015em; font-weight:700; margin-top:0.8rem; max-width:30ch; text-wrap:balance; }
+  .dek { max-width:74ch; color:var(--muted); font-size:17.5px; margin-top:0.9rem; }
+  main { padding:1rem 0 2rem; }
+  .cand { padding:2rem 0; border-top:1px solid var(--hairline); }
+  .candhead { display:flex; align-items:baseline; gap:1.2rem; flex-wrap:wrap; }
+  .name { font-size:24px; font-weight:700; letter-spacing:-0.01em; }
+  .axis { font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--green); }
+  .emph { color:var(--muted); font-size:15.5px; margin-top:0.5rem; max-width:76ch; font-family:var(--sans); }
+  .claim { color:var(--ink); font-size:15.5px; margin-top:0.35rem; max-width:76ch; font-family:var(--sans); font-style:italic; }
+  .surf { font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--faint); margin:1.3rem 0 0.5rem; }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:1.6rem; margin-top:1rem; }
+  @media (max-width:1100px){ .pair { grid-template-columns:1fr; } }
+  figure, .frame { border:1px solid var(--hairline); border-radius:4px; overflow:hidden; background:#1D1B19; }
+  figure img { display:block; width:100%; height:auto; }
+  .frame iframe { display:block; width:100%; height:880px; border:0; background:#1D1B19; }
+  .pending { border:1px dashed var(--hairline); border-radius:4px; padding:2.2rem 1.6rem; color:var(--faint); font-family:var(--sans); font-size:14.5px; }
+  .fb { margin-top:1.1rem; max-width:56rem; }
+  .fb-label { font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--green); display:block; margin-bottom:0.4rem; }
+  .fb textarea { width:100%; min-height:84px; background:#1D1B19; color:var(--ink); border:1px solid var(--hairline); border-radius:4px; padding:0.7rem 0.9rem; font-family:var(--sans); font-size:15px; line-height:1.5; resize:vertical; }
+  .fb textarea:focus { outline:2px solid var(--green-dim); outline-offset:1px; }
+  .fb-saved { display:none; font-family:var(--sans); font-size:12px; color:var(--green); margin-top:0.35rem; }
+  .overallwrap { border-top:1px solid var(--hairline); padding:1.6rem 0; }
+  .pick { border-top:1px solid var(--hairline); padding:1.6rem 0; font-family:var(--sans); font-size:15.5px; color:var(--muted); max-width:80ch; }
+  .pick b { color:var(--ink); }
+  #fb-bar { position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--hairline); padding:0.9rem 0; display:flex; align-items:center; gap:1.2rem; font-family:var(--sans); }
+  #fb-bar .hint { color:var(--faint); font-size:13.5px; flex:1; }
+  #fb-submit { background:hsl(152,40%,38%); color:#F2EFE8; border:1px solid hsl(152,40%,38%); border-radius:4px; font-size:14.5px; padding:0.65rem 1.5rem; cursor:pointer; min-height:24px; font-family:var(--sans); }
+  #fb-submit:disabled { opacity:0.5; }
+  #fb-status { font-size:13.5px; color:var(--muted); }
+  footer.colo { margin-top:2rem; border-top:1px solid var(--hairline); padding:1.4rem 0 3rem; font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--faint); }
+ .frame iframe{height:1200px}</style>
+<div class="shell"><header class="mast"><span class="wordmark">Palingenesis · Pipeline · Round one</span><span class="meta">16 Sep 2026 · three renderings of Erik’s sketch · dark identity · no motto</span></header>
+<main><span class="kicker">Your sketch, rendered</span><h1>From the sketch</h1><p class="dek">Your layout, rendered three ways: to the letter, chart-first, ledger-first. Same facts, same words. Say which, or what to change.</p>
+<section class="cand" id="Q1"><div class="candhead"><span class="name">Q1 — Faithful to the sketch</span><span class="axis">the sketch as drawn</span></div><div class="frame"><iframe title="Q1 — Faithful to the sketch" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;title&gt;Palingenesis — Pipeline&lt;/title&gt;
+&lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.googleapis.com&quot;&gt;
+&lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.gstatic.com&quot; crossorigin&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap&quot; rel=&quot;stylesheet&quot;&gt;
+&lt;style&gt;
+  :root{
+    --bg: #1B1917;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-sel: rgba(231,227,218,0.06);
+    /* type scale: exactly four sizes */
+    --t-xs: 11px;  --lh-xs: 16px;
+    --t-sm: 13px;  --lh-sm: 20px;
+    --t-md: 16px;  --lh-md: 24px;
+    --t-lg: 22px;  --lh-lg: 32px;
+    /* column grid: page 1440, pad 26, frame 1px.
+       rail content x=51 · mid content x=348 (+184 = 532 · 716 · 900) · inspector content x=1133 */
+    --rail: 296px;
+    --insp: 304px;
+    --pad: 24px;
+    --sub: 184px;
+    --ikey: 96px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: &#x27;JetBrains Mono&#x27;, ui-monospace, &#x27;SF Mono&#x27;, Menlo, monospace;
+    font-size: var(--t-sm);
+    line-height: var(--lh-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  .page{ width: 1440px; margin: 0 auto; padding: 24px 26px 32px; }
+
+  /* ---------- nav ---------- */
+  .brandrow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+  }
+  .brandrow .brand{ color: var(--ink); font-weight: 700; }
+  .rooms{
+    display:flex; gap: 24px;
+    padding: 8px 0 16px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.04em; color: var(--ink-dim);
+  }
+  .rooms .active{ color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--ink); }
+
+  /* ---------- status strip ---------- */
+  .strip{
+    border: 1px solid var(--rule);
+    padding: 16px var(--pad) 24px;
+    margin-bottom: 16px;
+  }
+  .stats{ display:grid; grid-template-columns: 297px var(--sub) var(--sub) var(--sub) 233px 256px; }
+  .stat .lbl{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.08em; color: var(--ink-dim); }
+  .stat .num{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .stat .num.sage{ color: var(--sage); }
+  .stat .num.clay{ color: var(--clay); }
+
+  /* ---------- workstation frame ---------- */
+  .workstation{ position: relative; border: 1px solid var(--rule); }
+  .corner{ position:absolute; width:10px; height:10px; }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+
+  .grid3{ display:grid; grid-template-columns: var(--rail) 1px 1fr 1px var(--insp); align-items: stretch; }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: var(--pad); min-width: 0; }
+  .colhead{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    font-weight: 700; letter-spacing: 0.1em; color: var(--ink);
+    margin-bottom: 24px;
+  }
+  .blk + .blk{ margin-top: 24px; }
+  .sublabel{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+  .sublabel.strong{ color: var(--ink); font-weight: 700; }
+  .hr{ height: 1px; background: var(--rule-soft); }
+  .chev{ color: var(--ink-dim); text-align: right; }
+  .sage{ color: var(--sage); }
+  .clay{ color: var(--clay); }
+  .mid{ color: var(--ink-mid); }
+  .dim{ color: var(--ink-dim); }
+  svg{ display:block; }
+  svg text{ font-family: &#x27;JetBrains Mono&#x27;, ui-monospace, monospace; }
+
+  /* ---------- LIFECYCLE rail ---------- */
+  .floor{ display:flex; align-items:center; gap: 16px; }
+  .floor .fv{ color: var(--ink); }
+  .floor svg{ width: 168px; height: 16px; }
+  .frow{ display:flex; justify-content:space-between; align-items:baseline; color: var(--ink-mid); }
+  .frow b{ color: var(--ink); font-weight: 500; }
+  .frow .caret{ color: var(--ink-dim); }
+  .frow.sort{ margin-top: 8px; }
+  .field{ display:inline-block; width: 128px; height: 12px; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
+  .grp .gname{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size: var(--t-xs); line-height: var(--lh-sm); letter-spacing: 0.08em; color: var(--ink);
+  }
+  .grp .gname .cnt{ font-size: var(--t-sm); letter-spacing: 0; color: var(--ink-mid); }
+  .grp.sage .gname .nm{ color: var(--sage); }
+  .grp.clay .gname .nm{ color: var(--clay); }
+  .grp.quiet .gname .nm{ color: var(--ink-mid); }
+  .grow{
+    display:grid; grid-template-columns: 1fr auto;
+    padding: 0 8px 0 6px; margin: 0 -8px;
+    border-left: 2px solid transparent;
+  }
+  .grow.sel{ background: var(--fill-sel); border-left-color: var(--ink); }
+  .grow .id{ color: var(--ink); white-space: nowrap; }
+  .grow .gf{ color: var(--ink-mid); text-align: right; }
+  .gsub{ display:grid; grid-template-columns: 1fr 16px; color: var(--ink-mid); white-space: nowrap; }
+  .gmore{ color: var(--ink-dim); }
+
+  /* ---------- SELECTED ITEM ---------- */
+  .ident{ display:flex; justify-content:space-between; align-items:baseline; gap: 16px; margin-bottom: 8px; }
+  .ident .id{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; letter-spacing: 0.04em; color: var(--ink); }
+  .ident .sv{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.06em; color: var(--ink-mid); }
+  .thesis{ color: var(--ink); max-width: 640px; }
+  .scale svg{ width: 100%; height: auto; }
+  .kv{ display:grid; grid-template-columns: var(--sub) 1fr 16px; }
+  .kv .k{ color: var(--ink-mid); }
+  .kv .v{ color: var(--ink); }
+  .kv .v.sage{ color: var(--sage); }
+  .kv .v.mid{ color: var(--ink-mid); }
+  .kv .v.dim{ color: var(--ink-dim); }
+  .kv .span{ grid-column: 1 / 3; color: var(--ink); }
+  .kv .span.mid{ color: var(--ink-mid); }
+  .judge{ margin-top: 16px; }
+  .ev{ display:grid; grid-template-columns: var(--sub) var(--sub) 1fr 16px; }
+  .ev .d{ color: var(--ink-mid); }
+  .ev .k{ color: var(--ink-mid); }
+  .ev .v{ color: var(--ink); }
+  .river svg{ width: 100%; height: auto; }
+
+  /* ---------- ITEM INSPECTOR ---------- */
+  .ibig{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); }
+  .ival{ color: var(--ink); }
+  .comp{ display:grid; grid-template-columns: 40px 40px 1fr; column-gap: 8px; align-items: center; }
+  .comp .c{ color: var(--ink-mid); }
+  .comp .cv{ color: var(--ink); text-align: right; }
+  .comp svg{ width: 160px; height: 16px; }
+  .ikv{ display:grid; grid-template-columns: var(--ikey) 1fr; }
+  .ikv .k{ color: var(--ink-mid); }
+  .ikv .v{ color: var(--ink); }
+  .ikv .v.dim{ color: var(--ink-dim); }
+  .lrow{ display:grid; grid-template-columns: 1fr 16px; }
+  .lrow .v{ color: var(--ink); }
+  .btns{ display:flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .btns.row{ gap: 16px; }
+  .btn{
+    display:inline-flex; align-items:center; height: 24px; padding: 0 10px;
+    border: 1px solid var(--rule); color: var(--ink-mid);
+    font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .btn.clay{ color: var(--clay); border-color: var(--clay); }
+  .stack{ display:flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  /* ---------- GENERATIONS foot ---------- */
+  .hdiv{ height: 1px; background: var(--rule); }
+  .gens{ display:grid; grid-template-columns: 297px 1fr; padding: var(--pad); align-items: baseline; }
+  .gens .t{ font-size: var(--t-xs); line-height: var(--lh-xs); font-weight: 700; letter-spacing: 0.1em; color: var(--ink); }
+  .gens .row{ display:flex; gap: 32px; color: var(--ink-mid); white-space: nowrap; }
+  .gens .row b{ color: var(--ink); font-weight: 600; }
+  .gens .row .chev{ margin-left: 8px; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div class=&quot;page&quot;&gt;
+
+  &lt;div class=&quot;brandrow&quot;&gt;
+    &lt;span class=&quot;brand&quot;&gt;PALINGENESIS&lt;/span&gt;
+    &lt;span&gt;Tue 15 Sep 2026&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;nav class=&quot;rooms&quot;&gt;
+    &lt;span&gt;Today&lt;/span&gt;
+    &lt;span class=&quot;active&quot;&gt;PIPELINE&lt;/span&gt;
+    &lt;span&gt;Library&lt;/span&gt;
+    &lt;span&gt;Portfolio&lt;/span&gt;
+    &lt;span&gt;Simulation&lt;/span&gt;
+    &lt;span&gt;Engine Room&lt;/span&gt;
+  &lt;/nav&gt;
+
+  &lt;!-- status strip --&gt;
+  &lt;section class=&quot;strip&quot;&gt;
+    &lt;div class=&quot;stats&quot;&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;GENERATION&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;G12&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;POPULATION&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;40&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;SURVIVAL&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;35%&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;BEST FITNESS&lt;/div&gt;&lt;div class=&quot;num sage&quot;&gt;0.91&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;COUNCIL&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;14:00 / 20:00&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;NEEDS HAND&lt;/div&gt;&lt;div class=&quot;num clay&quot;&gt;4&lt;/div&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;div class=&quot;workstation&quot;&gt;
+    &lt;div class=&quot;corner tl&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner tr&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner bl&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner br&quot;&gt;&lt;/div&gt;
+
+    &lt;div class=&quot;grid3&quot;&gt;
+      &lt;!-- LIFECYCLE --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;LIFECYCLE&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;Fitness floor&lt;/div&gt;
+          &lt;div class=&quot;floor&quot;&gt;
+            &lt;span class=&quot;fv&quot;&gt;0.70&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 168 16&quot; role=&quot;img&quot; aria-label=&quot;Fitness floor&quot;&gt;
+              &lt;line x1=&quot;0.5&quot; y1=&quot;3&quot; x2=&quot;0.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;167.5&quot; y1=&quot;3&quot; x2=&quot;167.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;0&quot; y1=&quot;8&quot; x2=&quot;168&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;circle cx=&quot;117.6&quot; cy=&quot;8&quot; r=&quot;4&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Stage&lt;/span&gt;&lt;b&gt;All &lt;span class=&quot;caret&quot;&gt;▾&lt;/span&gt;&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Verdict&lt;/span&gt;&lt;b&gt;All &lt;span class=&quot;caret&quot;&gt;▾&lt;/span&gt;&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Strategy&lt;/span&gt;&lt;b&gt;All &lt;span class=&quot;caret&quot;&gt;▾&lt;/span&gt;&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Text&lt;/span&gt;&lt;span class=&quot;field&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow sort&quot;&gt;&lt;span&gt;Sort&lt;/span&gt;&lt;b&gt;Fitness &lt;span class=&quot;caret&quot;&gt;▾&lt;/span&gt;&lt;/b&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;EMBRYO&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;8&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0441&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G12 · 0.63&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+7&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;CANDIDATE&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;7&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0433&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G12 · 0.76&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+6&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;IN_EVALUATION&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;6&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0428&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G12 · 0.82&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+5&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp sage blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0421&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G12 · 0.88&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+2&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp quiet blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;LIMINAL&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0418&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G12 · 0.79&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gsub&quot;&gt;&lt;span&gt;Parked 15 Sep · evidence gap&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+2&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp clay blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;VETOED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0409&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G11 · 0.68&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+2&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;SIMULATING&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow sel&quot;&gt;&lt;span class=&quot;id&quot;&gt;● item-0417&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G12 · 0.91&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+1&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;PILOT_READY&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0384&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G11 · 0.86&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+1&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;IN_PILOT&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0367&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G10 · 0.84&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;gmore&quot;&gt;+1&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;COMMERCIALIZING&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0344&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G9 · 0.81&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;LAUNCHED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0291&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G8 · 0.87&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;ARCHIVED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0217&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G6 · 0.72&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grp clay blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span class=&quot;nm&quot;&gt;FAILED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;grow&quot;&gt;&lt;span class=&quot;id&quot;&gt;item-0182&lt;/span&gt;&lt;span class=&quot;gf&quot;&gt;G5 · 0.74&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div class=&quot;vdiv&quot;&gt;&lt;/div&gt;
+
+      &lt;!-- SELECTED ITEM --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;SELECTED ITEM&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;ident&quot;&gt;&lt;span class=&quot;id&quot;&gt;ITEM-0417&lt;/span&gt;&lt;span class=&quot;sv&quot;&gt;SIMULATING · &lt;span class=&quot;sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;thesis&quot;&gt;Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) at no change in litter moisture, paying back in one flock.&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;scale blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;FITNESS&lt;/div&gt;
+          &lt;svg viewBox=&quot;0 0 736 96&quot; preserveAspectRatio=&quot;xMinYMin meet&quot; role=&quot;img&quot; aria-label=&quot;Fitness&quot;&gt;
+            &lt;text x=&quot;0&quot; y=&quot;14&quot; text-anchor=&quot;start&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-mid)&quot;&gt;0.0&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;14&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-mid)&quot;&gt;0.5&lt;/text&gt;
+            &lt;text x=&quot;736&quot; y=&quot;14&quot; text-anchor=&quot;end&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-mid)&quot;&gt;1.0&lt;/text&gt;
+            &lt;line x1=&quot;0.5&quot; y1=&quot;40&quot; x2=&quot;0.5&quot; y2=&quot;56&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;368&quot; y1=&quot;44&quot; x2=&quot;368&quot; y2=&quot;52&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;735.5&quot; y1=&quot;40&quot; x2=&quot;735.5&quot; y2=&quot;56&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;0&quot; y1=&quot;48&quot; x2=&quot;736&quot; y2=&quot;48&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;669.76&quot; cy=&quot;48&quot; r=&quot;5&quot; fill=&quot;var(--sage)&quot;/&gt;
+            &lt;text x=&quot;669.76&quot; y=&quot;82&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--sage)&quot;&gt;0.91&lt;/text&gt;
+          &lt;/svg&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Council&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span mid&quot;&gt;Tue 15 Sep · 14:00&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 01&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span&quot;&gt;&quot;The claimed effect is bounded and testable.&quot;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 02&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span&quot;&gt;&quot;The litter-moisture constraint is explicit.&quot;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 03&lt;/span&gt;&lt;span class=&quot;v mid&quot;&gt;LIMINAL&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span&quot;&gt;&quot;The one-flock payback needs simulation.&quot;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;hr blk&quot;&gt;&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;RECEIPTS&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Thesis&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;24%&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Interval&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;18–30%&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Constraint&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;no litter-moisture change&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Payback&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;one flock&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;SEED PAPERS&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span&quot;&gt;paper-01&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span&quot;&gt;paper-02&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span&quot;&gt;paper-03&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;span mid&quot;&gt;+ papers&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;hr blk&quot;&gt;&lt;/div&gt;
+
+        &lt;div class=&quot;river blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;RIVER&lt;/div&gt;
+          &lt;svg viewBox=&quot;0 0 736 104&quot; preserveAspectRatio=&quot;xMinYMin meet&quot; role=&quot;img&quot; aria-label=&quot;River&quot;&gt;
+            &lt;text x=&quot;32&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot;&gt;embryo&lt;/text&gt;
+            &lt;text x=&quot;144&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot;&gt;candidate&lt;/text&gt;
+            &lt;text x=&quot;256&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot;&gt;evaluation&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot;&gt;council&lt;/text&gt;
+            &lt;text x=&quot;480&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot;&gt;simulation&lt;/text&gt;
+            &lt;text x=&quot;592&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot;&gt;pilot&lt;/text&gt;
+            &lt;text x=&quot;704&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot;&gt;commerce&lt;/text&gt;
+            &lt;line x1=&quot;32&quot; y1=&quot;48&quot; x2=&quot;704&quot; y2=&quot;48&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;32&quot; cy=&quot;48&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;144&quot; cy=&quot;48&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;256&quot; cy=&quot;48&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;368&quot; cy=&quot;48&quot; r=&quot;4&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;circle cx=&quot;480&quot; cy=&quot;48&quot; r=&quot;7&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--sage)&quot; stroke-width=&quot;1.5&quot;/&gt;
+            &lt;circle cx=&quot;480&quot; cy=&quot;48&quot; r=&quot;3&quot; fill=&quot;var(--sage)&quot;/&gt;
+            &lt;circle cx=&quot;592&quot; cy=&quot;48&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;704&quot; cy=&quot;48&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;text x=&quot;480&quot; y=&quot;84&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot;&gt;item-0417&lt;/text&gt;
+          &lt;/svg&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Verdict&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Simulation&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;running&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Pilot&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Sites&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Readings&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;EVENTS&lt;/div&gt;
+          &lt;div class=&quot;ev&quot;&gt;&lt;span class=&quot;d&quot;&gt;Tue 15 Sep 14:00&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;Council&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ev&quot;&gt;&lt;span class=&quot;d&quot;&gt;Tue 15 Sep 14:06&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;Simulation&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;run-1842&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div class=&quot;vdiv&quot;&gt;&lt;/div&gt;
+
+      &lt;!-- ITEM INSPECTOR --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;ITEM INSPECTOR&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;GENERATION&lt;/div&gt;
+          &lt;div class=&quot;ibig&quot;&gt;G12&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;FITNESS&lt;/div&gt;
+          &lt;div class=&quot;ibig&quot;&gt;0.91&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;COMPONENTS&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;c&quot;&gt;C01&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.94&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 16&quot; role=&quot;img&quot; aria-label=&quot;C01&quot;&gt;
+              &lt;line x1=&quot;0.5&quot; y1=&quot;3&quot; x2=&quot;0.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;159.5&quot; y1=&quot;3&quot; x2=&quot;159.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;0&quot; y1=&quot;8&quot; x2=&quot;160&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;150.4&quot; cy=&quot;8&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;c&quot;&gt;C02&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.92&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 16&quot; role=&quot;img&quot; aria-label=&quot;C02&quot;&gt;
+              &lt;line x1=&quot;0.5&quot; y1=&quot;3&quot; x2=&quot;0.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;159.5&quot; y1=&quot;3&quot; x2=&quot;159.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;0&quot; y1=&quot;8&quot; x2=&quot;160&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;147.2&quot; cy=&quot;8&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;c&quot;&gt;C03&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.90&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 16&quot; role=&quot;img&quot; aria-label=&quot;C03&quot;&gt;
+              &lt;line x1=&quot;0.5&quot; y1=&quot;3&quot; x2=&quot;0.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;159.5&quot; y1=&quot;3&quot; x2=&quot;159.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;0&quot; y1=&quot;8&quot; x2=&quot;160&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;144&quot; cy=&quot;8&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;c&quot;&gt;C04&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.89&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 16&quot; role=&quot;img&quot; aria-label=&quot;C04&quot;&gt;
+              &lt;line x1=&quot;0.5&quot; y1=&quot;3&quot; x2=&quot;0.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;159.5&quot; y1=&quot;3&quot; x2=&quot;159.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;0&quot; y1=&quot;8&quot; x2=&quot;160&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;142.4&quot; cy=&quot;8&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;c&quot;&gt;C05&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.88&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 16&quot; role=&quot;img&quot; aria-label=&quot;C05&quot;&gt;
+              &lt;line x1=&quot;0.5&quot; y1=&quot;3&quot; x2=&quot;0.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;159.5&quot; y1=&quot;3&quot; x2=&quot;159.5&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;0&quot; y1=&quot;8&quot; x2=&quot;160&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;140.8&quot; cy=&quot;8&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;STRATEGY&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;biomimicry&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;MODE&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;research_backed&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;LINEAGE&lt;/div&gt;
+          &lt;div class=&quot;mid&quot;&gt;Parents&lt;/div&gt;
+          &lt;div class=&quot;lrow&quot;&gt;&lt;span class=&quot;v&quot;&gt;item-0321&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;lrow&quot;&gt;&lt;span class=&quot;v&quot;&gt;item-0338&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;mid&quot; style=&quot;margin-top:8px&quot;&gt;Siblings&lt;/div&gt;
+          &lt;div class=&quot;lrow&quot;&gt;&lt;span class=&quot;v&quot;&gt;item-0415&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;lrow&quot;&gt;&lt;span class=&quot;v&quot;&gt;item-0416&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;dim&quot;&gt;+2&lt;/div&gt;
+          &lt;div class=&quot;btns&quot;&gt;&lt;span class=&quot;btn&quot;&gt;Lineage view&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;SIMULATION&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Run&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;run-1842&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Result&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;pending&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Interval&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;In domain&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Hindcast&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;btns&quot;&gt;&lt;span class=&quot;btn&quot;&gt;Open run&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;ITEM ACTS&lt;/div&gt;
+          &lt;div class=&quot;stack&quot;&gt;
+            &lt;span class=&quot;btn&quot;&gt;Open Dossier&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;stack&quot; style=&quot;margin-top:16px&quot;&gt;
+            &lt;span class=&quot;btn&quot;&gt;Breed variants&lt;/span&gt;
+            &lt;span class=&quot;btn&quot;&gt;Commission research&lt;/span&gt;
+            &lt;span class=&quot;btn&quot;&gt;Re-evaluate&lt;/span&gt;
+            &lt;span class=&quot;btn&quot;&gt;Send simulation&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;DISPOSITION&lt;/div&gt;
+          &lt;div class=&quot;btns row&quot; style=&quot;margin-top:0&quot;&gt;&lt;span class=&quot;btn&quot;&gt;Park&lt;/span&gt;&lt;span class=&quot;btn clay&quot;&gt;Kill&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;ACT RECORD&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Reason&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;&lt;span class=&quot;field&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Date&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;15 Sep 2026&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Actor&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;Owner&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;btns&quot;&gt;&lt;span class=&quot;btn&quot;&gt;Record act&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;hdiv&quot;&gt;&lt;/div&gt;
+
+    &lt;!-- GENERATIONS --&gt;
+    &lt;section class=&quot;gens&quot;&gt;
+      &lt;span class=&quot;t&quot;&gt;GENERATIONS&lt;/span&gt;
+      &lt;div class=&quot;row&quot;&gt;
+        &lt;span&gt;&lt;b&gt;G12&lt;/b&gt;&amp;nbsp;&amp;nbsp;40 items · 35% survival · best 0.91&lt;/span&gt;
+        &lt;span&gt;&lt;b&gt;G11&lt;/b&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/span&gt;
+        &lt;span&gt;&lt;b&gt;G10&lt;/b&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/span&gt;
+        &lt;span&gt;&lt;b&gt;G9&lt;/b&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/span&gt;
+        &lt;span&gt;&lt;b&gt;SPECIES&lt;/b&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/span&gt;
+        &lt;span&gt;&lt;b&gt;LINEAGES&lt;/b&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/span&gt;
+        &lt;span&gt;&lt;b&gt;RECORD&lt;/b&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+  &lt;/div&gt;
+
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe></div><div class="fb"><label class="fb-label" for="fb-q-Q1">Your note — Q1</label><textarea id="fb-q-Q1" data-fb="q-Q1" placeholder="Advance, kill, or steal — your call."></textarea><div class="fb-saved" data-fb-saved="q-Q1"></div></div></section>
+<section class="cand" id="Q2"><div class="candhead"><span class="name">Q2 — Judgment-dominant</span><span class="axis">thesis large, fitness wide, the council at generous spacing</span></div><div class="frame"><iframe title="Q2 — Judgment-dominant" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;title&gt;Palingenesis — Pipeline&lt;/title&gt;
+&lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.googleapis.com&quot;&gt;
+&lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.gstatic.com&quot; crossorigin&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap&quot; rel=&quot;stylesheet&quot;&gt;
+&lt;style&gt;
+  :root{
+    --bg: #1B1917;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-band: rgba(231,227,218,0.09);
+    --fill-sel: rgba(231,227,218,0.06);
+    /* type scale: exactly four sizes */
+    --t-xs: 11px;  --lh-xs: 16px;
+    --t-sm: 13px;  --lh-sm: 20px;
+    --t-md: 16px;  --lh-md: 24px;
+    --t-lg: 22px;  --lh-lg: 32px;
+    /* column grid: content edges 51 · 316 · 500 · 684 · 868 · 1101 */
+    --rail: 264px;
+    --insp: 336px;
+    --pad: 24px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: &#x27;JetBrains Mono&#x27;, ui-monospace, &#x27;SF Mono&#x27;, Menlo, monospace;
+    font-size: var(--t-sm);
+    line-height: var(--lh-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  .page{ width: 1440px; margin: 0 auto; padding: 24px 26px 32px; }
+
+  /* ---------- nav ---------- */
+  .brandrow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+  }
+  .brandrow .brand{ color: var(--ink); font-weight: 700; }
+  .rooms{
+    display:flex; gap: 24px;
+    padding: 8px 0 16px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.04em; color: var(--ink-dim);
+  }
+  .rooms .active{ color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--ink); }
+
+  /* ---------- status strip ---------- */
+  .strip{
+    border: 1px solid var(--rule);
+    padding: 16px var(--pad) 16px;
+    margin-bottom: 16px;
+  }
+  .stats{ display:grid; grid-template-columns: 216px 49px 184px 184px 184px 184px 49px 288px; }
+  .stats .stat:nth-child(1){ grid-column: 1; }
+  .stats .stat:nth-child(2){ grid-column: 3; }
+  .stats .stat:nth-child(3){ grid-column: 4; }
+  .stats .stat:nth-child(4){ grid-column: 5; }
+  .stats .stat:nth-child(5){ grid-column: 6; }
+  .stats .stat:nth-child(6){ grid-column: 8; }
+  .stat .lbl{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.08em; color: var(--ink-dim); }
+  .stat .num{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; color: var(--ink); }
+  .stat .num.sage{ color: var(--sage); }
+  .stat .num.clay{ color: var(--clay); }
+
+  /* ---------- workstation frame ---------- */
+  .workstation{ position: relative; border: 1px solid var(--rule); }
+  .corner{ position:absolute; width:10px; height:10px; }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+
+  .grid3{ display:grid; grid-template-columns: var(--rail) 1px 1fr 1px var(--insp); align-items: stretch; }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: var(--pad); min-width: 0; }
+  .colhead{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    font-weight: 700; letter-spacing: 0.1em; color: var(--ink);
+    margin-bottom: 24px;
+  }
+  .blk{ margin-top: 0; }
+  .blk + .blk{ margin-top: 24px; }
+  .stats &gt; .blk{ margin-top: 0; }
+  .blk.ruled{ padding-top: 24px; border-top: 1px solid var(--rule-soft); }
+  .sublabel{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+  .sublabel.strong{ color: var(--ink); font-weight: 700; }
+  .sage{ color: var(--sage); }
+  .clay{ color: var(--clay); }
+  .quiet{ color: var(--ink-mid); }
+  .dim{ color: var(--ink-dim); }
+
+  .kv{ display:flex; justify-content:space-between; gap: 16px; }
+  .kv .k{ color: var(--ink-mid); }
+  .kv .v{ color: var(--ink); text-align: right; white-space: nowrap; }
+  .kv .v.dim{ color: var(--ink-dim); }
+  .kv .v.caret::after, .caret::after{ content: &quot; \25BE&quot;; color: var(--ink-dim); }
+  .kv .v.field{ flex: 1 1 auto; border-bottom: 1px solid var(--rule); min-height: 20px; }
+
+  .tabs{ display:flex; flex-wrap:wrap; gap: 8px; }
+  .tab{
+    display:inline-flex; align-items:center; height: 24px; padding: 0 10px;
+    border: 1px solid var(--rule); color: var(--ink-mid);
+    font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .tab.on{ background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 600; }
+  .tab.clay{ border-color: var(--clay); color: var(--clay); }
+  .tabs.foot{ padding-top: 24px; border-top: 1px solid var(--rule-soft); }
+
+  /* ---------- LIFECYCLE rail ---------- */
+  .floor{ display:grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: center; }
+  .floor .fv{ color: var(--ink); font-weight: 600; }
+  .floor svg{ display:block; width:100%; height: 16px; }
+  .filters .kv + .kv{ margin-top: 0; }
+  .filters .kv .v{ color: var(--ink); }
+  .stage{ margin-top: 24px; }
+  .stage .sname{
+    display:flex; justify-content:space-between;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+  }
+  .stage .sname .cnt{ color: var(--ink); font-weight: 600; letter-spacing: 0; }
+  .stage .sname.sage{ color: var(--sage); }
+  .stage .sname.clay{ color: var(--clay); }
+  .stage .sname.quiet{ color: var(--ink-mid); }
+  .srow{
+    display:grid; grid-template-columns: 20px 1fr;
+    padding: 4px 8px; margin: 4px -8px 0;
+    border-left: 2px solid transparent;
+    color: var(--ink);
+  }
+  .srow.selected{ background: var(--fill-sel); border-left-color: var(--ink); }
+  .srow .glyph{ color: var(--sage); }
+  .srow .more{ color: var(--ink-dim); }
+  .srow.selected .more{ color: var(--ink-mid); }
+
+  /* ---------- SELECTED ITEM ---------- */
+  .ident{ display:flex; align-items:baseline; justify-content:space-between; gap: 16px; }
+  .ident .id{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; letter-spacing: 0.04em; color: var(--ink); }
+  .ident .st{ color: var(--ink-mid); letter-spacing: 0.04em; }
+  .ident .st b{ color: var(--sage); font-weight: 700; }
+  .thesis{ font-size: var(--t-lg); line-height: var(--lh-lg); color: var(--ink); }
+  .scale svg{ display:block; width:100%; height:auto; }
+
+  .council .crow{ display:grid; grid-template-columns: 160px 1fr 16px; column-gap: 0; align-items: baseline; }
+  .council .crow .k{ color: var(--ink-mid); }
+  .council .crow .vd{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; color: var(--sage); }
+  .council .crow .go{ color: var(--ink-dim); text-align: right; }
+  .council .crow .when{ color: var(--ink-mid); }
+  .judge{ margin-top: 24px; }
+  .judge .crow .vd{ font-size: var(--t-sm); line-height: var(--lh-sm); font-weight: 700; color: var(--sage); }
+  .judge .crow .vd.quiet{ color: var(--ink-mid); }
+  .judge .crow .why{ color: var(--ink); }
+
+  table.rc{ width:100%; border-collapse: collapse; table-layout: fixed; }
+  table.rc col.c1{ width: 160px; }
+  table.rc col.c3{ width: 16px; }
+  table.rc td{ padding: 8px 0; vertical-align: top; color: var(--ink); border-bottom: 1px solid var(--rule-faint); }
+  table.rc tr:last-child td{ border-bottom: none; }
+  table.rc td.k{ color: var(--ink-mid); }
+  table.rc td.go{ color: var(--ink-dim); text-align: right; }
+  table.rc td.sage{ color: var(--sage); }
+  table.ev col.c1{ width: 176px; }
+  table.ev col.c2{ width: 128px; }
+
+  .river svg{ display:block; width:100%; height:auto; }
+  .river .kv{ max-width: 368px; }
+
+  /* ---------- ITEM INSPECTOR ---------- */
+  .ibig{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; color: var(--ink); }
+  .ibig.sage{ color: var(--sage); }
+  .ival{ color: var(--ink); }
+  .comp{ display:grid; grid-template-columns: 32px 40px 1fr; column-gap: 16px; align-items: center; }
+  .comp .ck{ color: var(--ink-mid); }
+  .comp .cv{ color: var(--ink); text-align: right; }
+  .comp svg{ display:block; width:100%; height: 16px; }
+  .link{ display:flex; justify-content:space-between; color: var(--ink); }
+  .link .go{ color: var(--ink-dim); }
+  .link.more{ color: var(--ink-dim); }
+  .sub{ color: var(--ink-mid); margin-top: 8px; }
+  .sub:first-of-type{ margin-top: 0; }
+  .verbs{ margin-top: 8px; }
+  .acts .kv .k{ color: var(--ink-dim); }
+  .acts .kv .v{ color: var(--ink-mid); }
+
+  /* ---------- GENERATIONS foot ---------- */
+  .hdiv{ height: 1px; background: var(--rule); }
+  .gens{ padding: var(--pad); display:flex; align-items:center; gap: 24px; flex-wrap: wrap; }
+  .gens .t{ font-size: var(--t-xs); line-height: var(--lh-xs); font-weight: 700; letter-spacing: 0.1em; color: var(--ink); }
+  .gens .g12{ display:flex; align-items:center; gap: 8px; color: var(--ink-mid); }
+  .gens .g12 b{ color: var(--ink); font-weight: 600; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div class=&quot;page&quot;&gt;
+
+  &lt;div class=&quot;brandrow&quot;&gt;
+    &lt;span class=&quot;brand&quot;&gt;PALINGENESIS&lt;/span&gt;
+    &lt;span&gt;Tue 15 Sep 2026&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;nav class=&quot;rooms&quot;&gt;
+    &lt;span&gt;Today&lt;/span&gt;
+    &lt;span class=&quot;active&quot;&gt;PIPELINE&lt;/span&gt;
+    &lt;span&gt;Library&lt;/span&gt;
+    &lt;span&gt;Portfolio&lt;/span&gt;
+    &lt;span&gt;Simulation&lt;/span&gt;
+    &lt;span&gt;Engine Room&lt;/span&gt;
+  &lt;/nav&gt;
+
+  &lt;!-- status strip --&gt;
+  &lt;section class=&quot;strip&quot;&gt;
+    &lt;div class=&quot;stats blk&quot;&gt;
+      &lt;div class=&quot;stat blk&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;GENERATION&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;G12&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat blk&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;POPULATION&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;40&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat blk&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;SURVIVAL&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;35%&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat blk&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;BEST FITNESS&lt;/div&gt;&lt;div class=&quot;num sage&quot;&gt;0.91&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat blk&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;COUNCIL&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;14:00 / 20:00&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat blk&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;NEEDS HAND&lt;/div&gt;&lt;div class=&quot;num clay&quot;&gt;4&lt;/div&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;div class=&quot;workstation&quot;&gt;
+    &lt;div class=&quot;corner tl&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner tr&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner bl&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner br&quot;&gt;&lt;/div&gt;
+
+    &lt;div class=&quot;grid3&quot;&gt;
+      &lt;!-- LIFECYCLE --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;LIFECYCLE&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;Fitness floor&lt;/div&gt;
+          &lt;div class=&quot;floor&quot;&gt;
+            &lt;span class=&quot;fv&quot;&gt;0.70&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 16&quot; preserveAspectRatio=&quot;none&quot; role=&quot;img&quot; aria-label=&quot;Fitness floor&quot;&gt;
+              &lt;line x1=&quot;1&quot; y1=&quot;3&quot; x2=&quot;1&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;159&quot; y1=&quot;3&quot; x2=&quot;159&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;1&quot; y1=&quot;8&quot; x2=&quot;159&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;circle cx=&quot;111.6&quot; cy=&quot;8&quot; r=&quot;4&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;filters blk&quot;&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Stage&lt;/span&gt;&lt;span class=&quot;v caret&quot;&gt;All&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Verdict&lt;/span&gt;&lt;span class=&quot;v caret&quot;&gt;All&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Strategy&lt;/span&gt;&lt;span class=&quot;v caret&quot;&gt;All&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Text&lt;/span&gt;&lt;span class=&quot;v field&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;filters blk&quot;&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Sort&lt;/span&gt;&lt;span class=&quot;v caret&quot;&gt;Fitness&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;stage blk ruled&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;EMBRYO&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;8&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0441 · G12 · 0.63&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+7&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;CANDIDATE&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;7&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0433 · G12 · 0.76&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+6&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;IN_EVALUATION&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;6&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0428 · G12 · 0.82&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+5&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname sage&quot;&gt;&lt;span&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0421 · G12 · 0.88&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+2&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname quiet&quot;&gt;&lt;span&gt;LIMINAL&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0418 · G12 · 0.79&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+2&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname clay&quot;&gt;&lt;span&gt;VETOED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;3&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0409 · G11 · 0.68&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+2&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;SIMULATING&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow selected&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;●&lt;/span&gt;&lt;span&gt;item-0417 · G12 · 0.91&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+1&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;PILOT_READY&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0384 · G11 · 0.86&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+1&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;IN_PILOT&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0367 · G10 · 0.84&lt;br&gt;&lt;span class=&quot;more&quot;&gt;+1&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;COMMERCIALIZING&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0344 · G9 · 0.81&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;LAUNCHED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0291 · G8 · 0.87&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname&quot;&gt;&lt;span&gt;ARCHIVED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0217 · G6 · 0.72&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;stage blk&quot;&gt;
+          &lt;div class=&quot;sname clay&quot;&gt;&lt;span&gt;FAILED&lt;/span&gt;&lt;span class=&quot;cnt&quot;&gt;1&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;glyph&quot;&gt;&lt;/span&gt;&lt;span&gt;item-0182 · G5 · 0.74&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div class=&quot;vdiv&quot;&gt;&lt;/div&gt;
+
+      &lt;!-- SELECTED ITEM --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;SELECTED ITEM&lt;/div&gt;
+
+        &lt;div class=&quot;ident blk&quot;&gt;
+          &lt;span class=&quot;id&quot;&gt;ITEM-0417&lt;/span&gt;
+          &lt;span class=&quot;st&quot;&gt;SIMULATING · &lt;b&gt;GREENLIGHT&lt;/b&gt;&lt;/span&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;thesis blk&quot;&gt;Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) at no change in litter moisture, paying back in one flock.&lt;/div&gt;
+
+        &lt;div class=&quot;scale blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;FITNESS&lt;/div&gt;
+          &lt;svg viewBox=&quot;0 0 736 112&quot; preserveAspectRatio=&quot;xMinYMin meet&quot; role=&quot;img&quot; aria-label=&quot;Fitness&quot;&gt;
+            &lt;!-- 0.0 at x=8 · 0.5 at 368 · 1.0 at 728 · 720px span --&gt;
+            &lt;text x=&quot;8&quot; y=&quot;16&quot; text-anchor=&quot;start&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.0&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.5&lt;/text&gt;
+            &lt;text x=&quot;728&quot; y=&quot;16&quot; text-anchor=&quot;end&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;1.0&lt;/text&gt;
+            &lt;!-- band above the floor --&gt;
+            &lt;rect x=&quot;512&quot; y=&quot;40&quot; width=&quot;216&quot; height=&quot;16&quot; fill=&quot;var(--fill-band)&quot;/&gt;
+            &lt;!-- axis --&gt;
+            &lt;line x1=&quot;8&quot; y1=&quot;48&quot; x2=&quot;728&quot; y2=&quot;48&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;8&quot; y1=&quot;40&quot; x2=&quot;8&quot; y2=&quot;56&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;368&quot; y1=&quot;42&quot; x2=&quot;368&quot; y2=&quot;54&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;728&quot; y1=&quot;40&quot; x2=&quot;728&quot; y2=&quot;56&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;!-- floor 0.70 --&gt;
+            &lt;line x1=&quot;512&quot; y1=&quot;32&quot; x2=&quot;512&quot; y2=&quot;64&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot; stroke-dasharray=&quot;2 2&quot;/&gt;
+            &lt;text x=&quot;512&quot; y=&quot;88&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.70&lt;/text&gt;
+            &lt;text x=&quot;512&quot; y=&quot;106&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;Fitness floor&lt;/text&gt;
+            &lt;!-- marker 0.91 --&gt;
+            &lt;circle cx=&quot;663.2&quot; cy=&quot;48&quot; r=&quot;7&quot; fill=&quot;var(--sage)&quot; stroke=&quot;var(--bg)&quot; stroke-width=&quot;2&quot;/&gt;
+            &lt;text x=&quot;663.2&quot; y=&quot;90&quot; text-anchor=&quot;middle&quot; font-size=&quot;16&quot; font-weight=&quot;700&quot; fill=&quot;var(--sage)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.91&lt;/text&gt;
+          &lt;/svg&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;council blk&quot;&gt;
+          &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;Council&lt;/span&gt;&lt;span class=&quot;vd&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;when&quot;&gt;Tue 15 Sep · 14:00&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 01&lt;/span&gt;&lt;span class=&quot;vd&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;why&quot;&gt;&quot;The claimed effect is bounded and testable.&quot;&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 02&lt;/span&gt;&lt;span class=&quot;vd&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;why&quot;&gt;&quot;The litter-moisture constraint is explicit.&quot;&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 03&lt;/span&gt;&lt;span class=&quot;vd quiet&quot;&gt;LIMINAL&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;crow&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;why&quot;&gt;&quot;The one-flock payback needs simulation.&quot;&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk ruled&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;RECEIPTS&lt;/div&gt;
+          &lt;table class=&quot;rc&quot;&gt;
+            &lt;colgroup&gt;&lt;col class=&quot;c1&quot;&gt;&lt;col&gt;&lt;col class=&quot;c3&quot;&gt;&lt;/colgroup&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Thesis&lt;/td&gt;&lt;td&gt;24%&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Interval&lt;/td&gt;&lt;td&gt;18–30%&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Constraint&lt;/td&gt;&lt;td&gt;no litter-moisture change&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Payback&lt;/td&gt;&lt;td&gt;one flock&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;SEED PAPERS&lt;/div&gt;
+          &lt;table class=&quot;rc&quot;&gt;
+            &lt;colgroup&gt;&lt;col class=&quot;c1&quot;&gt;&lt;col&gt;&lt;col class=&quot;c3&quot;&gt;&lt;/colgroup&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td&gt;paper-01&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;paper-02&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;paper-03&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;+ papers&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;river blk ruled&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;RIVER&lt;/div&gt;
+          &lt;svg viewBox=&quot;0 0 736 80&quot; preserveAspectRatio=&quot;xMinYMin meet&quot; role=&quot;img&quot; aria-label=&quot;River&quot;&gt;
+            &lt;!-- stations at 40 · 149.3 · 258.7 · 368 · 477.3 · 586.7 · 696 --&gt;
+            &lt;text x=&quot;40&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;embryo&lt;/text&gt;
+            &lt;text x=&quot;149.3&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;candidate&lt;/text&gt;
+            &lt;text x=&quot;258.7&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;evaluation&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;council&lt;/text&gt;
+            &lt;text x=&quot;477.3&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;simulation&lt;/text&gt;
+            &lt;text x=&quot;586.7&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;pilot&lt;/text&gt;
+            &lt;text x=&quot;696&quot; y=&quot;16&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--ink-dim)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;commerce&lt;/text&gt;
+            &lt;line x1=&quot;40&quot; y1=&quot;44&quot; x2=&quot;696&quot; y2=&quot;44&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;40&quot; cy=&quot;44&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;149.3&quot; cy=&quot;44&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;258.7&quot; cy=&quot;44&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;368&quot; cy=&quot;44&quot; r=&quot;4&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;circle cx=&quot;477.3&quot; cy=&quot;44&quot; r=&quot;7&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--sage)&quot; stroke-width=&quot;1.5&quot;/&gt;
+            &lt;circle cx=&quot;477.3&quot; cy=&quot;44&quot; r=&quot;3.5&quot; fill=&quot;var(--sage)&quot;/&gt;
+            &lt;circle cx=&quot;586.7&quot; cy=&quot;44&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;696&quot; cy=&quot;44&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;text x=&quot;477.3&quot; y=&quot;74&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--sage)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;item-0417&lt;/text&gt;
+          &lt;/svg&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;table class=&quot;rc&quot;&gt;
+            &lt;colgroup&gt;&lt;col class=&quot;c1&quot;&gt;&lt;col&gt;&lt;col class=&quot;c3&quot;&gt;&lt;/colgroup&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Verdict&lt;/td&gt;&lt;td class=&quot;sage&quot;&gt;GREENLIGHT&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Simulation&lt;/td&gt;&lt;td&gt;running&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Pilot&lt;/td&gt;&lt;td class=&quot;dim&quot;&gt;—&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Sites&lt;/td&gt;&lt;td class=&quot;dim&quot;&gt;—&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Readings&lt;/td&gt;&lt;td class=&quot;dim&quot;&gt;—&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk ruled&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;EVENTS&lt;/div&gt;
+          &lt;table class=&quot;rc ev&quot;&gt;
+            &lt;colgroup&gt;&lt;col class=&quot;c1&quot;&gt;&lt;col class=&quot;c2&quot;&gt;&lt;col&gt;&lt;col class=&quot;c3&quot;&gt;&lt;/colgroup&gt;
+            &lt;tbody&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Tue 15 Sep 14:00&lt;/td&gt;&lt;td&gt;Council&lt;/td&gt;&lt;td class=&quot;sage&quot;&gt;GREENLIGHT&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td class=&quot;k&quot;&gt;Tue 15 Sep 14:06&lt;/td&gt;&lt;td&gt;Simulation&lt;/td&gt;&lt;td&gt;run-1842&lt;/td&gt;&lt;td class=&quot;go&quot;&gt;▸&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;
+          &lt;/table&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div class=&quot;vdiv&quot;&gt;&lt;/div&gt;
+
+      &lt;!-- ITEM INSPECTOR --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;ITEM INSPECTOR&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;GENERATION&lt;/div&gt;
+          &lt;div class=&quot;ibig&quot;&gt;G12&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;FITNESS&lt;/div&gt;
+          &lt;div class=&quot;ibig sage&quot;&gt;0.91&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;COMPONENTS&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;ck&quot;&gt;C01&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.94&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 184 16&quot; preserveAspectRatio=&quot;none&quot; role=&quot;img&quot; aria-label=&quot;C01&quot;&gt;&lt;line x1=&quot;1&quot; y1=&quot;3&quot; x2=&quot;1&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;183&quot; y1=&quot;3&quot; x2=&quot;183&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;1&quot; y1=&quot;8&quot; x2=&quot;183&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;172.1&quot; cy=&quot;8&quot; r=&quot;3.5&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;ck&quot;&gt;C02&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.92&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 184 16&quot; preserveAspectRatio=&quot;none&quot; role=&quot;img&quot; aria-label=&quot;C02&quot;&gt;&lt;line x1=&quot;1&quot; y1=&quot;3&quot; x2=&quot;1&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;183&quot; y1=&quot;3&quot; x2=&quot;183&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;1&quot; y1=&quot;8&quot; x2=&quot;183&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;168.4&quot; cy=&quot;8&quot; r=&quot;3.5&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;ck&quot;&gt;C03&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.90&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 184 16&quot; preserveAspectRatio=&quot;none&quot; role=&quot;img&quot; aria-label=&quot;C03&quot;&gt;&lt;line x1=&quot;1&quot; y1=&quot;3&quot; x2=&quot;1&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;183&quot; y1=&quot;3&quot; x2=&quot;183&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;1&quot; y1=&quot;8&quot; x2=&quot;183&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;164.8&quot; cy=&quot;8&quot; r=&quot;3.5&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;ck&quot;&gt;C04&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.89&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 184 16&quot; preserveAspectRatio=&quot;none&quot; role=&quot;img&quot; aria-label=&quot;C04&quot;&gt;&lt;line x1=&quot;1&quot; y1=&quot;3&quot; x2=&quot;1&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;183&quot; y1=&quot;3&quot; x2=&quot;183&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;1&quot; y1=&quot;8&quot; x2=&quot;183&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;163&quot; cy=&quot;8&quot; r=&quot;3.5&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span class=&quot;ck&quot;&gt;C05&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.88&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 184 16&quot; preserveAspectRatio=&quot;none&quot; role=&quot;img&quot; aria-label=&quot;C05&quot;&gt;&lt;line x1=&quot;1&quot; y1=&quot;3&quot; x2=&quot;1&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;183&quot; y1=&quot;3&quot; x2=&quot;183&quot; y2=&quot;13&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;1&quot; y1=&quot;8&quot; x2=&quot;183&quot; y2=&quot;8&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;161.2&quot; cy=&quot;8&quot; r=&quot;3.5&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;STRATEGY&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;biomimicry&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;MODE&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;research_backed&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;LINEAGE&lt;/div&gt;
+          &lt;div class=&quot;sub&quot;&gt;Parents&lt;/div&gt;
+          &lt;div class=&quot;link&quot;&gt;&lt;span&gt;item-0321&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;link&quot;&gt;&lt;span&gt;item-0338&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;sub&quot;&gt;Siblings&lt;/div&gt;
+          &lt;div class=&quot;link&quot;&gt;&lt;span&gt;item-0415&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;link&quot;&gt;&lt;span&gt;item-0416&lt;/span&gt;&lt;span class=&quot;go&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;link more&quot;&gt;&lt;span&gt;+2&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Lineage view&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;SIMULATION&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Run&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;run-1842&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Result&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;pending&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Interval&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;In domain&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Hindcast&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Open run&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;ITEM ACTS&lt;/div&gt;
+          &lt;div class=&quot;tabs&quot;&gt;&lt;span class=&quot;tab on&quot;&gt;Open Dossier&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;
+            &lt;span class=&quot;tab&quot;&gt;Breed variants&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;Commission research&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;Re-evaluate&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;Send simulation&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;DISPOSITION&lt;/div&gt;
+          &lt;div class=&quot;tabs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Park&lt;/span&gt;&lt;span class=&quot;tab clay&quot;&gt;Kill&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk acts&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;ACT RECORD&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Reason&lt;/span&gt;&lt;span class=&quot;v field&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Date&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;15 Sep 2026&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Actor&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;Owner&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Record act&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;hdiv&quot;&gt;&lt;/div&gt;
+
+    &lt;!-- GENERATIONS --&gt;
+    &lt;section class=&quot;gens&quot;&gt;
+      &lt;span class=&quot;t&quot;&gt;GENERATIONS&lt;/span&gt;
+      &lt;span class=&quot;g12&quot;&gt;&lt;span class=&quot;tab on&quot;&gt;G12&lt;/span&gt;&lt;span&gt;&lt;b&gt;40 items&lt;/b&gt; · &lt;b&gt;35% survival&lt;/b&gt; · best &lt;b&gt;0.91&lt;/b&gt;&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;tabs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;G11 ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;G10 ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;G9 ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;SPECIES ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;LINEAGES ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;RECORD ▸&lt;/span&gt;&lt;/span&gt;
+    &lt;/section&gt;
+  &lt;/div&gt;
+
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe></div><div class="fb"><label class="fb-label" for="fb-q-Q2">Your note — Q2</label><textarea id="fb-q-Q2" data-fb="q-Q2" placeholder="Advance, kill, or steal — your call."></textarea><div class="fb-saved" data-fb-saved="q-Q2"></div></div></section>
+<section class="cand" id="Q3"><div class="candhead"><span class="name">Q3 — River-dominant</span><span class="axis">the lifecycle axis wide across the pane with the whole population counted on it</span></div><div class="frame"><iframe title="Q3 — River-dominant" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;title&gt;Palingenesis — Pipeline&lt;/title&gt;
+&lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.googleapis.com&quot;&gt;
+&lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.gstatic.com&quot; crossorigin&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap&quot; rel=&quot;stylesheet&quot;&gt;
+&lt;style&gt;
+  :root{
+    --bg: #1B1917;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-sel: rgba(231,227,218,0.06);
+    /* type scale: exactly four sizes */
+    --t-xs: 11px;  --lh-xs: 16px;
+    --t-sm: 13px;  --lh-sm: 20px;
+    --t-md: 16px;  --lh-md: 24px;
+    --t-lg: 22px;  --lh-lg: 32px;
+    /* column grid — pane content edges x = 51 · 348 · 532 · 716 · 900 · 1133, right edge 1389 */
+    --rail: 296px;
+    --insp: 304px;
+    --pad: 24px;
+    --key: 184px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: &#x27;JetBrains Mono&#x27;, ui-monospace, &#x27;SF Mono&#x27;, Menlo, monospace;
+    font-size: var(--t-sm);
+    line-height: var(--lh-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  .page{ width: 1440px; margin: 0 auto; padding: 24px 26px 32px; }
+
+  /* ---------- nav ---------- */
+  .brandrow{
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+  }
+  .brandrow .brand{ color: var(--ink); font-weight: 700; }
+  .rooms{
+    display:flex; gap: 24px;
+    padding: 8px 0 16px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.04em; color: var(--ink-dim);
+  }
+  .rooms .active{ color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--ink); }
+
+  /* ---------- status strip ---------- */
+  .scorecard{
+    border: 1px solid var(--rule);
+    padding: 16px var(--pad) 24px;
+    margin-bottom: 16px;
+  }
+  .stats{ display:grid; grid-template-columns: 297px 184px 184px 184px 233px 256px; }
+  .stat .lbl{ font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.08em; color: var(--ink-dim); }
+  .stat .num{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .stat .num.sage{ color: var(--sage); }
+  .stat .num.clay{ color: var(--clay); }
+
+  /* ---------- workstation frame ---------- */
+  .workstation{ position: relative; border: 1px solid var(--rule); }
+  .corner{ position:absolute; width:10px; height:10px; }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+
+  .grid3{ display:grid; grid-template-columns: var(--rail) 1px 1fr 1px var(--insp); align-items: stretch; }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: var(--pad); min-width: 0; }
+  .colhead{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    font-weight: 700; letter-spacing: 0.1em; color: var(--ink);
+    margin-bottom: 24px;
+  }
+  .blk + .blk{ margin-top: 24px; }
+  .blk.ruled{ padding-top: 24px; border-top: 1px solid var(--rule-soft); }
+  .sublabel{
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+  .sublabel.strong{ color: var(--ink); font-weight: 700; }
+  .chev{ color: var(--ink-dim); text-align: right; }
+  .sage{ color: var(--sage); }
+  .clay{ color: var(--clay); }
+  .mid{ color: var(--ink-mid); }
+  .dim{ color: var(--ink-dim); }
+
+  /* ---------- LIFECYCLE rail ---------- */
+  .floor{ display:flex; align-items:center; gap: 16px; }
+  .floor .fv{ color: var(--ink); flex: 0 0 auto; }
+  .floor svg{ display:block; flex: 0 0 auto; }
+  .frow{ display:flex; justify-content:space-between; gap: 16px; color: var(--ink-mid); }
+  .frow b{ color: var(--ink); font-weight: 500; }
+  .frow .field{ flex: 1 1 auto; max-width: 152px; height: 20px; border-bottom: 1px solid var(--rule); }
+  .sgroup .gname{
+    display:flex; justify-content:space-between; gap: 16px;
+    font-size: var(--t-xs); line-height: var(--lh-xs);
+    letter-spacing: 0.08em; color: var(--ink-mid);
+    margin-bottom: 8px;
+  }
+  .sgroup .gname b{ color: var(--ink); font-weight: 500; }
+  .sgroup .gname.sage{ color: var(--sage); }
+  .sgroup .gname.clay{ color: var(--clay); }
+  .srow{ display:block; padding: 0 8px 0 6px; margin: 0 -8px; border-left: 2px solid transparent; color: var(--ink); }
+  .srow.selected{ background: var(--fill-sel); border-left-color: var(--ink); }
+  .srow .more{ color: var(--ink-dim); }
+
+  /* ---------- SELECTED ITEM ---------- */
+  .river svg{ display:block; width:100%; height:auto; }
+  .ptitle{ display:flex; align-items:baseline; justify-content:space-between; gap: 16px; }
+  .ptitle .name{ font-size: var(--t-md); line-height: var(--lh-md); font-weight: 700; letter-spacing: 0.04em; color: var(--ink); }
+  .ptitle .state{ color: var(--ink-mid); }
+  .thesis{ color: var(--ink); max-width: 640px; }
+  .scale svg{ display:block; width:100%; height:auto; }
+
+  .kv{ display:grid; grid-template-columns: var(--key) 1fr 16px; column-gap: 0; }
+  .kv .k{ color: var(--ink-mid); }
+  .kv .v{ color: var(--ink); }
+  .kv .v.q{ color: var(--ink); }
+  .judge + .judge{ margin-top: 16px; }
+  .ev{ display:grid; grid-template-columns: var(--key) var(--key) 1fr 16px; }
+  .ev .d{ color: var(--ink-mid); }
+  .ev .t{ color: var(--ink-mid); }
+  .ev .v{ color: var(--ink); }
+
+  /* ---------- ITEM INSPECTOR ---------- */
+  .ibig{ font-size: var(--t-lg); line-height: var(--lh-lg); font-weight: 700; color: var(--ink); }
+  .ival{ color: var(--ink); }
+  .ikv{ display:grid; grid-template-columns: 96px 1fr 16px; }
+  .ikv .k{ color: var(--ink-mid); }
+  .ikv .v{ color: var(--ink); }
+  .ikv.r .v{ text-align: right; }
+  .ikv .field{ height: 20px; border-bottom: 1px solid var(--rule); }
+  .comp{ display:grid; grid-template-columns: 40px 40px 16px 1fr; align-items:center; color: var(--ink); }
+  .comp .cv{ text-align: right; }
+  .comp svg{ display:block; width:100%; height:auto; }
+  .lin{ display:grid; grid-template-columns: 1fr 16px; color: var(--ink); }
+  .lin.more{ color: var(--ink-dim); }
+  .lgroup + .lgroup{ margin-top: 8px; }
+  .lgroup .lk{ color: var(--ink-mid); }
+
+  .tabs{ display:flex; flex-wrap:wrap; gap: 8px; }
+  .tab{
+    display:inline-flex; align-items:center; height: 24px; padding: 0 10px;
+    border: 1px solid var(--rule); color: var(--ink-mid);
+    font-size: var(--t-xs); line-height: var(--lh-xs); letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .tab.on{ background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 600; }
+  .tab.clay{ color: var(--clay); border-color: var(--clay); }
+  .tabs.verbs{ margin-top: 8px; }
+
+  /* ---------- GENERATIONS foot ---------- */
+  .hdiv{ height: 1px; background: var(--rule); }
+  .foot{ padding: var(--pad); display:grid; grid-template-columns: 297px 552px 489px; align-items:center; }
+  .foot .t{ font-size: var(--t-xs); line-height: var(--lh-xs); font-weight: 700; letter-spacing: 0.1em; color: var(--ink); }
+  .foot .gen{ color: var(--ink-mid); }
+  .foot .gen b{ color: var(--ink); font-weight: 700; margin-right: 16px; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div class=&quot;page&quot;&gt;
+
+  &lt;div class=&quot;brandrow&quot;&gt;
+    &lt;span class=&quot;brand&quot;&gt;PALINGENESIS&lt;/span&gt;
+    &lt;span&gt;Tue 15 Sep 2026&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;nav class=&quot;rooms&quot;&gt;
+    &lt;span&gt;Today&lt;/span&gt;
+    &lt;span class=&quot;active&quot;&gt;PIPELINE&lt;/span&gt;
+    &lt;span&gt;Library&lt;/span&gt;
+    &lt;span&gt;Portfolio&lt;/span&gt;
+    &lt;span&gt;Simulation&lt;/span&gt;
+    &lt;span&gt;Engine Room&lt;/span&gt;
+  &lt;/nav&gt;
+
+  &lt;!-- status strip --&gt;
+  &lt;section class=&quot;scorecard&quot;&gt;
+    &lt;div class=&quot;stats&quot;&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;GENERATION&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;G12&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;POPULATION&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;40&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;SURVIVAL&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;35%&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;BEST FITNESS&lt;/div&gt;&lt;div class=&quot;num sage&quot;&gt;0.91&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;COUNCIL&lt;/div&gt;&lt;div class=&quot;num&quot;&gt;14:00 / 20:00&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;lbl&quot;&gt;NEEDS HAND&lt;/div&gt;&lt;div class=&quot;num clay&quot;&gt;4&lt;/div&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;div class=&quot;workstation&quot;&gt;
+    &lt;div class=&quot;corner tl&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner tr&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner bl&quot;&gt;&lt;/div&gt;&lt;div class=&quot;corner br&quot;&gt;&lt;/div&gt;
+
+    &lt;div class=&quot;grid3&quot;&gt;
+      &lt;!-- LIFECYCLE --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;LIFECYCLE&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;Fitness floor&lt;/div&gt;
+          &lt;div class=&quot;floor&quot;&gt;
+            &lt;span class=&quot;fv&quot;&gt;0.70&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 184 20&quot; width=&quot;184&quot; height=&quot;20&quot; role=&quot;img&quot; aria-label=&quot;Fitness floor 0.70&quot;&gt;
+              &lt;line x1=&quot;4&quot; y1=&quot;10&quot; x2=&quot;180&quot; y2=&quot;10&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;4&quot; y1=&quot;4&quot; x2=&quot;4&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;line x1=&quot;180&quot; y1=&quot;4&quot; x2=&quot;180&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+              &lt;circle cx=&quot;127.2&quot; cy=&quot;10&quot; r=&quot;3.5&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;/svg&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Stage&lt;/span&gt;&lt;b&gt;All ▾&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Verdict&lt;/span&gt;&lt;b&gt;All ▾&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Strategy&lt;/span&gt;&lt;b&gt;All ▾&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Text&lt;/span&gt;&lt;span class=&quot;field&quot;&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;frow&quot;&gt;&lt;span&gt;Sort&lt;/span&gt;&lt;b&gt;Fitness ▾&lt;/b&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;sgroup blk ruled&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;EMBRYO&lt;/span&gt;&lt;b&gt;8&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0441 · G12 · 0.63&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+7&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;CANDIDATE&lt;/span&gt;&lt;b&gt;7&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0433 · G12 · 0.76&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+6&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;IN_EVALUATION&lt;/span&gt;&lt;b&gt;6&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0428 · G12 · 0.82&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+5&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname sage&quot;&gt;&lt;span&gt;GREENLIGHT&lt;/span&gt;&lt;b&gt;3&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0421 · G12 · 0.88&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+2&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;LIMINAL&lt;/span&gt;&lt;b&gt;3&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0418 · G12 · 0.79&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+2&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname clay&quot;&gt;&lt;span&gt;VETOED&lt;/span&gt;&lt;b&gt;3&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0409 · G11 · 0.68&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+2&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;SIMULATING&lt;/span&gt;&lt;b&gt;2&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow selected&quot;&gt;&lt;span&gt;● item-0417 · G12 · 0.91&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+1&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;PILOT_READY&lt;/span&gt;&lt;b&gt;2&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0384 · G11 · 0.86&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+1&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;IN_PILOT&lt;/span&gt;&lt;b&gt;2&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0367 · G10 · 0.84&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span class=&quot;more&quot;&gt;+1&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;COMMERCIALIZING&lt;/span&gt;&lt;b&gt;1&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0344 · G9 · 0.81&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;LAUNCHED&lt;/span&gt;&lt;b&gt;1&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0291 · G8 · 0.87&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname&quot;&gt;&lt;span&gt;ARCHIVED&lt;/span&gt;&lt;b&gt;1&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0217 · G6 · 0.72&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sgroup blk&quot;&gt;
+          &lt;div class=&quot;gname clay&quot;&gt;&lt;span&gt;FAILED&lt;/span&gt;&lt;b&gt;1&lt;/b&gt;&lt;/div&gt;
+          &lt;div class=&quot;srow&quot;&gt;&lt;span&gt;item-0182 · G5 · 0.74&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div class=&quot;vdiv&quot;&gt;&lt;/div&gt;
+
+      &lt;!-- SELECTED ITEM --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;SELECTED ITEM&lt;/div&gt;
+
+        &lt;!-- RIVER, promoted: the whole living population on one axis --&gt;
+        &lt;div class=&quot;river blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;RIVER&lt;/div&gt;
+          &lt;svg viewBox=&quot;0 0 736 96&quot; preserveAspectRatio=&quot;xMinYMin meet&quot; role=&quot;img&quot; aria-label=&quot;Lifecycle axis with stage counts; item-0417 at simulation&quot;&gt;
+            &lt;!-- stage names --&gt;
+            &lt;text x=&quot;40&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;embryo&lt;/text&gt;
+            &lt;text x=&quot;149.33&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;candidate&lt;/text&gt;
+            &lt;text x=&quot;258.67&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;evaluation&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;council&lt;/text&gt;
+            &lt;text x=&quot;477.33&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;simulation&lt;/text&gt;
+            &lt;text x=&quot;586.67&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;pilot&lt;/text&gt;
+            &lt;text x=&quot;696&quot; y=&quot;20&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;commerce&lt;/text&gt;
+            &lt;!-- axis: passed segments in ink-mid, ahead in rule --&gt;
+            &lt;line x1=&quot;40&quot; y1=&quot;40&quot; x2=&quot;477.33&quot; y2=&quot;40&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;477.33&quot; y1=&quot;40&quot; x2=&quot;696&quot; y2=&quot;40&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;!-- nodes --&gt;
+            &lt;circle cx=&quot;40&quot; cy=&quot;40&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;149.33&quot; cy=&quot;40&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;258.67&quot; cy=&quot;40&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;368&quot; cy=&quot;40&quot; r=&quot;4&quot; fill=&quot;var(--ink)&quot;/&gt;
+            &lt;circle cx=&quot;477.33&quot; cy=&quot;40&quot; r=&quot;7&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--sage)&quot; stroke-width=&quot;1.5&quot;/&gt;
+            &lt;circle cx=&quot;477.33&quot; cy=&quot;40&quot; r=&quot;3&quot; fill=&quot;var(--sage)&quot;/&gt;
+            &lt;circle cx=&quot;586.67&quot; cy=&quot;40&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;696&quot; cy=&quot;40&quot; r=&quot;4&quot; fill=&quot;var(--bg)&quot; stroke=&quot;var(--ink-mid)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;!-- items at each stage: rail counts, council = 3+3+3, pilot = 2+2, commerce = 1+1 --&gt;
+            &lt;text x=&quot;40&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;8&lt;/text&gt;
+            &lt;text x=&quot;149.33&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;7&lt;/text&gt;
+            &lt;text x=&quot;258.67&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;6&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;9&lt;/text&gt;
+            &lt;text x=&quot;477.33&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;2&lt;/text&gt;
+            &lt;text x=&quot;586.67&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;4&lt;/text&gt;
+            &lt;text x=&quot;696&quot; y=&quot;66&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;2&lt;/text&gt;
+            &lt;text x=&quot;477.33&quot; y=&quot;86&quot; text-anchor=&quot;middle&quot; font-size=&quot;11&quot; fill=&quot;var(--sage)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;item-0417&lt;/text&gt;
+          &lt;/svg&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk ruled&quot;&gt;
+          &lt;div class=&quot;ptitle&quot;&gt;&lt;span class=&quot;name&quot;&gt;ITEM-0417&lt;/span&gt;&lt;span class=&quot;state&quot;&gt;SIMULATING · &lt;span class=&quot;sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;thesis blk&quot;&gt;Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) at no change in litter moisture, paying back in one flock.&lt;/div&gt;
+
+        &lt;div class=&quot;scale blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;FITNESS&lt;/div&gt;
+          &lt;svg viewBox=&quot;0 0 736 64&quot; preserveAspectRatio=&quot;xMinYMin meet&quot; role=&quot;img&quot; aria-label=&quot;Fitness 0.91 on a 0 to 1 scale&quot;&gt;
+            &lt;text x=&quot;8&quot; y=&quot;12&quot; text-anchor=&quot;start&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.0&lt;/text&gt;
+            &lt;text x=&quot;368&quot; y=&quot;12&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.5&lt;/text&gt;
+            &lt;text x=&quot;728&quot; y=&quot;12&quot; text-anchor=&quot;end&quot; font-size=&quot;13&quot; fill=&quot;var(--ink-mid)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;1.0&lt;/text&gt;
+            &lt;line x1=&quot;8&quot; y1=&quot;32&quot; x2=&quot;728&quot; y2=&quot;32&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;8&quot; y1=&quot;26&quot; x2=&quot;8&quot; y2=&quot;38&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;368&quot; y1=&quot;26&quot; x2=&quot;368&quot; y2=&quot;38&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;line x1=&quot;728&quot; y1=&quot;26&quot; x2=&quot;728&quot; y2=&quot;38&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;
+            &lt;circle cx=&quot;663.2&quot; cy=&quot;32&quot; r=&quot;5&quot; fill=&quot;var(--sage)&quot;/&gt;
+            &lt;text x=&quot;663.2&quot; y=&quot;58&quot; text-anchor=&quot;middle&quot; font-size=&quot;13&quot; fill=&quot;var(--sage)&quot; font-family=&quot;&#x27;JetBrains Mono&#x27;,monospace&quot;&gt;0.91&lt;/text&gt;
+          &lt;/svg&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Council&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;v mid&quot;&gt;Tue 15 Sep · 14:00&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 01&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;v q&quot;&gt;&quot;The claimed effect is bounded and testable.&quot;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 02&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;v q&quot;&gt;&quot;The litter-moisture constraint is explicit.&quot;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;judge&quot;&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Judge 03&lt;/span&gt;&lt;span class=&quot;v mid&quot;&gt;LIMINAL&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;&lt;/span&gt;&lt;span class=&quot;v q&quot;&gt;&quot;The one-flock payback needs simulation.&quot;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk ruled&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;RECEIPTS&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Thesis&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;24%&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Interval&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;18–30%&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Constraint&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;no litter-moisture change&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Payback&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;one flock&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;SEED PAPERS&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k v&quot;&gt;paper-01&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k v&quot;&gt;paper-02&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k v&quot;&gt;paper-03&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k dim&quot;&gt;+ papers&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk ruled&quot;&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Verdict&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Simulation&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;running&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Pilot&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Sites&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;kv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Readings&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel strong&quot;&gt;EVENTS&lt;/div&gt;
+          &lt;div class=&quot;ev&quot;&gt;&lt;span class=&quot;d&quot;&gt;Tue 15 Sep 14:00&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;Council&lt;/span&gt;&lt;span class=&quot;v sage&quot;&gt;GREENLIGHT&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ev&quot;&gt;&lt;span class=&quot;d&quot;&gt;Tue 15 Sep 14:06&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;Simulation&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;run-1842&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div class=&quot;vdiv&quot;&gt;&lt;/div&gt;
+
+      &lt;!-- ITEM INSPECTOR --&gt;
+      &lt;section class=&quot;col&quot;&gt;
+        &lt;div class=&quot;colhead&quot;&gt;ITEM INSPECTOR&lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;GENERATION&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;G12&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;FITNESS&lt;/div&gt;
+          &lt;div class=&quot;ibig&quot;&gt;0.91&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;COMPONENTS&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span&gt;C01&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.94&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 20&quot; role=&quot;img&quot; aria-label=&quot;C01 0.94&quot;&gt;&lt;line x1=&quot;4&quot; y1=&quot;10&quot; x2=&quot;156&quot; y2=&quot;10&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;4&quot; y1=&quot;4&quot; x2=&quot;4&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;156&quot; y1=&quot;4&quot; x2=&quot;156&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;146.9&quot; cy=&quot;10&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span&gt;C02&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.92&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 20&quot; role=&quot;img&quot; aria-label=&quot;C02 0.92&quot;&gt;&lt;line x1=&quot;4&quot; y1=&quot;10&quot; x2=&quot;156&quot; y2=&quot;10&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;4&quot; y1=&quot;4&quot; x2=&quot;4&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;156&quot; y1=&quot;4&quot; x2=&quot;156&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;143.8&quot; cy=&quot;10&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span&gt;C03&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.90&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 20&quot; role=&quot;img&quot; aria-label=&quot;C03 0.90&quot;&gt;&lt;line x1=&quot;4&quot; y1=&quot;10&quot; x2=&quot;156&quot; y2=&quot;10&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;4&quot; y1=&quot;4&quot; x2=&quot;4&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;156&quot; y1=&quot;4&quot; x2=&quot;156&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;140.8&quot; cy=&quot;10&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span&gt;C04&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.89&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 20&quot; role=&quot;img&quot; aria-label=&quot;C04 0.89&quot;&gt;&lt;line x1=&quot;4&quot; y1=&quot;10&quot; x2=&quot;156&quot; y2=&quot;10&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;4&quot; y1=&quot;4&quot; x2=&quot;4&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;156&quot; y1=&quot;4&quot; x2=&quot;156&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;139.3&quot; cy=&quot;10&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;comp&quot;&gt;&lt;span&gt;C05&lt;/span&gt;&lt;span class=&quot;cv&quot;&gt;0.88&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+            &lt;svg viewBox=&quot;0 0 160 20&quot; role=&quot;img&quot; aria-label=&quot;C05 0.88&quot;&gt;&lt;line x1=&quot;4&quot; y1=&quot;10&quot; x2=&quot;156&quot; y2=&quot;10&quot; stroke=&quot;var(--rule)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;4&quot; y1=&quot;4&quot; x2=&quot;4&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;line x1=&quot;156&quot; y1=&quot;4&quot; x2=&quot;156&quot; y2=&quot;16&quot; stroke=&quot;var(--ink-dim)&quot; stroke-width=&quot;1&quot;/&gt;&lt;circle cx=&quot;137.8&quot; cy=&quot;10&quot; r=&quot;3&quot; fill=&quot;var(--ink)&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;STRATEGY&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;biomimicry&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;MODE&lt;/div&gt;
+          &lt;div class=&quot;ival&quot;&gt;research_backed&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;LINEAGE&lt;/div&gt;
+          &lt;div class=&quot;lgroup&quot;&gt;
+            &lt;div class=&quot;lk&quot;&gt;Parents&lt;/div&gt;
+            &lt;div class=&quot;lin&quot;&gt;&lt;span&gt;item-0321&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;lin&quot;&gt;&lt;span&gt;item-0338&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;lgroup&quot;&gt;
+            &lt;div class=&quot;lk&quot;&gt;Siblings&lt;/div&gt;
+            &lt;div class=&quot;lin&quot;&gt;&lt;span&gt;item-0415&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;lin&quot;&gt;&lt;span&gt;item-0416&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;▸&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;lin more&quot;&gt;&lt;span&gt;+2&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Lineage view&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;SIMULATION&lt;/div&gt;
+          &lt;div class=&quot;ikv r&quot;&gt;&lt;span class=&quot;k&quot;&gt;Run&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;run-1842&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv r&quot;&gt;&lt;span class=&quot;k&quot;&gt;Result&lt;/span&gt;&lt;span class=&quot;v mid&quot;&gt;pending&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv r&quot;&gt;&lt;span class=&quot;k&quot;&gt;Interval&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv r&quot;&gt;&lt;span class=&quot;k&quot;&gt;In domain&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv r&quot;&gt;&lt;span class=&quot;k&quot;&gt;Hindcast&lt;/span&gt;&lt;span class=&quot;v dim&quot;&gt;—&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Open run&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;ITEM ACTS&lt;/div&gt;
+          &lt;div class=&quot;tabs&quot;&gt;&lt;span class=&quot;tab on&quot;&gt;Open Dossier&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;
+            &lt;span class=&quot;tab&quot;&gt;Breed variants&lt;/span&gt;
+            &lt;span class=&quot;tab&quot;&gt;Commission research&lt;/span&gt;
+            &lt;span class=&quot;tab&quot;&gt;Re-evaluate&lt;/span&gt;
+            &lt;span class=&quot;tab&quot;&gt;Send simulation&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;DISPOSITION&lt;/div&gt;
+          &lt;div class=&quot;tabs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Park&lt;/span&gt;&lt;span class=&quot;tab clay&quot;&gt;Kill&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;blk&quot;&gt;
+          &lt;div class=&quot;sublabel&quot;&gt;ACT RECORD&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Reason&lt;/span&gt;&lt;span class=&quot;field&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Date&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;15 Sep 2026&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;ikv&quot;&gt;&lt;span class=&quot;k&quot;&gt;Actor&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;Owner&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;tabs verbs&quot;&gt;&lt;span class=&quot;tab&quot;&gt;Record act&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;hdiv&quot;&gt;&lt;/div&gt;
+
+    &lt;!-- GENERATIONS --&gt;
+    &lt;section class=&quot;foot&quot;&gt;
+      &lt;span class=&quot;t&quot;&gt;GENERATIONS&lt;/span&gt;
+      &lt;span class=&quot;gen&quot;&gt;&lt;b&gt;G12&lt;/b&gt;40 items · 35% survival · best 0.91&lt;/span&gt;
+      &lt;span class=&quot;tabs&quot;&gt;
+        &lt;span class=&quot;tab&quot;&gt;G11 ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;G10 ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;G9 ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;SPECIES ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;LINEAGES ▸&lt;/span&gt;&lt;span class=&quot;tab&quot;&gt;RECORD ▸&lt;/span&gt;
+      &lt;/span&gt;
+    &lt;/section&gt;
+  &lt;/div&gt;
+
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe></div><div class="fb"><label class="fb-label" for="fb-q-Q3">Your note — Q3</label><textarea id="fb-q-Q3" data-fb="q-Q3" placeholder="Advance, kill, or steal — your call."></textarea><div class="fb-saved" data-fb-saved="q-Q3"></div></div></section>
+<div class="overallwrap"><div class="candhead"><span class="name">Overall</span></div><div class="fb"><label class="fb-label" for="fb-q-overall">Which one, or what to combine</label><textarea id="fb-q-overall" data-fb="q-overall" style="min-height:120px" placeholder="Advance, kill, or steal — your call."></textarea><div class="fb-saved" data-fb-saved="q-overall"></div></div></div>
+</main>
+<div id="fb-bar"><span class="hint">Notes save into this page — submit once.</span><span id="fb-status"></span><button id="fb-submit">Submit ruling</button></div>
+<footer class="colo">Palingenesis design canon · round pipe1</footer></div>
+<script>
+(function(){
+  var template=null;
+  function state(){ try { return JSON.parse(document.getElementById('fb-state').textContent)||{}; } catch(e){ return {}; } }
+  function setStatus(m){ var el=document.getElementById('fb-status'); if(el) el.textContent=m; }
+  function render(){
+    var s=state(), fb=s.feedback||{};
+    Object.keys(fb).forEach(function(k){
+      var ta=document.querySelector('textarea[data-fb="'+k+'"]'); if(ta&&!ta.value) ta.value=fb[k];
+      var sv=document.querySelector('[data-fb-saved="'+k+'"]'); if(sv){ sv.textContent='Saved'+(s.submitted_at?' · '+s.submitted_at:''); sv.style.display='block'; }
+    });
+    if(s.submitted_at) setStatus('Last submitted '+s.submitted_at);
+  }
+  window.addEventListener('DOMContentLoaded', function(){
+    template='<!doctype html>\n'+document.documentElement.outerHTML;
+    render();
+    var b=document.getElementById('fb-submit'); if(b) b.addEventListener('click', submit);
+  });
+  async function submit(){
+    var btn=document.getElementById('fb-submit'); var fb={};
+    document.querySelectorAll('textarea[data-fb]').forEach(function(t){ if(t.value.trim()) fb[t.dataset.fb]=t.value.trim(); });
+    if(!Object.keys(fb).length){ setStatus('Nothing to save yet — write a note first.'); return; }
+    var api=await claude.use('artifact');
+    if(!api){ setStatus('Saving unavailable here — paste notes into chat instead.'); return; }
+    var n=new Date();
+    var stamp=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0')+' '+String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+    var payload=JSON.stringify({feedback:fb, submitted_at:stamp}).replace(/</g,'\\u003c');
+    var doc=template.replace(/<script type="application\/json" id="fb-state">[\s\S]*?<\/script>/, '<script type="application/json" id="fb-state">'+payload+'<\/script>');
+    try{ btn.disabled=true; setStatus('Saving…'); await api.publish(doc); setStatus('Saved — reloading.'); }
+    catch(e){ var c=(e&&e.code)||''; setStatus(c==='conflict'?'A newer version exists — reloading.':'Could not save ('+(c||e)+') — paste notes into chat.'); btn.disabled=false; }
+  }
+})();
+</script>

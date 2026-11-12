@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Library</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper: hsl(45, 50%, 95%);
+    --paper-deep: hsl(44, 38%, 89%);
+    --panel: hsl(45, 55%, 97%);
+    --ink: hsl(140, 22%, 13%);
+    --ink-soft: hsl(140, 10%, 30%);
+    --line: hsl(44, 22%, 78%);
+    --leaf: hsl(132, 33%, 34%);
+    --leaf-deep: hsl(138, 37%, 20%);
+    --leaf-light: hsl(101, 30%, 54%);
+    --leaf-wash: hsl(95, 36%, 90%);
+    --butter: hsl(45, 84%, 62%);
+    --butter-pale: hsl(46, 75%, 88%);
+    --clay: hsl(17, 63%, 45%);
+    --clay-text: hsl(17, 66%, 36%);
+    --clay-wash: hsl(20, 48%, 91%);
+
+    --serif: "Fraunces", "Georgia", serif;
+    --sans: "Inter", "Helvetica Neue", sans-serif;
+    --mono: "IBM Plex Mono", "Menlo", monospace;
+
+    --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px; --s7: 96px;
+    --r-s: 8px; --r-m: 16px; --r-l: 24px;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html{ background: var(--paper); }
+  body{
+    font-family: var(--sans);
+    font-size: 16px; line-height: 1.55;
+    color: var(--ink);
+    background: var(--paper);
+  }
+  a{ color: inherit; text-decoration: none; }
+  .wrap{ max-width: 1240px; margin: 0 auto; padding: 0 40px; }
+  .mono{ font-family: var(--mono); }
+
+  /* ---------- masthead ---------- */
+  .masthead{ padding-top: var(--s3); }
+  .bar{ display:flex; align-items:center; justify-content:space-between; gap: var(--s4); }
+  .wordmark{
+    display:flex; align-items:center; gap:10px;
+    font-family: var(--serif); font-weight: 500; font-size: 26px; letter-spacing: -0.01em;
+  }
+  .wordmark svg{ display:block; }
+  nav{ display:flex; align-items:center; gap: 4px; }
+  nav a{
+    display:inline-block; padding: 8px 14px; border-radius: 999px;
+    font-size: 15px; font-weight: 500; color: var(--ink-soft);
+  }
+  nav a.current{ background: var(--butter); color: var(--ink); font-weight: 600; }
+  .masthead-rule{ border:0; border-top: 1px solid var(--line); margin: var(--s3) 0 0; }
+
+  /* ---------- shared small parts ---------- */
+  .kicker{
+    display:inline-block; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft);
+  }
+  .chip{
+    display:inline-flex; align-items:center; min-height: 26px; padding: 2px 12px;
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 13px; font-weight: 500; color: var(--ink-soft); background: var(--panel);
+  }
+  .drill{
+    display:inline-flex; align-items:center; min-height: 24px;
+    font-size: 14px; font-weight: 600; color: var(--clay-text);
+    border-bottom: 1px dashed var(--clay);
+  }
+  .drill::after{ content: " \2192"; white-space: pre; }
+
+  /* ---------- hero ---------- */
+  .hero{ padding-top: var(--s6); padding-bottom: var(--s6); text-align: center; }
+  .hero-emblem{ margin: 0 auto var(--s3); width: 150px; }
+  .hero-emblem svg{ display:block; width:100%; height:auto; }
+  .hero h1{
+    font-family: var(--serif);
+    font-size: 68px; font-weight: 380; line-height: 1.05; letter-spacing: -0.015em;
+    font-variation-settings: "opsz" 70;
+  }
+  .hero-dateline{
+    margin-top: var(--s2); font-size: 15px; color: var(--ink-soft); font-weight: 500;
+  }
+  .hero-stats{
+    display:flex; justify-content:center; flex-wrap: wrap;
+    gap: var(--s6); margin-top: var(--s5);
+  }
+  .hero-stats .fig{ min-width: 0; text-align: center; }
+  .hero-stats .fig b{
+    display:inline-block; font-family: var(--serif); font-weight: 500;
+    font-size: 36px; line-height: 1.1; letter-spacing: -0.01em;
+    border-bottom: 2px dotted var(--clay); padding-bottom: 2px;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+  .hero-stats .fig span{ display:block; margin-top: 8px; font-size: 13px; color: var(--ink-soft); }
+
+  /* ---------- ask ---------- */
+  .ask{ padding-bottom: var(--s7); }
+  .ask-inner{ max-width: 760px; margin: 0 auto; text-align: center; }
+  .ask-box{
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-l);
+    padding: var(--s5) var(--s5) var(--s4);
+  }
+  .ask-box .kicker{ display:block; margin-bottom: var(--s2); }
+  .ask-lead{
+    font-family: var(--serif); font-size: 28px; font-weight: 380; line-height: 1.42;
+    letter-spacing: -0.005em; color: var(--ink);
+  }
+  .ask-field{
+    display:flex; align-items:center; gap: var(--s3); text-align: left;
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-s);
+    padding: 14px 16px 14px 22px; margin-top: var(--s4);
+  }
+  .ask-field .q{
+    flex: 1; font-size: 15px; font-style: italic; color: var(--ink-soft);
+  }
+  .ask-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-height: 44px; padding: 10px 30px; border-radius: var(--r-s);
+    background: var(--butter); color: var(--ink); border: none;
+    font-family: var(--sans); font-size: 14px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
+    cursor: pointer;
+  }
+  .ask-examples{
+    display:flex; flex-direction: column; align-items:center; gap: var(--s2);
+    margin-top: var(--s4);
+  }
+  .ask-examples .drill{
+    font-weight: 500; color: var(--ink-soft); border-bottom-color: var(--clay);
+    font-size: 15px;
+  }
+  .ask-examples .drill b{ color: var(--clay-text); font-weight: 600; }
+
+  /* ---------- shelves ---------- */
+  .shelves{ background: var(--paper-deep); padding: var(--s6) 0 var(--s6); }
+  .shelves-head{ display:flex; align-items:baseline; gap: 14px; margin-bottom: var(--s4); }
+  .shelves-head .when{ font-size: 14px; color: var(--ink-soft); }
+  .shelf-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }
+  .shelf{
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-m);
+    padding: var(--s3) var(--s3) var(--s2);
+  }
+  .shelf-head{
+    display:flex; align-items:center; gap: 9px; margin-bottom: var(--s3);
+    padding-bottom: var(--s2); border-bottom: 1px solid var(--line);
+  }
+  .shelf-head .dot{ width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .shelf-head h2{
+    font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink);
+  }
+  .shelf-entry{ padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .shelf-entry:last-child{ border-bottom: none; padding-bottom: 4px; }
+  .shelf-entry .title{
+    font-family: var(--serif); font-size: 16px; font-weight: 480; line-height: 1.32;
+    letter-spacing: -0.005em; color: var(--ink);
+  }
+  .shelf-entry .meta{
+    display:flex; align-items:baseline; gap: 8px; margin-top: 6px;
+    font-size: 13px; color: var(--ink-soft);
+  }
+  .shelf-entry .meta .sep{ color: var(--line); }
+  .shelf-entry .kept b{
+    font-family: var(--serif); font-weight: 600; color: var(--ink);
+    border-bottom: 2px dotted var(--clay); padding-bottom: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .more-line{ text-align: center; margin-top: var(--s4); }
+  .more-line .drill{ font-size: 15px; }
+  .more-line .drill b{
+    font-family: var(--serif); color: var(--clay-text); font-weight: 700;
+  }
+
+  /* ---------- views dock ---------- */
+  .views-dock{
+    position: fixed; top: 50%; right: 0; transform: translateY(-50%); z-index: 30;
+  }
+  .views-tab{
+    display:flex; flex-direction: row; align-items:center; justify-content:center;
+    gap: 18px; width: 58px; padding: 22px 0;
+    writing-mode: vertical-rl; text-orientation: mixed;
+    background: var(--leaf-deep); color: var(--paper);
+    border-radius: var(--r-m) 0 0 var(--r-m);
+    box-shadow: -3px 4px 18px hsla(140, 40%, 8%, 0.22);
+  }
+  .views-tab .vlabel{
+    font-family: var(--serif); font-weight: 500; font-size: 18px; letter-spacing: 0.03em;
+  }
+  .views-tab .vitems{
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.01em;
+    color: hsl(95, 32%, 84%); white-space: nowrap;
+  }
+  .views-tab .vitems .sep{ opacity: 0.5; margin: 0 1px; }
+
+  /* ---------- footer ---------- */
+  footer{ background: var(--leaf-deep); margin-top: var(--s6); }
+  .foot{
+    display:flex; align-items:center; justify-content:space-between; gap: var(--s4);
+    padding-top: var(--s5); padding-bottom: var(--s5);
+    color: hsl(45, 50%, 95%);
+  }
+  .foot .motto{
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: 20px; letter-spacing: 0.01em;
+  }
+  .foot .mark{ display:flex; align-items:center; gap:10px; font-family: var(--serif); font-size: 18px; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap bar">
+    <a class="wordmark" href="#">
+      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="9.1" y="9" width="1.8" height="10" fill="hsl(138, 37%, 20%)"/>
+        <path d="M10 10 C4.5 10 1.2 6 1 1.2 C6.5 1.6 10 5 10 10 Z" fill="hsl(132, 33%, 34%)"/>
+        <path d="M10 10 C15.5 10 18.8 6 19 1.2 C13.5 1.6 10 5 10 10 Z" fill="hsl(101, 30%, 54%)"/>
+      </svg>
+      Palingenesis
+    </a>
+    <nav aria-label="Primary">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a class="current" href="#" aria-current="page">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#">Engine Room</a>
+    </nav>
+  </div>
+  <div class="wrap"><hr class="masthead-rule"></div>
+</header>
+
+<main>
+  <!-- ======================= HERO: THE LIBRARY ======================= -->
+  <section class="wrap hero">
+    <div class="hero-emblem">
+      <svg viewBox="0 0 180 120" role="img" aria-label="Flat illustration: five book spines standing on a shelf">
+        <rect x="10" y="100" width="160" height="10" rx="3" fill="hsl(138, 37%, 20%)"/>
+        <rect x="22" y="42" width="20" height="58" rx="2" fill="hsl(132, 33%, 34%)"/>
+        <rect x="48" y="25" width="20" height="75" rx="2" fill="hsl(45, 84%, 62%)"/>
+        <rect x="74" y="50" width="20" height="50" rx="2" fill="hsl(101, 30%, 54%)"/>
+        <rect x="100" y="18" width="20" height="82" rx="2" fill="hsl(138, 37%, 20%)"/>
+        <rect x="103" y="18" width="14" height="9" fill="hsl(45, 84%, 62%)"/>
+        <rect x="126" y="35" width="20" height="65" rx="2" fill="hsl(95, 36%, 90%)"/>
+      </svg>
+    </div>
+    <h1>The Library</h1>
+    <p class="hero-dateline">Saturday 23 August 2026 &middot; overnight record</p>
+    <div class="hero-stats">
+      <a class="fig" href="#"><b>12,847</b><span>papers read</span></a>
+      <a class="fig" href="#"><b>58,921</b><span>evidence records</span></a>
+      <a class="fig" href="#"><b>214,506</b><span>connections</span></a>
+      <a class="fig" href="#"><b>312</b><span>sweeps</span></a>
+      <a class="fig" href="#"><b>1,142</b><span>contradictions</span></a>
+    </div>
+  </section>
+
+  <!-- ======================= ASK THE LIBRARY ======================= -->
+  <section class="wrap ask">
+    <div class="ask-inner">
+      <div class="ask-box">
+        <span class="kicker">Ask</span>
+        <p class="ask-lead">Ask anything the machine has read &mdash; answers cite their sources.</p>
+        <div class="ask-field">
+          <span class="q">Ask the library&hellip;</span>
+          <button class="ask-btn" type="button">Ask</button>
+        </div>
+      </div>
+      <div class="ask-examples">
+        <a class="drill" href="#">Which char feedstocks raise hydrophobicity risk on sandy loams?</a>
+        <a class="drill" href="#">What do we hold on legume bridges and root-zone salinity?</a>
+        <a class="drill" href="#">Which claims contradict the 1.8-day interval finding?</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= SHELVES ======================= -->
+  <section class="shelves">
+    <div class="wrap">
+      <div class="shelves-head">
+        <span class="kicker">Shelves</span>
+        <span class="when">overnight &middot; 64 papers</span>
+      </div>
+      <div class="shelf-grid">
+
+        <div class="shelf">
+          <div class="shelf-head">
+            <span class="dot" style="background: hsl(132, 33%, 34%);"></span>
+            <h2>Soil &amp; Water</h2>
+          </div>
+
+          <div class="shelf-entry">
+            <div class="title">Biochar at 12 t/ha and plant-available water</div>
+            <div class="meta">
+              <span>Geoderma 2025</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>8</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Irrigation interval stretch after char amendment</div>
+            <div class="meta">
+              <span>Agric Water Manag 2025</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>7</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Char feedstock and hydrophobicity risk</div>
+            <div class="meta">
+              <span>Pedosphere 2023</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>5</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Biochar aging and cation exchange</div>
+            <div class="meta">
+              <span>Geoderma 2024</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>9</b> kept</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="shelf">
+          <div class="shelf-head">
+            <span class="dot" style="background: hsl(45, 84%, 62%);"></span>
+            <h2>Crop Genetics</h2>
+          </div>
+
+          <div class="shelf-entry">
+            <div class="title">Deep-rooting alleles under terminal water deficit</div>
+            <div class="meta">
+              <span>Field Crops Res 2025</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>6</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Rhizosheath traits in water-limited barley</div>
+            <div class="meta">
+              <span>Plant Soil 2024</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>8</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Osmotic adjustment heritability in faba bean</div>
+            <div class="meta">
+              <span>Eur J Agron 2024</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>7</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Root-hair density in polyethylene-glycol screens</div>
+            <div class="meta">
+              <span>Ann Bot 2023</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>6</b> kept</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="shelf">
+          <div class="shelf-head">
+            <span class="dot" style="background: hsl(101, 30%, 54%);"></span>
+            <h2>Saline Systems</h2>
+          </div>
+
+          <div class="shelf-entry">
+            <div class="title">Rhizobium co-inoculation under saline irrigation</div>
+            <div class="meta">
+              <span>Field Crops Res 2025</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>7</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Halophyte&ndash;wheat rotations and root-zone desalination</div>
+            <div class="meta">
+              <span>Plant Soil 2024</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>6</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Legume bridge crops on marginal saline land</div>
+            <div class="meta">
+              <span>Eur J Agron 2024</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>6</b> kept</a>
+            </div>
+          </div>
+          <div class="shelf-entry">
+            <div class="title">Rotational nitrogen credit under brackish regimes</div>
+            <div class="meta">
+              <span>Agron J 2022</span><span class="sep">&middot;</span>
+              <a class="kept" href="#"><b>7</b> kept</a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <p class="more-line"><a class="drill" href="#">+<b>52</b> more</a></p>
+    </div>
+  </section>
+</main>
+
+<aside class="views-dock" aria-label="Views panel, collapsed">
+  <div class="views-tab">
+    <span class="vlabel">Views</span>
+    <span class="vitems">Connections<span class="sep"> &middot; </span>In use now<span class="sep"> &middot; </span>Refresh due<span class="sep"> &middot; </span>Reading ledger<span class="sep"> &middot; </span>Research sweeps<span class="sep"> &middot; </span>Contradictions</span>
+  </div>
+</aside>
+
+<footer>
+  <div class="wrap foot">
+    <span class="motto">Every claim sourced &middot; every cost computed &middot; every verdict recorded.</span>
+    <span class="mark">
+      <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="9.1" y="9" width="1.8" height="10" fill="hsl(46, 75%, 88%)"/>
+        <path d="M10 10 C4.5 10 1.2 6 1 1.2 C6.5 1.6 10 5 10 10 Z" fill="hsl(45, 84%, 62%)"/>
+        <path d="M10 10 C15.5 10 18.8 6 19 1.2 C13.5 1.6 10 5 10 10 Z" fill="hsl(101, 30%, 54%)"/>
+      </svg>
+      Palingenesis
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>
