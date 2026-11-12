@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis — Home</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ————— the catalogue: one lot title, seven numbered lots, the record, the owner —————
+     grid: content 1076 wide at x=182 · four columns of 215 with 72 gutters
+           column lefts 182 · 469 · 756 · 1043 (two-column lots span 2 cols = 502)
+     baseline: 8px — line-heights 16 · 24 · 40 · 56; every margin a multiple of 8
+     type: four sizes — 13 caps/mono · 17 body · 36 lot names, figures, owner · 52 title */
+  :root{
+    --ground:#1B1917;
+    --ink:#E7E3DA;
+    --ink-2:#B7B2A6;
+    --ink-3:#8A8477;
+    --hair:rgba(231,227,218,.15);
+    --hair-faint:rgba(231,227,218,.08);
+    --hair-strong:rgba(231,227,218,.30);
+    --sage:#9CB08C;
+    --sage-dim:rgba(156,176,140,.45);
+    --paper:rgb(248,247,245);
+    --paper-ink:#262019;
+    --paper-ink-2:#6f6557;
+    --paper-hair:#dcd3c0;
+    --paper-sage:#4E6A42;
+    --serif:'Iowan Old Style',Palatino,'Book Antiqua',Charter,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Helvetica Neue','Segoe UI',Arial,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --t-xs:13px; --lh-xs:16px;
+    --t-md:17px; --lh-md:24px;
+    --t-lg:36px; --lh-lg:40px;
+    --t-xl:52px; --lh-xl:56px;
+    --col:215px; --gut:72px; --two:502px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--ground);color:var(--ink)}
+  body{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);-webkit-font-smoothing:antialiased;min-width:1440px}
+  ::selection{background:var(--sage);color:var(--ground)}
+  a{color:inherit;text-decoration:none}
+
+  .wrap{width:1220px;margin:0 auto;padding:0 72px}
+
+  .caps{font-family:var(--sans);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.18em;text-transform:uppercase;font-weight:600;color:var(--ink-3)}
+  .mono{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+
+  /* ————— masthead: the one skeleton ————— */
+  .masthead{border-bottom:1px solid var(--hair)}
+  .masthead .wrap{display:flex;justify-content:space-between;align-items:baseline;padding-top:24px;padding-bottom:24px}
+  .wordmark{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-xs);letter-spacing:.28em;text-transform:uppercase;color:var(--ink);white-space:nowrap}
+  .nav{display:flex;gap:24px}
+  .nav a{font-family:var(--sans);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+  .nav a:hover{color:var(--ink)}
+  .actions-top{display:flex;gap:24px}
+  .actions-top a{font-family:var(--sans);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+  .actions-top a.primary{color:var(--sage)}
+
+  /* ————— the lot title ————— */
+  .title{padding:80px 0 80px}
+  h1{font-size:var(--t-xl);line-height:var(--lh-xl);font-weight:400;letter-spacing:-.012em;margin-top:24px;max-width:1076px}
+  .essential{margin-top:24px;font-style:italic;color:var(--ink-2);max-width:60ch}
+  .lineage{margin-top:32px;font-family:var(--sans);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.04em;color:var(--ink-3)}
+
+  /* ————— sections ————— */
+  section{border-top:1px solid var(--hair);padding:40px 0 80px}
+
+  /* ————— how it works: one line, six steps ————— */
+  .steps{margin-top:32px;display:flex;flex-wrap:wrap;align-items:baseline}
+  .steps .n{color:var(--ink);font-weight:500}
+  .steps .arrow{color:var(--hair-strong);padding:0 24px}
+
+  /* ————— the rooms: the ruled catalogue ————— */
+  .catalogue{margin-top:32px}
+  .lot-1{background:var(--paper);color:var(--paper-ink);margin:0 -40px;padding:40px 40px 40px;display:grid;grid-template-columns:var(--two) var(--gut) var(--two)}
+  .lot-1 .caps{color:var(--paper-ink-2)}
+  .lot-1 .detail{color:var(--paper-ink)}
+  .lot-1 .door{color:var(--paper-sage)}
+  .lot-1 .door::after{color:var(--paper-sage)}
+  .lot-1 .divider{width:1px;background:var(--paper-hair);margin:0 auto}
+  .edition{padding-top:8px}
+  .edition .mini-mark{text-align:center;font-family:var(--serif);font-size:var(--t-lg);line-height:var(--lh-lg);letter-spacing:.18em;text-indent:.18em;text-transform:uppercase;color:var(--paper-ink)}
+  .edition .rule{margin-top:16px;border-top:2px solid var(--paper-ink)}
+  .edition .rule::after{content:"";display:block;margin-top:2px;border-top:1px solid var(--paper-ink)}
+  .edition .folio{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 8px;border-bottom:1px solid var(--paper-hair)}
+  .edition .folio .caps{color:var(--paper-ink-2)}
+  .edition .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--paper-sage);margin-right:8px;position:relative;top:-1px}
+  .edition .cols{display:grid;grid-template-columns:repeat(4,1fr);height:64px;margin-top:16px}
+  .edition .cols i{border-left:1px solid var(--paper-hair);display:block}
+  .edition .cols i:first-child{border-left:none}
+
+  .lots{display:grid;grid-template-columns:var(--two) var(--gut) var(--two);position:relative}
+  .lots .divider{grid-column:2;grid-row:1 / span 3;width:1px;background:var(--hair);margin:0 auto}
+  .lot{padding:40px 0 40px;border-top:1px solid var(--hair)}
+  .lot.c1{grid-column:1}
+  .lot.c2{grid-column:3}
+  .lot.r1{grid-row:1;border-top:none}
+  .lot.r2{grid-row:2}
+  .lot.r3{grid-row:3}
+  .lot-name{margin-top:8px;font-size:var(--t-lg);line-height:var(--lh-lg);font-weight:400;letter-spacing:-.005em}
+  .lot-name .numeral{color:var(--ink-3);margin-right:24px}
+  .lot-1 .lot-name .numeral{color:var(--paper-ink-2)}
+  .line{margin-top:16px}
+  .detail{margin-top:16px;color:var(--ink-2);max-width:56ch}
+  .door{display:inline-block;margin-top:24px;font-family:var(--sans);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.18em;text-transform:uppercase;font-weight:600;color:var(--sage)}
+  .door::after{content:" →";letter-spacing:0;color:var(--sage-dim)}
+  .door:hover::after{color:var(--sage)}
+
+  /* ————— the record: the standing row ————— */
+  .strip{margin-top:32px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);display:grid;grid-template-columns:repeat(4,var(--col));column-gap:var(--gut)}
+  .fig{padding:24px 0 24px}
+  .fig .score{font-family:var(--sans);font-weight:300;font-size:var(--t-lg);line-height:var(--lh-lg);font-variant-numeric:tabular-nums;color:var(--ink)}
+  .fig .caps{margin-top:8px;color:var(--ink-2)}
+
+  /* ————— the owner: the closing note ————— */
+  .owner{margin-top:24px;font-size:var(--t-lg);line-height:var(--lh-lg);font-weight:400;letter-spacing:-.005em;max-width:1076px}
+  .note{margin-top:32px;font-style:italic;color:var(--ink-2);max-width:72ch}
+
+  /* ————— the foot: two actions ————— */
+  .foot{border-top:1px solid var(--hair);padding:40px 0 80px;display:flex;align-items:center;gap:24px}
+  .btn{font-family:var(--sans);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.18em;text-transform:uppercase;font-weight:600;cursor:pointer;display:inline-block}
+  .btn.primary{background:var(--sage);color:var(--ground);padding:16px 32px;border:1px solid var(--sage)}
+  .btn.primary:hover{filter:brightness(1.07)}
+  .btn.quiet{background:transparent;color:var(--ink-2);border:1px solid var(--hair);padding:16px 32px}
+  .btn.quiet:hover{color:var(--ink);border-color:var(--hair-strong)}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="wordmark" href="#">Palingenesis</a>
+    <nav class="nav">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#">Engine Room</a>
+    </nav>
+    <div class="actions-top">
+      <a href="#">Sign in</a>
+      <a href="#" class="primary">Open Today</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ————— the lot title ————— -->
+  <div class="title">
+    <p class="caps">The promise</p>
+    <h1>An autonomous engine for agricultural innovation — reading continuously, judged adversarially, ruled by one human.</h1>
+    <p class="essential">It reads the literature, breeds candidate innovations, argues about them in a council, simulates the winners, and carries them into the field.</p>
+    <p class="lineage">Built for commercial poultry first. The engine is general.</p>
+  </div>
+
+  <!-- ————— how it works: six steps, one line ————— -->
+  <section>
+    <p class="caps">How it works</p>
+    <p class="steps mono">
+      <span><span class="n">1</span> Reads</span><span class="arrow">→</span>
+      <span><span class="n">2</span> Breeds</span><span class="arrow">→</span>
+      <span><span class="n">3</span> Judges</span><span class="arrow">→</span>
+      <span><span class="n">4</span> Simulates</span><span class="arrow">→</span>
+      <span><span class="n">5</span> Proves</span><span class="arrow">→</span>
+      <span><span class="n">6</span> Accounts</span>
+    </p>
+  </section>
+
+  <!-- ————— the rooms: seven lots ————— -->
+  <section>
+    <p class="caps">The rooms</p>
+
+    <div class="catalogue">
+
+      <!-- lot I · the morning edition, on paper -->
+      <div class="lot-1">
+        <div>
+          <p class="caps">Since 00:00</p>
+          <h2 class="lot-name"><span class="numeral">I</span>Today</h2>
+          <p class="detail">The morning edition: what needs a ruling, and the machine's record of the night.</p>
+          <a class="door" href="#">Open Today</a>
+        </div>
+        <div class="divider" aria-hidden="true"></div>
+        <div class="edition" aria-hidden="true">
+          <p class="mini-mark">Palingenesis</p>
+          <div class="rule"></div>
+          <div class="folio"><span class="caps">Today</span><span class="caps"><span class="dot"></span>Since 00:00</span></div>
+          <div class="cols"><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
+
+      <!-- lots II–VII · the working rooms -->
+      <div class="lots">
+        <div class="divider" aria-hidden="true"></div>
+
+        <div class="lot c1 r1">
+          <p class="caps">Step 1 · Reads</p>
+          <h2 class="lot-name"><span class="numeral">II</span>Library</h2>
+          <p class="line mono">212 papers · 45 findings · 3 evidence clusters</p>
+          <p class="detail">What the machine has read and knows. Every claim extracted verbatim, with its source.</p>
+          <a class="door" href="#">Open</a>
+        </div>
+
+        <div class="lot c2 r1">
+          <p class="caps">Step 2 · Breeds</p>
+          <h2 class="lot-name"><span class="numeral">III</span>Pipeline</h2>
+          <p class="line mono">Generation 12 · 40 items · best fitness 0.91</p>
+          <p class="detail">The living population moving through one river, one candidate enlarged for judgment.</p>
+          <a class="door" href="#">Open</a>
+        </div>
+
+        <div class="lot c1 r2">
+          <p class="caps">Step 3 · Judges</p>
+          <h2 class="lot-name"><span class="numeral">IV</span>Dossier</h2>
+          <p class="line mono">Council 5 of 6 · GREENLIGHT · fitness 87.4</p>
+          <p class="detail">One innovation, the whole case: mechanism, economics, each judge's reason, the decision.</p>
+          <a class="door" href="#">Open</a>
+        </div>
+
+        <div class="lot c2 r2">
+          <p class="caps">Step 4 · Simulates</p>
+          <h2 class="lot-name"><span class="numeral">V</span>Simulation</h2>
+          <p class="line mono">Hindcast skill 0.82 · 90% coverage 88%</p>
+          <p class="detail">A calibrated simulator scored against what actually happened.</p>
+          <a class="door" href="#">Open</a>
+        </div>
+
+        <div class="lot c1 r3">
+          <p class="caps">Step 5 · Proves</p>
+          <h2 class="lot-name"><span class="numeral">VI</span>Portfolio</h2>
+          <p class="line mono">41 claims scored · 29 on or above · coverage 84%</p>
+          <p class="detail">The book of bets that made it, thesis beside reality.</p>
+          <a class="door" href="#">Open</a>
+        </div>
+
+        <div class="lot c2 r3">
+          <p class="caps">Step 6 · Accounts</p>
+          <h2 class="lot-name"><span class="numeral">VII</span>Engine Room</h2>
+          <p class="line mono">6 wheels · every order logged on the clock</p>
+          <p class="detail">The machine accounts for itself; the owner steers it.</p>
+          <a class="door" href="#">Open</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ————— the record ————— -->
+  <section>
+    <p class="caps">The record</p>
+    <div class="strip">
+      <div class="fig"><div class="score">212</div><div class="caps">Papers read</div></div>
+      <div class="fig"><div class="score">41</div><div class="caps">Claims scored</div></div>
+      <div class="fig"><div class="score">84%</div><div class="caps">Interval coverage</div></div>
+      <div class="fig"><div class="score">9</div><div class="caps">Positions</div></div>
+    </div>
+  </section>
+
+  <!-- ————— the owner: closing note ————— -->
+  <section>
+    <p class="caps">The owner</p>
+    <p class="owner">The owner does not operate the machine. The owner reviews winners, believes or challenges the receipts, and decides.</p>
+    <div class="note">
+      <p>Every claim carries its source. Every verdict is recorded with its reason. Nothing is deleted.</p>
+      <p>Approved claims stay frozen beside what the field measured, for the rest of the bet's life.</p>
+      <p>Where the machine cannot answer, it says so: cannot simulate is a verdict, not an error.</p>
+    </div>
+  </section>
+
+  <!-- ————— the foot ————— -->
+  <div class="foot">
+    <a class="btn primary" href="#">Open Today</a>
+    <a class="btn quiet" href="#">Sign in</a>
+  </div>
+
+</main>
+
+</body>
+</html>

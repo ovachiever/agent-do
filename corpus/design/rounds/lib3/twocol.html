@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis · Library</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #1B1917;
+    --bg-raise: #262220;
+    --cream: #E7E3DA;
+    --muted: #A69D90;
+    --faint: #6E675E;
+    --hair: rgba(231,227,218,0.14);
+    --sage: hsl(158,30%,55%);
+    --sage-bright: hsl(158,32%,62%);
+    --serif: Georgia, 'Iowan Old Style', 'Palatino', 'Times New Roman', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--cream);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+    min-width: 1240px;
+    overflow: hidden;
+  }
+  * { scrollbar-width: thin; scrollbar-color: rgba(231,227,218,0.18) transparent; }
+
+  .lbl {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- Header ---------- */
+  header {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--serif);
+    font-size: 20px;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  .brand .mark {
+    width: 9px; height: 9px;
+    background: var(--sage);
+    transform: rotate(45deg);
+    flex: none;
+  }
+  nav { display: flex; align-items: center; gap: 2px; }
+  nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 11px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  nav a:hover { color: var(--cream); }
+  nav a.on {
+    color: var(--sage);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 8px;
+  }
+  form.ask {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  form.ask input {
+    appearance: none;
+    width: 356px;
+    min-width: 220px;
+    height: 34px;
+    padding: 0 12px;
+    background: var(--bg-raise);
+    border: 1px solid var(--hair);
+    border-radius: 6px;
+    color: var(--cream);
+    font-family: var(--sans);
+    font-size: 13px;
+  }
+  form.ask input::placeholder { color: var(--muted); }
+  form.ask input:focus {
+    outline: none;
+    border-color: var(--sage);
+    box-shadow: 0 0 0 1px var(--sage);
+  }
+  form.ask button {
+    height: 34px;
+    padding: 0 16px;
+    background: var(--sage);
+    color: #1B1917;
+    border: 0;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  form.ask button:hover { background: var(--sage-bright); }
+  .live {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .live .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--sage);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+  /* ---------- Two columns ---------- */
+  main {
+    height: calc(100vh - 98px);
+    display: grid;
+    grid-template-columns: minmax(0,1fr) 430px;
+  }
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  .truth-col { border-left: 1px solid var(--hair); }
+
+  .colhead {
+    flex: none;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 13px 24px 11px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .colhead h1, .colhead h2 {
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+  .colhead .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+  /* ---------- Left: the living record ---------- */
+  .rows { padding: 0 24px 16px; }
+  .row {
+    display: grid;
+    grid-template-columns: 42px 58px minmax(0,1fr) auto;
+    column-gap: 12px;
+    align-items: baseline;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .row .t {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .row .tag {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .row .tag.cited  { color: var(--sage); }
+  .row .tag.contra { color: var(--cream); }
+  .row .what {
+    font-size: 13px;
+    color: var(--cream);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row .what .src { color: var(--muted); }
+  .row .what .id { font-family: var(--mono); font-size: 12px; }
+  .row .m {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    text-align: right;
+  }
+  .row .m b { font-weight: 400; color: var(--cream); }
+  .day {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 2px 4px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    color: var(--faint);
+    white-space: nowrap;
+  }
+  .day::before, .day::after { content: ""; flex: 1; border-top: 1px solid var(--hair); }
+
+  /* ---------- Right: the standing truth ---------- */
+  .block { padding: 13px 24px 15px; }
+  .block + .block { border-top: 1px solid var(--hair); }
+  .blockhead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 9px;
+  }
+  .blockhead .note {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .stat {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 5px 0;
+  }
+  .stat .k {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .stat .v {
+    text-align: right;
+    font-size: 17px;
+    color: var(--cream);
+    white-space: nowrap;
+  }
+  .stat .v.big { font-size: 22px; }
+  .stat .v .s {
+    display: block;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+  .stat .v .s .up { color: var(--sage); }
+  .meter {
+    height: 3px;
+    margin: 4px 0 2px;
+    background: rgba(231,227,218,0.14);
+  }
+  .meter i { display: block; height: 3px; width: 47%; background: var(--sage); }
+
+  .g {
+    display: grid;
+    grid-template-columns: 46px minmax(0,1fr) auto;
+    column-gap: 10px;
+    align-items: baseline;
+    padding: 5px 0;
+  }
+  .g code {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--sage);
+  }
+  .g .gt {
+    font-size: 13px;
+    color: var(--cream);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .g .gm {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .sig { padding: 6px 0; }
+  .sig .l1, .sig .l2 {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .sig .sn { font-size: 13px; color: var(--cream); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sig .sv { font-family: var(--mono); font-size: 14px; color: var(--cream); white-space: nowrap; }
+  .sig .sv em { font-style: normal; font-size: 12px; color: var(--muted); }
+  .sig .l2 { margin-top: 1px; }
+  .sig .sp { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sig .sd { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  /* ---------- Footer ---------- */
+  footer {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid var(--hair);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="mark"></span>Palingenesis</div>
+  <nav>
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#" class="on">Library</a>
+    <a href="#">Engine Room</a>
+  </nav>
+  <form class="ask" action="#">
+    <input type="text" name="q" placeholder="Ask the Library — &ldquo;strongest evidence for split-phase calcium?&rdquo;">
+    <button type="submit">Ask</button>
+  </form>
+  <div class="live"><span class="dot"></span>14:44 CT · READING</div>
+</header>
+
+<main>
+
+  <!-- LEFT · the living record -->
+  <section class="col">
+    <div class="colhead">
+      <h1>The Living Record</h1>
+      <div class="meta">TODAY · 176 PAPERS READ · 2 SWEEPS DONE · $34.62 METERED</div>
+    </div>
+    <div class="scroll">
+      <div class="rows">
+
+        <div class="row"><span class="t">14:43</span><span class="tag cited">Cited</span>
+          <span class="what"><span class="id">DOS-0114</span> Split-phase calcium — 3 claims resolved <span class="src">→</span> <span class="id">ev-41205–07</span></span>
+          <span class="m">3 claims · <b>$0.02</b></span></div>
+
+        <div class="row"><span class="t">14:41</span><span class="tag">Paper</span>
+          <span class="what">Betaine spares methionine in W-36 layers under cyclic heat <span class="src">— Poult. Sci. 105(8)</span></span>
+          <span class="m">11 claims · <b>$0.14</b></span></div>
+
+        <div class="row"><span class="t">14:38</span><span class="tag">Paper</span>
+          <span class="what">Phytase superdosing past 1,500 FTU: tibia ash and shell response <span class="src">— Anim. Feed Sci. Technol. 312</span></span>
+          <span class="m">9 claims · <b>$0.11</b></span></div>
+
+        <div class="row"><span class="t">14:33</span><span class="tag">Signal</span>
+          <span class="what">Soybean meal Dec &rsquo;26 refreshed — 308.70 $/t <span class="src">— CME ZM · 13:05 CT</span></span>
+          <span class="m">1 series · <b>$0.01</b></span></div>
+
+        <div class="row"><span class="t">14:29</span><span class="tag">Sweep</span>
+          <span class="what"><span class="id">S-118</span> finished · phytase superdosing &gt;1,500 FTU</span>
+          <span class="m">214 → 19 kept · <b>$3.87</b></span></div>
+
+        <div class="row"><span class="t">14:22</span><span class="tag contra">Contra</span>
+          <span class="what"><span class="id">C-31</span> opened · midnight-flash lighting: shell +4% (Nascimento &rsquo;24) vs null (Oduho &rsquo;22)</span>
+          <span class="m">2 claims · <b>$0.05</b></span></div>
+
+        <div class="row"><span class="t">14:17</span><span class="tag">Paper</span>
+          <span class="what">Acaricide rotation against <i>Dermanyssus gallinae</i> in EU layer flocks <span class="src">— Vet. Parasitol. 341</span></span>
+          <span class="m">13 claims · <b>$0.16</b></span></div>
+
+        <div class="row"><span class="t">14:11</span><span class="tag cited">Cited</span>
+          <span class="what"><span class="id">DOS-0109</span> In-ovo sexing economics — 5 claims resolved <span class="src">→</span> <span class="id">ev-41196–200</span></span>
+          <span class="m">5 claims · <b>$0.03</b></span></div>
+
+        <div class="row"><span class="t">14:06</span><span class="tag">Paper</span>
+          <span class="what">Black soldier fly larvae meal at 4–8%: lay rate and Haugh units <span class="src">— Br. Poult. Sci. 67(4)</span></span>
+          <span class="m">12 claims · <b>$0.15</b></span></div>
+
+        <div class="row"><span class="t">13:58</span><span class="tag">Queue</span>
+          <span class="what"><span class="id">S-121</span> commissioned · water acidification vs. crop pH and <i>Salmonella</i> load</span>
+          <span class="m">est. 180 papers · <b>$4.20</b></span></div>
+
+        <div class="row"><span class="t">13:54</span><span class="tag">Paper</span>
+          <span class="what">Perch height and keel-bone fracture prevalence in aviary systems <span class="src">— Anim. Welf. 35</span></span>
+          <span class="m">8 claims · <b>$0.10</b></span></div>
+
+        <div class="row"><span class="t">13:47</span><span class="tag contra">Contra</span>
+          <span class="what"><span class="id">C-30</span> widened · lysine response flat above 0.86 g/MJ (3 trials) vs linear (2 trials)</span>
+          <span class="m">5 claims · <b>$0.06</b></span></div>
+
+        <div class="row"><span class="t">13:41</span><span class="tag">Paper</span>
+          <span class="what">Eggshell translucency and cuticle deposition under LED spectra <span class="src">— Poult. Sci. 105(8)</span></span>
+          <span class="m">7 claims · <b>$0.09</b></span></div>
+
+        <div class="row"><span class="t">13:36</span><span class="tag cited">Cited</span>
+          <span class="what"><span class="id">DOS-0112</span> Oyster-shell particle size — 2 claims resolved <span class="src">→</span> <span class="id">ev-41190–91</span></span>
+          <span class="m">2 claims · <b>$0.02</b></span></div>
+
+        <div class="row"><span class="t">13:30</span><span class="tag">Sweep</span>
+          <span class="what"><span class="id">S-117</span> finished · in-ovo sexing unit economics</span>
+          <span class="m">96 → 11 kept · <b>$2.41</b></span></div>
+
+        <div class="row"><span class="t">13:24</span><span class="tag">Paper</span>
+          <span class="what">Precision amino-acid feeding with real-time intake sensing <span class="src">— Comput. Electron. Agric. 229</span></span>
+          <span class="m">10 claims · <b>$0.13</b></span></div>
+
+        <div class="row"><span class="t">13:18</span><span class="tag">Signal</span>
+          <span class="what">L-lysine HCl US spot refreshed — 1.58 $/kg <span class="src">— Feedinfo · daily</span></span>
+          <span class="m">1 series · <b>$0.01</b></span></div>
+
+        <div class="row"><span class="t">13:11</span><span class="tag">Paper</span>
+          <span class="what"><i>Salmonella</i> Enteritidis vaccine persistence in 100-week extended cycles <span class="src">— Avian Pathol. 55</span></span>
+          <span class="m">14 claims · <b>$0.17</b></span></div>
+
+        <div class="row"><span class="t">13:02</span><span class="tag">Paper</span>
+          <span class="what">On-farm hatching and day-7 mortality: 41-flock cohort <span class="src">— Prev. Vet. Med. 228</span></span>
+          <span class="m">9 claims · <b>$0.12</b></span></div>
+
+        <div class="row"><span class="t">12:55</span><span class="tag cited">Cited</span>
+          <span class="what"><span class="id">DOS-0107</span> Heat-stress betaine — 4 claims resolved <span class="src">→</span> <span class="id">ev-41184–87</span></span>
+          <span class="m">4 claims · <b>$0.02</b></span></div>
+
+        <div class="row"><span class="t">12:49</span><span class="tag">Queue</span>
+          <span class="what"><span class="id">S-120</span> commissioned · split-phase calcium feeding schedules</span>
+          <span class="m">est. 240 papers · <b>$5.10</b></span></div>
+
+        <div class="row"><span class="t">12:44</span><span class="tag">Paper</span>
+          <span class="what">Xylanase with emulsifier in reduced-energy layer diets <span class="src">— J. Appl. Poult. Res. 35(3)</span></span>
+          <span class="m">8 claims · <b>$0.10</b></span></div>
+
+        <div class="day">Thursday · August 21 — 241 papers · 5 sweeps · $61.90 metered</div>
+
+        <div class="row"><span class="t">23:52</span><span class="tag">Sweep</span>
+          <span class="what"><span class="id">S-116</span> finished · ammonia scrubber capex in high-rise houses</span>
+          <span class="m">187 → 22 kept · <b>$4.44</b></span></div>
+
+        <div class="row"><span class="t">23:31</span><span class="tag">Paper</span>
+          <span class="what">Pullet skeletal development under intermittent lighting <span class="src">— Br. Poult. Sci. 67(4)</span></span>
+          <span class="m">10 claims · <b>$0.12</b></span></div>
+
+        <div class="row"><span class="t">22:58</span><span class="tag contra">Contra</span>
+          <span class="what"><span class="id">C-29</span> closed · fine limestone favors evening Ca uptake — verdict recorded</span>
+          <span class="m">6 claims · <b>$0.04</b></span></div>
+
+        <div class="row"><span class="t">22:41</span><span class="tag">Paper</span>
+          <span class="what">Formic-acid water lines and cecal <i>Salmonella</i> counts <span class="src">— Poult. Sci. 105(7)</span></span>
+          <span class="m">11 claims · <b>$0.13</b></span></div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT · the standing truth -->
+  <aside class="col truth-col">
+    <div class="colhead">
+      <h2>The Standing Truth</h2>
+      <div class="meta">AS OF 14:44 CT</div>
+    </div>
+    <div class="scroll">
+
+      <div class="block">
+        <div class="blockhead"><span class="lbl">Corpus &amp; Cost</span><span class="note">METERED · LIVE</span></div>
+
+        <div class="stat"><span class="k">Papers in corpus</span>
+          <span class="v big">128,441<span class="s"><span class="up">▲</span> 214 today</span></span></div>
+
+        <div class="stat"><span class="k">Claims extracted</span>
+          <span class="v">902,733<span class="s">avg 10.9 per full read</span></span></div>
+
+        <div class="stat"><span class="k">Evidence records</span>
+          <span class="v">41,209<span class="s">3,214 cited into live dossiers</span></span></div>
+
+        <div class="stat"><span class="k">Contradictions open</span>
+          <span class="v">14<span class="s">2 opened today · 1 closed Thu</span></span></div>
+
+        <div class="stat"><span class="k">Sweeps</span>
+          <span class="v">2 live · 7 queued<span class="s">S-119 red mite · 61% done</span></span></div>
+
+        <div class="stat"><span class="k">Spend · today</span>
+          <span class="v mono">$34.62<span class="s">reads + sweeps + scans</span></span></div>
+
+        <div class="stat"><span class="k">Spend · Aug MTD</span>
+          <span class="v mono">$2,847.19<span class="s">of $6,000 cap · 47%</span></span></div>
+        <div class="meter"><i></i></div>
+      </div>
+
+      <div class="block">
+        <div class="blockhead"><span class="lbl">Germinating Now</span><span class="note">5 OF 23 · BY SUPPORT</span></div>
+
+        <div class="g"><code>G-060</code><span class="gt">Split-phase calcium: PM-weighted delivery</span><span class="gm">14 ev · 0.81</span></div>
+        <div class="g"><code>G-074</code><span class="gt">Betaine spares methionine under cyclic heat</span><span class="gm">11 ev · 0.78</span></div>
+        <div class="g"><code>G-071</code><span class="gt">Fine limestone shifted to PM feeding</span><span class="gm">9 ev · 0.74</span></div>
+        <div class="g"><code>G-066</code><span class="gt">BSF larvae meal ≤6% holds Haugh units</span><span class="gm">7 ev · 0.69</span></div>
+        <div class="g"><code>G-055</code><span class="gt">On-farm hatch cuts day-7 mortality</span><span class="gm">6 ev · 0.66</span></div>
+      </div>
+
+      <div class="block">
+        <div class="blockhead"><span class="lbl">Market Signals</span><span class="note">4 SERIES · AUTO</span></div>
+
+        <div class="sig">
+          <div class="l1"><span class="sn">Shell eggs · natl. large white</span><span class="sv">$2.38 <em>/doz</em></span></div>
+          <div class="l2"><span class="sp">USDA ERS · weekly · Aug 19</span><span class="sd">▲ 3.9% w/w</span></div>
+        </div>
+        <div class="sig">
+          <div class="l1"><span class="sn">L-lysine HCl · US spot</span><span class="sv">$1.58 <em>/kg</em></span></div>
+          <div class="l2"><span class="sp">Feedinfo · Aug 21</span><span class="sd">▼ 1.2% w/w</span></div>
+        </div>
+        <div class="sig">
+          <div class="l1"><span class="sn">Soybean meal · Dec &rsquo;26</span><span class="sv">$308.70 <em>/t</em></span></div>
+          <div class="l2"><span class="sp">CME ZM · Aug 22 · 13:05 CT</span><span class="sd">▲ 0.8% d/d</span></div>
+        </div>
+        <div class="sig">
+          <div class="l1"><span class="sn">Corn · Dec &rsquo;26</span><span class="sv">$4.19 <em>/bu</em></span></div>
+          <div class="l2"><span class="sp">CME ZC · Aug 22 · 13:05 CT</span><span class="sd">▼ 0.4% d/d</span></div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+</main>
+
+<footer>Every claim sourced · every cost computed · every verdict recorded</footer>
+
+</body>
+</html>
