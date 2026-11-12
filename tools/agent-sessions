@@ -174,13 +174,22 @@ cmd_search() {
         return 1
     fi
 
-    # Try agent-sessions CLI first (hybrid semantic + FTS)
-    local cli_available=false
-    if command -v agent-sessions &>/dev/null; then
-        cli_available=true
-    fi
+    # Try the agent-sessions CLI first (hybrid semantic + FTS), but never
+    # this script: the agent-do launcher prepends tools/ to PATH, so the bare
+    # name resolves to ourselves. Backgrounding ourselves and killing the copy
+    # after 5s orphaned a grandchild every time and leaked one mktemp file per
+    # generation, forever (incident 2026-10-16, mn-f8add7).
+    local cli_bin="" cli_self cli_cand
+    cli_self="$(realpath "${BASH_SOURCE[0]}")"
+    while IFS= read -r cli_cand; do
+        if [[ "$(realpath "$cli_cand" 2>/dev/null || true)" == "$cli_self" ]]; then
+            continue
+        fi
+        cli_bin="$cli_cand"
+        break
+    done < <(type -aP agent-sessions 2>/dev/null || true)
 
-    if [[ "$cli_available" == true && "$OUTPUT_FORMAT" != "json" ]]; then
+    if [[ -n "$cli_bin" && "$OUTPUT_FORMAT" != "json" ]]; then
         # Use CLI for hybrid search with 5s timeout, then enrich with DB
         local cli_args=("search" "$QUERY" "--limit" "$LIMIT")
         [[ -n "$HARNESS" ]] && cli_args+=("--harness" "$HARNESS")
@@ -188,7 +197,10 @@ cmd_search() {
 
         local cli_output="" tmpfile
         tmpfile=$(mktemp)
-        agent-sessions "${cli_args[@]}" >"$tmpfile" 2>/dev/null &
+        # A killed run must not leak the scratch file.
+        trap 'rm -f "${tmpfile:-}"' EXIT
+        trap 'kill "${cli_pid:-}" 2>/dev/null || true; rm -f "${tmpfile:-}"; exit 143' TERM INT
+        "$cli_bin" "${cli_args[@]}" >"$tmpfile" 2>/dev/null &
         local cli_pid=$!
         local waited=0
         while kill -0 "$cli_pid" 2>/dev/null && [[ $waited -lt 5 ]]; do
@@ -203,6 +215,7 @@ cmd_search() {
             cli_output=$(cat "$tmpfile")
         fi
         rm -f "$tmpfile"
+        trap - EXIT TERM INT
 
         if [[ -n "$cli_output" ]]; then
             # Extract IDs from CLI output and enrich with DB data

@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine Room — Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --rule:rgba(231,227,218,0.14);
+    --rule-strong:rgba(231,227,218,0.32);
+    --sage:hsl(158,30%,55%);
+    --sage-dim:hsla(158,30%,55%,0.22);
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--bg);color-scheme:dark}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-size:14px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--sage);color:#14231D}
+  .shell{max-width:1260px;margin:0 auto;padding:0 48px}
+
+  /* ---------- top nav ---------- */
+  .topbar{border-bottom:1px solid var(--rule)}
+  .nav-row{display:flex;align-items:center;justify-content:space-between;padding:20px 48px}
+  .wordmark{font-family:var(--serif);font-size:20px;letter-spacing:0.01em;color:var(--ink)}
+  .nav a{
+    display:inline-flex;align-items:center;min-height:26px;
+    margin-left:30px;padding:2px 1px;
+    font-size:13.5px;color:var(--muted);text-decoration:none;letter-spacing:0.01em;
+    border-bottom:2px solid transparent;
+  }
+  .nav a:hover{color:var(--ink)}
+  .nav a.active{color:var(--ink);border-bottom-color:var(--sage)}
+
+  /* ---------- page head ---------- */
+  .head{padding-top:44px;padding-bottom:38px;border-bottom:1px solid var(--rule)}
+  .eyebrow{
+    font-size:12px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;
+    color:var(--muted);
+  }
+  h1{
+    margin-top:14px;
+    font-family:var(--serif);font-weight:400;font-size:32px;line-height:1.18;
+    letter-spacing:-0.005em;color:var(--ink);
+  }
+  .state{
+    margin-top:20px;max-width:880px;
+    font-family:var(--serif);font-size:19px;line-height:1.5;color:var(--ink);
+    border-left:3px solid var(--sage);padding-left:18px;
+  }
+  .state em{font-style:italic}
+  .dek{
+    margin-top:16px;max-width:780px;
+    font-family:var(--serif);font-size:15px;line-height:1.6;color:var(--muted);
+  }
+  .asof{margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+
+  /* ---------- main grid ---------- */
+  .grid{
+    display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);
+    column-gap:36px;margin-top:38px;
+  }
+  .col-b{border-left:1px solid var(--rule);padding-left:36px}
+  .sec + .sec{border-top:1px solid var(--rule);margin-top:42px;padding-top:28px}
+  .label-row{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+  .label{
+    font-size:12px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;
+    color:var(--muted);
+  }
+  .label-note{font-size:12px;color:var(--faint)}
+  .lede{margin-top:12px;font-family:var(--serif);font-size:14.5px;line-height:1.55;color:var(--muted)}
+
+  code{font-family:var(--mono);font-size:12.5px;color:var(--faint);letter-spacing:0}
+
+  /* ---------- systems ---------- */
+  .svc{list-style:none;margin-top:18px}
+  .svc li{display:flex;gap:13px;align-items:flex-start}
+  .svc li + li{margin-top:17px}
+  .dot{flex:none;width:9px;height:9px;border-radius:50%;margin-top:6px}
+  .dot.on{background:var(--sage)}
+  .dot.rest{background:transparent;border:1.5px solid rgba(231,227,218,0.55)}
+  .svc-line1{font-size:14px;line-height:1.45}
+  .svc-name{font-size:15px;font-weight:600;color:var(--ink)}
+  .svc-role{color:var(--muted);font-size:13.5px}
+  .svc-line2{margin-top:3px;font-size:13px;line-height:1.5;color:var(--muted)}
+  .svc-line2 b{font-weight:500;color:var(--ink)}
+  .svc-line2 em{font-style:italic}
+
+  /* ---------- scheduler ---------- */
+  .sched p{margin-top:12px;font-size:14px;line-height:1.6;color:var(--muted)}
+  .sched p.leadline{color:var(--ink);font-size:14.5px}
+  .sched p.leadline em{font-family:var(--serif);font-style:italic}
+  .pause-row{margin-top:20px;display:flex;align-items:flex-start;gap:18px}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;flex:none;
+    min-height:38px;padding:0 18px;
+    background:rgba(231,227,218,0.05);
+    border:1px solid var(--rule-strong);border-radius:5px;
+    font-family:var(--sans);font-size:13.5px;font-weight:500;color:var(--ink);
+    cursor:pointer;
+  }
+  .btn:hover{background:rgba(231,227,218,0.10);border-color:rgba(231,227,218,0.5)}
+  .pause-note{font-size:12.5px;line-height:1.55;color:var(--faint);padding-top:2px}
+
+  /* ---------- incidents ---------- */
+  .inc-state{margin-top:14px;font-size:14px;line-height:1.55;color:var(--muted)}
+  .inc{margin-top:22px}
+  .inc-meta{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+  .inc-meta .when{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  .inc-meta .when b{color:var(--ink);font-weight:500}
+  .role-tag{
+    flex:none;font-size:12px;font-weight:600;letter-spacing:0.12em;
+    text-transform:uppercase;color:var(--faint);
+  }
+  .inc-body{margin-top:7px;font-size:14px;line-height:1.58;color:var(--ink);max-width:640px}
+  .inc-cost{margin-top:6px;font-size:12.5px;color:var(--faint)}
+  .inc-tail{margin-top:24px;font-size:12.5px;color:var(--faint)}
+
+  /* ---------- ledger ---------- */
+  .meter{position:relative;height:8px;margin-top:20px;background:rgba(231,227,218,0.10);border-radius:2px;overflow:hidden}
+  .meter .spent{position:absolute;top:0;bottom:0;left:0;width:17.4%;background:var(--sage)}
+  .meter .expect{position:absolute;top:0;bottom:0;left:17.4%;width:61.8%;background:var(--sage-dim)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;font-size:12.5px;color:var(--muted)}
+  .legend .sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:-1px}
+  .sw.a{background:var(--sage)}
+  .sw.b{background:var(--sage-dim)}
+  .sw.c{background:rgba(231,227,218,0.10)}
+  .led{margin-top:20px}
+  .led-row{display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-top:1px solid var(--rule)}
+  .led-name{font-size:14px;font-weight:600;color:var(--ink)}
+  .led-what{margin-top:2px;font-size:12.5px;line-height:1.5;color:var(--faint)}
+  .led-amt{flex:none;font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .led-total{display:flex;justify-content:space-between;gap:18px;padding:12px 0 2px;border-top:1px solid var(--rule-strong)}
+  .led-total .t-label{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .led-total .t-amt{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .led-notes{margin-top:14px;font-size:12.5px;line-height:1.6;color:var(--faint)}
+
+  /* ---------- research ---------- */
+  .sweep{margin-top:20px}
+  .sweep-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
+  .sweep-name{font-family:var(--serif);font-style:italic;font-size:16.5px;line-height:1.35;color:var(--ink)}
+  .sweep-name code{font-style:normal;margin-left:8px}
+  .sweep-status{margin-top:5px;font-size:13.5px;line-height:1.55;color:var(--muted)}
+  .queue{margin-top:24px;padding-top:18px;border-top:1px solid var(--rule);
+         font-size:13.5px;line-height:1.6;color:var(--muted)}
+  .queue em{font-family:var(--serif);font-style:italic;color:var(--ink)}
+
+  /* ---------- data ---------- */
+  .data-item{margin-top:18px}
+  .data-item .d-line{font-size:14px;line-height:1.55;color:var(--ink)}
+  .data-item .d-line strong{font-weight:600}
+  .data-item .d-sub{margin-top:4px;font-size:12.5px;line-height:1.55;color:var(--faint)}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:64px;border-top:1px solid var(--rule)}
+  .foot-row{
+    display:flex;align-items:center;justify-content:space-between;gap:24px;
+    padding:26px 48px 44px;
+  }
+  .foot-side{font-size:12px;color:var(--faint)}
+  .motto{
+    font-size:12px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;
+    color:var(--muted);text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="nav-row" style="max-width:1260px;margin:0 auto">
+    <div class="wordmark">Palingenesis</div>
+    <nav class="nav">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#" class="active" aria-current="page">Engine Room</a>
+    </nav>
+  </div>
+</header>
+
+<section class="head shell">
+  <p class="eyebrow">Engine Room</p>
+  <h1>The machine, with the panels off.</h1>
+  <p class="state">Six services answering, one resting to schedule. The day has spent <strong>$87.14</strong> of its <strong>$500</strong>. Cycle&nbsp;214 — <em>Vernation</em> — begins at 18:00 tonight. Nothing is broken.</p>
+  <p class="dek">The one room where the operator’s whole truth lives — every service, every dollar, every fault, with its receipts. You come here on purpose; nothing from this room is pushed to the other pages.</p>
+  <p class="asof">reported live · Saturday, August 22, 2026 · 06:42:19 CT · figures at most five seconds old · the machine keeps its books in UTC and speaks to you in Central</p>
+</section>
+
+<main class="shell grid">
+
+  <!-- ======================= left column ======================= -->
+  <div class="col-a">
+
+    <section class="sec">
+      <div class="label-row">
+        <span class="label">Systems</span>
+        <span class="label-note">watches counted from last cold start</span>
+      </div>
+      <ul class="svc">
+        <li>
+          <span class="dot on"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Reader</span> <code>svc.reader</code> <span class="svc-role">— reads and files the literature; nothing is cited unread.</span></div>
+            <div class="svc-line2"><b>Running 13 days</b>, since Aug 9, 04:02 CT · last act 06:41 — read and sourced Zhao et&nbsp;al. 2026 for <em>Saline irrigation tolerance</em>.</div>
+          </div>
+        </li>
+        <li>
+          <span class="dot on"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Scout</span> <code>svc.scout</code> <span class="svc-role">— watches 61 journals and 4 patent feeds for anything worth reading.</span></div>
+            <div class="svc-line2"><b>Running 13 days</b>, since Aug 9, 04:02 CT · last find 05:57 — flagged one preprint to the Reader.</div>
+          </div>
+        </li>
+        <li>
+          <span class="dot on"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Council</span> <code>svc.council</code> <span class="svc-role">— deliberates on candidates and drafts every verdict.</span></div>
+            <div class="svc-line2"><b>Running 6 days</b>, since Aug 16, 07:43 CT (planned restart, quarterly model review — <code>MAINT-007</code>) · last sitting closed 05:49, the morning brief.</div>
+          </div>
+        </li>
+        <li>
+          <span class="dot rest"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Simulator</span> <code>svc.sim</code> <span class="svc-role">— trials every candidate against field physics before a verdict may cite it.</span></div>
+            <div class="svc-line2"><b>Resting since 05:52 CT</b>, as scheduled · wakes for Cycle&nbsp;214 at 18:00 · overnight it ran 140 trials for <code>swp-116</code>, all within physical bounds.</div>
+          </div>
+        </li>
+        <li>
+          <span class="dot on"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Archivist</span> <code>svc.arch</code> <span class="svc-role">— writes the permanent record: sources, costs, verdicts.</span></div>
+            <div class="svc-line2"><b>Running 41 days</b>, since Jul 12, 04:00 CT · 412 records written since midnight, each checksummed twice · never sleeps, even through a pause.</div>
+          </div>
+        </li>
+        <li>
+          <span class="dot on"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Courier</span> <code>svc.courier</code> <span class="svc-role">— composes and delivers the morning brief to Today.</span></div>
+            <div class="svc-line2"><b>Running 13 days</b>, since Aug 9, 04:02 CT · delivered this morning’s brief at 06:00:12 CT — the 41st consecutive on-time morning.</div>
+          </div>
+        </li>
+        <li>
+          <span class="dot on"></span>
+          <div>
+            <div class="svc-line1"><span class="svc-name">Warden</span> <code>svc.warden</code> <span class="svc-role">— meters every call against the cap and holds the pause key.</span></div>
+            <div class="svc-line2"><b>Running 87 days</b>, since May 27, 09:15 CT — the longest watch · has never had to use the emergency stop.</div>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="sec sched">
+      <div class="label-row">
+        <span class="label">Scheduler</span>
+        <span class="label-note">all times Central</span>
+      </div>
+      <p>One generation cycle nightly at 18:00 CT — set by the owner on May&nbsp;4, unchanged for 110 days. The morning brief posts by 06:00 CT. Cycles are named from the plant’s own calendar of acts.</p>
+      <p class="leadline">Next: Cycle&nbsp;214, <em>Vernation</em> — begins in 11&nbsp;h&nbsp;18&nbsp;m, expected to close near 23:40 CT (median run of the last twelve cycles: 5&nbsp;h&nbsp;38&nbsp;m). Last night, Cycle&nbsp;213 — <em>Tillering</em> — closed at 23:31 after 5&nbsp;h&nbsp;31&nbsp;m, spent $301.22, and sent three findings to the Library.</p>
+      <div class="pause-row">
+        <button class="btn" type="button">Pause after Vernation</button>
+        <p class="pause-note">Pausing needs the owner’s key and takes effect between cycles, never mid-verdict; every use is entered in the log. The Archivist and the Warden stay awake through any pause.</p>
+      </div>
+      <p style="font-size:12.5px;color:var(--faint);margin-top:14px">Paused once in 110 days — Aug 16, 07:02–07:43 CT, planned, for the quarterly model review (<code>MAINT-007</code>). An immediate stop exists; it has never been needed.</p>
+    </section>
+
+    <section class="sec">
+      <div class="label-row">
+        <span class="label">Incidents</span>
+        <span class="label-note">sixty-day window, unabridged</span>
+      </div>
+      <p class="inc-state">Nothing open. Three incidents in the last sixty days, the longest 41 minutes — each entered below with what broke, what was done, and what it cost.</p>
+
+      <div class="inc">
+        <div class="inc-meta">
+          <span class="when"><b>INC-041</b> · Aug 19, 08:31–09:12 CT · 41 minutes</span>
+          <span class="role-tag">Reader</span>
+        </div>
+        <p class="inc-body">A malformed PDF batch — fourteen files from the <em>Journal of Arid Agronomy</em> — stalled the Reader. The Warden halted the batch at the third failure and quarantined all fourteen; clean copies were re-fetched the next morning, and the publisher wrote back on Aug 20. No claim from the bad batch ever reached the Library.</p>
+        <p class="inc-cost">Cost of the stall $0.88, kept on the books · closed 09:12 CT · entered by the Warden.</p>
+      </div>
+
+      <div class="inc">
+        <div class="inc-meta">
+          <span class="when"><b>INC-040</b> · Aug 12, 18:02–18:31 CT · 29 minutes</span>
+          <span class="role-tag">Council</span>
+        </div>
+        <p class="inc-body">The upstream model API went dark for 28 minutes at cycle start. Cycle&nbsp;204 began at 18:31; two interrupted deliberations were discarded and re-run whole rather than resumed. Every verdict from that night carries a late-start note in its margin.</p>
+        <p class="inc-cost">$1.12 in discarded calls, kept on the books · closed 18:31 CT · entered by the Warden.</p>
+      </div>
+
+      <div class="inc">
+        <div class="inc-meta">
+          <span class="when"><b>INC-039</b> · Jul 30, 21:14–22:03 CT · 49 minutes</span>
+          <span class="role-tag">Simulator</span>
+        </div>
+        <p class="inc-body">Three trials reported soil temperatures no soil could hold — a unit slip at ingest, °F read as °C. The three verdicts were voided and re-run the same night; a bounds check now rejects any out-of-range trial before it can score, and the fix was verified in Cycle&nbsp;192’s log.</p>
+        <p class="inc-cost">$3.40 to re-run, kept on the books · closed 22:03 CT · entered by the Warden.</p>
+      </div>
+
+      <p class="inc-tail">The full log — 17 incidents since Cycle&nbsp;1 woke on Jan 21 — lives with the Archivist, unabridged. Nothing has ever reached the Library unverified.</p>
+    </section>
+
+  </div>
+
+  <!-- ======================= right column ======================= -->
+  <div class="col-b">
+
+    <section class="sec">
+      <div class="label-row">
+        <span class="label">The Day’s Ledger</span>
+        <span class="label-note">resets 00:00 CT</span>
+      </div>
+
+      <div class="meter" role="img" aria-label="Spent $87.14 of the $500 daily cap; expected close near $396.">
+        <span class="expect"></span>
+        <span class="spent"></span>
+      </div>
+      <div class="legend">
+        <span><span class="sw a"></span>spent $87.14</span>
+        <span><span class="sw b"></span>expected close ≈ $396 · median pace, last 12 days</span>
+        <span><span class="sw c"></span>cap $500.00, hard</span>
+      </div>
+
+      <div class="led">
+        <div class="led-row">
+          <div><div class="led-name">Reader</div><div class="led-what">388 papers read · 2.14&nbsp;M tokens metered</div></div>
+          <div class="led-amt">$41.62</div>
+        </div>
+        <div class="led-row">
+          <div><div class="led-name">Council</div><div class="led-what">one sitting, the morning brief · 41 deliberations</div></div>
+          <div class="led-amt">$21.06</div>
+        </div>
+        <div class="led-row">
+          <div><div class="led-name">Simulator</div><div class="led-what">140 trial runs for <code>swp-116</code> · 3.2 compute-hours</div></div>
+          <div class="led-amt">$9.87</div>
+        </div>
+        <div class="led-row">
+          <div><div class="led-name">Scout</div><div class="led-what">3,041 feed items screened, 12 kept</div></div>
+          <div class="led-amt">$7.18</div>
+        </div>
+        <div class="led-row">
+          <div><div class="led-name">Archivist</div><div class="led-what">412 records written, checksummed twice</div></div>
+          <div class="led-amt">$5.90</div>
+        </div>
+        <div class="led-row">
+          <div><div class="led-name">Warden</div><div class="led-what">meters every call, and bills its own metering</div></div>
+          <div class="led-amt">$0.89</div>
+        </div>
+        <div class="led-row">
+          <div><div class="led-name">Courier</div><div class="led-what">one brief composed and delivered</div></div>
+          <div class="led-amt">$0.62</div>
+        </div>
+        <div class="led-total">
+          <span class="t-label">Spent since 00:00 CT</span>
+          <span class="t-amt">$87.14</span>
+        </div>
+      </div>
+
+      <p class="led-notes">Every figure metered at the call by the Warden and reconciled nightly against provider invoices — last reconciliation Aug 21, 23:58 CT, drift $0.00. The $500 cap was set by the owner on May&nbsp;4 and changes only by the owner’s key; the Warden refuses the first call that would cross it. August to date: $6,941.97 across 21 closed days, mean $330.57.</p>
+    </section>
+
+    <section class="sec">
+      <div class="label-row">
+        <span class="label">Research Operations</span>
+        <span class="label-note">queue depth 9</span>
+      </div>
+      <p class="lede">Three sweeps in flight — the Council admits no more than three at once.</p>
+
+      <div class="sweep">
+        <div class="sweep-head">
+          <span class="sweep-name">Nitrogen-fixing endophytes for dryland maize<code>swp-116</code></span>
+          <span class="role-tag">Simulator</span>
+        </div>
+        <p class="sweep-status">140 of 400 trials run; the rest complete in Cycle&nbsp;214, verdicts expected from Cycle&nbsp;215. Opened Aug 12 from a Scout find.</p>
+      </div>
+
+      <div class="sweep">
+        <div class="sweep-head">
+          <span class="sweep-name">Low-chill dormancy in stone-fruit rootstock<code>swp-118</code></span>
+          <span class="role-tag">Council</span>
+        </div>
+        <p class="sweep-status">38 candidates held to 6 in last night’s sitting; verdict drafts are open. Opened Aug 15 by the owner.</p>
+      </div>
+
+      <div class="sweep">
+        <div class="sweep-head">
+          <span class="sweep-name">Saline irrigation tolerance in cereal rye<code>swp-121</code></span>
+          <span class="role-tag">Reader</span>
+        </div>
+        <p class="sweep-status">812 of 1,214 papers read, of a corpus fixed at filing; the Council sits on it tonight. Opened Aug 18 by the owner.</p>
+      </div>
+
+      <p class="queue">The queue behind them holds 9 sweeps; the deepest wait is four days — <em>Perennial wheat lodging</em>, filed Aug 18. Depth is the price of the three-sweep rule, and the rule holds.</p>
+    </section>
+
+    <section class="sec">
+      <div class="label-row">
+        <span class="label">Data</span>
+        <span class="label-note">snapshots every six hours</span>
+      </div>
+
+      <div class="data-item">
+        <p class="d-line"><strong>Snapshot.</strong> Last taken 06:00 CT — <code>snap-0822-0600</code>, 41.2&nbsp;GB, checksum verified 06:04 CT.</p>
+        <p class="d-sub">Held in two regions, Iowa and Oregon · size from the object-store manifest · ninety days kept.</p>
+      </div>
+
+      <div class="data-item">
+        <p class="d-line"><strong>Backfill.</strong> USDA field-trial records, 2014–2021 — 611,482 of 728,090 rows in, 84%.</p>
+        <p class="d-sub">Counts from the source manifest · runs only in the machine’s idle hours · expected complete Aug 29.</p>
+      </div>
+
+      <div class="data-item">
+        <p class="d-line"><strong>Recovery.</strong> Nothing in recovery. Last restore drill Aug 17 — the full library rebuilt in a clean room in 22 minutes and checked against 1,024 sampled claims, zero mismatches.</p>
+        <p class="d-sub">Drills monthly, on the 17th · <code>DRILL-007</code>, entered by the Archivist.</p>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div class="foot-row" style="max-width:1260px;margin:0 auto">
+    <span class="foot-side">Palingenesis · Engine Room</span>
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="foot-side">reported live · 06:42 CT</span>
+  </div>
+</footer>
+
+</body>
+</html>

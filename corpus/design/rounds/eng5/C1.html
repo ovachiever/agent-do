@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Engine Room — Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917; --panel:#211E1B;
+    --cream:#E7E3DA; --muted:#A69D90;
+    --hair:rgba(231,227,218,0.14); --hair2:rgba(231,227,218,0.08);
+    --sage:#9DB08A; --clay:#C67B5C;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{min-width:1440px;color:var(--cream);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .label{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .clay{color:var(--clay)} .sage{color:var(--sage)} .mutd{color:var(--muted)}
+  .drill{border-bottom:1px dotted rgba(231,227,218,0.38)}
+  .page{width:1392px;margin:0 auto}
+
+  /* ── nav ─────────────────────────────── */
+  nav{border-bottom:1px solid var(--hair)}
+  .navin{width:1392px;margin:0 auto;height:47px;display:flex;align-items:center;gap:22px}
+  .brand{font:16px var(--serif);letter-spacing:.04em;color:var(--cream)}
+  .navlinks{margin-left:auto;display:flex;gap:20px;align-items:center}
+  .navlinks a{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:15px 0 13px}
+  .navlinks a.on{color:var(--cream);border-bottom:2px solid var(--cream)}
+  .navstamp{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);border-left:1px solid var(--hair);padding-left:20px}
+
+  /* ── lede ────────────────────────────── */
+  .lede{padding:14px 0 10px}
+  .lede h1{font:400 20px/1.35 var(--serif);color:var(--cream)}
+  .lede h1 .mono{font-size:17px}
+  .lede .sub{margin-top:5px;font-size:12px;color:var(--muted)}
+  .lede .sub .mono{font-size:12px}
+
+  /* ── the line (svg) ──────────────────── */
+  .lineband{padding:2px 0 8px;border-top:1px solid var(--hair)}
+  svg text{font-family:var(--sans)}
+  svg .t-mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  svg .t-label{font-weight:600;letter-spacing:.08em}
+
+  /* ── timetable ───────────────────────── */
+  .gridband{border-top:1px solid var(--hair);padding-top:8px}
+  .bandtitle{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  .bandtitle .rt{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
+  table.tt{width:1392px;table-layout:fixed;border-collapse:collapse;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px}
+  table.tt col.stage{width:112px}
+  table.tt col.cyc{width:80px}
+  table.tt th,table.tt td{padding:2px 3px;text-align:left;vertical-align:top;font-weight:400}
+  table.tt thead th{border-bottom:1px solid var(--hair);padding-bottom:4px}
+  table.tt tbody tr{border-top:1px solid var(--hair2)}
+  table.tt td,table.tt th{border-left:1px solid var(--hair2)}
+  table.tt td:first-child,table.tt th:first-child{border-left:none}
+  .hcy{display:block;color:var(--cream)} .hbk{display:block;color:var(--muted)}
+  .b{display:block;color:var(--muted)} .a{display:block;color:var(--cream)}
+  .x{text-decoration:line-through} .pend{color:var(--muted)}
+  td.now{box-shadow:inset 0 0 0 1px var(--sage)}
+  .stg .id{display:block;color:var(--muted)} .stg .vb{display:block;color:var(--cream);font-family:var(--sans)}
+  .ttfoot{margin-top:6px;font-size:12px;color:var(--muted)}
+  .ttfoot .mono{font-size:12px}
+
+  /* ── dense band ──────────────────────── */
+  .dense{display:flex;margin-top:12px;border-top:1px solid var(--hair);padding-top:10px}
+  .col{padding-right:14px}
+  .col + .col{border-left:1px solid var(--hair);padding-left:14px}
+  .c-ledger{width:452px} .c-sched{width:224px} .c-data{width:232px} .c-inc{width:484px}
+  .coltitle{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .coltitle .rt{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
+  .lrow{display:flex;align-items:center;gap:10px;height:21px;font-size:12px}
+  .lrow .nm{width:74px;color:var(--cream)}
+  .lrow .sp{width:96px;text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+  .lrow .pc{width:42px;text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+  .lrow .cl{width:84px;text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--cream)}
+  .lrow .track{flex:1;height:4px;background:var(--hair2);position:relative}
+  .lrow .fill{position:absolute;left:0;top:0;bottom:0;background:var(--muted)}
+  .lrow .tick{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--cream)}
+  .lrow.hd{height:16px;font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .lrow.hd .nm,.lrow.hd .cl{color:var(--muted);font-family:var(--sans)}
+  .lrow.tot{border-top:1px solid var(--hair);margin-top:3px;padding-top:3px;height:24px}
+  .lrow.tot .nm,.lrow.tot .sp,.lrow.tot .pc{color:var(--cream)}
+  .kv{margin-bottom:8px}
+  .kv .k{font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream);margin-top:1px}
+  .inc{margin-bottom:9px}
+  .inc .l1{display:flex;gap:8px;align-items:baseline;font-size:12px}
+  .inc .l1 .tm{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .inc .l1 .tag{font-weight:600}
+  .inc .l1 .st{margin-left:auto;font-family:var(--mono);font-size:12px}
+  .inc .l2{font-size:12px;color:var(--muted);margin-top:1px}
+  .inc .l2 .mono{font-size:12px}
+
+  /* ── control strip ───────────────────── */
+  .strip{display:flex;align-items:center;margin-top:12px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:9px 0}
+  .strip .half{display:flex;align-items:center;gap:14px}
+  .strip .left{width:56%;padding-right:18px}
+  .strip .right{width:44%;border-left:1px solid var(--hair);padding-left:18px}
+  .suspend{flex:none;background:none;border:1px solid var(--cream);color:var(--cream);
+    font:600 12px var(--sans);letter-spacing:.09em;text-transform:uppercase;
+    padding:9px 18px;min-height:32px;cursor:pointer}
+  .conseq{font-size:12px;color:var(--muted);line-height:1.5}
+  .lawtext{font-size:12px;color:var(--muted);line-height:1.5}
+  .lawtext .law{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--cream);margin-right:6px}
+
+  /* ── footer ──────────────────────────── */
+  footer{margin-top:12px;padding:10px 0 14px}
+  .footin{width:1392px;margin:0 auto;display:flex;align-items:baseline}
+  .motto{font:italic 13px var(--serif);color:var(--cream)}
+  .fmeta{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="navin">
+    <span class="brand">Palingenesis</span>
+    <div class="navlinks">
+      <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a class="on" href="#">Engine Room</a>
+      <span class="navstamp">SAT 2026-08-22 · 14:41:26</span>
+    </div>
+  </div>
+</nav>
+
+<main class="page">
+
+  <!-- verdict lede -->
+  <section class="lede">
+    <h1>All six services up. Scout is mid-cycle — <span class="mono">c11</span> of <span class="mono">16</span> — with spend at
+      <span class="mono drill">$216.44</span> of the <span class="mono">$500</span> cap, pacing <span class="mono">$10.02</span> a day
+      toward a <span class="mono">$310.47</span> close. Next cycle <span class="mono">c12</span> fires at <span class="mono drill">15:55:00</span>.</h1>
+    <div class="sub">August is <span class="mono">70%</span> elapsed; the cap is <span class="mono">43%</span> burned — spend runs
+      <span class="mono">27</span> points behind the calendar. Open: <span class="clay">▲ feed FD-2107</span> (watching to <span class="mono">18:00</span>).
+      Struck clean: <span class="mono">c04</span> (feeds empty, <span class="mono">$0</span>).</div>
+  </section>
+
+  <!-- THE LINE -->
+  <section class="lineband">
+    <svg width="1392" height="205" viewBox="0 0 1392 205" role="img" aria-label="The line: six services with flows, cycle clock, feed exception">
+      <!-- cycle clock node -->
+      <rect x="536" y="6" width="320" height="44" fill="var(--panel)" stroke="rgba(231,227,218,0.14)"/>
+      <circle cx="552" cy="17.5" r="3.5" fill="#9DB08A"/>
+      <text x="562" y="22" class="t-label" font-size="12" fill="#A69D90">CYCLE CLOCK</text>
+      <text x="548" y="41" class="t-mono" font-size="12" fill="#E7E3DA">c11 of 16 · 11m of 50 · next c12 15:55:00</text>
+
+      <!-- legend -->
+      <line x1="1085" y1="18" x2="1109" y2="18" stroke="#A69D90" stroke-width="1.5"/>
+      <text x="1113" y="22" font-size="12" fill="#A69D90">flow</text>
+      <line x1="1156" y1="18" x2="1180" y2="18" stroke="#A69D90" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <text x="1184" y="22" font-size="12" fill="#A69D90">control</text>
+      <circle cx="1249" cy="18" r="4" fill="#9DB08A"/>
+      <text x="1257" y="22" font-size="12" fill="#A69D90">running</text>
+      <text x="1320" y="22" font-size="12" fill="#C67B5C">▲</text>
+      <text x="1336" y="22" font-size="12" fill="#A69D90">exception</text>
+
+      <!-- control bus (dashed) -->
+      <line x1="696" y1="50" x2="696" y2="62" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="242.5" y1="62" x2="1312.5" y2="62" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="242.5" y1="62" x2="242.5" y2="76" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="456.5" y1="62" x2="456.5" y2="76" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="670.5" y1="62" x2="670.5" y2="76" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="884.5" y1="62" x2="884.5" y2="76" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="1098.5" y1="62" x2="1098.5" y2="76" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="1312.5" y1="62" x2="1312.5" y2="76" stroke="#A69D90" stroke-width="1" stroke-dasharray="3 3"/>
+
+      <!-- source feeds rail + clay exception pin -->
+      <text x="8" y="96" class="t-label" font-size="12" fill="#A69D90">SOURCE FEEDS</text>
+      <text x="8" y="113" class="t-mono" font-size="12" fill="#E7E3DA">14 feeds · 13 up</text>
+      <line x1="8" y1="122" x2="156" y2="122" stroke="#A69D90" stroke-width="1.5"/>
+      <polygon points="156,117.5 156,126.5 163,122" fill="#A69D90"/>
+      <text x="8" y="141" font-size="12" font-weight="600" fill="#C67B5C">▲ FD-2107 stalled 18m</text>
+      <text x="8" y="157" class="t-mono" font-size="12" fill="#C67B5C">08:44–09:02</text>
+      <text x="8" y="173" font-size="12" fill="#C67B5C">c07 +13m · wake +4m</text>
+
+      <!-- station 1 · Reader -->
+      <rect x="164" y="76" width="157" height="92" fill="var(--panel)" stroke="rgba(231,227,218,0.14)"/>
+      <text x="174" y="93" class="t-mono" font-size="12" fill="#A69D90">RD-01</text>
+      <text x="311" y="93" text-anchor="end" class="t-mono" font-size="12" fill="#A69D90">idle · 15:55</text>
+      <text x="174" y="112" font-size="15" font-weight="600" fill="#E7E3DA">Reader</text>
+      <text x="174" y="129" font-size="12" fill="#A69D90">reads the new papers</text>
+      <text x="174" y="146" class="t-mono" font-size="12" fill="#E7E3DA">217 excerpts today</text>
+      <text x="174" y="162" class="t-mono" font-size="12" fill="#A69D90">$58.31 of $120 aug</text>
+
+      <!-- flow 1 -->
+      <text x="349.5" y="112" text-anchor="middle" class="t-mono" font-size="12" fill="#E7E3DA">217</text>
+      <line x1="323" y1="122" x2="371" y2="122" stroke="#A69D90" stroke-width="1.5"/>
+      <polygon points="371,117.5 371,126.5 378,122" fill="#A69D90"/>
+      <text x="349.5" y="138" text-anchor="middle" font-size="12" fill="#A69D90">excerpts</text>
+
+      <!-- station 2 · Scout (running · sage) -->
+      <rect x="378" y="76" width="157" height="92" fill="var(--panel)" stroke="#9DB08A" stroke-width="1.5"/>
+      <text x="388" y="93" class="t-mono" font-size="12" fill="#A69D90">SC-02</text>
+      <text x="525" y="93" text-anchor="end" class="t-mono" font-size="12" font-weight="600" fill="#9DB08A">RUNNING</text>
+      <text x="388" y="112" font-size="15" font-weight="600" fill="#E7E3DA">Scout</text>
+      <text x="388" y="129" font-size="12" fill="#A69D90">shortlists the leads</text>
+      <text x="388" y="146" class="t-mono" font-size="12" fill="#E7E3DA">41 leads today</text>
+      <text x="388" y="162" class="t-mono" font-size="12" fill="#A69D90">$24.18 of $60 aug</text>
+
+      <!-- flow 2 -->
+      <text x="563.5" y="112" text-anchor="middle" class="t-mono" font-size="12" fill="#E7E3DA">41</text>
+      <line x1="537" y1="122" x2="585" y2="122" stroke="#A69D90" stroke-width="1.5"/>
+      <polygon points="585,117.5 585,126.5 592,122" fill="#A69D90"/>
+      <text x="563.5" y="138" text-anchor="middle" font-size="12" fill="#A69D90">leads</text>
+
+      <!-- station 3 · Council -->
+      <rect x="592" y="76" width="157" height="92" fill="var(--panel)" stroke="rgba(231,227,218,0.14)"/>
+      <text x="602" y="93" class="t-mono" font-size="12" fill="#A69D90">CN-03</text>
+      <text x="739" y="93" text-anchor="end" class="t-mono" font-size="12" fill="#A69D90">queued 14:47</text>
+      <text x="602" y="112" font-size="15" font-weight="600" fill="#E7E3DA">Council</text>
+      <text x="602" y="129" font-size="12" fill="#A69D90">votes what advances</text>
+      <text x="602" y="146" class="t-mono" font-size="12" fill="#E7E3DA">12 of 41 approved</text>
+      <text x="602" y="162" class="t-mono" font-size="12" fill="#A69D90">$41.07 of $90 aug</text>
+
+      <!-- flow 3 -->
+      <text x="777.5" y="112" text-anchor="middle" class="t-mono" font-size="12" fill="#E7E3DA">12</text>
+      <line x1="751" y1="122" x2="799" y2="122" stroke="#A69D90" stroke-width="1.5"/>
+      <polygon points="799,117.5 799,126.5 806,122" fill="#A69D90"/>
+      <text x="777.5" y="138" text-anchor="middle" font-size="12" fill="#A69D90">approvals</text>
+
+      <!-- station 4 · Simulator -->
+      <rect x="806" y="76" width="157" height="92" fill="var(--panel)" stroke="rgba(231,227,218,0.14)"/>
+      <text x="816" y="93" class="t-mono" font-size="12" fill="#A69D90">SM-04</text>
+      <text x="953" y="93" text-anchor="end" class="t-mono" font-size="12" fill="#A69D90">idle · 14:54</text>
+      <text x="816" y="112" font-size="15" font-weight="600" fill="#E7E3DA">Simulator</text>
+      <text x="816" y="129" font-size="12" fill="#A69D90">test-grows the winners</text>
+      <text x="816" y="146" class="t-mono" font-size="12" fill="#E7E3DA">12 runs · 3h 09m</text>
+      <text x="816" y="162" class="t-mono" font-size="12" fill="#A69D90">$71.66 of $150 aug</text>
+
+      <!-- flow 4 -->
+      <text x="991.5" y="112" text-anchor="middle" class="t-mono" font-size="12" fill="#E7E3DA">12</text>
+      <line x1="965" y1="122" x2="1013" y2="122" stroke="#A69D90" stroke-width="1.5"/>
+      <polygon points="1013,117.5 1013,126.5 1020,122" fill="#A69D90"/>
+      <text x="991.5" y="138" text-anchor="middle" font-size="12" fill="#A69D90">results</text>
+
+      <!-- station 5 · Archivist -->
+      <rect x="1020" y="76" width="157" height="92" fill="var(--panel)" stroke="rgba(231,227,218,0.14)"/>
+      <text x="1030" y="93" class="t-mono" font-size="12" fill="#A69D90">AR-05</text>
+      <text x="1167" y="93" text-anchor="end" class="t-mono" font-size="12" fill="#A69D90">idle · 15:08</text>
+      <text x="1030" y="112" font-size="15" font-weight="600" fill="#E7E3DA">Archivist</text>
+      <text x="1030" y="129" font-size="12" fill="#A69D90">files every result</text>
+      <text x="1030" y="146" class="t-mono" font-size="12" fill="#E7E3DA">26 filings today</text>
+      <text x="1030" y="162" class="t-mono" font-size="12" fill="#A69D90">$9.44 of $30 aug</text>
+
+      <!-- flow 5 -->
+      <text x="1205.5" y="112" text-anchor="middle" class="t-mono" font-size="12" fill="#E7E3DA">9</text>
+      <line x1="1179" y1="122" x2="1227" y2="122" stroke="#A69D90" stroke-width="1.5"/>
+      <polygon points="1227,117.5 1227,126.5 1234,122" fill="#A69D90"/>
+      <text x="1205.5" y="138" text-anchor="middle" font-size="12" fill="#A69D90">notes</text>
+
+      <!-- station 6 · Courier -->
+      <rect x="1234" y="76" width="157" height="92" fill="var(--panel)" stroke="rgba(231,227,218,0.14)"/>
+      <text x="1244" y="93" class="t-mono" font-size="12" fill="#A69D90">CO-06</text>
+      <text x="1381" y="93" text-anchor="end" class="t-mono" font-size="12" fill="#A69D90">idle · 15:14</text>
+      <text x="1244" y="112" font-size="15" font-weight="600" fill="#E7E3DA">Courier</text>
+      <text x="1244" y="129" font-size="12" fill="#A69D90">delivers to the owner</text>
+      <text x="1244" y="146" class="t-mono" font-size="12" fill="#E7E3DA">9 notes today</text>
+      <text x="1244" y="162" class="t-mono" font-size="12" fill="#A69D90">$11.78 of $50 aug</text>
+    </svg>
+  </section>
+
+  <!-- THE TIMETABLE -->
+  <section class="gridband">
+    <div class="bandtitle">
+      <span class="label">The day in cycles — booked over actual</span>
+      <span class="rt">16 booked · 9 run · 1 live · 1 struck · 5 to come</span>
+    </div>
+    <table class="tt">
+      <colgroup><col class="stage"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"><col class="cyc"></colgroup>
+      <thead>
+        <tr>
+          <th><span class="hbk" style="font-family:var(--sans)">stage / cycle</span></th>
+          <th><span class="hcy">c01</span><span class="hbk">00:20</span></th>
+          <th><span class="hcy">c02</span><span class="hbk">01:45</span></th>
+          <th><span class="hcy">c03</span><span class="hbk">03:10</span></th>
+          <th><span class="hcy x mutd">c04 ✕</span><span class="hbk x">04:35</span></th>
+          <th><span class="hcy">c05</span><span class="hbk">06:00</span></th>
+          <th><span class="hcy">c06</span><span class="hbk">07:25</span></th>
+          <th><span class="hcy">c07 <span class="clay">▲</span></span><span class="hbk">08:50</span></th>
+          <th><span class="hcy">c08</span><span class="hbk">10:15</span></th>
+          <th><span class="hcy">c09</span><span class="hbk">11:40</span></th>
+          <th><span class="hcy">c10</span><span class="hbk">13:05</span></th>
+          <th><span class="hcy sage">c11 ●</span><span class="hbk">14:30</span></th>
+          <th><span class="hcy">c12</span><span class="hbk">15:55</span></th>
+          <th><span class="hcy">c13</span><span class="hbk">17:20</span></th>
+          <th><span class="hcy">c14</span><span class="hbk">18:45</span></th>
+          <th><span class="hcy">c15</span><span class="hbk">20:10</span></th>
+          <th><span class="hcy">c16</span><span class="hbk">21:35</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="stg"><span class="id">RD-01</span><span class="vb">read</span></td>
+          <td><span class="b">00:20</span><span class="a">00:20</span></td>
+          <td><span class="b">01:45</span><span class="a">01:45</span></td>
+          <td><span class="b">03:10</span><span class="a">03:10</span></td>
+          <td><span class="b x">04:35</span><span class="a pend">—</span></td>
+          <td><span class="b">06:00</span><span class="a">06:00</span></td>
+          <td><span class="b">07:25</span><span class="a">07:25</span></td>
+          <td><span class="b">08:50</span><span class="a">09:03<span class="clay">▲+13</span></span></td>
+          <td><span class="b">10:15</span><span class="a">10:15</span></td>
+          <td><span class="b">11:40</span><span class="a">11:40</span></td>
+          <td><span class="b">13:05</span><span class="a">13:05</span></td>
+          <td><span class="b">14:30</span><span class="a">14:30</span></td>
+          <td><span class="b">15:55</span><span class="a pend">·</span></td>
+          <td><span class="b">17:20</span><span class="a pend">·</span></td>
+          <td><span class="b">18:45</span><span class="a pend">·</span></td>
+          <td><span class="b">20:10</span><span class="a pend">·</span></td>
+          <td><span class="b">21:35</span><span class="a pend">·</span></td>
+        </tr>
+        <tr>
+          <td class="stg"><span class="id">SC-02</span><span class="vb">scout</span></td>
+          <td><span class="b">00:28</span><span class="a">00:28</span></td>
+          <td><span class="b">01:53</span><span class="a">01:54</span></td>
+          <td><span class="b">03:18</span><span class="a">03:18</span></td>
+          <td><span class="b x">04:43</span><span class="a pend">—</span></td>
+          <td><span class="b">06:08</span><span class="a">06:08</span></td>
+          <td><span class="b">07:33</span><span class="a">07:34</span></td>
+          <td><span class="b">08:58</span><span class="a">09:09 <span class="clay">+11</span></span></td>
+          <td><span class="b">10:23</span><span class="a">10:23</span></td>
+          <td><span class="b">11:48</span><span class="a">11:49</span></td>
+          <td><span class="b">13:13</span><span class="a">13:13</span></td>
+          <td class="now"><span class="b">14:38</span><span class="a sage">●14:39</span></td>
+          <td><span class="b">16:03</span><span class="a pend">·</span></td>
+          <td><span class="b">17:28</span><span class="a pend">·</span></td>
+          <td><span class="b">18:53</span><span class="a pend">·</span></td>
+          <td><span class="b">20:18</span><span class="a pend">·</span></td>
+          <td><span class="b">21:43</span><span class="a pend">·</span></td>
+        </tr>
+        <tr>
+          <td class="stg"><span class="id">CN-03</span><span class="vb">vote</span></td>
+          <td><span class="b">00:37</span><span class="a">00:38</span></td>
+          <td><span class="b">02:02</span><span class="a">02:02</span></td>
+          <td><span class="b">03:27</span><span class="a">03:27</span></td>
+          <td><span class="b x">04:52</span><span class="a pend">—</span></td>
+          <td><span class="b">06:17</span><span class="a">06:18</span></td>
+          <td><span class="b">07:42</span><span class="a">07:42</span></td>
+          <td><span class="b">09:07</span><span class="a">09:16 <span class="clay">+9</span></span></td>
+          <td><span class="b">10:32</span><span class="a">10:32</span></td>
+          <td><span class="b">11:57</span><span class="a">11:57</span></td>
+          <td><span class="b">13:22</span><span class="a">13:23</span></td>
+          <td><span class="b">14:47</span><span class="a pend">·</span></td>
+          <td><span class="b">16:12</span><span class="a pend">·</span></td>
+          <td><span class="b">17:37</span><span class="a pend">·</span></td>
+          <td><span class="b">19:02 †</span><span class="a pend">·</span></td>
+          <td><span class="b">20:27</span><span class="a pend">·</span></td>
+          <td><span class="b">21:52</span><span class="a pend">·</span></td>
+        </tr>
+        <tr>
+          <td class="stg"><span class="id">SM-04</span><span class="vb">simulate</span></td>
+          <td><span class="b">00:44</span><span class="a">00:45</span></td>
+          <td><span class="b">02:09</span><span class="a">02:09</span></td>
+          <td><span class="b">03:34</span><span class="a">03:36</span></td>
+          <td><span class="b x">04:59</span><span class="a pend">—</span></td>
+          <td><span class="b">06:24</span><span class="a">06:24</span></td>
+          <td><span class="b">07:49</span><span class="a">07:50</span></td>
+          <td><span class="b">09:14</span><span class="a">09:21 <span class="clay">+7</span></span></td>
+          <td><span class="b">10:39</span><span class="a">10:40</span></td>
+          <td><span class="b">12:04</span><span class="a">12:10 <span class="clay">+6</span></span></td>
+          <td><span class="b">13:29</span><span class="a">13:29</span></td>
+          <td><span class="b">14:54</span><span class="a pend">·</span></td>
+          <td><span class="b">16:19</span><span class="a pend">·</span></td>
+          <td><span class="b">17:44</span><span class="a pend">·</span></td>
+          <td><span class="b">19:09</span><span class="a pend">·</span></td>
+          <td><span class="b">20:34</span><span class="a pend">·</span></td>
+          <td><span class="b">21:59</span><span class="a pend">·</span></td>
+        </tr>
+        <tr>
+          <td class="stg"><span class="id">AR-05</span><span class="vb">archive</span></td>
+          <td><span class="b">00:58</span><span class="a">00:58</span></td>
+          <td><span class="b">02:23</span><span class="a">02:24</span></td>
+          <td><span class="b">03:48</span><span class="a">03:49</span></td>
+          <td><span class="b x">05:13</span><span class="a pend">—</span></td>
+          <td><span class="b">06:38</span><span class="a">06:38</span></td>
+          <td><span class="b">08:03</span><span class="a">08:03</span></td>
+          <td><span class="b">09:28</span><span class="a">09:33 <span class="clay">+5</span></span></td>
+          <td><span class="b">10:53</span><span class="a">10:53</span></td>
+          <td><span class="b">12:18</span><span class="a">12:19</span></td>
+          <td><span class="b">13:43</span><span class="a">13:43</span></td>
+          <td><span class="b">15:08</span><span class="a pend">·</span></td>
+          <td><span class="b">16:33</span><span class="a pend">·</span></td>
+          <td><span class="b">17:58</span><span class="a pend">·</span></td>
+          <td><span class="b">19:23</span><span class="a pend">·</span></td>
+          <td><span class="b">20:48</span><span class="a pend">·</span></td>
+          <td><span class="b">22:13</span><span class="a pend">·</span></td>
+        </tr>
+        <tr>
+          <td class="stg"><span class="id">CO-06</span><span class="vb">deliver</span></td>
+          <td><span class="b">01:04</span><span class="a">01:04</span></td>
+          <td><span class="b">02:29</span><span class="a">02:29</span></td>
+          <td><span class="b">03:54</span><span class="a">03:54</span></td>
+          <td><span class="b x">05:19</span><span class="a pend">—</span></td>
+          <td><span class="b">06:44</span><span class="a">06:45</span></td>
+          <td><span class="b">08:09</span><span class="a">08:09</span></td>
+          <td><span class="b">09:34</span><span class="a">09:38 <span class="clay">+4</span></span></td>
+          <td><span class="b">10:59</span><span class="a">10:59</span></td>
+          <td><span class="b">12:24</span><span class="a">12:25</span></td>
+          <td><span class="b">13:49</span><span class="a">13:49</span></td>
+          <td><span class="b">15:14</span><span class="a pend">·</span></td>
+          <td><span class="b">16:39</span><span class="a pend">·</span></td>
+          <td><span class="b">18:04</span><span class="a pend">·</span></td>
+          <td><span class="b">19:29</span><span class="a pend">·</span></td>
+          <td><span class="b">20:54</span><span class="a pend">·</span></td>
+          <td><span class="b">22:19</span><span class="a pend">·</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="ttfoot">booked over actual · times america/chicago · <span class="mono">+n</span> = minutes late ·
+      <span class="mono">✕ c04</span> struck <span class="mono">04:31</span> — feeds empty, <span class="mono">$0</span> spent ·
+      <span class="clay"><span class="mono">▲ c07</span> — feed FD-2107 stall, wake <span class="mono">+13m → +4m</span></span> ·
+      <span class="sage"><span class="mono">●</span> running now — <span class="mono">14:41:26</span></span> ·
+      <span class="mono">† c14</span> vote — re-vote on split lead L-4118</div>
+  </section>
+
+  <!-- LEDGER · SCHEDULER · DATA · INCIDENTS -->
+  <section class="dense">
+
+    <div class="col c-ledger">
+      <div class="coltitle"><span class="label">Ledger — August · cap $500</span><span class="rt">close → $310.47 · headroom $189.53</span></div>
+      <div class="lrow hd"><span class="nm">service</span><span class="sp">$ spent / cap</span><span class="track" style="background:none"></span><span class="pc">$/day</span><span class="cl">→ close</span></div>
+      <div class="lrow"><span class="nm">reader</span><span class="sp drill">58.31 / 120</span><span class="track"><span class="fill" style="width:48.6%"></span><span class="tick" style="left:69.7%"></span></span><span class="pc">2.70</span><span class="cl">→ 83.64</span></div>
+      <div class="lrow"><span class="nm">scout</span><span class="sp drill">24.18 / 60</span><span class="track"><span class="fill" style="width:40.3%"></span><span class="tick" style="left:57.8%"></span></span><span class="pc">1.12</span><span class="cl">→ 34.69</span></div>
+      <div class="lrow"><span class="nm">council</span><span class="sp drill">41.07 / 90</span><span class="track"><span class="fill" style="width:45.6%"></span><span class="tick" style="left:65.5%"></span></span><span class="pc">1.90</span><span class="cl">→ 58.91</span></div>
+      <div class="lrow"><span class="nm">simulator</span><span class="sp drill">71.66 / 150</span><span class="track"><span class="fill" style="width:47.8%"></span><span class="tick" style="left:68.5%"></span></span><span class="pc">3.32</span><span class="cl">→ 102.79</span></div>
+      <div class="lrow"><span class="nm">archivist</span><span class="sp drill">9.44 / 30</span><span class="track"><span class="fill" style="width:31.5%"></span><span class="tick" style="left:45.1%"></span></span><span class="pc">0.44</span><span class="cl">→ 13.54</span></div>
+      <div class="lrow"><span class="nm">courier</span><span class="sp drill">11.78 / 50</span><span class="track"><span class="fill" style="width:23.6%"></span><span class="tick" style="left:33.8%"></span></span><span class="pc">0.55</span><span class="cl">→ 16.90</span></div>
+      <div class="lrow tot"><span class="nm">all six</span><span class="sp">216.44 / 500</span><span class="track"><span class="fill" style="width:43.3%"></span><span class="tick" style="left:62.1%"></span></span><span class="pc">10.02</span><span class="cl">→ 310.47 ✓</span></div>
+    </div>
+
+    <div class="col c-sched">
+      <div class="coltitle"><span class="label">Scheduler</span></div>
+      <div class="kv"><div class="k">next stage</div><div class="v">vote c11 · 14:47:00</div></div>
+      <div class="kv"><div class="k">next cycle</div><div class="v">c12 · 15:55:00 · in 1h 14m</div></div>
+      <div class="kv"><div class="k">evening digest</div><div class="v">deliver · 19:05:00</div></div>
+      <div class="kv"><div class="k">deep pass</div><div class="v">sun 03:00 · long sims</div></div>
+      <div class="kv"><div class="k">watchdog</div><div class="v">ping 5m · 3 miss → suspend</div></div>
+    </div>
+
+    <div class="col c-data">
+      <div class="coltitle"><span class="label">Data</span></div>
+      <div class="kv"><div class="k">library</div><div class="v">12,847 records · 3.1 gb</div></div>
+      <div class="kv"><div class="k">today</div><div class="v">+217 excerpts · +26 filings</div></div>
+      <div class="kv"><div class="k">feeds</div><div class="v">14 · 13 up · <span class="clay">1 stalled ▲</span></div></div>
+      <div class="kv"><div class="k">backup</div><div class="v">03:30 ran · verified 03:34 ✓</div></div>
+      <div class="kv"><div class="k">retention</div><div class="v">raw 90d · dossiers kept</div></div>
+    </div>
+
+    <div class="col c-inc">
+      <div class="coltitle"><span class="label">Incidents — today</span><span class="rt">3 · 1 resolved</span></div>
+      <div class="inc">
+        <div class="l1"><span class="tm mutd drill">03:31</span><span class="tag mutd">scheduler</span><span class="st mutd">resolved ✓</span></div>
+        <div class="l2"><span class="mono">c04</span> struck — feeds empty (sat lull) → skipped, <span class="mono">$0</span>, rolled to <span class="mono">c05</span></div>
+      </div>
+      <div class="inc">
+        <div class="l1"><span class="tm clay drill">08:44</span><span class="tag clay">▲ feed FD-2107 · agronomy letters</span><span class="st clay">watching → 18:00</span></div>
+        <div class="l2">stalled 18m → retried ×3, caught up <span class="mono">09:03</span> · <span class="mono">c07</span> ran <span class="mono">+13m</span>, wake <span class="mono">+4m</span></div>
+      </div>
+      <div class="inc">
+        <div class="l1"><span class="tm clay drill">11:57</span><span class="tag clay">council split</span><span class="st clay">held for owner</span></div>
+        <div class="l2">lead <span class="mono">L-4118</span> tied 3–3 → briefed to inbox; re-vote booked <span class="mono">c14 19:02</span> †</div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- SUSPEND + DRILL LAW -->
+  <section class="strip">
+    <div class="half left">
+      <button class="suspend" type="button">Suspend generation</button>
+      <div class="conseq">Finishes the stage now running (≤6 min), then stops Scout, Council, Simulator and every paid call.
+        Reader keeps pulling raw feeds; the library keeps serving. Nothing is deleted — resume reruns nothing.</div>
+    </div>
+    <div class="half right">
+      <div class="lawtext"><span class="law">Drill law</span> Every figure here opens to its receipt — the run log, the prompt,
+        the token count, the cost line. Dotted figures drill directly. A number that will not drill is treated as false.</div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="footin">
+    <span class="motto">The field rests. The engine does not.</span>
+    <span class="fmeta">engine room · palingenesis v2.4 · times america/chicago · as of 14:41:26</span>
+  </div>
+</footer>
+
+</body>
+</html>

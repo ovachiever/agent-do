@@ -22,6 +22,7 @@ use crate::issue::{
 };
 use crate::reconcile::{prompt_pointer, strip_prompt_annotation};
 use crate::store::MannaStore;
+use crate::track::{is_paired, pairable};
 
 pub const WORKFLOW_VERSION: u32 = 2;
 pub const HANDOFF_DIR: &str = ".handoff";
@@ -682,7 +683,12 @@ fn git_path_tracked(base: &Path, relative: &Path) -> Result<bool, String> {
 pub fn untracked_durable_paths(base: &Path) -> Result<Vec<PathBuf>, String> {
     durable_paths()
         .into_iter()
-        .chain([".manna/drift.yaml"])
+        .chain([
+            ".manna/drift.yaml",
+            ".manna/coordinators.json",
+            ".manna/managed.json",
+            ".manna/lifecycle.jsonl",
+        ])
         .filter(|relative| base.join(relative).is_file())
         .filter_map(
             |relative| match git_path_tracked(base, Path::new(relative)) {
@@ -711,7 +717,7 @@ fn workflow_gitignore_content(existing: &str) -> String {
     }
     if !existing.contains(marker) {
         updated.push_str(&format!(
-            "\n{}\n!.manna/\n.manna/*\n!.manna/issues.jsonl\n!.manna/sessions.jsonl\n!.manna/board.yaml\n!.manna/workflow.yaml\n!.manna/handoff-order.yaml\n!.manna/federation.yaml\n!.manna/drift.yaml\n.manna/board.lock\n.manna/transactions/\n!.handoff/\n!.handoff/**\n",
+            "\n{}\n!.manna/\n.manna/*\n!.manna/issues.jsonl\n!.manna/sessions.jsonl\n!.manna/board.yaml\n!.manna/workflow.yaml\n!.manna/handoff-order.yaml\n!.manna/federation.yaml\n!.manna/drift.yaml\n!.manna/coordinators.json\n!.manna/managed.json\n!.manna/lifecycle.jsonl\n.manna/board.lock\n.manna/transactions/\n!.handoff/\n!.handoff/**\n",
             marker
         ));
     } else {
@@ -719,6 +725,9 @@ fn workflow_gitignore_content(existing: &str) -> String {
             "!.manna/board.yaml",
             "!.manna/handoff-order.yaml",
             "!.manna/federation.yaml",
+            "!.manna/coordinators.json",
+            "!.manna/managed.json",
+            "!.manna/lifecycle.jsonl",
             ".manna/transactions/",
         ] {
             if !updated.lines().any(|line| line == rule) {
@@ -874,14 +883,13 @@ pub fn canonical_handoff_path(
     Ok(relative)
 }
 
+/// Rows that own a canonical handoff: every strict item, plus any track that
+/// was given a dispatch work order. Paired tracks enter priority and the
+/// generated index exactly like items.
 fn paired_items(issues: &[Issue]) -> Vec<&Issue> {
     issues
         .iter()
-        .filter(|issue| {
-            issue.issue_type == IssueType::Item
-                && issue.prompt.is_some()
-                && issue.handoff_digest.is_some()
-        })
+        .filter(|issue| pairable(issue.issue_type) && is_paired(issue))
         .collect()
 }
 
@@ -1846,6 +1854,9 @@ fn render_document(frontmatter: &HandoffFrontmatter, body: &str) -> Result<Strin
 }
 
 fn generated_body(issue: &Issue) -> String {
+    if issue.issue_type == IssueType::Track {
+        return generated_track_body(issue);
+    }
     let work_order = issue
         .description
         .as_deref()
@@ -1867,6 +1878,49 @@ fn generated_body(issue: &Issue) -> String {
         issue.id,
         issue.id,
         issue.id
+    )
+}
+
+/// The dispatch work order for a track. The same five required sections as an
+/// item handoff, so one validator and one claim gate serve both; the body is
+/// the protocol a single agent follows to work the track's items in
+/// dependency order. It names live board commands and carries no ledger: the
+/// board is the only record of progress, and a successor rebuilds from it.
+fn generated_track_body(issue: &Issue) -> String {
+    let description = issue
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or(&issue.title);
+    let inputs = if let Some(source) = issue.source.as_deref() {
+        format!("- {}", source)
+    } else {
+        "- None declared.".to_string()
+    };
+    let id = &issue.id;
+    format!(
+        "\n# Handoff: {title}\n\n\
+Board state is canonical in `.manna/`. This file is the work order for one track: one agent works the track's items in dependency order, one claim at a time. It is not a claim on the items, a progress ledger, or coordinator authority.\n\n\
+## Claim\n\n```bash\nagent-do manna claim {id}\n```\n\n\
+## Scope\n\n{title}\n\n\
+## Inputs\n\n{inputs}\n\n\
+## Work order\n\n{description}\n\n\
+**Track dispatch protocol.** Every item in this track keeps its own claim, its own sealed work order, and its own close. The steps below are the whole assignment.\n\n\
+1. Read the track from the canonical board: `agent-do manna show {id} --json`. `children.next` names the one item to claim now: open, unclaimed, every blocker done, highest handoff priority first (`.manna/handoff-order.yaml`), then the oldest row, then the lowest id. `children.eligible` lists the rest in that order; `children.held`, `children.waiting`, and `children.decisions` say what is not yours to take; `children.stall` says why `next` is null.\n\
+2. Claim that item individually: `agent-do manna claim <item-id>`. A refusal (claimed elsewhere, blocked, a changed or unsealed work order) is final for that item: take the next eligible item instead. Never retry around a refusal, never claim through another identity, and never work an item you do not hold.\n\
+3. Read the item's sealed handoff named by its `prompt` field and follow it to completion exactly as a single-item worker would: its owned paths, its verification receipts, a Conventional Commit carrying `Manna: <item-id>`, and its own close. `agent-do manna done <item-id>` closes an ordinary item; a managed item takes `agent-do manna submit` instead, and a submission is not acceptance: the item stays in progress until its coordinator accepts it.\n\
+4. Refresh before every selection by running step 1 again. The board is the only record of progress. Items added to the track since your claim are listed under `children.added_since_claim`: each carries its own sealed work order, so name the change of scope in your report before claiming one; nothing is claimed silently. Items moved out of the track or deleted disappear from the list; one you already hold stays yours under its own work order.\n\
+5. Continue while `children.next` is non-null. When it is null and `children.open` is not zero, record the exact blocker (`children.stall`, the item ids, the owner of a claim held elsewhere, the external prerequisite) in your report and in this handoff's receipts, reseal, and stop. A lane that ends releases the track with `agent-do manna abandon {id}`; every item claim and every commit stays where it is, and a successor claims the track and rebuilds progress from the board, never from this file.\n\
+6. Holding this track grants only the right to claim its eligible items one at a time. It reserves no item, blocks no independent worker (any session may claim this track's items at any time; the board's atomic claim decides), confers no coordinator authority, accepts nothing, and authorizes no merge, deploy, push, or pull request.\n\n\
+## Completion\n\n\
+1. `agent-do manna done {id}` closes the track only when every item in it is done; the board refuses otherwise and lists what is open. Submitted-but-unaccepted items are open. An empty track cannot close; delete it or give it items.\n\
+2. Update this handoff only when continuation context changed; seal with `agent-do manna handoff seal {id}`.\n\
+3. Commit board paperwork with `Manna: {id}` only on a commit that advances the track itself; item work carries the item's own trailer.\n",
+        title = issue.title,
+        id = id,
+        inputs = inputs,
+        description = description,
     )
 }
 
@@ -2502,7 +2556,7 @@ fn validate_transaction(
                 || transaction.after.is_none()
                 || transaction.document.is_none()
                 || transaction.archive.is_some()
-                || transaction.after.as_ref().unwrap().issue_type != IssueType::Item
+                || !pairable(transaction.after.as_ref().unwrap().issue_type)
             {
                 return Err("create transaction has an invalid shape".to_string());
             }
@@ -2512,10 +2566,13 @@ fn validate_transaction(
             let (Some(before), Some(after)) = (&transaction.before, &transaction.after) else {
                 return Err("attach transaction is missing a board row".to_string());
             };
+            // Attach gives a row its first pair: a dream becoming an item or a
+            // track, or a container track receiving its dispatch work order.
             if transaction.document.is_none()
                 || transaction.archive.is_some()
-                || before.issue_type == IssueType::Item
-                || after.issue_type != IssueType::Item
+                || before.prompt.is_some()
+                || before.handoff_digest.is_some()
+                || !pairable(after.issue_type)
                 || !same_lifecycle(before, after)
             {
                 return Err(
@@ -2530,8 +2587,8 @@ fn validate_transaction(
             };
             if transaction.document.is_none()
                 || transaction.archive.is_some()
-                || before.issue_type != IssueType::Item
-                || after.issue_type != IssueType::Item
+                || !pairable(before.issue_type)
+                || !pairable(after.issue_type)
                 || before.prompt != after.prompt
                 || !same_lifecycle(before, after)
             {
@@ -2548,8 +2605,8 @@ fn validate_transaction(
             };
             if transaction.document.is_some()
                 || transaction.archive.is_none()
-                || before.issue_type != IssueType::Item
-                || after.issue_type == IssueType::Item
+                || !pairable(before.issue_type)
+                || pairable(after.issue_type)
                 || after.prompt.is_some()
                 || after.handoff_digest.is_some()
                 || !same_lifecycle(before, after)
@@ -2567,7 +2624,7 @@ fn validate_transaction(
             if transaction.after.is_some()
                 || transaction.document.is_some()
                 || transaction.archive.is_none()
-                || before.issue_type != IssueType::Item
+                || !pairable(before.issue_type)
             {
                 return Err("delete transaction has an invalid shape".to_string());
             }
@@ -4450,6 +4507,87 @@ pub fn seal_handoff(
     commit_rebind(base, store, config, issue, issue, document)
 }
 
+/// Give a track that has no pair an existing document at its canonical path:
+/// the body is kept byte for byte, the frontmatter is normalized to the row,
+/// and the binding is computed and stored in one attach transaction. A
+/// document that does not validate refuses here and names the defect, so a
+/// hand-written track order is never overwritten and never half-adopted.
+pub fn adopt_handoff(
+    base: &Path,
+    store: &MannaStore,
+    config: &WorkflowConfig,
+    before: &Issue,
+) -> Result<Issue, String> {
+    let relative = canonical_handoff_path(base, config, before, None)?;
+    preflight_handoff(base, &relative)?;
+    let existing = fs::read_to_string(base.join(&relative))
+        .map_err(|error| format!("failed to read {}: {}", relative.display(), error))?;
+    let mut after = before.clone();
+    after.prompt = Some(relative.to_string_lossy().into_owned());
+    let document = update_frontmatter_for_issue(&existing, &after)?;
+    let (after, document) = prepare_bound_issue(&after, document)?;
+    validate_document(&after, &document).map_err(|error| {
+        format!(
+            "existing {} cannot be adopted as the track's work order: {}",
+            relative.display(),
+            error
+        )
+    })?;
+    let transaction = PairTransaction {
+        version: WORKFLOW_VERSION,
+        action: PairAction::Attach,
+        issue_id: before.id.clone(),
+        before: Some(before.clone()),
+        after: Some(after.clone()),
+        handoff: relative.to_string_lossy().into_owned(),
+        archive: None,
+        document: Some(document),
+        sync: None,
+        integrity: String::new(),
+    };
+    run_transaction(base, store, config, transaction)?;
+    Ok(after)
+}
+
+/// Rewrite a paired row's document from its metadata under the same pointer.
+/// Used when an item becomes a track or a track becomes an item: the body's
+/// protocol differs by kind, so the generated document is replaced in one
+/// rebind transaction. The previous body is in Git history; the existing seal
+/// is verified first so an unsealed edit cannot vanish in the conversion.
+pub fn regenerate_handoff(
+    base: &Path,
+    store: &MannaStore,
+    config: &WorkflowConfig,
+    before: &Issue,
+    after_metadata: &Issue,
+) -> Result<Issue, String> {
+    let relative = canonical_handoff_path(base, config, before, before.prompt.as_deref())?;
+    preflight_handoff(base, &relative)?;
+    let existing = fs::read_to_string(base.join(&relative))
+        .map_err(|error| format!("failed to read {}: {}", relative.display(), error))?;
+    validate_document(before, &existing).map_err(|error| {
+        format!(
+            "cannot convert {} while its handoff is unsealed: {}. Seal it explicitly first with `agent-do manna handoff seal {}`",
+            before.id, error, before.id
+        )
+    })?;
+    let mut after = after_metadata.clone();
+    after.prompt = before.prompt.clone();
+    let document = render_handoff(base, &after)?;
+    commit_rebind(base, store, config, before, &after, document)
+}
+
+/// The handoff priority list as stored, or empty when the board has none.
+/// Read-only; `sync` owns normalization.
+pub fn handoff_order_ids(base: &Path) -> Vec<String> {
+    read_order_text(base)
+        .ok()
+        .flatten()
+        .and_then(|text| parse_order(&text).ok())
+        .map(|order| order.items)
+        .unwrap_or_default()
+}
+
 /// Propagate authoritative row metadata into a handoff only after proving the
 /// existing body is still sealed. Ordinary updates cannot bless hand-edited
 /// scope merely because some unrelated title or source field changed.
@@ -5409,7 +5547,7 @@ pub fn find_orphan_handoffs(base: &Path, issues: &[Issue]) -> Vec<(PathBuf, Stri
                 };
                 match by_id.get(manna_id.as_str()).copied() {
                     None => findings.push((path, "handoff has no live Manna item".to_string())),
-                    Some(issue) if issue.issue_type != IssueType::Item => findings.push((
+                    Some(issue) if !pairable(issue.issue_type) => findings.push((
                         path,
                         format!("handoff belongs to non-actionable {}", issue.issue_type),
                     )),

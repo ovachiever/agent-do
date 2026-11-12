@@ -1,0 +1,203 @@
+<title>Concept Round Two</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=Source+Sans+3:wght@400;600&family=Source+Code+Pro:wght@400&display=swap">
+<style>
+  :root {
+    --bg: #1B1917; --ink: #E7E3DA; --muted: #A69D90; --faint: #7A7267;
+    --hairline: rgba(231,227,218,0.14);
+    --green: hsl(158,30%,55%); --green-dim: hsla(158,30%,55%,0.35);
+    --amber: hsl(42,48%,62%); --clay: hsl(12,42%,58%);
+    --serif: 'Source Serif 4', Georgia, serif;
+    --sans: 'Source Sans 3', -apple-system, sans-serif;
+    --mono: 'Source Code Pro', Menlo, monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--ink); font-family:var(--serif); font-size:17px; line-height:1.6; }
+  .shell { max-width:78rem; margin:0 auto; padding:0 2.5rem; }
+  header.mast { display:flex; align-items:baseline; gap:2rem; flex-wrap:wrap; padding:1.4rem 0; border-bottom:1px solid var(--hairline); font-family:var(--sans); }
+  .wordmark { font-family:var(--serif); font-size:13px; letter-spacing:0.14em; text-transform:uppercase; }
+  .mast .meta { color:var(--faint); font-size:13.5px; margin-left:auto; font-variant-numeric:tabular-nums; }
+  .kicker { font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--faint); display:block; }
+  h1 { font-size:clamp(36px,4.5vw,54px); line-height:1.1; letter-spacing:-0.015em; font-weight:700; margin-top:0.6rem; max-width:24ch; text-wrap:balance; }
+  .dek { max-width:64ch; color:var(--muted); font-size:19px; margin-top:1.1rem; text-wrap:pretty; }
+  .dek strong { color:var(--ink); }
+  main { padding:3rem 0 2rem; }
+  section { margin-top:3.5rem; }
+  h2 { font-size:28px; letter-spacing:-0.01em; margin:0.4rem 0 0.6rem; }
+  .surface-note { color:var(--muted); max-width:66ch; margin-bottom:1.6rem; }
+  .card { border-top:1px solid var(--hairline); padding:1.8rem 0; display:grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); gap:2rem; }
+  @media (max-width: 980px){ .card { grid-template-columns:1fr; } }
+  figure { border:1px solid var(--hairline); border-radius:4px; overflow:hidden; background:#211E1B; align-self:start; }
+  figure img { display:block; width:100%; height:auto; }
+  .cap { font-family:var(--sans); font-size:13px; color:var(--faint); padding:0.6rem 0.9rem; border-top:1px solid var(--hairline); }
+  .who { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+  .name { font-size:23px; font-weight:700; letter-spacing:-0.01em; }
+  .chip { font-family:var(--sans); font-size:11.5px; letter-spacing:0.07em; text-transform:uppercase; border:1px solid; border-radius:3px; padding:2px 9px; white-space:nowrap; }
+  .chip.win { color:var(--green); border-color:var(--green-dim); }
+  .chip.flag { color:var(--clay); border-color:hsla(12,42%,58%,0.4); }
+  .chip.note { color:var(--amber); border-color:hsla(42,48%,62%,0.35); }
+  .chip.ctrl { color:var(--faint); border-color:var(--hairline); }
+  .ranks { font-family:var(--mono); font-size:13px; color:var(--muted); margin-top:0.35rem; }
+  blockquote { border-left:2px solid var(--green-dim); padding:0.15rem 0 0.15rem 1.1rem; margin-top:0.9rem; color:var(--muted); font-size:15.5px; }
+  blockquote .src { font-family:var(--sans); font-size:11.5px; letter-spacing:0.07em; text-transform:uppercase; color:var(--faint); display:block; margin-top:0.25rem; }
+  .debt { font-family:var(--sans); font-size:13px; color:var(--faint); margin-top:0.8rem; }
+  .tablewrap { overflow-x:auto; border-top:1px solid var(--hairline); margin-top:1rem; }
+  table { width:100%; border-collapse:collapse; font-family:var(--sans); font-size:14.5px; font-variant-numeric:tabular-nums; }
+  th { text-align:left; font-weight:400; color:var(--faint); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; border-bottom:1px solid var(--hairline); padding:0.6rem 1.1rem 0.6rem 0; }
+  td { border-bottom:1px solid var(--hairline); padding:0.65rem 1.1rem 0.65rem 0; vertical-align:top; }
+  td.miss { color:var(--clay); } td.held { color:var(--green); } td.mixed { color:var(--amber); }
+  .prose { max-width:66ch; }
+  .prose p { margin-bottom:1rem; }
+  .decision { border:1px solid var(--green-dim); border-radius:4px; padding:1.5rem 1.8rem; margin-top:2.2rem; }
+  .decision .kicker { color:var(--green); }
+  .decision p { margin-top:0.5rem; max-width:66ch; }
+  footer { margin-top:4rem; border-top:1px solid var(--hairline); padding:1.4rem 0 3rem; font-family:var(--sans); font-size:12px; letter-spacing:0.07em; text-transform:uppercase; color:var(--faint); display:flex; gap:2rem; flex-wrap:wrap; }
+</style>
+
+<div class="shell">
+  <header class="mast">
+    <span class="wordmark">Moon Loop · Concept Round Two</span>
+    <span class="meta">24 Aug 2026 · Library + Engine Room, dark-only per your ruling · 10 blind builds · 4 blind judges · nulls incognito</span>
+  </header>
+
+  <main>
+    <span class="kicker">The decision bar, round two</span>
+    <h1>The last two surfaces. Two winners, two split votes.</h1>
+    <p class="dek">Engine Room has a clear points winner — the ship's watch log, with the judges calling its standing order <strong>"the cap yields to no one"</strong> the most memorable line of all ten pages. The Library is a genuine three-way final: the atlas leads on consistency, the herbarium owns feeling, the seed-bank owns brief-fit — and the brief judge volunteered the hybrid that resolves it.</p>
+
+    <section>
+      <span class="kicker">Surface three</span>
+      <h2>Library — what the machine has read</h2>
+      <p class="surface-note">Rank-sums, lower is better. Both judges independently flagged the null as the default habit.</p>
+
+      <div class="card">
+        <figure><img src="IMG_LIB_E" alt="Library, memory atlas: panels as questions, keystone and corroborant seating with kinship lines, arrangements signed by the machine" width="1440" height="900"><div class="cap">library/atlas.html · dpt 45 (faint-text contrast debt) · law: memory-atlas constellation</div></figure>
+        <div>
+          <div class="who"><span class="name">The Atlas</span><span class="chip win">Points leader — 2nd on both lenses</span></div>
+          <div class="ranks">feeling №2 · brief-fit №2 · rank-sum 4</div>
+          <blockquote>"The boldest idea on the table: knowledge as arrangement, where 'what sits together is claimed together'… panels named Swelter and Nightsoil give it a soul no template has."<span class="src">feeling judge</span></blockquote>
+          <blockquote>"'What the machine knows' expressed structurally, not numerically."<span class="src">brief-fit judge</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_LIB_D" alt="Library, herbarium: held sheet with pressed claims, determination label, annotations added never removed by named hands" width="1440" height="900"><div class="cap">library/herbarium.html · dpt 82, clean · law: herbarium specimen sheet</div></figure>
+        <div>
+          <div class="who"><span class="name">The Herbarium</span><span class="chip win">Feeling winner</span></div>
+          <div class="ranks">feeling №1 · brief-fit №4 · rank-sum 5</div>
+          <blockquote>"Fully inhabited: you are holding sheet 01 of 143 with the pile visibly stacked behind it… annotations from named hands (Linnea, Magpie, Barrow) accrete and are never erased. Unmistakable in a lineup tomorrow: the sheet-in-hand one."<span class="src">feeling judge</span></blockquote>
+          <blockquote>"A superb second-level page ranked as a landing page."<span class="src">brief-fit judge — the hybrid, handed over</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_LIB_C" alt="Library, seed bank: collected-verified-stored-germinated chain, germinating-now list, trace-a-claim input" width="1440" height="900"><div class="cap">library/seedbank.html · dpt 45 (contrast debt) · law: seed-bank accession registry</div></figure>
+        <div>
+          <div class="who"><span class="name">The Seed Bank</span><span class="chip win">Brief-fit winner</span></div>
+          <div class="ranks">brief-fit №1 · feeling №4 · rank-sum 5</div>
+          <blockquote>"Answers all three reader jobs fastest… 'Germinating Now' leads with the highest-consequence items, and 'Trace a claim' makes the brief's core contract a first-class affordance."<span class="src">brief-fit judge</span></blockquote>
+          <blockquote>"'The vault is judged by what grows out of it' — the metaphor penetrates the data model rather than decorating it."<span class="src">feeling judge</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_LIB_A" alt="Library, double-entry ledger: what was read and what it yielded, in-balance audits, commissioned reading on order" width="1440" height="900"><div class="cap">library/ledger.html · dpt 82, clean · law: double-entry ledger</div></figure>
+        <div>
+          <div class="who"><span class="name">The Ledger</span><span class="chip note">Best receipts and commissioning</span></div>
+          <div class="ranks">feeling №3 · brief-fit №3 · rank-sum 6</div>
+          <blockquote>"'Entered twice, in balance, audited' — an austere, principled conceit… admired more than loved."<span class="src">feeling judge</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_LIB_B" alt="Library, null control: KPI stat cards, activity log, signals rail" width="1440" height="900"><div class="cap">library/null.html · dpt 78, clean · control: no structural law</div></figure>
+        <div>
+          <div class="who"><span class="name">The Null</span><span class="chip ctrl">Control — incognito</span><span class="chip flag">Flagged by BOTH judges</span></div>
+          <div class="ranks">feeling №5 · brief-fit №5 · rank-sum 10</div>
+          <blockquote>"The generic dark dashboard the brief forbids… it reports on the machine's reading instead of letting you stand inside it."<span class="src">both judges, converging</span></blockquote>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="kicker">Surface four</span>
+      <h2>Engine Room — the one honest doorway</h2>
+      <p class="surface-note">The SCADA gravity never landed: zero dashboard-habit flags on this surface — the operational-dignity laws held, and even the null cleared it.</p>
+
+      <div class="card">
+        <figure><img src="IMG_ENG_D" alt="Engine Room, ship's watch log: watches of four hours, conditions on taking the watch, standing orders, master's countersign" width="1440" height="900"><div class="cap">engine/watchlog.html · dpt 45 (contrast debt) · law: ship's engineering watch log</div></figure>
+        <div>
+          <div class="who"><span class="name">The Watch Log</span><span class="chip win">Winner on points</span></div>
+          <div class="ranks">feeling №1 · brief-fit №2 · rank-sum 3</div>
+          <blockquote>"The instrument of record kept with pride, almost literally… 'Cycles yield to nothing; backfills yield to cycles; the cap yields to no one' is the single most memorable line across all five pages. Ritual is what trust looks like."<span class="src">feeling judge</span></blockquote>
+          <blockquote>"Pause/resume authority is best realized here: real Suspend/Amend controls with logged consequences and countersign rules."<span class="src">brief-fit judge</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_ENG_C" alt="Engine Room, null control: The machine with the panels off — services as sentences, per-service ledger" width="1440" height="900"><div class="cap">engine/null.html · dpt 78, clean · control: no structural law</div></figure>
+        <div>
+          <div class="who"><span class="name">The Null</span><span class="chip ctrl">Control — incognito</span><span class="chip win">Brief-fit winner</span></div>
+          <div class="ranks">brief-fit №1 · feeling №4 · rank-sum 5</div>
+          <blockquote>"The lede answers the lens verbatim in one glance: six answering, one resting, $87.14 of $500, Cycle 214 at 18:00, 'Nothing is broken'… it reads as a typeset record, not a panel."<span class="src">brief-fit judge</span></blockquote>
+          <p class="debt">The round's finding: the accreted direction now lifts even the default this high. The verdict-first lede is a graft candidate for whatever wins.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_ENG_B" alt="Engine Room, dispatch checklist: Tonight's cycle is cleared to dispatch, required condition vs observed state, signed reliefs with expiry" width="1440" height="900"><div class="cap">engine/checklist.html · dpt 80, clean — best floor of the round · law: dispatch checklist / MEL</div></figure>
+        <div>
+          <div class="who"><span class="name">The Checklist</span><span class="chip note">Sharpest trust argument</span></div>
+          <div class="ranks">feeling №2 · brief-fit №4 · rank-sum 6</div>
+          <blockquote>"'It has read DO NOT DISPATCH twice in 219 cycles — both nights the machine stayed down and said why' — that sentence alone converts a skeptic, and the signed relief with an expiry is a real institution's artifact, not UI copy."<span class="src">feeling judge</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_ENG_A" alt="Engine Room, observatory night log: The Log of Operating Day 247, plan for the day with filed and to-come dispositions" width="1440" height="900"><div class="cap">engine/nightlog.html · dpt 76, clean · law: observatory night log</div></figure>
+        <div>
+          <div class="who"><span class="name">The Night Log</span><span class="chip note">Honest, least distinct</span></div>
+          <div class="ranks">brief-fit №3 · feeling №5 · rank-sum 8</div>
+          <blockquote>"Near-full coverage of the brief's truth, and it reads as a record… I would trust it; I am not sure I would recognize it tomorrow."<span class="src">both lenses, converging</span></blockquote>
+        </div>
+      </div>
+
+      <div class="card">
+        <figure><img src="IMG_ENG_E" alt="Engine Room, railway working timetable: booked times stand, actuals written beneath, take possession of the line" width="1440" height="900"><div class="cap">engine/timetable.html · dpt 45 (contrast debt) · law: railway working timetable</div></figure>
+        <div>
+          <div class="who"><span class="name">The Timetable</span><span class="chip note">Most unforgettable artifact; highest translation tax</span></div>
+          <div class="ranks">feeling №3 · brief-fit №5 · rank-sum 8</div>
+          <blockquote>"Booked figures stand and actuals are written beneath, never over… pause authority recast as 'Take possession of the line.' Pure integrity display — but no dollar appears anywhere on the first screen."<span class="src">both lenses, converging</span></blockquote>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="kicker">Honesty ledger</span>
+      <h2>Predictions, scored</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Pre-registered before any build</th><th>Outcome</th></tr></thead>
+          <tbody>
+            <tr><td>Each null flagged as default habit by ≥1 judge</td><td class="mixed">MIXED — Library null flagged by both; Engine null flagged by neither (it earned "typeset record, not a panel")</td></tr>
+            <tr><td>≥6 of 8 seeded pass floors clean (with the new craft clauses)</td><td class="miss">MISSED — 4 of 8; sub-12px and no-affordance criticals are gone (the clauses worked), but faint-text contrast below 3:1 is the new debt class</td></tr>
+            <tr><td>No two seeded candidates read as the same family</td><td class="held">HELD — four distinct souls per surface, again</td></tr>
+            <tr><td>Engine gravity: ≥1 candidate flagged as ops-dashboard</td><td class="held" style="color:var(--green)">MISSED in the best way — zero flags; the operational-dignity laws fully resisted the SCADA pull</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="surface-note" style="margin-top:1rem"><strong>The round's finding:</strong> the null-lift effect is compounding. As your rulings and the product's conventions accrete into the brief, the "default" build improves every round — Engine's null took a brief-fit first. The direction is becoming self-improving context; the laws now have to beat a rising floor to earn their keep.</p>
+    </section>
+
+    <div class="decision">
+      <span class="kicker">Awaiting your ruling — nothing above is approved until you rule</span>
+      <p><strong>Library:</strong> advance one — atlas (consistency), herbarium (feeling), seed-bank (brief-fit) — or take the judges' hybrid: <strong>seed-bank or atlas as the landing, herbarium as the opened sheet</strong>. Or kill all.</p>
+      <p><strong>Engine Room:</strong> advance the watch-log (points winner), or hybrid: <strong>watch-log spine + the null's verdict-first lede ("Nothing is broken") + the checklist's signed-relief mechanism</strong>. Or kill all.</p>
+      <p style="color:var(--faint); font-size:15px">Your decision becomes part of the lineage.</p>
+    </div>
+  </main>
+
+  <footer>
+    <span>Blind built · blind judged · nulls incognito · predictions pre-registered and scored</span>
+    <span>Round three of the canon: two surfaces ruled, two await</span>
+  </footer>
+</div>
