@@ -193,8 +193,8 @@ def logs(args: argparse.Namespace) -> dict[str, Any]:
     encoded = text.encode()
     # kubectl does not tell us whether an exactly-full response was naturally
     # that size or cut by --limit-bytes, so report that boundary conservatively.
-    truncated_bytes = len(encoded) >= args.max_bytes
-    if truncated_bytes:
+    truncated_bytes = len(raw.encode()) >= args.max_bytes or len(encoded) > args.max_bytes
+    if len(encoded) > args.max_bytes:
         text = encoded[-args.max_bytes:].decode(errors="ignore")
     return {"success": True, "provider": "kubernetes", "context": args.context, "namespace": args.namespace, "pod": args.pod, "container": args.container, "previous": args.previous, "log": text,
             "limits": {"tail_lines": args.tail, "max_bytes": args.max_bytes, "since": args.since},

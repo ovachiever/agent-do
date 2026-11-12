@@ -13,6 +13,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FAKE_KUBECTL = r'''#!/usr/bin/env python3
 import json
+import os
 import sys
 
 args = sys.argv[1:]
@@ -21,7 +22,7 @@ def output(value):
     raise SystemExit(0)
 
 if "logs" in args:
-    print("started token=top-secret\nfinished")
+    print(os.environ.get("FAKE_LOG", "started token=top-secret\nfinished"))
     raise SystemExit(0)
 
 if "--raw" in args:
@@ -100,6 +101,14 @@ class K8sTraceTests(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertFalse(data["success"])
         self.assertIn("--since", data["error"])
+
+    def test_byte_limit_reports_provider_truncation_after_redaction_shrinks_log(self):
+        secret = "x" * 80
+        self.env["FAKE_LOG"] = "token=" + secret
+        size = len((self.env["FAKE_LOG"] + "\n").encode())
+        data = self.json_command("logs", "pod", "--container", "web", "--context", "aks-prod", "--namespace", "pay", "--max-bytes", str(size), "--json")
+        self.assertTrue(data["truncated"]["bytes"])
+        self.assertNotIn(secret, data["log"])
 
 
 if __name__ == "__main__":
