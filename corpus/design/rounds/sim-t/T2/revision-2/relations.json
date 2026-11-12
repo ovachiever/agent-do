@@ -1,0 +1,203 @@
+{
+  "schema": 1,
+  "kind": "native-design-relations",
+  "intent": "Palingenesis Simulation room: the room's verdict line and the model's own standing counterweigh each other in the opening band; the standing instrument family shares one baseline while its three doorway figures (tier, skill, coverage) assert more scale than the two supporting figures (calibrated, parameters); hindcast and core ledger rows keep one steady rhythm, broken by a larger pause at each change of section.",
+  "inputs": {
+    "roomPresence": {
+      "value": 1.2,
+      "range": [
+        0.8,
+        1.4
+      ],
+      "why": "Relative scale of the room title 'Simulation' against this composition's chosen baseline; 1 is that baseline."
+    },
+    "roomSizeRef": {
+      "value": 3.6,
+      "why": "Reference room-title size in rem for a 1440px instrument room; an authored coordinate for this composition, not a system token."
+    },
+    "openingGapRef": {
+      "value": 1,
+      "why": "Reference gap in rem between the room title and the verdict line (lede) at roomPresence = 1."
+    },
+    "counterbalanceElasticity": {
+      "value": -0.6,
+      "why": "Erik's ratified large-headline/small-gap preference (A/D, C/B ruling): the room-to-verdict gap contracts as the title grows, but only partway (|e|<1) so the room still reads as a dense instrument, not a poster."
+    },
+    "figureOrigin": {
+      "value": 1.5,
+      "why": "Shared minimum size in rem every standing figure inherits before its own role variation is applied."
+    },
+    "figureScale": {
+      "value": 1.15,
+      "why": "Shared scale in rem distributed across the standing family by variation."
+    },
+    "primaryVariation": {
+      "value": 1,
+      "why": "Tier, hindcast skill, and coverage carry the brief's own priority 0.8 flag: this room's three doorway figures take the full scale."
+    },
+    "secondaryVariation": {
+      "value": 0.6,
+      "why": "Calibrated date and site-parameter split carry no priority flag; they support the three doorway figures at roughly three-fifths their variation while sharing the same origin."
+    },
+    "rowInterval": {
+      "value": 0.85,
+      "why": "Base vertical rhythm in rem for one hindcast or core ledger row; both ledgers share this phrase (hc-rows / core-rows same-role relations in the brief)."
+    },
+    "phraseSame": {
+      "value": 1,
+      "why": "Row-to-row phrase within one ledger: steady, no departure."
+    },
+    "phraseSection": {
+      "value": 3.6,
+      "why": "The boundary between runs, hindcasts, and cores is a change of task (heads-seq relation in the brief); the pause there is markedly larger so the room doesn't read as one undifferentiated list."
+    },
+    "bandShare": {
+      "value": 0.44,
+      "range": [
+        0.3,
+        0.6
+      ],
+      "why": "Fraction of the opening band's 12-track width given to the verdict column; the remainder counterweighs it with the standing instrument row (lede-standing relation in the brief)."
+    }
+  },
+  "relations": {
+    "roomSize": {
+      "expr": {
+        "op": "multiply",
+        "args": [
+          "roomSizeRef",
+          "roomPresence"
+        ]
+      },
+      "why": "Room-title size follows its authored relative presence."
+    },
+    "openingGap": {
+      "expr": {
+        "op": "multiply",
+        "args": [
+          "openingGapRef",
+          {
+            "op": "power",
+            "args": [
+              "roomPresence",
+              "counterbalanceElasticity"
+            ]
+          }
+        ]
+      },
+      "why": "Counterbalance: as the room title grows more present, the gap pulling the eye down into the verdict line contracts, at the authored elasticity."
+    },
+    "figurePrimarySize": {
+      "expr": {
+        "op": "add",
+        "args": [
+          "figureOrigin",
+          {
+            "op": "multiply",
+            "args": [
+              "figureScale",
+              "primaryVariation"
+            ]
+          }
+        ]
+      },
+      "why": "Shared ancestry: tier, skill, and coverage share the family origin and scale, at full variation."
+    },
+    "figureSecondarySize": {
+      "expr": {
+        "op": "add",
+        "args": [
+          "figureOrigin",
+          {
+            "op": "multiply",
+            "args": [
+              "figureScale",
+              "secondaryVariation"
+            ]
+          }
+        ]
+      },
+      "why": "Shared ancestry: calibrated date and parameter split share the same origin and scale, at reduced variation."
+    },
+    "ledgerRowGap": {
+      "expr": {
+        "op": "multiply",
+        "args": [
+          "rowInterval",
+          "phraseSame"
+        ]
+      },
+      "why": "Rhythm: the steady interval between rows inside one ledger (hindcasts, cores)."
+    },
+    "sectionGap": {
+      "expr": {
+        "op": "multiply",
+        "args": [
+          "rowInterval",
+          "phraseSection"
+        ]
+      },
+      "why": "Rhythm: the larger pause authored at each change of section."
+    },
+    "openingTrack": {
+      "expr": {
+        "op": "multiply",
+        "args": [
+          "bandShare",
+          12
+        ]
+      },
+      "why": "Partition: the opening band divides a 12-track row; the verdict column takes its share."
+    },
+    "standingTrack": {
+      "expr": {
+        "op": "multiply",
+        "args": [
+          {
+            "op": "subtract",
+            "args": [
+              1,
+              "bandShare"
+            ]
+          },
+          12
+        ]
+      },
+      "why": "Partition: the standing instrument row takes the remaining track, counterweighing the verdict column."
+    }
+  },
+  "bindings": {
+    "--room-size": {
+      "node": "roomSize",
+      "unit": "rem"
+    },
+    "--opening-gap": {
+      "node": "openingGap",
+      "unit": "rem"
+    },
+    "--figure-primary-size": {
+      "node": "figurePrimarySize",
+      "unit": "rem"
+    },
+    "--figure-secondary-size": {
+      "node": "figureSecondarySize",
+      "unit": "rem"
+    },
+    "--ledger-row-gap": {
+      "node": "ledgerRowGap",
+      "unit": "rem"
+    },
+    "--section-gap": {
+      "node": "sectionGap",
+      "unit": "rem"
+    },
+    "--opening-track": {
+      "node": "openingTrack",
+      "unit": ""
+    },
+    "--standing-track": {
+      "node": "standingTrack",
+      "unit": ""
+    }
+  }
+}

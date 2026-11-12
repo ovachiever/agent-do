@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400..700&family=Source+Sans+3:wght@400..700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917; --lift:#211E1B; --lift2:#272320; --lift3:#2B2723;
+  --ink:#E7E3DA; --muted:#A69D90; --faint:#6E675E;
+  --line:rgba(231,227,218,0.14); --line2:rgba(231,227,218,0.28);
+  --sage:hsl(158,30%,55%); --sageD:hsl(158,22%,19%);
+  --clay:hsl(12,42%,58%); --clayD:hsl(12,26%,17%);
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:'Source Sans 3',-apple-system,'Helvetica Neue',sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);min-width:1280px;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+input{font:14px var(--sans);color:var(--ink);background:#171412;border:1px solid var(--line2);padding:7px 10px;min-width:0}
+input:focus{outline:0;border-color:var(--sage)}
+:focus-visible{outline:1px solid var(--sage);outline-offset:2px}
+.wrap{max-width:1408px;margin:0 auto;padding:0 44px}
+.sage{color:var(--sage)} .clay{color:var(--clay)} .mut{color:var(--muted)}
+.tmono{font-family:var(--mono)}
+
+/* masthead */
+.mast{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px solid var(--line)}
+.m1{display:flex;align-items:center;gap:28px;height:54px}
+.brand{font:600 19px var(--serif);letter-spacing:.02em}
+.rooms{display:flex;gap:20px;font:13px/1 var(--sans);color:var(--muted)}
+.rooms span{padding:6px 1px;cursor:default}
+.rooms .cur{color:var(--ink);border-bottom:1px solid var(--sage);padding-bottom:5px}
+.clock{margin-left:auto;font:13px var(--mono);color:var(--muted)}
+.m2{display:flex;align-items:center;gap:14px;min-height:46px;border-top:1px solid var(--line)}
+.crumbs{display:flex;align-items:center;gap:9px;font:600 12px var(--sans);letter-spacing:.13em;text-transform:uppercase}
+.crumb{color:var(--muted);padding:7px 1px;letter-spacing:.13em}
+button.crumb:hover{color:var(--sage)}
+.crumb.cur{color:var(--ink);cursor:default}
+.csep{color:var(--faint);font-size:14px}
+.eschint{font:12px var(--sans);color:var(--muted);opacity:.7;margin-left:2px;text-transform:none;letter-spacing:0}
+.course{margin-left:auto;display:flex;align-items:center;gap:12px;font:13px var(--sans);color:var(--muted)}
+.course .lbl{margin-right:-2px}
+.course b{color:var(--ink);font-weight:600}
+.cbtn{border:1px solid var(--line2);padding:6px 12px;font:600 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.cbtn:hover{color:var(--sage);border-color:var(--sage)}
+.loggednote{font:12px var(--sans);color:var(--sage)}
+.cformrow{border-top:1px solid var(--line);padding:12px 0;display:flex;gap:16px;align-items:flex-end}
+.cformrow label{display:flex;flex-direction:column;gap:6px;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.cformrow .note{font:12px var(--sans);color:var(--muted);padding-bottom:9px;text-transform:none;letter-spacing:0}
+
+/* generic block anatomy */
+main{padding:24px 0 8px}
+.lede{font:400 21px/1.45 var(--serif);max-width:1080px;margin:6px 0 2px}
+.ledechips{display:flex;align-items:center;gap:10px;margin-top:10px}
+.bandcap{display:flex;align-items:center;gap:12px;margin:26px 0 10px}
+.capline{flex:1;height:1px;background:var(--line)}
+.capnote{font:12px var(--sans);color:var(--muted)}
+.lbl{font:600 12px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.grid7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.grid6{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.grid4x{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.blk{position:relative;background:var(--lift);border:1px solid var(--line);padding:13px 14px 11px;display:flex;flex-direction:column;min-height:122px}
+.blk .lbl{margin-bottom:9px}
+.fig{font:600 27px/1.1 var(--serif);font-variant-numeric:tabular-nums}
+.fig.big{font-size:31px}
+.fig.mono{font:600 19px/1.35 var(--mono)}
+.fig .dim{color:var(--muted)}
+.sub{font:13px/1.5 var(--sans);color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:7px;min-height:17px}
+.state{font:13px var(--sans);color:var(--muted);margin-top:auto;padding-top:9px}
+.cue{position:absolute;right:11px;bottom:9px;font:13px var(--sans);color:var(--muted);opacity:.5}
+.blk.click{cursor:pointer}
+.blk.click:hover{background:var(--lift2);border-color:var(--line2)}
+.blk.click:hover .cue{color:var(--sage);opacity:1}
+.bar{height:3px;background:rgba(231,227,218,0.09);margin-top:10px;position:relative}
+.bar i{position:absolute;top:0;bottom:0;left:0;background:var(--sage)}
+.bar em{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--muted)}
+.step{display:inline-flex;gap:4px;visibility:hidden;margin-left:2px}
+.blk:hover .step{visibility:visible}
+.step button{width:24px;height:24px;border:1px solid var(--line2);color:var(--muted);font:600 14px var(--mono);display:grid;place-items:center;padding:0}
+.step button:hover{color:var(--sage);border-color:var(--sage)}
+.kv{display:flex;justify-content:space-between;gap:12px;font:13px/1.6 var(--sans);color:var(--muted)}
+.kv b{color:var(--ink);font-weight:400;text-align:right}
+.kv b.tmono{font-size:13px}
+
+/* panels + tables */
+.panel{border:1px solid var(--line);background:var(--lift)}
+.phead{display:flex;align-items:baseline;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.pstate{font:13px var(--sans);color:var(--muted)}
+.pnum{margin-left:auto;font:13px var(--mono);color:var(--muted)}
+.legend{margin-left:auto;display:flex;gap:14px;font:12px var(--sans);color:var(--muted)}
+.legend .lg-done{color:var(--ink)} .legend .lg-live{color:var(--sage)} .legend .lg-slip{color:var(--clay)} .legend .lg-struck{color:var(--clay);text-decoration:line-through} .legend .lg-held{text-decoration:line-through}
+.thead{display:grid;gap:0 10px;padding:9px 16px;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+.row{display:grid;gap:0 10px;padding:0 16px;min-height:46px;align-items:center;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row.click{cursor:pointer}
+.row.click:hover{background:var(--lift2)}
+.row .cuecell{color:var(--muted);opacity:.5;font-size:13px;text-align:right}
+.row.click:hover .cuecell{color:var(--sage);opacity:1}
+.num{font:13px var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.cell-mono{font:13px var(--mono)}
+.eltitle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px}
+.cols-st{grid-template-columns:150px 150px 1fr 100px 120px 80px 110px 26px}
+.cols-pp{grid-template-columns:44px 1fr 210px 56px 76px 96px 26px}
+.cols-log{grid-template-columns:64px 1fr 130px}
+.logrow .t{font:13px var(--mono);color:var(--muted)}
+.logrow .txt{font:14px/1.45 var(--sans);padding:8px 0}
+.logrow .right{justify-self:end;display:flex;align-items:center;gap:8px}
+.logrow.click .runref{font:12px var(--mono);color:var(--muted)}
+.logrow.click:hover .runref{color:var(--sage)}
+.chipE{font:600 12px/1 var(--sans);letter-spacing:.1em;border:1px solid var(--sage);color:var(--sage);padding:4px 8px;text-transform:uppercase}
+.mins{font:13px var(--mono);color:var(--muted)}
+.mins.clay{color:var(--clay)}
+@keyframes rowin{from{background:var(--sageD)}to{background:transparent}}
+.flash{animation:rowin 1.8s ease-out}
+.rowflash{background:var(--sageD) !important}
+
+/* timetable */
+.ttg{display:grid;grid-template-columns:118px repeat(16,minmax(0,1fr));grid-template-rows:56px repeat(6,46px);grid-auto-flow:column;gap:1px;background:var(--line)}
+.ttg>div{background:var(--lift)}
+.ttg>div.tgl,.ttg>div.gut{background:var(--bg)}
+.tgl{display:flex;flex-direction:column;justify-content:center;padding:0 12px;gap:2px}
+.tgl b{font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--ink)}
+.tgl span{font:12px var(--sans);color:var(--muted)}
+.tth{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer}
+.tth .cy{font:12px var(--mono);color:var(--muted)}
+.tth .rid{font:600 13px var(--mono);color:var(--ink)}
+.tth .tag{font:600 12px/1 var(--sans);letter-spacing:.08em}
+.tth.struck .rid{color:var(--clay);text-decoration:line-through}
+.tc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;font:12px var(--mono);line-height:1.25}
+.tc .b{color:var(--muted)}
+.tc .a{color:var(--ink)}
+.tc .x{color:var(--clay)}
+.tc .slp{color:var(--clay)}
+.tc .lv{color:var(--sage);font-weight:600}
+.tc .sm{color:var(--sage)}
+.tc .heldt{color:var(--muted);text-decoration:line-through}
+.ttg .hov{background:var(--lift2)}
+.ttg .tc:hover,.ttg .tth:hover{background:var(--lift3)}
+@keyframes blink{50%{opacity:.35}}
+.pulse{animation:blink 1.6s infinite}
+
+/* standing orders band */
+.soband{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.so{background:var(--lift);padding:12px 16px;display:flex;flex-direction:column;gap:6px;min-height:96px}
+.so .val{font:14px var(--sans);color:var(--ink)}
+.so .prov{font:12px var(--sans);color:var(--muted)}
+.so .prov.sage{color:var(--sage)}
+.so .edit{margin-top:auto;align-self:flex-start;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:6px 0;min-height:24px}
+.so .edit:hover{color:var(--sage)}
+.so .soform{display:flex;gap:6px;margin-top:auto}
+.so .soform input{flex:1;font-size:13px;padding:5px 8px}
+
+/* controls */
+.control{display:flex;align-items:center;gap:24px;border:1px solid var(--line);background:var(--lift);padding:16px 18px;margin-top:26px}
+.btnbig{border:1px solid var(--clay);color:var(--clay);padding:13px 26px;font:600 13px var(--sans);letter-spacing:.14em;text-transform:uppercase;min-height:44px}
+.btnbig:hover{background:var(--clayD)}
+.btnbig.armed{background:var(--clay);color:#1B1917}
+.btnbig.resume{border-color:var(--sage);color:var(--sage)}
+.btnbig.resume:hover{background:var(--sageD)}
+.cons{font:14px/1.5 var(--sans);color:var(--muted);max-width:700px}
+.btn{border:1px solid var(--line2);padding:10px 18px;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--ink);min-height:38px}
+.btn:hover{border-color:var(--sage);color:var(--sage)}
+.btn.pri{border-color:var(--sage);color:var(--sage)}
+.btn.pri:hover{background:var(--sageD)}
+.btn.ghost{color:var(--muted);border-color:var(--line2)}
+.chip{display:inline-block;font:600 12px/1 var(--sans);letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border:1px solid currentColor}
+.chip.sage{color:var(--sage)} .chip.clay{color:var(--clay)} .chip.mut{color:var(--muted)}
+.idchip{font:600 13px var(--mono);color:var(--ink);border:1px solid var(--line2);padding:4px 9px}
+
+/* stage centerpiece band */
+.bigline{padding:20px 18px;font:600 19px/1.5 var(--serif)}
+.bigline .tmono{font-size:16px;font-weight:400}
+.bigline.claytone{color:var(--clay)}
+.bigline .mut{font-weight:400}
+
+/* paper page */
+.paperhead{font:600 25px/1.35 var(--serif);max-width:1040px;margin:8px 0 4px}
+.papersub{font:14px var(--sans);color:var(--muted)}
+.crow{display:grid;grid-template-columns:60px 1fr;gap:0 10px;padding:11px 16px;border-bottom:1px solid var(--line);font:15px/1.5 var(--sans);align-items:baseline}
+.crow:last-child{border-bottom:0}
+.crow .cid{font:13px var(--mono);color:var(--muted)}
+
+.foot{margin:36px auto 26px;text-align:center;font:14px var(--sans);color:var(--faint)}
+.pagein{animation:fadein .18s ease-out}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+window.__errs=[];window.addEventListener('error',function(e){window.__errs.push(String(e.message))});
+const DATA = __DATA__;
+const RUNS = DATA.runs;
+const SVC = DATA.day.services;
+const STAGE_ORDER = ['open','read','deliberate','simulate','record','close'];
+const LIVE_T0 = 17*3600+22*60;
+const DAY_SPENT = SVC.reduce((a,s)=>a+s.spent,0);
+const DAY_CLOSE = 15590;
+
+const S = {
+  view:{level:'day',run:null,stage:null,paper:null},
+  course:{topic:'drought-tolerant wheat',cycles:'13–24',at:'10:00',by:'Erik'},
+  log: DATA.day.log.map(o=>Object.assign({},o)),
+  allot: Object.fromEntries(SVC.map(s=>[s.key,s.allot])),
+  standing:[
+    {k:'cadence', label:'cadence', val:'hourly · 06:00–21:00', by:'default', at:null},
+    {k:'strike',  label:'strike',  val:'past +25',             by:'default', at:null},
+    {k:'retry',   label:'retry',   val:'×1 then requeue',      by:'default', at:null},
+    {k:'snapshot',label:'snapshot',val:'hourly at :15',        by:'default', at:null}
+  ],
+  suspended:false, armed:false, rerun:{}, courseOpen:false, editSO:null,
+  clock: 17*3600+26*60+8, flash:null
+};
+let armT=null;
+
+const money = c => '$'+(c/100).toFixed(2);
+const hm  = s => String(Math.floor(s/3600)).padStart(2,'0')+':'+String(Math.floor((s%3600)/60)).padStart(2,'0');
+const hms = s => hm(s)+':'+String(s%60).padStart(2,'0');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const runOf = id => RUNS.find(r=>r.id===id);
+const runTotal = r => STAGE_ORDER.reduce((a,k)=>a+(r.costs[k]||0),0);
+const dayAllot = () => SVC.reduce((a,s)=>a+S.allot[s.key],0);
+const minutesLost = () => S.log.reduce((a,e)=>a+(e.mins||0),0);
+const liveEl = () => Math.min(12,Math.max(0,Math.floor((S.clock-LIVE_T0)/60)))+'m in';
+const isHeld = r => S.suspended && r.status==='booked';
+const stOf = (r,k) => r.stages.find(s=>s.k===k);
+const truncTitle = t => t.length>30 ? t.slice(0,29).trimEnd()+'…' : t;
+
+function pushOrder(text){
+  S.log.push({t:hm(S.clock),kind:'order',text:text});
+  S.flash=S.log.length-1;
+  setTimeout(()=>{S.flash=null;},2000);
+}
+
+/* ---------- masthead ---------- */
+function crumbSpec(){
+  const v=S.view, out=[{t:'Day',go:'day'}];
+  if(v.level==='day') return out;
+  out.push({t:v.run,go:'run:'+v.run});
+  if(v.level==='run') return out;
+  const st=stOf(runOf(v.run), v.level==='paper'?'read':v.stage);
+  out.push({t:st.name,go:'stage:'+v.run+':'+st.k});
+  if(v.level==='stage') return out;
+  out.push({t:truncTitle(runOf(v.run).papers[v.paper].t),go:null});
+  return out;
+}
+function mastHTML(){
+  const cs=crumbSpec();
+  const crumbs=cs.map((c,i)=>{
+    const last=i===cs.length-1;
+    const inner=last?`<span class="crumb cur">${esc(c.t)}</span>`:`<button class="crumb" data-go="${c.go}">${esc(c.t)}</button>`;
+    return inner+(last?'':'<span class="csep">▸</span>');
+  }).join('');
+  const eschint=cs.length>1?'<span class="eschint">esc ▴</span>':'';
+  const lastOrder=S.log[S.log.length-1];
+  const courseNote=(S.flash!==null&&lastOrder&&lastOrder.kind==='order'&&lastOrder.text.indexOf('course set')===0)?`<span class="loggednote">logged ${lastOrder.t} · Erik</span>`:'';
+  const form=!S.courseOpen?'':`
+    <div class="wrap cformrow">
+      <label>topic<input id="cTopic" value="${esc(S.course.topic)}" style="width:340px"></label>
+      <label>cycles<input id="cCycles" value="${esc(S.course.cycles)}" style="width:110px"></label>
+      <button class="btn pri" id="courseSetBtn" data-act="courseSet">Set course</button>
+      <button class="btn ghost" data-act="courseCancel">Cancel</button>
+      <span class="note">an order — logs on the clock, tagged Erik</span>
+    </div>`;
+  return `<header class="mast">
+    <div class="wrap m1">
+      <span class="brand">Palingenesis</span>
+      <div class="rooms"><span>Today</span><span>Pipeline</span><span>Library</span><span>Portfolio</span><span>Simulation</span><span class="cur">Engine Room</span></div>
+      <span class="clock" id="clock">${hms(S.clock)} · farm local UTC−05</span>
+    </div>
+    <div class="wrap m2">
+      <div class="crumbs">${crumbs}${eschint}</div>
+      <div class="course">
+        <span class="lbl">Course</span>
+        <span><b>${esc(S.course.topic)}</b> · cycles ${esc(S.course.cycles)} · set ${esc(S.course.at)} by ${esc(S.course.by)}</span>
+        ${courseNote}
+        <button class="cbtn" data-act="courseToggle">${S.courseOpen?'Close':'Change course'}</button>
+      </div>
+    </div>
+    ${form}
+  </header>`;
+}
+
+/* ---------- shared block ---------- */
+function blk(o){
+  const click=o.go||o.act;
+  const attrs=(o.go?` data-go="${o.go}"`:'')+(o.act?` data-act="${o.act}"`:'')+(click?' role="button" tabindex="0"':'');
+  return `<div class="blk${click?' click':''}"${attrs}>
+    <div class="lbl">${o.lbl}</div>
+    <div class="fig${o.figcls?' '+o.figcls:''}">${o.fig}</div>
+    ${o.subs||''}
+    ${o.bar||''}
+    <div class="state">${o.state||''}</div>
+    ${click?'<div class="cue">▸</div>':''}
+  </div>`;
+}
+
+/* ---------- day ---------- */
+function svcBlockDay(s){
+  const allot=S.allot[s.key];
+  const pct=Math.min(100,(s.spent/allot)*100).toFixed(1);
+  const pcl=Math.min(100,(s.close/allot)*100).toFixed(1);
+  return `<div class="blk click" data-act="trace:${s.sk}" role="button" tabindex="0">
+    <div class="lbl">${s.name}</div>
+    <div class="fig">${money(s.spent)}</div>
+    <div class="sub"><span>of ${money(allot)} allot</span>
+      <span class="step">
+        <button data-act="allot:${s.key}:dn" aria-label="lower ${s.name} allot">−</button>
+        <button data-act="allot:${s.key}:up" aria-label="raise ${s.name} allot">+</button>
+      </span></div>
+    <div class="sub">≈ ${money(s.close)} at close</div>
+    <div class="bar"><i style="width:${pct}%"></i><em style="left:${pcl}%"></em></div>
+    <div class="state">${s.job}</div>
+    <div class="cue">▸</div>
+  </div>`;
+}
+function cellHTML(r,st){
+  const held=isHeld(r);
+  let inner='';
+  if(held){ inner=`<span class="heldt">${st.booked}</span><span class="b">held</span>`; }
+  else if(st.state==='struck'){ inner='<span class="x">—</span>'; }
+  else if(st.state==='booked'){ inner=`<span class="b">${st.booked}</span>`; }
+  else if(st.state==='live'){ inner=`<span class="lv"><span class="pulse">●</span> ${st.actual}</span><span class="sm" data-live-elapsed>${liveEl()}</span>`; }
+  else if(st.slip>0){ inner=`<span class="b">${st.booked}</span><span class="slp">${st.actual} +${st.slip}</span>`; }
+  else { inner=`<span class="a">${st.actual}</span>`; }
+  return `<div class="tc" data-go="stage:${r.id}:${st.k}" data-run="${r.id}" data-strow="${st.k}" role="button" tabindex="0">${inner}</div>`;
+}
+function timetableHTML(){
+  const gut=['<div class="gut"></div>'].concat(DATA.day.stagesMeta.map(m=>
+    `<div class="tgl" data-strow="${m.k}"><b>${m.name}</b><span>${m.service} · +${m.off}</span></div>`)).join('');
+  const cols=RUNS.map(r=>{
+    const held=isHeld(r);
+    let tag='';
+    if(r.status==='live') tag='<span class="tag sage">LIVE</span>';
+    else if(r.status==='struck') tag='<span class="tag clay">STRUCK</span>';
+    else if(held) tag='<span class="tag clay">HELD</span>';
+    else if(r.cycle===13&&!S.suspended) tag='<span class="tag mut">NEXT</span>';
+    const head=`<div class="tth${r.status==='struck'?' struck':''}" data-go="run:${r.id}" data-run="${r.id}" role="button" tabindex="0" aria-label="open ${r.id}">
+      <span class="cy">c${String(r.cycle).padStart(2,'0')}</span><span class="rid">${r.id}</span>${tag}</div>`;
+    return head+r.stages.map(st=>cellHTML(r,st)).join('');
+  }).join('');
+  const legend=`<span class="legend"><span class="lg-done">done</span><span>booked</span><span class="lg-slip">+slip</span><span class="lg-live">● live</span><span class="lg-struck">struck</span>${S.suspended?'<span class="lg-held">held</span>':''}</span>`;
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">Timetable</span><span class="pstate">one open per hour · 06:00–21:00</span>${legend}</div>
+    <div class="ttg">${gut}${cols}</div>
+  </section>`;
+}
+function logRow(e,i){
+  const link=e.run?` click" data-go="run:${e.run}" role="button" tabindex="0`:'';
+  const right=e.kind==='order'
+    ? '<span class="chipE">Erik</span>'
+    : `<span class="mins${(e.mins||0)>=1?' clay':''}">${(e.mins||0).toFixed(1)}</span>`;
+  const ref=e.run?`<span class="runref">▸ ${e.run}</span>`:'';
+  return `<div class="row logrow cols-log${link}${S.flash===i?' flash':''}">
+    <span class="t">${e.t}</span><span class="txt">${esc(e.text)}</span>
+    <span class="right">${ref}${right}</span></div>`;
+}
+function logPanel(entries,label,stateTxt){
+  const lost=minutesLost();
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">${label}</span><span class="pstate">${stateTxt}</span>
+      <span class="pnum"><span class="${lost>0?'clay':''}">${lost.toFixed(1)}</span> of 960 min lost</span></div>
+    ${entries.map((e)=>logRow(e,S.log.indexOf(e))).join('')}
+  </section>`;
+}
+function standingHTML(){
+  return `<div class="soband">${S.standing.map(so=>{
+    const prov=so.by==='default'?'<span class="prov">default</span>':`<span class="prov sage">set ${so.at} by ${esc(so.by)}</span>`;
+    const body=S.editSO===so.k
+      ? `<div class="soform"><input id="soInput" value="${esc(so.val)}">
+         <button class="btn pri" id="soSetBtn" data-act="soSet:${so.k}" style="min-height:30px;padding:5px 10px">Set</button>
+         <button class="btn ghost" data-act="soCancel" style="min-height:30px;padding:5px 10px">✕</button></div>`
+      : `<button class="edit" data-act="soEdit:${so.k}">edit</button>`;
+    return `<div class="so"><span class="lbl">${so.label}</span><span class="val">${esc(so.val)}</span>${prov}${body}</div>`;
+  }).join('')}</div>`;
+}
+function dayHTML(){
+  const sus=S.suspended;
+  const ledeTail=sus
+    ? `<b class="sage">cycle 12 mid-Simulate</b>, cycles 13–16 <b class="clay">held by order</b>.`
+    : `<b class="sage">cycle 12 mid-Simulate</b>, cycle 13 opens 18:00:00.`;
+  const lede=`<b class="sage">Nominal</b> — ten closed, <b class="clay">one struck</b>, ${money(DAY_SPENT)} of ${money(dayAllot())} spent; ${ledeTail}`;
+  const dayPct=Math.min(100,(DAY_SPENT/dayAllot())*100).toFixed(1);
+  const dayPcl=Math.min(100,(DAY_CLOSE/dayAllot())*100).toFixed(1);
+  const dayBlk=`<div class="blk">
+    <div class="lbl">Day ledger</div>
+    <div class="fig big">${money(DAY_SPENT)}</div>
+    <div class="sub">of ${money(dayAllot())} allot</div>
+    <div class="sub">≈ ${money(DAY_CLOSE)} at close</div>
+    <div class="bar"><i style="width:${dayPct}%"></i><em style="left:${dayPcl}%"></em></div>
+    <div class="state">six services on book</div>
+  </div>`;
+  const vols=DATA.day.volumes.map(v=>blk({
+    lbl:v.label, fig:String(v.fig), state:v.state, act:'trace:'+v.sk
+  })).join('');
+  const schBlk=`<div class="blk${sus?'':' click'}"${sus?'':' data-go="run:r-2213" role="button" tabindex="0"'}>
+    <div class="lbl">Scheduler</div>
+    <div class="fig mono">${sus?'held':'18:00:00'}</div>
+    <div class="sub">${sus?'resume to rebook · r-2213':'next open · cycle 13 · r-2213'}</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:2px">
+      <div class="kv"><span>cadence</span><b>one open per hour · 06:00–21:00</b></div>
+      <div class="kv"><span>late rule</span><b>struck past +25 · worst +21</b></div>
+      <div class="kv"><span>clock</span><b>farm local · UTC−05</b></div>
+    </div>
+    <div class="state">${sus?'<span class="clay">suspended by Erik</span>':'on cadence'}</div>
+    ${sus?'':'<div class="cue">▸</div>'}
+  </div>`;
+  const dataBlk=`<div class="blk">
+    <div class="lbl">Data</div>
+    <div class="fig mono">412 MB</div>
+    <div class="sub">snapshot 17:15:09 · verified</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:2px">
+      <div class="kv"><span>archive</span><b>1,283 runs · 9.6 GB · to 16:43</b></div>
+      <div class="kv"><span>backfill</span><b>0 owed</b></div>
+      <div class="kv"><span>repair</span><b>last Aug 19</b></div>
+      <div class="kv"><span>next snap</span><b class="tmono">18:15:00 · hourly :15</b></div>
+    </div>
+    <div class="state">write 2 verified</div>
+  </div>`;
+  const consequence=sus
+    ? `Cycles 13–16 held by order at ${esc(S.log.filter(e=>e.text.indexOf('generation suspended')===0).slice(-1)[0].t)} · resume reopens next booked hour.`
+    : 'Cycle 12 runs to 17:41 · 13–16 do not open · resume reopens next booked hour.';
+  const ctlBtn=sus
+    ? `<button class="btnbig resume" data-act="resume">Resume generation</button>`
+    : `<button class="btnbig${S.armed?' armed':''}" data-act="suspend">${S.armed?'Confirm suspend — 13–16 will not open':'Suspend generation'}</button>`;
+  return `
+    <p class="lede">${lede}</p>
+    <div class="bandcap"><span class="lbl">Ledger</span><span class="capnote">spent · allot · ≈close</span><span class="capline"></span></div>
+    <div class="grid7">${dayBlk}${SVC.map(svcBlockDay).join('')}</div>
+    <div class="bandcap"><span class="lbl">Timetable</span><span class="capnote">sixteen cycles · booked and actual</span><span class="capline"></span></div>
+    ${timetableHTML()}
+    <div class="bandcap"><span class="lbl">Volumes</span><span class="capnote">to 17:26</span><span class="capline"></span></div>
+    <div class="grid6">${vols}</div>
+    <div class="bandcap"><span class="lbl">Machine</span><span class="capnote">scheduler · data</span><span class="capline"></span></div>
+    <div class="mrow">${schBlk}${dataBlk}</div>
+    <div class="bandcap"><span class="lbl">Standing orders</span><span class="capnote">value · provenance</span><span class="capline"></span></div>
+    ${standingHTML()}
+    <div class="bandcap"><span class="lbl">Log</span><span class="capnote">orders and incidents · on the clock</span><span class="capline"></span></div>
+    ${logPanel(S.log,'Log','orders sage-tagged Erik')}
+    <section class="control">${ctlBtn}<p class="cons">${consequence}</p></section>`;
+}
+
+/* ---------- run ---------- */
+function runChip(r){
+  if(r.status==='live') return '<span class="chip sage">Live</span>';
+  if(r.status==='struck') return '<span class="chip clay">Struck</span>';
+  if(isHeld(r)) return '<span class="chip clay">Held</span>';
+  if(r.status==='booked') return '<span class="chip mut">Booked</span>';
+  return '<span class="chip mut">Closed</span>';
+}
+function runLede(r){
+  if(r.status==='booked'){
+    return isHeld(r)
+      ? `Cycle ${r.cycle} is held on book by order — resume reopens the next booked hour.`
+      : `Cycle ${r.cycle} opens ${r.open}:00 under course ${esc(S.course.topic)} — six services booked to the hour.`;
+  }
+  return esc(r.lede);
+}
+function svcBlockRun(r,st){
+  const cost=r.costs[st.k]||0;
+  const run_=st.state==='done'||st.state==='live';
+  const fig=(run_||cost>0)?money(cost):'<span class="dim">—</span>';
+  let sub='';
+  if(isHeld(r)) sub='held';
+  else if(st.state==='booked') sub=`books ${st.booked}`;
+  else if(st.state==='struck') sub='<span class="clay">struck</span>';
+  else if(st.k==='open') sub=`${r.sources} sources`;
+  else if(st.k==='read') sub=`${r.papersN} papers`;
+  else if(st.k==='deliberate') sub=`vote ${r.vote}`;
+  else if(st.k==='simulate') sub=r.status==='live'?'<span class="sage">trial live</span>':`${r.seasons} seasons`;
+  else if(st.k==='record') sub=r.verdict?`${r.verdict}`:'—';
+  else sub=r.digest?`posted ${r.closedAt}`:'—';
+  return blk({lbl:st.service,fig:fig,subs:`<div class="sub">${sub}</div>`,state:st.job,go:`stage:${r.id}:${st.k}`});
+}
+function stageTable(r){
+  const rows=r.stages.map(st=>{
+    const held=isHeld(r);
+    const actual=held?'held':(st.state==='live'?st.actual+' · live':(st.actual?st.actual+(st.actualEnd?'–'+st.actualEnd:''):'—'));
+    const slip=st.slip>0?`<span class="clay">+${st.slip}</span>`:(st.state==='done'?'0':'—');
+    const cost=(st.state==='done'||st.state==='live'||(r.costs[st.k]||0)>0)?money(r.costs[st.k]||0):'—';
+    const acls=st.state==='live'?' sage':(st.slip>0?' clay':'');
+    return `<div class="row click cols-st" data-go="stage:${r.id}:${st.k}" role="button" tabindex="0">
+      <span class="lbl" style="letter-spacing:.12em">${st.name}</span>
+      <span class="mut">${st.service}</span><span></span>
+      <span class="cell-mono mut">${st.booked}</span>
+      <span class="cell-mono${acls}">${st.state==='struck'?'<span class="clay">—</span>':actual}</span>
+      <span class="cell-mono mut">${slip}</span>
+      <span class="num">${cost}</span><span class="cuecell">▸</span>
+    </div>`;
+  }).join('');
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">Stages</span><span class="pstate">booked → actual</span>
+      <span class="pnum">${r.id}</span></div>
+    <div class="thead cols-st"><span>Stage</span><span>Service</span><span></span><span>Booked</span><span>Actual</span><span>Slip</span><span style="text-align:right">Cost</span><span></span></div>
+    ${rows}
+  </section>`;
+}
+function runHTML(r){
+  const held=isHeld(r);
+  const chips=`<div class="ledechips">${runChip(r)}${r.verdict?`<span class="idchip">${r.verdict}</span>`:''}${r.digest?`<span class="idchip">${r.digest}</span>`:''}</div>`;
+  const runBlk=`<div class="blk">
+    <div class="lbl">Run ledger</div>
+    <div class="fig big">${(r.status==='booked')?'<span class="dim">—</span>':money(runTotal(r))}</div>
+    <div class="sub">of day ${money(DAY_SPENT)}</div>
+    <div class="state">${r.status==='booked'?(held?'held on book':'opens '+r.open+':00'):'six services'}</div>
+  </div>`;
+  const summary=(()=>{
+    const b=[];
+    const dash='<span class="dim">—</span>';
+    if(r.status==='struck'){
+      b.push(blk({lbl:'Sources',fig:'0',state:'<span class="clay">feed empty</span>',go:`stage:${r.id}:open`}));
+      b.push(blk({lbl:'Papers',fig:'0',state:'never read',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Claims',fig:'0',state:'none kept',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Trial',fig:dash,figcls:'mono',state:'struck',go:`stage:${r.id}:simulate`}));
+      b.push(blk({lbl:'Verdict',fig:dash,figcls:'mono',state:'struck',go:`stage:${r.id}:record`}));
+      b.push(blk({lbl:'Digest',fig:dash,figcls:'mono',state:'kept on book',go:`stage:${r.id}:close`}));
+    } else if(r.status==='booked'){
+      const s=held?'held':'booked';
+      b.push(blk({lbl:'Sources',fig:dash,state:s,go:`stage:${r.id}:open`}));
+      b.push(blk({lbl:'Papers',fig:dash,state:s,go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Claims',fig:dash,state:s,go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Trial',fig:dash,figcls:'mono',state:s,go:`stage:${r.id}:simulate`}));
+      b.push(blk({lbl:'Verdict',fig:dash,figcls:'mono',state:s,go:`stage:${r.id}:record`}));
+      b.push(blk({lbl:'Digest',fig:dash,figcls:'mono',state:s,go:`stage:${r.id}:close`}));
+    } else {
+      b.push(blk({lbl:'Sources',fig:String(r.sources),state:'scouted',go:`stage:${r.id}:open`}));
+      b.push(blk({lbl:'Papers',fig:String(r.papersN),state:'in the stack',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Claims',fig:String(r.claims),state:'kept to lineage',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Trial',fig:r.status==='live'?dash:r.result,figcls:'mono',
+        state:r.status==='live'?'<span class="sage">season 2 of 3</span>':`${r.seasons} seasons · ${r.conf}`,go:`stage:${r.id}:simulate`}));
+      b.push(blk({lbl:'Verdict',fig:r.verdict?r.verdict:dash,figcls:'mono',
+        state:r.verdict?`${r.kind} · ${r.vote}`:'records 17:34',go:`stage:${r.id}:record`}));
+      b.push(blk({lbl:'Digest',fig:r.digest?r.digest:dash,figcls:'mono',
+        state:r.digest?`posted ${r.closedAt}`:'books 17:41',go:`stage:${r.id}:close`}));
+    }
+    return b.join('');
+  })();
+  let control='';
+  if(r.status==='closed'||r.status==='struck'){
+    control=S.rerun[r.id]
+      ? `<section class="control"><span class="chip sage">Re-run queued ${S.rerun[r.id]}</span><p class="cons">books after cycle 16 · course as set · allot unchanged</p></section>`
+      : `<section class="control"><button class="btn" data-act="rerun:${r.id}" style="border-color:var(--line2)">Re-run cycle</button><p class="cons">books after cycle 16 · course as set · allot unchanged</p></section>`;
+  } else if(r.status==='live'){
+    control=`<section class="control"><span class="chip sage">Live</span><p class="cons">Simulate live · <span class="tmono" data-live-elapsed>${liveEl()}</span> · record books 17:34 · runs to 17:41</p></section>`;
+  } else {
+    control=`<section class="control"><span class="chip ${held?'clay':'mut'}">${held?'Held':'Booked'}</span><p class="cons">${held?'held by order · resume reopens next booked hour':`opens ${r.open}:00 · course ${esc(S.course.topic)} · strike past +25`}</p></section>`;
+  }
+  const incidents=r.incidents.length?`
+    <div class="bandcap"><span class="lbl">Log</span><span class="capnote">this run</span><span class="capline"></span></div>
+    <section class="panel">${r.incidents.map(e=>`
+      <div class="row logrow cols-log"><span class="t">${e.t}</span><span class="txt">${esc(e.text)}</span>
+      <span class="right"><span class="mins${e.mins>=1?' clay':''}">${e.mins.toFixed(1)}</span></span></div>`).join('')}
+    </section>`:'';
+  return `
+    <p class="lede">${runLede(r)}</p>
+    ${chips}
+    <div class="bandcap"><span class="lbl">Ledger</span><span class="capnote">this run · six services</span><span class="capline"></span></div>
+    <div class="grid7">${runBlk}${r.stages.map(st=>svcBlockRun(r,st)).join('')}</div>
+    <div class="bandcap"><span class="lbl">Stages</span><span class="capnote">click a stage to open its page</span><span class="capline"></span></div>
+    ${stageTable(r)}
+    <div class="bandcap"><span class="lbl">Record</span><span class="capnote">what this run holds</span><span class="capline"></span></div>
+    <div class="grid6">${summary}</div>
+    ${incidents}
+    ${control}`;
+}
+
+/* ---------- stage ---------- */
+function stageLede(r,st){
+  if(isHeld(r)) return `The ${st.service} is held on book by order — resume reopens the next booked hour.`;
+  return esc(st.lede);
+}
+function stageCenter(r,st){
+  const d=st.detail||{};
+  if(st.k==='read'&&r.papers.length){
+    const rows=r.papers.map((p,i)=>`
+      <div class="row click cols-pp" data-go="paper:${r.id}:${i}" role="button" tabindex="0">
+        <span class="cell-mono mut">p${i+1}</span>
+        <span class="eltitle" title="${esc(p.t)}">${esc(p.t)}</span>
+        <span class="mut">${esc(p.j)}</span>
+        <span class="cell-mono mut">${p.y}</span>
+        <span class="num">${p.claims.length}</span>
+        <span class="num">${money(p.cost)}</span>
+        <span class="cuecell">▸</span>
+      </div>`).join('');
+    return `<section class="panel">
+      <div class="phead"><span class="lbl">Papers ingested</span><span class="pstate">each row a receipt</span>
+        <span class="pnum">${r.papersN} papers · ${r.claims} claims · ${money(r.costs.read)}</span></div>
+      <div class="thead cols-pp"><span></span><span>Title</span><span>Journal</span><span>Year</span><span style="text-align:right">Claims</span><span style="text-align:right">Cost</span><span></span></div>
+      ${rows}
+    </section>`;
+  }
+  let label='Record', line='', clay=false;
+  if(st.state==='booked'||isHeld(r)){
+    label=st.name; line=`<span class="mut">${isHeld(r)?'held by order':'books '+st.booked} · nothing recorded yet</span>`;
+  } else if(st.state==='struck'){
+    label=st.name; clay=true; line=`never ran · cycle ${String(r.cycle).padStart(2,'0')} struck at open · kept on book`;
+  } else if(st.k==='open'){
+    label='Docket';
+    line=d.note?`<span class="clay">${esc(d.note)}</span>`:`${d.sources} sources scouted · <b>${d.admitted}</b> admitted to the stack`;
+  } else if(st.k==='deliberate'){
+    label='Vote';
+    line=d.pending?`${d.claims} claims weighed · vote ${d.vote} · <span class="mut">verdict records 17:34</span>`
+                  :`${d.claims} claims weighed · vote ${d.vote} · ${d.kind} recorded`;
+  } else if(st.k==='simulate'){
+    label='Trial';
+    line=d.live?`season 2 of 3 · <span class="tmono sage" data-live-elapsed>${liveEl()}</span> · result pending`
+               :`${d.seasons} seasons run · result <span class="tmono">${d.result}</span> · confidence ${d.conf}`;
+  } else if(st.k==='record'){
+    label='Lineage';
+    line=`${d.claims} claims linked · evidence <span class="tmono">${d.ev0} … ${d.evN}</span> · verdict <span class="tmono">${d.verdict}</span> recorded ${d.at}`;
+  } else if(st.k==='close'){
+    label='Digest';
+    line=`digest <span class="tmono">${d.digest}</span> posted ${d.at} · book closed`;
+  } else if(st.k==='read'){
+    label='Stack'; line=`<span class="mut">no papers held</span>`;
+  }
+  const inc=(st.k==='simulate'&&r.incidents.length&&r.status!=='struck')?r.incidents.map(e=>`
+      <div class="row logrow cols-log" style="border-top:1px solid var(--line)"><span class="t">${e.t}</span><span class="txt">${esc(e.text)}</span>
+      <span class="right"><span class="mins${e.mins>=1?' clay':''}">${e.mins.toFixed(1)}</span></span></div>`).join(''):'';
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">${label}</span><span class="pstate">${st.name} · ${st.service}</span></div>
+    <div class="bigline${clay?' claytone':''}">${line}</div>${inc}
+  </section>`;
+}
+function stageHTML(r,k){
+  const st=stOf(r,k);
+  const held=isHeld(r);
+  const cost=r.costs[k]||0;
+  const ran=st.state==='done'||st.state==='live';
+  let actFig='—', actSub='';
+  if(held){actFig='—';actSub='held by order';}
+  else if(st.state==='booked'){actFig='—';actSub=`books ${st.booked}`;}
+  else if(st.state==='struck'){actFig='—';actSub='<span class="clay">never ran</span>';}
+  else if(st.state==='live'){actFig=`${st.actual} –`;actSub=`<span class="sage">running · </span><span class="sage tmono" data-live-elapsed>${liveEl()}</span>`;}
+  else {actFig=`${st.actual}–${st.actualEnd}`;actSub=st.slip>0?`<span class="clay">+${st.slip} late</span>`:'on book';}
+  const blocks=[
+    blk({lbl:'Service',fig:st.service,state:st.job}),
+    blk({lbl:'Cost',fig:(ran||cost>0)?money(cost):'<span class="dim">—</span>',subs:`<div class="sub">of run ${r.status==='booked'?'—':money(runTotal(r))}</div>`,state:(ran||cost>0)?'computed':'no spend'}),
+    blk({lbl:'Window',fig:`${st.booked}–${st.bookedEnd}`,figcls:'mono',subs:`<div class="sub">booked +${st.off} → +${st.offEnd}</div>`,state:`${st.offEnd-st.off} min booked`}),
+    blk({lbl:'Actual',fig:actFig,figcls:'mono',subs:`<div class="sub">${actSub}</div>`,state:st.state==='done'?'closed':st.state})
+  ].join('');
+  return `
+    <p class="lede">${stageLede(r,st)}</p>
+    <div class="ledechips">${runChip(r)}<span class="idchip">${r.id} · ${st.name.toLowerCase()}</span></div>
+    <div class="bandcap"><span class="lbl">${st.name}</span><span class="capnote">${r.id} · stage ${STAGE_ORDER.indexOf(k)+1} of 6</span><span class="capline"></span></div>
+    <div class="grid4x">${blocks}</div>
+    <div class="bandcap"><span class="lbl">${st.k==='read'?'Stack':'Record'}</span><span class="capnote">${st.k==='read'?'click a paper for its receipt':'what this stage wrote'}</span><span class="capline"></span></div>
+    ${stageCenter(r,st)}`;
+}
+
+/* ---------- paper ---------- */
+function paperHTML(r,i){
+  const p=r.papers[i];
+  const claims=p.claims.map((c,j)=>`<div class="crow"><span class="cid">c${j+1}</span><span>${esc(c)}</span></div>`).join('');
+  const blocks=[
+    blk({lbl:'Claims',fig:String(p.claims.length),state:'kept to lineage'}),
+    blk({lbl:'Cost',fig:money(p.cost),subs:`<div class="sub">of Read ${money(r.costs.read)}</div>`,state:'computed at read'}),
+    blk({lbl:'Evidence',fig:p.ev,figcls:'mono',state:'lineage record'}),
+    blk({lbl:'Run',fig:r.id,figcls:'mono',subs:`<div class="sub">${r.verdict?'verdict '+r.verdict:'live'}</div>`,state:r.closedAt?('closed '+r.closedAt):'mid-Simulate',go:'run:'+r.id})
+  ].join('');
+  return `
+    <h1 class="paperhead">${esc(p.t)}</h1>
+    <p class="papersub">${esc(p.j)} · ${p.y} · read by the ${stOf(r,'read').service} in ${r.id}</p>
+    <p class="lede">${p.claims.length} claims kept to <span class="tmono">${p.ev}</span> for ${money(p.cost)}.</p>
+    <div class="bandcap"><span class="lbl">Receipt</span><span class="capnote">paper p${i+1} of ${r.papersN}</span><span class="capline"></span></div>
+    <div class="grid4x">${blocks}</div>
+    <div class="bandcap"><span class="lbl">Claims kept</span><span class="capnote">each line traceable to ${p.ev}</span><span class="capline"></span></div>
+    <section class="panel">${claims}</section>`;
+}
+
+/* ---------- render + events ---------- */
+function mainHTML(){
+  const v=S.view;
+  if(v.level==='day') return dayHTML();
+  if(v.level==='run') return runHTML(runOf(v.run));
+  if(v.level==='stage') return stageHTML(runOf(v.run),v.stage);
+  return paperHTML(runOf(v.run),v.paper);
+}
+function render(){
+  document.getElementById('app').innerHTML=
+    mastHTML()+`<main class="wrap pagein" id="pg">`+mainHTML()+`</main>`+
+    `<footer class="foot">Every claim sourced · every cost computed · every verdict recorded</footer>`;
+}
+function nav(go){
+  const p=go.split(':');
+  if(p[0]==='day') S.view={level:'day'};
+  else if(p[0]==='run') S.view={level:'run',run:p[1]+(p[2]?':'+p[2]:'')};
+  else if(p[0]==='stage') S.view={level:'stage',run:p[1],stage:p[2]};
+  else if(p[0]==='paper') S.view={level:'paper',run:p[1],stage:'read',paper:parseInt(p[2],10)};
+  S.courseOpen=false;S.editSO=null;S.armed=false;
+  render();window.scrollTo({top:0});
+}
+function up(){
+  const v=S.view;
+  if(v.level==='paper') nav('stage:'+v.run+':read');
+  else if(v.level==='stage') nav('run:'+v.run);
+  else if(v.level==='run') nav('day');
+}
+function traceRow(k){
+  const els=document.querySelectorAll('[data-strow="'+k+'"]');
+  if(!els.length) return;
+  els.forEach(n=>n.classList.add('rowflash'));
+  els[0].scrollIntoView({block:'nearest',behavior:'smooth'});
+  setTimeout(()=>{els.forEach(n=>n.classList.remove('rowflash'));},1500);
+}
+function stepAllot(k,dir){
+  const svc=SVC.find(s=>s.key===k);
+  const cur=S.allot[k];
+  let nxt=cur+(dir==='up'?500:-500);
+  const min=Math.max(500,Math.ceil(svc.spent/500)*500);
+  if(nxt<min) nxt=min;
+  if(nxt===cur) return;
+  S.allot[k]=nxt;
+  const last=S.log[S.log.length-1];
+  if(last&&last.kind==='order'&&last.allotKey===k){
+    if(last.from===nxt){S.log.pop();S.flash=null;}
+    else{last.t=hm(S.clock);last.text=`${svc.name} allot ${nxt>last.from?'raised':'lowered'} ${money(last.from)}→${money(nxt)}`;S.flash=S.log.length-1;}
+  } else {
+    S.log.push({t:hm(S.clock),kind:'order',allotKey:k,from:cur,text:`${svc.name} allot ${nxt>cur?'raised':'lowered'} ${money(cur)}→${money(nxt)}`});
+    S.flash=S.log.length-1;
+  }
+  setTimeout(()=>{S.flash=null;},2000);
+  render();
+}
+document.addEventListener('click',function(e){
+  const a=e.target.closest('[data-act],[data-go]');
+  if(!a){ if(S.armed){S.armed=false;clearTimeout(armT);render();} return; }
+  const act=a.dataset.act, go=a.dataset.go;
+  if(go&&!act){ nav(go); return; }
+  const parts=(act||'').split(':');
+  switch(parts[0]){
+    case 'courseToggle':{S.courseOpen=!S.courseOpen;render();const t=document.getElementById('cTopic');if(t)t.focus();break;}
+    case 'courseCancel':{S.courseOpen=false;render();break;}
+    case 'courseSet':{
+      const t=document.getElementById('cTopic').value.trim();
+      const cy=document.getElementById('cCycles').value.trim();
+      if(!t||!cy){document.getElementById(t?'cCycles':'cTopic').focus();break;}
+      S.course={topic:t,cycles:cy,at:hm(S.clock),by:'Erik'};
+      pushOrder('course set: '+t+' × cycles '+cy);
+      S.courseOpen=false;render();break;}
+    case 'trace':{traceRow(parts[1]);break;}
+    case 'allot':{stepAllot(parts[1],parts[2]);break;}
+    case 'soEdit':{S.editSO=parts[1];render();const i=document.getElementById('soInput');if(i){i.focus();i.select();}break;}
+    case 'soCancel':{S.editSO=null;render();break;}
+    case 'soSet':{
+      const v=document.getElementById('soInput').value.trim();
+      if(!v)break;
+      const so=S.standing.find(o=>o.k===parts[1]);
+      so.val=v;so.by='Erik';so.at=hm(S.clock);
+      pushOrder('standing order — '+so.label+': '+v);
+      S.editSO=null;render();break;}
+    case 'rerun':{
+      const rid=act.slice(6);
+      if(S.rerun[rid])break;
+      S.rerun[rid]=hm(S.clock);
+      pushOrder('re-run '+rid+' queued — books after cycle 16');
+      render();break;}
+    case 'suspend':{
+      if(!S.armed){S.armed=true;render();armT=setTimeout(function(){S.armed=false;render();},5000);}
+      else{clearTimeout(armT);S.armed=false;S.suspended=true;pushOrder('generation suspended — cycles 13–16 held on book');render();}
+      break;}
+    case 'resume':{S.suspended=false;pushOrder('generation resumed — cycles 13–16 rebooked');render();break;}
+  }
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){
+    if(S.courseOpen){S.courseOpen=false;render();return;}
+    if(S.editSO){S.editSO=null;render();return;}
+    if(S.armed){S.armed=false;clearTimeout(armT);render();return;}
+    if(S.view.level!=='day') up();
+    return;
+  }
+  if(e.key==='Enter'){
+    const id=e.target&&e.target.id;
+    if(id==='cTopic'||id==='cCycles'){e.preventDefault();const b=document.getElementById('courseSetBtn');if(b)b.click();}
+    else if(id==='soInput'){e.preventDefault();const b=document.getElementById('soSetBtn');if(b)b.click();}
+    else if(e.target&&e.target.closest){const el=e.target.closest('[data-go],[data-act]');if(el&&el.tagName!=='BUTTON'&&el.tagName!=='INPUT'){e.preventDefault();el.click();}}
+  }
+});
+document.addEventListener('mouseover',function(e){
+  document.querySelectorAll('.ttg .hov').forEach(n=>n.classList.remove('hov'));
+  const c=e.target.closest('.ttg [data-run]');
+  if(c){const id=c.dataset.run;document.querySelectorAll('.ttg [data-run="'+id+'"]').forEach(n=>n.classList.add('hov'));}
+});
+setInterval(function(){
+  S.clock++;
+  const c=document.getElementById('clock');
+  if(c) c.textContent=hms(S.clock)+' · farm local UTC−05';
+  document.querySelectorAll('[data-live-elapsed]').forEach(n=>{n.textContent=liveEl();});
+},1000);
+render();
+</script>
+</body>
+</html>

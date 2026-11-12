@@ -109,11 +109,15 @@ def normalize_language(value: str | None) -> tuple[str, str]:
     raise ToolError(f"Unsupported language: {value}", EXIT_USAGE)
 
 
+class TimedOutProcess(subprocess.CompletedProcess):
+    """A process this wrapper stopped because it outran the caller's --timeout."""
+
+
 def run_command(
     argv: list[str],
     *,
     input_text: str | None = None,
-    timeout: float = 15.0,
+    timeout: float | None = 15.0,
 ) -> tuple[subprocess.CompletedProcess[str] | None, int]:
     start = time.monotonic()
     try:
@@ -130,7 +134,7 @@ def run_command(
         elapsed = int((time.monotonic() - start) * 1000)
         stderr = str(exc.stderr or "")
         stdout = str(exc.stdout or "")
-        proc = subprocess.CompletedProcess(argv, 124, stdout=stdout, stderr=stderr or "Command timed out")
+        proc = TimedOutProcess(argv, 124, stdout=stdout, stderr=stderr or "Command timed out")
         return proc, elapsed
 
 
@@ -523,7 +527,9 @@ def parse_source_options(args: list[str], *, allow_target: bool = False) -> dict
     source_mode = None
     source_value = None
     target = None
-    timeout = 20.0
+    # No wrapper deadline unless the caller asks: a long whose-query is legitimate,
+    # and the script's own `with timeout` already governs each AppleEvent reply.
+    timeout = None
     launch = False
     refresh = False
     i = 0
@@ -602,7 +608,7 @@ def write_temp_source(source: str, language: str) -> Path:
     return Path(handle.name)
 
 
-def compile_source(source: str, language: str, *, timeout: float = 15.0) -> dict[str, Any]:
+def compile_source(source: str, language: str, *, timeout: float | None = 15.0) -> dict[str, Any]:
     _normalized, osalang = normalize_language(language)
     if not shutil.which("osacompile"):
         raise ToolError("osacompile is not available on this host", EXIT_UNSUPPORTED)
@@ -696,7 +702,7 @@ def execute_script(
     language: str,
     target: str | None,
     launch: bool,
-    timeout: float,
+    timeout: float | None,
     wrap_target: bool = False,
 ) -> dict[str, Any]:
     normalized, osalang = normalize_language(language)
@@ -743,7 +749,15 @@ def execute_script(
     try:
         proc, elapsed = run_command(["osascript", "-l", osalang, str(source_path)], timeout=timeout)
         assert proc is not None
-        classification = classify_appleevent_result(proc.returncode, proc.stderr)
+        if isinstance(proc, TimedOutProcess):
+            classification = {
+                "automation": "timed_out",
+                "osstatus": None,
+                "name": None,
+                "message": f"Script outran --timeout {timeout:g}s; the wrapper stopped osascript",
+            }
+        else:
+            classification = classify_appleevent_result(proc.returncode, proc.stderr)
         return {
             "ok": proc.returncode == 0,
             "target": target_meta,
@@ -758,10 +772,19 @@ def execute_script(
             "stderr": proc.stderr,
             "exit_code": proc.returncode,
             "duration_ms": elapsed,
+            "timeout_s": timeout,
             **classification,
         }
     finally:
         source_path.unlink(missing_ok=True)
+
+
+def run_exit_code(result: dict[str, Any]) -> int:
+    if result.get("ok"):
+        return EXIT_SUCCESS
+    if result.get("automation") == "timed_out":
+        return EXIT_TIMEOUT
+    return EXIT_RUN_FAILED
 
 
 def permission_probe(app: str, *, launch: bool = False, timeout: float = 10.0) -> dict[str, Any]:
@@ -943,7 +966,7 @@ def handle_command(raw_args: list[str]) -> None:
             wrap_target=False,
         )
         result["source"] = source_opts["source_label"]
-        emit(result, EXIT_SUCCESS if result.get("ok") else EXIT_RUN_FAILED)
+        emit(result, run_exit_code(result))
     if cmd == "tell":
         if len(args) < 2:
             raise ToolError("Usage: agent-appleevents tell <app> --script <script>", EXIT_USAGE)
@@ -958,7 +981,7 @@ def handle_command(raw_args: list[str]) -> None:
             wrap_target=True,
         )
         result["source"] = source_opts["source_label"]
-        emit(result, EXIT_SUCCESS if result.get("ok") else EXIT_RUN_FAILED)
+        emit(result, run_exit_code(result))
     if cmd == "cache":
         if len(args) < 2:
             raise ToolError("Usage: agent-appleevents cache <status|clear> [app]", EXIT_USAGE)

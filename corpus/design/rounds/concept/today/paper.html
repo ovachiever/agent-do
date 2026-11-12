@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Today</title>
+<style>
+  :root {
+    --paper: #f7f3e8;
+    --ink: #262019;
+    --muted: #6f6557;
+    --faint: #9c917f;
+    --hair: #dcd3c0;
+    --accent: #2e6b3f;
+    --accent-deep: #224f30;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: var(--paper); }
+  body {
+    color: var(--ink);
+    font-family: var(--serif);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: #eae2cb; }
+  a { color: inherit; text-decoration: none; }
+  .page { max-width: 1256px; margin: 0 auto; padding: 22px 56px 60px; }
+
+  /* ── top strip: date · assembly time · nav ───────────────── */
+  .strip {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 24px;
+    font-family: var(--sans); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); padding-bottom: 10px; border-bottom: 1px solid var(--hair);
+    font-variant-numeric: tabular-nums;
+  }
+  .strip .mid { color: var(--faint); }
+  nav.crumbs { display: flex; gap: 26px; }
+  nav.crumbs a { color: var(--muted); padding-bottom: 2px; }
+  nav.crumbs a:hover { color: var(--ink); }
+  nav.crumbs a[aria-current="page"] { color: var(--ink); font-weight: 700; border-bottom: 1px solid var(--ink); }
+
+  /* ── masthead ────────────────────────────────────────────── */
+  .wordmark {
+    margin-top: 28px; text-align: center;
+    font-size: 47px; font-weight: 400; letter-spacing: .18em; text-indent: .18em;
+    text-transform: uppercase;
+  }
+  .identity {
+    margin-top: 10px; text-align: center;
+    font-style: italic; font-size: 13.5px; color: var(--muted);
+  }
+  .masthead-rule { margin-top: 20px; border-top: 2px solid var(--ink); }
+  .masthead-rule::after { content: ""; display: block; margin-top: 2px; border-top: 1px solid var(--ink); }
+
+  /* ── pulse (the folio line) ──────────────────────────────── */
+  .pulse {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 10px 2px; border-bottom: 1px solid var(--hair);
+    font-family: var(--sans); font-size: 12.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pulse strong { color: var(--ink); font-weight: 700; }
+  .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); margin-right: 7px; position: relative; top: -1px;
+  }
+
+  /* ── the docket: lead + off-lead ─────────────────────────── */
+  .docket { display: grid; grid-template-columns: 1fr 348px; margin-top: 34px; }
+  .lead { padding-right: 50px; }
+  .rail { border-left: 1px solid var(--hair); padding-left: 44px; }
+
+  .kicker {
+    font-family: var(--sans); font-size: 10.5px; letter-spacing: .15em;
+    text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .kicker .k-strong { color: var(--ink); font-weight: 700; }
+  .kicker .k-sep { color: var(--faint); margin: 0 3px; }
+
+  .headline {
+    margin-top: 12px; font-size: 38px; line-height: 1.14;
+    font-weight: 400; letter-spacing: -0.012em; text-wrap: balance;
+  }
+  .headline-2 { margin-top: 12px; font-size: 22px; line-height: 1.3; font-weight: 400; text-wrap: balance; }
+
+  .scoreline {
+    display: flex; gap: 44px; margin: 22px 0 20px; padding: 12px 0;
+    border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+    font-family: var(--sans);
+  }
+  .cell { display: flex; flex-direction: column; gap: 3px; }
+  .label { font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+  .value { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .value.fitness { font-size: 19px; }
+  .verdict { color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-weight: 700; }
+  .value.verdict { font-size: 13.5px; padding-top: 2px; }
+  .sub { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .lede { max-width: 650px; font-size: 16.5px; line-height: 1.62; }
+  .chain {
+    margin-top: 16px; font-family: var(--sans); font-size: 11.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums; letter-spacing: .01em; max-width: 650px;
+  }
+  .chain-label {
+    text-transform: uppercase; letter-spacing: .14em; font-size: 9.5px;
+    color: var(--faint); font-weight: 700; margin-right: 8px;
+  }
+  .act { margin-top: 18px; }
+  .act a {
+    font-family: var(--sans); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    font-weight: 700; color: var(--accent);
+    border-bottom: 1px solid rgba(46, 107, 63, .35); padding-bottom: 2px;
+  }
+  .act a:hover { color: var(--accent-deep); border-bottom-color: var(--accent-deep); }
+  .act a::after { content: " →"; letter-spacing: 0; }
+
+  .scoreline-2 {
+    margin: 16px 0 14px; padding: 10px 0;
+    border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+    font-family: var(--sans); font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums; line-height: 1.7;
+  }
+  .scoreline-2 .verdict { font-size: 11.5px; }
+  .scoreline-2 strong { color: var(--ink); font-weight: 700; }
+  .lede-2 { font-size: 14.5px; line-height: 1.6; }
+
+  .docket-note {
+    margin-top: 28px; font-style: italic; font-size: 13.5px; color: var(--muted);
+  }
+
+  /* ── the machine's record ────────────────────────────────── */
+  .record { margin-top: 30px; }
+  .record-rule { border-top: 2px solid var(--ink); }
+  .record-head { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 0 18px; }
+  .record-head h2 {
+    font-family: var(--sans); font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; font-weight: 700;
+  }
+  .record-meta {
+    font-family: var(--sans); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); font-variant-numeric: tabular-nums;
+  }
+  .entries { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .entry { padding: 0 26px; }
+  .entry:first-child { padding-left: 0; }
+  .entry:last-child { padding-right: 0; }
+  .entry + .entry { border-left: 1px solid var(--hair); }
+  .stamp {
+    font-family: var(--sans); font-size: 10.5px; color: var(--faint);
+    font-variant-numeric: tabular-nums; letter-spacing: .06em;
+  }
+  .cat {
+    color: var(--ink); font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; margin-left: 6px; font-size: 10.5px;
+  }
+  .entry .body {
+    margin-top: 10px; font-size: 14px; line-height: 1.58;
+    text-align: justify; hyphens: auto; -webkit-hyphens: auto;
+    font-variant-numeric: oldstyle-nums;
+  }
+
+  /* ── footer ──────────────────────────────────────────────── */
+  footer { margin-top: 56px; border-top: 1px solid var(--hair); padding-top: 20px; text-align: center; }
+  .motto {
+    font-family: var(--sans); font-size: 10.5px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .colophon { margin-top: 9px; font-size: 12.5px; font-style: italic; color: var(--faint); }
+
+  @media (max-width: 1080px) {
+    .docket { grid-template-columns: 1fr; }
+    .lead { padding-right: 0; }
+    .rail { border-left: none; padding-left: 0; margin-top: 36px; border-top: 1px solid var(--hair); padding-top: 28px; }
+    .entries { grid-template-columns: 1fr 1fr; row-gap: 30px; }
+    .entry { padding: 0 26px 0 0; }
+    .entry:nth-child(even) { padding: 0 0 0 26px; }
+    .entry:nth-child(3) { border-left: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="strip">
+      <span>Saturday · 22 August 2026</span>
+      <span class="mid">Assembled 11:04:26 UTC · reassembles on new evidence</span>
+      <nav class="crumbs" aria-label="Primary">
+        <a href="#" aria-current="page">Today</a>
+        <a href="#">Pipeline</a>
+        <a href="#">Library</a>
+        <a href="#">Engine Room</a>
+      </nav>
+    </div>
+
+    <h1 class="wordmark">Palingenesis</h1>
+    <p class="identity">An autonomous engine for agricultural innovation — reading continuously, judged adversarially, ruled by one human</p>
+
+    <div class="masthead-rule" aria-hidden="true"></div>
+
+    <div class="pulse" role="status">
+      <span><span class="dot" aria-hidden="true"></span>All six subsystems <strong>running</strong></span>
+      <span><strong>$23.62</strong> metered since 00:00</span>
+      <span>Generation 341 closes <strong>14:30</strong> — in 3h 26m</span>
+    </div>
+  </header>
+
+  <main class="docket">
+
+    <article class="lead">
+      <p class="kicker"><span class="k-strong">Awaiting your ruling</span><span class="k-sep">·</span>Candidate PG-1147<span class="k-sep">·</span>surfaced yesterday 17:26</p>
+      <h2 class="headline">Winter-rye exudates can retire prophylactic fungicide in continuous corn</h2>
+
+      <div class="scoreline">
+        <div class="cell">
+          <span class="label">Council verdict</span>
+          <span class="value verdict">Greenlight</span>
+          <span class="sub">6–1 of seven seats</span>
+        </div>
+        <div class="cell">
+          <span class="label">Fitness</span>
+          <span class="value fitness">87.4</span>
+          <span class="sub">1st of 17 survivors, Gen 341</span>
+        </div>
+        <div class="cell">
+          <span class="label">Evidence</span>
+          <span class="value">61 sources</span>
+          <span class="sub">9 load-bearing claims</span>
+        </div>
+        <div class="cell">
+          <span class="label">Cost to date</span>
+          <span class="value">$31.40</span>
+          <span class="sub">metered · full ledger in dossier</span>
+        </div>
+      </div>
+
+      <p class="lede">PG-1147 proposes retiring prophylactic fungicide on continuous-corn ground and letting a winter-rye intercrop do the same work: its root exudates suppress <em>Fusarium graminearum</em> at field concentrations in 54 of the 61 sources read. The council's one dissent — cold-spring emergence drag — went to simulation and came back priced: 1.1 bu/acre in the worst regime, against $28.40/acre of chemistry retired. Your greenlight commissions the dossier's 40-acre field protocol; nothing is planted until you rule.</p>
+
+      <p class="chain"><span class="chain-label">Chain</span>61 papers → 9 claims → council 6–1, dissent recorded (Skeptic seat) → 10,000 seasons over three soil regimes, $12.19 → surfaced 17:26 yesterday</p>
+
+      <p class="act"><a href="#">Open the dossier and rule</a></p>
+    </article>
+
+    <aside class="rail">
+      <article>
+        <p class="kicker"><span class="k-strong">Awaiting your ruling</span><span class="k-sep">·</span>Candidate PG-1152<span class="k-sep">·</span>surfaced 08:41 today</p>
+        <h2 class="headline-2">Midday-pulsed deficit irrigation cuts almond water 22% with yield held</h2>
+
+        <p class="scoreline-2"><span class="verdict">Greenlight</span> · council 5–2 · <strong>Fitness 81.9</strong> — 2nd of 17 survivors · $22.71 metered to date</p>
+
+        <p class="lede-2">Pulses timed to stomatal midday closure held yield within 0.4% while applied water fell 22%, over 10,000 orchard-seasons and three drought regimes finished this morning. The water-rights seat withdrew its objection after a commissioned sweep found no junior-rights conflict in 14 of 16 districts.</p>
+
+        <p class="act"><a href="#">Open the dossier and rule</a></p>
+      </article>
+    </aside>
+
+  </main>
+
+  <p class="docket-note">The docket is complete: two rulings awaited, neither overdue. Fifteen other Generation-341 survivors remain in simulation and do not need you.</p>
+
+  <section class="record">
+    <div class="record-rule" aria-hidden="true"></div>
+    <div class="record-head">
+      <h2>The Machine&rsquo;s Record</h2>
+      <span class="record-meta">00:00–11:04 · four entries · complete</span>
+    </div>
+
+    <div class="entries">
+      <article class="entry">
+        <p class="stamp">04:52<span class="cat">Overnight reading</span></p>
+        <p class="body">1,284 papers read in the 04:00 sweep — <em>Plant &amp; Soil</em>, <em>Field Crops Research</em>, <em>Agronomy Journal</em>, and 60 other journals. 23 claims extracted and sourced; four cleared triage and were seated as candidates PG-1153 through PG-1156. Cost $3.90, metered.</p>
+      </article>
+
+      <article class="entry">
+        <p class="stamp">06:18<span class="cat">Council veto</span></p>
+        <p class="body">PG-1139, foliar silica against heat stress, struck down 5–2. The recorded reason: &ldquo;the effect collapses outside greenhouse conditions; three field nulls — Kansas 2023, Córdoba 2024, Punjab 2024 — outweigh the two positives cited.&rdquo; The veto retired the candidate with its $118 simulation unspent, at posted rates.</p>
+      </article>
+
+      <article class="entry">
+        <p class="stamp">08:41<span class="cat">Simulation finished</span></p>
+        <p class="body">PG-1152 ran 10,000 orchard-seasons across three drought regimes in 41 minutes, $9.12 metered. Yield held within 0.4% of control; applied water fell 22%. Surfaced to the docket above at 08:41.</p>
+      </article>
+
+      <article class="entry">
+        <p class="stamp">10:17<span class="cat">Sweep commissioned</span></p>
+        <p class="body">Deliberating PG-1155, rhizobium seed inoculants, the council ordered a cold-chain viability sweep: 340 papers queued across 12 journals, $4.60 estimated, findings due 14:00 — inside this generation.</p>
+      </article>
+    </div>
+  </section>
+
+  <footer>
+    <p class="motto">Every claim sourced · every cost computed · every verdict recorded</p>
+    <p class="colophon">Palingenesis · Generation 341 · this front reassembles when evidence changes it</p>
+  </footer>
+
+</div>
+</body>
+</html>
