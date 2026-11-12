@@ -207,8 +207,9 @@ render_request_checked() {
 resolve_service() {
     local name_or_id="$1"
 
-    # Already an ID
-    if [[ "$name_or_id" == srv-* ]]; then
+    # Already an ID. Render issues srv-* for web/worker/private/static services
+    # and crn-* for cron jobs; both live under /services/{id}.
+    if [[ "$name_or_id" == srv-* || "$name_or_id" == crn-* ]]; then
         echo "$name_or_id"
         return 0
     fi
