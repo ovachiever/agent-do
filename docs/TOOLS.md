@@ -59,7 +59,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [excel](#excel) | AI-first Excel CLI for workbook automation | mixed | 11 |
 | [figma](#figma) | Control Figma | read | 3 |
 | [gcp](#gcp) | Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials | mixed | 19 |
-| [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 32 |
+| [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 33 |
 | [ghidra](#ghidra) | Ghidra reverse engineering automation | read | 4 |
 | [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 28 |
 | [handbrake](#handbrake) | Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs | mixed | 7 |
@@ -1935,7 +1935,7 @@ Concurrency: `mixed`
 - create, list, assign, unassign, label, close, and comment on GitHub issues
 - create pull requests with committed provenance declarations and a local preview
 - list actionable pull requests across repos
-- inspect pull request details, diffs, checks, and unresolved review threads
+- inspect pull request details, diffs, checks, unresolved review threads, and conversation comments
 - classify changed files by review-risk tier (critical/elevated/standard)
 - audit PR review risks and generate fix-oriented engineering review replies
 - surface the built-in review doctrine on every review
@@ -1961,6 +1961,7 @@ Concurrency: `mixed`
 - `issue comment`: Comment on an issue with --body or --body-file, then read it back
 - `diff`: Show PR diff
 - `threads`: Show unresolved PR review threads
+- `comments`: Show PR conversation comments and review summaries (--no-reviews for issue comments only)
 - `checks`: Show PR checks
 - `review`: Summarize a PR for review — state, checks, risk tier, and the review doctrine
 - `audit`: Audit a PR for review risks and generate request-changes-ready reply text
@@ -2004,6 +2005,8 @@ agent-do gh audit ovachiever/agent-do#3 --reply --probe-deploys
 agent-do gh review ovachiever/agent-do#3 --summary
 # show unresolved GitHub review comments
 agent-do gh threads ovachiever/agent-do#3
+# read the comments posted on a pull request's conversation
+agent-do gh comments ovachiever/agent-do#3
 # approve this GitHub PR
 agent-do gh approve ovachiever/agent-do#3 --body "LGTM"
 # close accidental pull request and delete branch
@@ -2016,7 +2019,7 @@ agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-nee
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `diff`, `doctrine`, `inbox`, `issue list`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
+- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `comments`, `diff`, `doctrine`, `inbox`, `issue list`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
 - Write (connect/interact/save): `approve`, `checkout`, `close`, `comment`, `draft`, `edit`, `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`, `merge`, `portfolio add`, `portfolio remove`, `pr create`, `ready`, `reopen`, `request-changes`, `update-branch`
 - polymorphic (beat decided by payload or flag at call time): `pr create`
 - composite (one call performs several beats internally): `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`
