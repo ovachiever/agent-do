@@ -1826,6 +1826,8 @@ cmd_db_create() {
             --disk-autoscale) disk_auto="true"; shift ;;
             --environment) environment="$2"; shift 2 ;;
             --json) json_output=1; shift ;;
+            --help|-h) echo "Usage: agent-render db create <name> [--plan --version --region --database --user --ha --disk-size]"; return 0 ;;
+            -*) echo "Error: unknown option '$1' for create (a name cannot start with '-')" >&2; echo "Usage: agent-render db create <name> [--plan --version --region --database --user --ha --disk-size]" >&2; return 1 ;;
             *) [[ -z "$name" ]] && name="$1" || { echo "Error: unexpected '$1'" >&2; return 1; }; shift ;;
         esac
     done
@@ -2056,6 +2058,8 @@ for item in items:
                     --region) region="$2"; shift 2 ;;
                     --owner) owner="$2"; shift 2 ;;
                     --persist) persist="$2"; shift 2 ;;
+                    --help|-h) echo "Usage: agent-render kv create <name> [--plan p] [--region r]"; return 0 ;;
+                    -*) echo "Error: unknown option '$1' for create (a name cannot start with '-')" >&2; echo "Usage: agent-render kv create <name> [--plan p] [--region r]" >&2; return 1 ;;
                     *) [[ -z "$name" ]] && name="$1" || true; shift ;;
                 esac
             done
@@ -2163,6 +2167,8 @@ for item in items:
                 case "$1" in
                     --owner) owner="$2"; shift 2 ;;
                     --env) vars+=("$2"); shift 2 ;;
+                    --help|-h) echo "Usage: agent-render env-group create <name> [--env K=V]..."; return 0 ;;
+                    -*) echo "Error: unknown option '$1' for create (a name cannot start with '-')" >&2; echo "Usage: agent-render env-group create <name> [--env K=V]..." >&2; return 1 ;;
                     *) [[ -z "$name" ]] && name="$1" || true; shift ;;
                 esac
             done
@@ -2777,6 +2783,8 @@ cmd_project() {
                 case "$1" in
                     --owner) owner="$2"; shift 2 ;;
                     --env) envs+=("$2"); shift 2 ;;
+                    --help|-h) echo "Usage: agent-render project create <name> [--env <name>]..."; return 0 ;;
+                    -*) echo "Error: unknown option '$1' for create (a name cannot start with '-')" >&2; echo "Usage: agent-render project create <name> [--env <name>]..." >&2; return 1 ;;
                     *) [[ -z "$name" ]] && name="$1" || true; shift ;;
                 esac
             done
@@ -2914,6 +2922,8 @@ for item in data:
                 case "$1" in
                     --project|-p) project="$2"; shift 2 ;;
                     --name) name="$2"; shift 2 ;;
+                    --help|-h) echo "Usage: agent-render environment create <name> --project <project-id>"; return 0 ;;
+                    -*) echo "Error: unknown option '$1' for create (a name cannot start with '-')" >&2; echo "Usage: agent-render environment create <name> --project <project-id>" >&2; return 1 ;;
                     *) [[ -z "$name" ]] && name="$1" || true; shift ;;
                 esac
             done
