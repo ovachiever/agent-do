@@ -39,7 +39,7 @@ jobs:
   test-suite:
     name: Full test suite (macOS)
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -60,6 +60,8 @@ jobs:
         run: |
           brew list libpq >/dev/null 2>&1 || brew install libpq
           echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+      - name: Install Tesseract (design image measurement tests)
+        run: brew list tesseract >/dev/null 2>&1 || brew install tesseract
       - name: Install tmux (agent-tui dependency; drift checks its real help)
         run: brew list tmux >/dev/null 2>&1 || brew install tmux
       - name: Build agent-manna (drift checks the real Rust binary's help)
