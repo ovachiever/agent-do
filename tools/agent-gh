@@ -269,9 +269,13 @@ query {
 """ % (json.dumps(owner), json.dumps(name), number)
     try:
         payload = run_graphql(query)
-        connection = (((payload.get("repository") or {}).get("pullRequest") or {})
-                      .get("closingIssuesReferences") or {})
-        nodes = connection.get("nodes") or []
+        repository = payload.get("repository")
+        pull = repository.get("pullRequest") if isinstance(repository, dict) else None
+        connection = pull.get("closingIssuesReferences") if isinstance(pull, dict) else None
+        if (not isinstance(connection, dict) or not isinstance(connection.get("nodes"), list)
+                or not isinstance(connection.get("totalCount"), int)):
+            raise GhError("GitHub returned incomplete closing-issue references")
+        nodes = connection["nodes"]
         return {
             "status": "available",
             "issues": [{
