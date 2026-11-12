@@ -465,6 +465,87 @@ def main() -> int:
         require("coord interrupt is active" in coord_prompt_context, f"expected interrupt reason, got: {coord_prompt_context}")
         require(coord_prompt_payload.get("decision") != "block", f"did not expect blocking hook output: {coord_prompt_payload}")
 
+    # Shell and hooks share one coord identity (mn-812cd9): an acknowledgment
+    # made from the shell quiets the hook's reminder, an unresolved action
+    # drop keeps reminding at work boundaries, and a different session still
+    # sees the delivery.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        project = Path(tmpdir)
+        subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+        (project / "README.md").write_text("hook identity test", encoding="utf-8")
+        base = os.environ.copy()
+        base["AGENT_DO_HOME"] = str(project / ".agent-do-home")
+        base["AGENT_DO_HOOK_AI"] = "off"
+        for key in ("AGENT_DO_COORD_SESSION", "CODEX_THREAD_ID", "CLAUDE_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_AGENT_ID", "TMUX_PANE"):
+            base.pop(key, None)
+        lead_shell = dict(base, AGENT_DO_COORD_SESSION="lead-session-0001")
+        other_shell = dict(base, AGENT_DO_COORD_SESSION="other-session-0002")
+        sender = dict(base, CODEX_THREAD_ID="sender-9")
+        lead_id = json.loads(subprocess.run(
+            [str(ROOT / "agent-do"), "coord", "whoami", "--json"], cwd=project, env=lead_shell, text=True, capture_output=True, check=True,
+        ).stdout)["agent_id"]
+        other_id = json.loads(subprocess.run(
+            [str(ROOT / "agent-do"), "coord", "whoami", "--json"], cwd=project, env=other_shell, text=True, capture_output=True, check=True,
+        ).stdout)["agent_id"]
+        subprocess.run([str(ROOT / "agent-do"), "coord", "focus", "set", "lead lane", "--path", "src", "--json"], cwd=project, env=lead_shell, text=True, capture_output=True, check=True)
+
+        def drop(args: list[str]) -> dict:
+            out = subprocess.run([str(ROOT / "agent-do"), "coord", "drop", "add", *args, "--json"], cwd=project, env=sender, text=True, capture_output=True, check=True)
+            return json.loads(out.stdout)["drop"]
+
+        info = drop([".dev/notes.md", "--for", "any", "--note", "fyi"])
+        action = drop([".dev/todo.md", "--for", lead_id, "--note", "please do", "--action"])
+
+        def hook_for(session_id: str, prompt: str = "fix the build in this repo now") -> str:
+            proc = run(
+                "python3",
+                "hooks/claude/agent-do-prompt-router.py",
+                input_text=json.dumps({"prompt": prompt, "cwd": str(project), "session_id": session_id}),
+                env=base,
+            )
+            require(proc.returncode == 0, f"prompt-router failed: {proc.stderr}")
+            if not proc.stdout.strip():
+                return ""
+            payload = json.loads(proc.stdout)
+            return payload.get("hookSpecificOutput", {}).get("additionalContext", "")
+
+        before = hook_for("lead-session-0001")
+        require(action["id"] in before, f"hook must remind the lead of the unread action drop: {before}")
+        require(info["id"] not in before, f"an informational drop is never a blocker in the router: {before}")
+        require(lead_id not in before.split("Active peers:")[-1], f"the hook must not list the lead's own shell as a peer: {before}")
+
+        subprocess.run([str(ROOT / "agent-do"), "coord", "drop", "ack", action["id"], "--json"], cwd=project, env=lead_shell, text=True, capture_output=True, check=True)
+        after_ack = hook_for("lead-session-0001")
+        require(action["id"] in after_ack and "unresolved" in after_ack, f"an acknowledged action drop keeps reminding until resolved: {after_ack}")
+        quiet = hook_for("lead-session-0001", "what does this hook do, just curious?")
+        require(quiet == "" or action["id"] not in quiet, f"reminders belong to work boundaries, not every question: {quiet}")
+
+        subprocess.run([str(ROOT / "agent-do"), "coord", "drop", "resolve", action["id"], "--reason", "done", "--json"], cwd=project, env=lead_shell, text=True, capture_output=True, check=True)
+        after_resolve = hook_for("lead-session-0001")
+        require(action["id"] not in after_resolve, f"a resolved drop stops nudging the hook: {after_resolve}")
+
+        # Another session's hook is a different reader: the broadcast info
+        # drop is still its notice, visible through session-start.
+        other_start = run(
+            "bash",
+            "hooks/claude/agent-do-session-start.sh",
+            input_text=json.dumps({"cwd": str(project), "session_id": "other-session-0002"}),
+            env=base,
+        )
+        require(other_start.returncode == 0, f"session-start failed: {other_start.stderr}")
+        other_context = json.loads(other_start.stdout)["hookSpecificOutput"]["additionalContext"]
+        require(info["id"] in other_context, f"session-start shows the broadcast to another reader: {other_context}")
+        subprocess.run([str(ROOT / "agent-do"), "coord", "drop", "ack", info["id"], "--json"], cwd=project, env=other_shell, text=True, capture_output=True, check=True)
+        other_again = run(
+            "bash",
+            "hooks/claude/agent-do-session-start.sh",
+            input_text=json.dumps({"cwd": str(project), "session_id": "other-session-0002"}),
+            env=base,
+        )
+        other_context_again = json.loads(other_again.stdout)["hookSpecificOutput"]["additionalContext"]
+        require(info["id"] not in other_context_again, f"the shell's ack quiets session-start for the same session: {other_context_again}")
+        require(other_id not in other_context_again.split("Active peers:")[-1], f"session-start must not list its own session as a peer: {other_context_again}")
+
     with tempfile.TemporaryDirectory() as telemetry_home:
         env = os.environ.copy()
         env["AGENT_DO_HOME"] = telemetry_home

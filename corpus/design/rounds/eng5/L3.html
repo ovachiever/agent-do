@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Engine Room · Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917; --lift:#211E1B; --ink:#E7E3DA; --mut:#A69D90; --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14); --edge:rgba(231,227,218,0.28);
+    --sage:hsl(158,30%,55%); --clay:#C4835C; --bar:rgba(231,227,218,0.5);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{
+    color:var(--ink);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1392px;margin:0 auto;padding:0 24px}
+  a{color:inherit;text-decoration:none}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12px}
+  .lbl{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .drill{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--mut)}
+  a.drill:hover{color:var(--sage)}
+  .sage{color:var(--sage)} .clay{color:var(--clay)} .mut{color:var(--mut)}
+
+  /* ---- nav ---- */
+  nav{border-bottom:1px solid var(--hair)}
+  .navrow{display:flex;align-items:center;height:47px}
+  .wordmark{font-family:Georgia,"Times New Roman",serif;font-size:15px;letter-spacing:.14em;text-transform:uppercase;margin-right:34px}
+  .navlinks{display:flex;gap:24px;flex:1}
+  .navlinks a{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding:16px 0 14px;border-bottom:2px solid transparent}
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.on{color:var(--ink);border-bottom-color:var(--sage)}
+  .navmeta{display:flex;align-items:center;gap:14px}
+  .chip{border:1px solid var(--hair);padding:4px 10px}
+
+  /* ---- verdict ---- */
+  .verdict{display:flex;justify-content:space-between;gap:40px;padding:22px 0 18px;border-bottom:1px solid var(--hair)}
+  .lede{max-width:880px}
+  .lede h1{font-family:Georgia,"Times New Roman",serif;font-weight:400;font-size:21px;line-height:1.45}
+  .lede .sub{margin-top:8px;font-size:14px;color:var(--fnt);font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .lede .sub a{color:var(--mut)} .lede .sub a:hover{color:var(--sage)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sage);margin-right:8px;position:relative;top:-1px}
+  .suspend{min-width:400px;max-width:420px;text-align:right}
+  .suspend button{
+    height:34px;padding:0 20px;background:transparent;border:1px solid rgba(231,227,218,.38);
+    color:var(--ink);font:600 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+  }
+  .suspend button:hover{border-color:var(--clay);color:var(--clay)}
+  .suspend p{margin-top:8px;font-size:12px;line-height:1.55;color:var(--mut);text-align:right}
+
+  /* ---- sections ---- */
+  section{padding:16px 0 18px;border-bottom:1px solid var(--hair)}
+  .shead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;gap:16px}
+  .shead .right{display:flex;gap:18px;align-items:baseline}
+
+  /* ---- THE LINE ---- */
+  .line{display:grid;grid-template-columns:1fr 104px 1fr 104px 1fr 104px 1fr 104px 1fr 104px 1fr;align-items:start}
+  .stn{grid-row:1;border:1px solid rgba(231,227,218,.22);background:var(--lift);padding:10px 12px;min-height:112px}
+  .stn .name{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);display:flex;justify-content:space-between;align-items:center}
+  .stn .state{margin-top:5px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;color:var(--mut)}
+  .stn .big{margin-top:9px;font-size:20px;font-weight:600;line-height:1.1}
+  .stn .bigcap{font-size:12px;color:var(--mut)}
+  .stn .cost{margin-top:7px;font-size:12px;color:var(--mut);border-top:1px solid var(--hair);padding-top:5px}
+  .sdot{display:inline-block;width:7px;height:7px;border-radius:50%}
+  .sdot.idle{background:var(--bar)} .sdot.run{background:var(--sage)} .sdot.wait{background:transparent;border:1px solid var(--bar)}
+
+  .edgecell{grid-row:1;padding:0 5px;text-align:center}
+  .conn{position:relative;height:1px;background:var(--edge);margin:52px 0 8px}
+  .conn::after{content:"";position:absolute;right:0;top:-3px;border-left:6px solid rgba(231,227,218,.55);border-top:3.5px solid transparent;border-bottom:3.5px solid transparent}
+  .fname{font-size:12px;color:var(--mut)}
+  .fcount{font-size:14px;font-weight:600;margin:1px 0 6px}
+  .ticks{display:flex;align-items:flex-end;gap:2px;height:30px;width:94px;margin:0 auto;border-bottom:1px solid var(--hair)}
+  .ticks b{width:4px;background:var(--bar)}
+  .ticks b.a{background:var(--sage)}
+  .ticks b.x{height:4px;background:var(--clay)}
+  .ticks b.z{height:1px;background:rgba(231,227,218,.35)}
+  .ticks b.f{height:0}
+  .pk{margin-top:5px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;color:var(--mut)}
+
+  .det{grid-row:2;margin-top:16px;padding-right:10px}
+  .det .job{font-size:13px;line-height:1.5;color:var(--ink)}
+  .det .row{margin-top:7px;font-size:12px;line-height:1.55;color:var(--mut)}
+  .det .row .k{color:var(--ink);font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase;margin-right:5px}
+  .det .mono{font-size:12px}
+  .recap{grid-column:1 / -1;grid-row:3;margin-top:16px;padding-top:10px;border-top:1px solid var(--hair);font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;color:var(--mut)}
+  .legend{font-size:12px;color:var(--mut)}
+  .sw{display:inline-block;width:8px;height:8px;position:relative;top:0}
+  .sw.b1{background:var(--bar)} .sw.b2{background:var(--sage)} .sw.b3{background:var(--clay);width:8px;height:4px} .sw.b4{border:1px solid rgba(231,227,218,.3);background:transparent}
+
+  /* ---- ledger ---- */
+  table.ledger{width:100%;border-collapse:collapse}
+  .ledger th{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);text-align:right;padding:0 10px 7px;border-bottom:1px solid var(--hair);white-space:nowrap}
+  .ledger th:first-child{text-align:left;padding-left:0}
+  .ledger th.bcol{text-align:left}
+  .ledger td{padding:5px 10px;border-bottom:1px solid var(--hair);text-align:right;font-size:13px;white-space:nowrap}
+  .ledger td:first-child{text-align:left;padding-left:0}
+  .ledger td.svc{font-weight:600}
+  .ledger td.bcol{width:220px;text-align:left}
+  .ledger tr.tot td{border-top:1px solid rgba(231,227,218,.3);font-weight:600}
+  .ledger tr.res td{color:var(--mut);font-weight:400}
+  .track{height:4px;background:rgba(231,227,218,.12);position:relative;width:200px}
+  .fill{height:4px;background:var(--bar)}
+  .pj{position:absolute;top:-3px;width:2px;height:10px;background:var(--sage)}
+
+  /* ---- scheduler ---- */
+  .sched{display:grid;grid-template-columns:repeat(16,1fr)}
+  .slot{border-left:1px solid var(--hair);padding:8px 4px 6px;text-align:center}
+  .slot:first-child{border-left:none}
+  .slot .d{display:inline-block;width:8px;height:8px;border-radius:50%}
+  .slot .d.done{background:var(--bar)}
+  .slot .d.cxl{background:var(--clay);border-radius:0}
+  .slot .d.next{background:var(--sage)}
+  .slot .d.fut{background:transparent;border:1px solid rgba(231,227,218,.3)}
+  .slot .cy{margin-top:5px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;color:var(--ink)}
+  .slot .tm{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;color:var(--mut)}
+  .slot .ct{margin-top:3px;font-size:12px;color:var(--ink)}
+  .slot .ct.est{color:var(--mut)}
+  .schedfacts{font-size:13px;color:var(--mut)}
+  .schedfacts b{color:var(--ink);font-weight:600}
+
+  /* ---- data + incidents ---- */
+  .cols{display:grid;grid-template-columns:46fr 54fr;gap:36px}
+  .datablock{padding:9px 0;border-bottom:1px solid var(--hair)}
+  .datablock:last-child{border-bottom:none}
+  .datablock .dl{display:flex;gap:10px;align-items:baseline;margin-bottom:4px}
+  .datablock .facts{font-size:13px;color:var(--ink);line-height:1.6}
+  .datablock .facts .mut{color:var(--mut)}
+  .bftrack{height:4px;background:rgba(231,227,218,.12);margin-top:6px;position:relative}
+  .bffill{height:4px;background:var(--bar)}
+
+  .inc{width:100%;border-collapse:collapse}
+  .inc td{padding:6px 10px;border-bottom:1px solid var(--hair);vertical-align:top;font-size:13px}
+  .inc td:first-child{padding-left:0;white-space:nowrap}
+  .inc td.t{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;color:var(--mut)}
+  .inc td.m{text-align:right;padding-right:0;white-space:nowrap;font-weight:600}
+  .inc .idot{display:inline-block;width:6px;height:6px;background:var(--clay);margin-right:2px;position:relative;top:-1px}
+  .inc .act{color:var(--mut)}
+
+  footer{padding:14px 0 22px;display:flex;justify-content:space-between;align-items:baseline}
+  footer .credo{font-size:12px;color:var(--mut);letter-spacing:.02em}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap navrow">
+  <span class="wordmark">Palingenesis</span>
+  <span class="navlinks">
+    <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a class="on" href="#line">Engine Room</a>
+  </span>
+  <span class="navmeta">
+    <span class="mono mut">2026-08-22 · 16:08:14 CDT</span>
+    <a class="chip mono" href="#ledger" title="ledger/day/2026-08-22.jsonl">$114.30 / $500.00 · 22.9%</a>
+  </span>
+</div></nav>
+
+<div class="wrap">
+
+  <!-- VERDICT -->
+  <div class="verdict">
+    <div class="lede">
+      <h1><span class="dot"></span><span class="sage">Healthy</span> — all six services on the line, <b>$114.30</b> spent of the <b>$500.00</b> daily cap through cycle 14 of 16, projected close $132.33, zero open incidents; next cycle fires <span class="mono" style="font-size:16px">16:30:00</span>.</h1>
+      <div class="sub">as of 16:08:14 CDT · 2026-08-22 · day 41 of continuous run · verdict <a href="#ledger" title="log/verdicts/2026-08-22.jsonl · every figure below is the source of this sentence">vr-0822-14 ▸</a></div>
+    </div>
+    <div class="suspend">
+      <button title="controls/suspend — requires owner key, logged to log/controls/">Suspend generation</button>
+      <p>Halts Scout, Council and Simulator at the next beat. Reader keeps ingesting; Archivist and Courier finish work in flight. Cycles 15–16 mark <span class="mono">suspended</span>; spend stops once the running beat settles (≤&nbsp;$0.40 exposure). Resume rejoins the 45-min cadence at the next slot.</p>
+    </div>
+  </div>
+
+  <!-- THE LINE -->
+  <section id="line">
+    <div class="shead">
+      <span class="lbl">The line — reader → courier · cycles 01–16 under every flow</span>
+      <span class="right">
+        <span class="legend"><span class="sw b1"></span> per-cycle count &nbsp; <span class="sw b2"></span> cy-14 latest &nbsp; <span class="sw b3"></span> cy-05 cancelled &nbsp; <span class="sw b4"></span> pending</span>
+        <a class="drill" href="#sched" title="log/flows/2026-08-22/ — per-edge, per-cycle counts, one row per handoff">▸ log/flows/2026-08-22</a>
+      </span>
+    </div>
+
+    <div class="line">
+      <!-- stations -->
+      <div class="stn" style="grid-column:1">
+        <div class="name">Reader <a class="drill" href="#incidents" title="svc/reader — process log, parse ledger, quarantine qb-061">rd ▸</a></div>
+        <div class="state"><span class="sdot idle"></span> idle · since 15:47:12</div>
+        <div class="big">2,847 <span class="bigcap">findings today</span></div>
+        <div class="cost">$28.14 today · cap $90.00</div>
+      </div>
+      <div class="stn" style="grid-column:3">
+        <div class="name">Scout <a class="drill" href="#ledger" title="svc/scout — candidate drafts cn-0801…cn-0874">sc ▸</a></div>
+        <div class="state"><span class="sdot idle"></span> idle · since 15:48:41</div>
+        <div class="big">74 <span class="bigcap">candidates today</span></div>
+        <div class="cost">$19.87 today · cap $70.00</div>
+      </div>
+      <div class="stn" style="grid-column:5">
+        <div class="name">Council <a class="drill" href="#ledger" title="svc/council — verdicts with reasons, 5 reviewers per candidate">cl ▸</a></div>
+        <div class="state"><span class="sdot idle"></span> idle · since 15:50:29</div>
+        <div class="big">21 <span class="bigcap">passes today</span></div>
+        <div class="cost">$41.52 today · cap $140.00</div>
+      </div>
+      <div class="stn" style="grid-column:7">
+        <div class="name">Simulator <a class="drill" href="#incidents" title="svc/simulator — run registry tr-0801…tr-0847">sm ▸</a></div>
+        <div class="state"><span class="sdot run"></span> running · since 15:51:02</div>
+        <div class="big">18 <span class="bigcap">runs done today</span></div>
+        <div class="cost">$17.06 today · cap $110.00</div>
+      </div>
+      <div class="stn" style="grid-column:9">
+        <div class="name">Archivist <a class="drill" href="#data" title="svc/archivist — library writes, citation graph, dedupe log">ar ▸</a></div>
+        <div class="state"><span class="sdot idle"></span> idle · since 15:52:19</div>
+        <div class="big">18 <span class="bigcap">reports filed today</span></div>
+        <div class="cost">$6.43 today · cap $40.00</div>
+      </div>
+      <div class="stn" style="grid-column:11">
+        <div class="name">Courier <a class="drill" href="#incidents" title="svc/courier — digest receipts dg-0822-1, dg-0822-2">co ▸</a></div>
+        <div class="state"><span class="sdot wait"></span> waiting · since 12:00:34</div>
+        <div class="big">8 <span class="bigcap">items delivered today</span></div>
+        <div class="cost">$1.28 today · cap $20.00</div>
+      </div>
+
+      <!-- edges with per-cycle tick charts -->
+      <div class="edgecell" style="grid-column:2">
+        <div class="conn"></div>
+        <div class="fname">findings</div>
+        <div class="fcount">2,847</div>
+        <div class="ticks" title="findings per cycle — c01 231 · c02 204 · c03 198 · c04 226 · c05 cancelled · c06 274 (re-queued batch) · c07 212 · c08 189 · c09 243 · c10 207 · c11 218 · c12 196 · c13 224 · c14 225 · c15–c16 pending">
+          <b style="height:24px"></b><b style="height:21px"></b><b style="height:20px"></b><b style="height:23px"></b><b class="x"></b><b style="height:28px"></b><b style="height:22px"></b><b style="height:19px"></b><b style="height:25px"></b><b style="height:21px"></b><b style="height:22px"></b><b style="height:20px"></b><b style="height:23px"></b><b class="a" style="height:23px"></b><b class="f"></b><b class="f"></b>
+        </div>
+        <div class="pk">pk 274 c06</div>
+      </div>
+      <div class="edgecell" style="grid-column:4">
+        <div class="conn"></div>
+        <div class="fname">candidates</div>
+        <div class="fcount">74</div>
+        <div class="ticks" title="candidates per cycle — c01 7 · c02 4 · c03 6 · c04 8 · c05 cancelled · c06 9 · c07 5 · c08 4 · c09 6 · c10 4 · c11 6 · c12 4 · c13 5 · c14 6 · c15–c16 pending">
+          <b style="height:22px"></b><b style="height:12px"></b><b style="height:19px"></b><b style="height:25px"></b><b class="x"></b><b style="height:28px"></b><b style="height:16px"></b><b style="height:12px"></b><b style="height:19px"></b><b style="height:12px"></b><b style="height:19px"></b><b style="height:12px"></b><b style="height:16px"></b><b class="a" style="height:19px"></b><b class="f"></b><b class="f"></b>
+        </div>
+        <div class="pk">pk 9 c06</div>
+      </div>
+      <div class="edgecell" style="grid-column:6">
+        <div class="conn"></div>
+        <div class="fname">passes</div>
+        <div class="fcount">21</div>
+        <div class="ticks" title="council passes per cycle — c01 2 · c02 1 · c03 2 · c04 3 · c05 cancelled · c06 2 · c07 1 · c08 0 · c09 2 · c10 1 · c11 2 · c12 1 · c13 2 · c14 2 · c15–c16 pending">
+          <b style="height:19px"></b><b style="height:9px"></b><b style="height:19px"></b><b style="height:28px"></b><b class="x"></b><b style="height:19px"></b><b style="height:9px"></b><b class="z"></b><b style="height:19px"></b><b style="height:9px"></b><b style="height:19px"></b><b style="height:9px"></b><b style="height:19px"></b><b class="a" style="height:19px"></b><b class="f"></b><b class="f"></b>
+        </div>
+        <div class="pk">pk 3 c04 · 0 c08</div>
+      </div>
+      <div class="edgecell" style="grid-column:8">
+        <div class="conn"></div>
+        <div class="fname">reports</div>
+        <div class="fcount">18</div>
+        <div class="ticks" title="simulation reports per cycle — c01 1 · c02 2 · c03 1 · c04 2 · c05 cancelled · c06 3 · c07 1 · c08 2 · c09 1 · c10 1 · c11 1 · c12 1 · c13 1 · c14 1 · c15–c16 pending">
+          <b style="height:9px"></b><b style="height:19px"></b><b style="height:9px"></b><b style="height:19px"></b><b class="x"></b><b style="height:28px"></b><b style="height:9px"></b><b style="height:19px"></b><b style="height:9px"></b><b style="height:9px"></b><b style="height:9px"></b><b style="height:9px"></b><b style="height:9px"></b><b class="a" style="height:9px"></b><b class="f"></b><b class="f"></b>
+        </div>
+        <div class="pk">pk 3 c06</div>
+      </div>
+      <div class="edgecell" style="grid-column:10">
+        <div class="conn"></div>
+        <div class="fname">briefs</div>
+        <div class="fcount">12</div>
+        <div class="ticks" title="dispatch briefs queued per cycle — c01 1 · c02 1 · c03 0 · c04 2 · c05 cancelled · c06 1 · c07 1 · c08 0 · c09 1 · c10 1 · c11 1 · c12 0 · c13 1 · c14 2 · c15–c16 pending">
+          <b style="height:14px"></b><b style="height:14px"></b><b class="z"></b><b style="height:28px"></b><b class="x"></b><b style="height:14px"></b><b style="height:14px"></b><b class="z"></b><b style="height:14px"></b><b style="height:14px"></b><b style="height:14px"></b><b class="z"></b><b style="height:14px"></b><b class="a" style="height:28px"></b><b class="f"></b><b class="f"></b>
+        </div>
+        <div class="pk">pk 2 c04·c14</div>
+      </div>
+
+      <!-- station detail -->
+      <div class="det" style="grid-column:1">
+        <div class="job">Reads every new source — journals, patents, extension bulletins, price feeds — and pulls out findings.</div>
+        <div class="row"><span class="k">Last</span><span class="mono">15:47:07</span> parsed 41 sources → 225 findings (cy-14)</div>
+        <div class="row"><span class="k">Today</span>512 sources · 2,847 findings · 38 dupes dropped · 23 recovered via <a class="drill" href="#incidents" title="incident 06:47:12 — quarantine batch qb-061">qb-061 ▸</a></div>
+        <div class="row"><span class="k">Cost</span>$28.14 of $90.00 (31.3%) · <a class="drill" href="#ledger" title="ledger/reader — 13 executed cycles, itemized">led/reader ▸</a></div>
+      </div>
+      <div class="det" style="grid-column:3">
+        <div class="job">Hunts across the findings for openings — gaps, anomalies, price moves — and drafts candidates.</div>
+        <div class="row"><span class="k">Last</span><span class="mono">15:48:39</span> drafted 6 candidates from 225 findings (cy-14)</div>
+        <div class="row"><span class="k">Today</span>2,847 triaged · 74 drafted · 11 watchlisted · top score 0.86 <span class="mono" title="drip-retrofit for shade-house cucurbits — passed council cy-13">cn-0871</span></div>
+        <div class="row"><span class="k">Cost</span>$19.87 of $70.00 (28.4%) · <a class="drill" href="#ledger" title="ledger/scout — 13 executed cycles, itemized">led/scout ▸</a></div>
+      </div>
+      <div class="det" style="grid-column:5">
+        <div class="job">Five reviewer models argue each candidate and record a verdict with reasons.</div>
+        <div class="row"><span class="k">Last</span><span class="mono">15:50:24</span> voted 6: 2 pass · 3 hold · 1 reject (cy-14)</div>
+        <div class="row"><span class="k">Today</span>74 verdicts · 21 pass · 38 hold · 15 reject · avg 3 m 24 s per verdict</div>
+        <div class="row"><span class="k">Cost</span>$41.52 of $140.00 (29.7%) · <a class="drill" href="#ledger" title="ledger/council — 13 executed cycles, itemized">led/council ▸</a></div>
+      </div>
+      <div class="det" style="grid-column:7">
+        <div class="job">Runs each passed candidate through yield, water and cost models on plot-level data.</div>
+        <div class="row"><span class="k">Last</span><span class="mono">15:51:02</span> started <span class="mono" title="drip-retrofit, 240-plot Monte Carlo — elapsed 17 m 12 s at 16:08:14">tr-0847</span> (240 plots, elapsed 17 m 12 s)</div>
+        <div class="row"><span class="k">Today</span>18 done · 1 running · 2 queued · median run 11 m 24 s</div>
+        <div class="row"><span class="k">Cost</span>$17.06 of $110.00 (15.5%) · <a class="drill" href="#ledger" title="ledger/simulator — per-run compute, itemized">led/simulator ▸</a></div>
+      </div>
+      <div class="det" style="grid-column:9">
+        <div class="job">Files every report and citation into the library, dedupes, keeps provenance whole.</div>
+        <div class="row"><span class="k">Last</span><span class="mono">15:52:16</span> filed 1 report · linked 31 citations · queued 2 briefs (cy-14)</div>
+        <div class="row"><span class="k">Today</span>18 reports filed · 396 citations linked · 214 records touched · 12 dedupes</div>
+        <div class="row"><span class="k">Cost</span>$6.43 of $40.00 (16.1%) · <a class="drill" href="#ledger" title="ledger/archivist — write ops, itemized">led/archivist ▸</a></div>
+      </div>
+      <div class="det" style="grid-column:11">
+        <div class="job">Packages what changed into the owner digest and delivers it on schedule.</div>
+        <div class="row"><span class="k">Last</span><span class="mono">12:00:34</span> sent noon digest <a class="drill" href="#incidents" title="digest receipt dg-0822-2 — 3 items, delivered after one SMTP 421 retry">dg-0822-2 ▸</a> (3 items, 1 retry)</div>
+        <div class="row"><span class="k">Today</span>2 digests sent (07:00, 12:00) · 8 items delivered · 4 queued for 18:00 · 0 bounces</div>
+        <div class="row"><span class="k">Cost</span>$1.28 of $20.00 (6.4%) · <a class="drill" href="#ledger" title="ledger/courier — per-digest, itemized">led/courier ▸</a></div>
+      </div>
+
+      <div class="recap">today's flow · 512 sources → 2,847 findings → 74 candidates → 21 passes → 18 reports → 12 briefs → 8 delivered (4 queued for 18:00) · every handoff logged with cycle id and content hash</div>
+    </div>
+  </section>
+
+  <!-- LEDGER -->
+  <section id="ledger">
+    <div class="shead">
+      <span class="lbl">Ledger — today vs cap</span>
+      <span class="right">
+        <span class="legend">pace = mean of 13 executed cycles · <span class="sw b2" style="width:2px;height:10px"></span> projected close marker</span>
+        <a class="drill" href="#sched" title="ledger/day/2026-08-22.jsonl — every API call and compute-second priced at booking time">▸ ledger/day/2026-08-22</a>
+      </span>
+    </div>
+    <table class="ledger">
+      <tr><th>Service</th><th>Spent</th><th>Cap</th><th>Used</th><th>Pace /cy</th><th>Proj close</th><th>Headroom at close</th><th class="bcol">Spent vs cap</th></tr>
+      <tr><td class="svc">Reader</td><td>$28.14</td><td>$90.00</td><td>31.3%</td><td>$2.16</td><td>$32.47</td><td>$57.53</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:31.3%"></div><div class="pj" style="left:36.1%"></div></div></td></tr>
+      <tr><td class="svc">Scout</td><td>$19.87</td><td>$70.00</td><td>28.4%</td><td>$1.53</td><td>$22.93</td><td>$47.07</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:28.4%"></div><div class="pj" style="left:32.8%"></div></div></td></tr>
+      <tr><td class="svc">Council</td><td>$41.52</td><td>$140.00</td><td>29.7%</td><td>$3.19</td><td>$47.91</td><td>$92.09</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:29.7%"></div><div class="pj" style="left:34.2%"></div></div></td></tr>
+      <tr><td class="svc">Simulator</td><td>$17.06</td><td>$110.00</td><td>15.5%</td><td>$1.31</td><td>$19.68</td><td>$90.32</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:15.5%"></div><div class="pj" style="left:17.9%"></div></div></td></tr>
+      <tr><td class="svc">Archivist</td><td>$6.43</td><td>$40.00</td><td>16.1%</td><td>$0.49</td><td>$7.42</td><td>$32.58</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:16.1%"></div><div class="pj" style="left:18.6%"></div></div></td></tr>
+      <tr><td class="svc">Courier</td><td>$1.28</td><td>$20.00</td><td>6.4%</td><td title="per digest, 2 of 3 sent">$0.64 /dg</td><td>$1.92</td><td>$18.08</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:6.4%"></div><div class="pj" style="left:9.6%"></div></div></td></tr>
+      <tr class="tot"><td>Allocated</td><td>$114.30</td><td>$470.00</td><td>24.3%</td><td>$8.79</td><td>$132.33</td><td>$337.67</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:24.3%"></div><div class="pj" style="left:28.2%"></div></div></td></tr>
+      <tr class="res"><td>Reserve (unallocated)</td><td>—</td><td>$30.00</td><td>—</td><td>—</td><td>—</td><td>$30.00</td><td class="bcol"><div class="track"></div></td></tr>
+      <tr class="tot"><td>Day cap</td><td>$114.30</td><td>$500.00</td><td>22.9%</td><td>$8.79</td><td>$132.33</td><td>$367.67</td>
+        <td class="bcol"><div class="track"><div class="fill" style="width:22.9%"></div><div class="pj" style="left:26.5%"></div></div></td></tr>
+    </table>
+  </section>
+
+  <!-- SCHEDULER -->
+  <section id="sched">
+    <div class="shead">
+      <span class="lbl">Scheduler — cycle 14 of 16</span>
+      <span class="schedfacts">cadence <b>45 min</b> · window <span class="mono">06:00:00–18:00:00</span> · next <b>cy-15</b> at <span class="mono">16:30:00</span> (in 21 m 46 s) · last ran <span class="mono">15:45:00 → 15:52:19</span> (7 m 19 s) · mean 6 m 48 s · remaining est <b>+$18.03</b></span>
+      <a class="drill" href="#incidents" title="sched/2026-08-22 — beat log, one row per slot with start, end, exit state">▸ sched/2026-08-22</a>
+    </div>
+    <div class="sched">
+      <div class="slot"><span class="d done"></span><div class="cy">01</div><div class="tm">06:00</div><div class="ct">$8.92</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">02</div><div class="tm">06:45</div><div class="ct">$8.71</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">03</div><div class="tm">07:30</div><div class="ct">$8.35</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">04</div><div class="tm">08:15</div><div class="ct">$9.18</div></div>
+      <div class="slot" title="cancelled 09:00:00 — agris mirror timed out 3× in pre-fetch; sources re-queued to cycle 6; see incidents"><span class="d cxl"></span><div class="cy clay">05</div><div class="tm">09:00</div><div class="ct clay">$0.14</div></div>
+      <div class="slot" title="double batch — cycle 5 sources re-queued here"><span class="d done"></span><div class="cy">06</div><div class="tm">09:45</div><div class="ct">$10.87</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">07</div><div class="tm">10:30</div><div class="ct">$8.66</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">08</div><div class="tm">11:15</div><div class="ct">$7.94</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">09</div><div class="tm">12:00</div><div class="ct">$8.71</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">10</div><div class="tm">12:45</div><div class="ct">$8.42</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">11</div><div class="tm">13:30</div><div class="ct">$8.78</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">12</div><div class="tm">14:15</div><div class="ct">$8.12</div></div>
+      <div class="slot"><span class="d done"></span><div class="cy">13</div><div class="tm">15:00</div><div class="ct">$8.63</div></div>
+      <div class="slot" title="latest completed — 15:45:00 → 15:52:19, snapshot sn-0822-14 at close"><span class="d done"></span><div class="cy">14</div><div class="tm">15:45</div><div class="ct">$8.87</div></div>
+      <div class="slot" title="next — fires 16:30:00; estimate from per-service pace"><span class="d next"></span><div class="cy sage">15</div><div class="tm sage">16:30</div><div class="ct est">≈$8.70</div></div>
+      <div class="slot" title="final slot of the day — includes 18:00 digest, ≈$0.64"><span class="d fut"></span><div class="cy mut">16</div><div class="tm">17:15</div><div class="ct est">≈$9.33</div></div>
+    </div>
+  </section>
+
+  <!-- DATA + INCIDENTS -->
+  <section>
+    <div class="cols">
+      <div id="data">
+        <div class="shead" style="margin-bottom:6px">
+          <span class="lbl">Data</span>
+          <a class="drill" href="#ledger" title="data/ — snapshot manifests, archive pushes, backfill batches">▸ data/manifests</a>
+        </div>
+        <div class="datablock">
+          <div class="dl"><span class="lbl">Snapshot</span><span class="mono mut" title="taken at cycle-14 close">sn-0822-14</span></div>
+          <div class="facts">taken <span class="mono">15:52:19</span> at cy-14 close · 214 records · 12.7&nbsp;MB · sha256 <span class="mono" title="sha256 verified against manifest at write">…e41c verified</span> · next at cy-15 close ≈<span class="mono">16:37</span></div>
+        </div>
+        <div class="datablock">
+          <div class="dl"><span class="lbl">Archive</span><span class="mono mut">ar-0821</span></div>
+          <div class="facts">38 daily archives · 412.6&nbsp;MB · last pushed <span class="mono">00:05:11</span> · mirror <span class="mono">b2://palin-arch</span> in sync (lag 0&nbsp;s) · retention 180&nbsp;d</div>
+        </div>
+        <div class="datablock">
+          <div class="dl"><span class="lbl">Backfill</span><span class="mono mut">corpus 2019–2025</span></div>
+          <div class="facts">118,204 of 129,312 docs (<b>91.4%</b>) · +1,872 today · 7-day rate 2,340/d · ETA 4&nbsp;d&nbsp;18&nbsp;h · 0 failed batches</div>
+          <div class="bftrack" title="118,204 of 129,312 docs — 91.4%"><div class="bffill" style="width:91.4%"></div></div>
+        </div>
+      </div>
+
+      <div id="incidents">
+        <div class="shead" style="margin-bottom:6px">
+          <span class="lbl">Incidents — 4 today · 56 m lost · 0 open</span>
+          <a class="drill" href="#sched" title="log/incidents/2026-08-22.jsonl — full stack traces and recovery receipts">▸ log/incidents/2026-08-22</a>
+        </div>
+        <table class="inc">
+          <tr>
+            <td class="t"><span class="idot"></span> 06:47:12</td>
+            <td>Reader: bulletin mirror served a malformed feed, 23 items unparseable<div class="act">quarantined <span class="mono">qb-061</span>, refetched from origin, 23/23 recovered</div></td>
+            <td class="m">4 m</td>
+          </tr>
+          <tr>
+            <td class="t"><span class="idot"></span> 09:00:00</td>
+            <td>Scheduler: <a class="drill" href="#sched" title="slot 05 — cancel receipt in beat log">cycle 5 cancelled ▸</a> — agris mirror timed out 3× in pre-fetch<div class="act">sources re-queued to cycle 6 (double batch), partial $0.14 written to ledger</div></td>
+            <td class="m">45 m</td>
+          </tr>
+          <tr>
+            <td class="t"><span class="idot"></span> 12:00:08</td>
+            <td>Courier: noon digest greylisted (SMTP 421) on first attempt<div class="act">retried <span class="mono">12:00:34</span>, delivered, receipt <span class="mono">dg-0822-2</span> filed</div></td>
+            <td class="m">1 m</td>
+          </tr>
+          <tr>
+            <td class="t"><span class="idot"></span> 13:38:47</td>
+            <td>Simulator: <span class="mono">tr-0844</span> requested 512 plots, over the 480-plot guard<div class="act">clamped to 480, rerun clean, guard receipt filed</div></td>
+            <td class="m">6 m</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span class="credo">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="mono mut">palingenesis engine v0.9.4 · log day 2026-08-22 · uptime 41 d 3 h</span>
+  </footer>
+
+</div>
+</body>
+</html>

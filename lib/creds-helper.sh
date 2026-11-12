@@ -71,6 +71,10 @@ creds_store() {
 
 creds_get_macos() {
     local key="$1"
+    if [[ "$key" == "OPENAI_API_KEY" && "${2:-}" != "explicit" ]]; then
+        echo "OPENAI_API_KEY requires an explicit named credential read; automatic Keychain access is disabled." >&2
+        return 2
+    fi
     security find-generic-password -s "${AGENT_DO_CREDS_SERVICE}" -a "${key}" -w 2>/dev/null
 }
 
@@ -104,7 +108,7 @@ creds_get_from_store() {
     [[ -n "$key" ]] || return 1
 
     case "$AGENT_DO_CREDS_PLATFORM" in
-        macos) creds_get_macos "$key" ;;
+        macos) creds_get_macos "$key" "${2:-}" ;;
         linux) creds_get_linux "$key" ;;
         windows) creds_get_windows "$key" ;;
         *) return 1 ;;
@@ -119,7 +123,7 @@ creds_get() {
         printf '%s' "$env_value"
         return 0
     fi
-    creds_get_from_store "$key"
+    creds_get_from_store "$key" "${2:-}"
 }
 
 creds_get_source() {
@@ -130,6 +134,15 @@ creds_get_source() {
         printf 'env'
         return 0
     fi
+    if [[ "$AGENT_DO_CREDS_PLATFORM" == "macos" ]]; then
+        # Attributes only: never use -w/-g to probe existence or source. A
+        # protected key can exist without permission to reveal its contents.
+        if security find-generic-password -s "$AGENT_DO_CREDS_SERVICE" -a "$key" >/dev/null 2>&1; then
+            printf 'store'
+            return 0
+        fi
+        return 1
+    fi
     if creds_get_from_store "$key" >/dev/null 2>&1; then
         printf 'store'
         return 0
@@ -138,7 +151,7 @@ creds_get_source() {
 }
 
 creds_has() {
-    creds_get "${1:-}" >/dev/null 2>&1
+    creds_get_source "${1:-}" >/dev/null 2>&1
 }
 
 creds_delete_macos() {
@@ -257,7 +270,7 @@ creds_list_store() {
 creds_export_line() {
     local key value
     key="$(normalize_secret_key "${1:-}")"
-    value="$(creds_get "$key")" || return 1
+    value="$(creds_get "$key" "${2:-}")" || return $?
 
     python3 - "$key" "$value" <<'PY'
 import shlex

@@ -1,0 +1,1043 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{overflow-x:hidden}
+body{background:#1B1917;color:#E7E3DA;font-family:"Source Sans 3",-apple-system,"Helvetica Neue",Arial,sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;color:inherit}
+.serif{font-family:"Source Serif 4",Georgia,serif}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.tnum{font-variant-numeric:tabular-nums}
+.mut{color:#A69D90}
+.sage{color:hsl(158,30%,55%)}
+.clay{color:hsl(12,42%,58%)}
+.label{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#A69D90;font-weight:600}
+.sm{font-size:12px}
+.wrap{max-width:1440px;margin:0 auto;padding:0 36px}
+
+/* ---------- header ---------- */
+header.top{position:sticky;top:0;z-index:40;background:#1B1917;border-bottom:1px solid rgba(231,227,218,.14)}
+.nav{display:flex;align-items:center;gap:28px;height:52px}
+.brand{font-size:19px;font-weight:700}
+.tabs{display:flex;gap:22px;font-size:14px;color:#A69D90}
+.tabs span{padding:4px 0;min-height:24px;display:inline-flex;align-items:center}
+.tabs .cur{color:#E7E3DA;border-bottom:2px solid hsl(158,30%,55%)}
+.clockbox{margin-left:auto;display:flex;gap:10px;align-items:baseline}
+#clock{font-size:14px}
+.courserow{display:flex;align-items:center;gap:14px;min-height:46px;border-top:1px solid rgba(231,227,218,.14);padding:6px 0}
+.cval{font-size:14px;font-weight:600}
+.linky{background:none;border:0;color:#A69D90;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;cursor:pointer;font-size:12px;min-height:24px;display:inline-flex;align-items:center;padding:0 2px}
+.linky:hover{color:#E7E3DA}
+.chip{display:inline-flex;align-items:center;border:1px solid rgba(231,227,218,.3);padding:2px 8px;font-size:12px;letter-spacing:.07em;text-transform:uppercase}
+.chip.sage{color:hsl(158,30%,55%);border-color:hsl(158,30%,40%)}
+.chip.clay{color:hsl(12,42%,58%);border-color:hsl(12,32%,45%)}
+.chip.mutc{color:#A69D90}
+
+/* ---------- masthead ---------- */
+.mast{padding:26px 0 6px}
+.mast h1{font-size:30px;font-weight:700;line-height:1.2}
+.mastdate{font-size:13px;color:#A69D90;margin-top:2px}
+.lede{font-family:"Source Serif 4",Georgia,serif;font-size:19px;line-height:1.5;margin-top:12px;max-width:1000px}
+.lede .chip{position:relative;top:-2px;margin-right:10px}
+
+/* ---------- bands + blocks ---------- */
+.band{margin:26px 0}
+.bandhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:12px}
+.grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
+.grid6{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.blk{border:1px solid rgba(231,227,218,.14);padding:14px 16px;position:relative;background:#1B1917}
+.drill{cursor:pointer}
+.drill:hover{background:#211E1B;border-color:rgba(231,227,218,.32)}
+.drill:hover .cue{color:hsl(158,30%,55%)}
+.cue{color:#A69D90;font-size:12px}
+.blkhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;gap:8px}
+.fig{font-size:24px;font-weight:600;line-height:1.15}
+.sub{font-size:13px;color:#A69D90;margin-top:2px}
+.state{font-size:13px;margin-top:8px}
+.job{font-size:12px;color:#A69D90;margin-top:2px}
+.facts{margin-top:8px}
+.facts div{font-size:13px;color:#A69D90;padding:2px 0}
+.pm{position:absolute;top:10px;right:36px;width:28px;height:24px;border:1px solid rgba(231,227,218,.3);background:#211E1B;color:#A69D90;font-size:13px;cursor:pointer;opacity:0;display:flex;align-items:center;justify-content:center}
+.blk:hover .pm{opacity:1}
+.pm:hover{color:hsl(158,30%,55%);border-color:hsl(158,30%,45%)}
+
+/* ---------- timetable ---------- */
+.tt{display:flex;border:1px solid rgba(231,227,218,.14)}
+.ttlab{flex:0 0 132px;border-right:1px solid rgba(231,227,218,.14)}
+.ttcols{display:flex;flex:1;position:relative;min-width:0}
+.ttcol{flex:1;min-width:0;border-right:1px solid rgba(231,227,218,.08);cursor:pointer}
+.ttcol:last-child{border-right:0}
+.ttcol:hover{background:#211E1B}
+.tthead{height:66px;padding:8px 7px;border-bottom:1px solid rgba(231,227,218,.14)}
+.ttn{font-size:13px;font-weight:600}
+.ttid{font-size:12px;color:#A69D90}
+.ttcol.struckrun .ttid{text-decoration:line-through}
+.ttst{font-size:12px;color:#A69D90}
+.ttcell,.ttlabcell{height:44px;padding:5px 7px;border-bottom:1px solid rgba(231,227,218,.07)}
+.ttcell:last-child,.ttlabcell:last-child{border-bottom:0}
+.ttlabcell{display:flex;flex-direction:column;justify-content:center;gap:0}
+.ttcell .t{font-size:13px;display:block;line-height:1.2}
+.cs{font-size:12px;display:block;line-height:1.15}
+.bkd .t{color:#A69D90}
+.none{color:#A69D90;font-size:13px}
+.livec{background:rgba(112,178,152,.13)}
+.livec .t{color:hsl(158,30%,55%)}
+.nowline{position:absolute;top:66px;bottom:0;width:2px;background:hsl(158,30%,55%);pointer-events:none;z-index:2}
+
+/* ---------- log ---------- */
+.lrow{display:flex;gap:12px;align-items:baseline;padding:9px 10px;border-bottom:1px solid rgba(231,227,218,.10);cursor:pointer}
+.lrow:first-child{border-top:1px solid rgba(231,227,218,.10)}
+.lrow:hover{background:#211E1B}
+.lrow:hover .cue{color:hsl(158,30%,55%)}
+.lt{flex:0 0 72px;font-size:12px;color:#A69D90}
+.ltx{flex:1;font-size:13px;min-width:0}
+.tail{flex:0 0 auto;font-size:12px}
+.fresh{background:rgba(112,178,152,.14)}
+
+/* ---------- control ---------- */
+.controlblk{border:1px solid rgba(231,227,218,.14);padding:20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 16px;background:none;border:1px solid rgba(231,227,218,.32);color:#E7E3DA;font-size:12px;letter-spacing:.09em;text-transform:uppercase;cursor:pointer;font-weight:600}
+.btn:hover{border-color:#E7E3DA}
+.btn.sageb{color:hsl(158,30%,55%);border-color:hsl(158,30%,42%)}
+.btn.sageb:hover{background:rgba(112,178,152,.12)}
+.btn.clayb{color:hsl(12,42%,58%);border-color:hsl(12,34%,45%)}
+.btn.clayb:hover{background:rgba(193,121,103,.12)}
+.btn.solidclay{background:hsl(12,42%,58%);border-color:hsl(12,42%,58%);color:#1B1917}
+.btn.solidclay:hover{border-color:hsl(12,42%,66%);background:hsl(12,42%,66%)}
+.bigbtn{min-height:46px;padding:12px 24px;font-size:13px}
+.conseq{font-size:14px;color:#A69D90;max-width:560px}
+
+footer{border-top:1px solid rgba(231,227,218,.14);margin-top:36px;padding:26px 0 34px;text-align:center;font-size:14px;color:#6E675E}
+
+/* ---------- inspector rail ---------- */
+#rail{position:fixed;top:0;right:0;bottom:0;width:380px;background:#211E1B;border-left:1px solid rgba(231,227,218,.2);z-index:80;transform:translateX(380px);transition:transform .22s ease;display:flex;flex-direction:column}
+#rail.open{transform:none}
+#rail .tab{position:absolute;left:-31px;top:42%;width:31px;height:132px;background:#211E1B;border:1px solid rgba(231,227,218,.2);border-right:0;color:#A69D90;writing-mode:vertical-rl;font-size:12px;letter-spacing:.16em;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+#rail .tab:hover{color:hsl(158,30%,55%)}
+.railhead{display:flex;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(231,227,218,.14)}
+#crumb{flex:1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.cseg{font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:#A69D90;background:none;border:0;cursor:pointer;padding:2px;min-height:24px}
+.cseg:hover{color:#E7E3DA}
+.cseg.curc{color:#E7E3DA}
+.csep{color:#A69D90;font-size:12px}
+.xbtn{width:28px;height:28px;border:1px solid rgba(231,227,218,.3);background:none;color:#A69D90;cursor:pointer;font-size:13px}
+.xbtn:hover{color:#E7E3DA;border-color:#E7E3DA}
+.railbody{flex:1;overflow-y:auto;padding:16px 16px 28px}
+.sfig{font-size:22px;font-weight:600;line-height:1.2}
+.ssub{font-size:13px;color:#A69D90;margin-top:2px}
+.sheet .chip{margin-top:8px}
+.sect{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#A69D90;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;margin-top:20px;padding-bottom:6px;border-bottom:1px solid rgba(231,227,218,.14);gap:8px}
+.sect .right{font-size:12px;letter-spacing:0;text-transform:none;font-weight:400}
+.rrow{display:flex;justify-content:space-between;gap:10px;padding:8px 2px;border-bottom:1px solid rgba(231,227,218,.08);font-size:13px;align-items:baseline}
+.rrow .rr{color:#A69D90;text-align:right;white-space:nowrap}
+.rrow.click{cursor:pointer}
+.rrow.click:hover{background:#26221E}
+.rrow.click:hover .cue{color:hsl(158,30%,55%)}
+.note{font-size:12px;color:#A69D90;margin-top:8px;line-height:1.5}
+.kline{font-size:13px;margin-top:10px}
+.kline .mut{font-size:12px}
+
+/* stage + paper rows */
+.srow{border-bottom:1px solid rgba(231,227,218,.08);cursor:pointer}
+.srow:hover{background:#26221E}
+.sr-main{display:flex;gap:8px;align-items:baseline;padding:9px 2px}
+.sr-name{flex:0 0 84px;font-size:13px;font-weight:600}
+.sr-svc{flex:1;font-size:12px;color:#A69D90}
+.sr-time{flex:0 0 52px;font-size:13px;text-align:right}
+.sr-cost{flex:0 0 56px;font-size:13px;color:#A69D90;text-align:right}
+.sdet{display:none;padding:0 2px 10px;font-size:13px;color:#A69D90;line-height:1.55}
+.srow.x .sdet{display:block}
+.prow{border-bottom:1px solid rgba(231,227,218,.08);cursor:pointer}
+.prow:hover{background:#26221E}
+.prow-main{display:flex;gap:10px;align-items:baseline;padding:9px 2px}
+.ptitle{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.prow.x .ptitle{white-space:normal}
+.pmeta{flex:0 0 auto;font-size:12px;color:#A69D90}
+.pdet{display:none;padding:0 2px 10px;font-size:13px;color:#A69D90;line-height:1.55}
+.prow.x .pdet{display:block}
+
+/* ticks */
+.ticks{display:flex;align-items:flex-end;gap:3px;height:58px;padding:10px 0 2px}
+.tick{flex:1;min-width:4px;cursor:pointer;background:#A69D90}
+.tick:hover{background:hsl(158,30%,55%)}
+.tick.sagey{background:hsl(158,30%,55%)}
+.tick.clayey{background:hsl(12,42%,58%)}
+.tick.pend{background:none;border:1px solid rgba(231,227,218,.22);cursor:default}
+.ticknums{display:flex;gap:3px}
+.ticknums span{flex:1;text-align:center;font-size:12px;color:#A69D90;min-width:4px}
+
+/* forms */
+.inp{width:100%;background:#1B1917;border:1px solid rgba(231,227,218,.26);color:#E7E3DA;padding:9px 10px;font-size:14px;font-family:inherit;margin-top:6px}
+.inp:focus{outline:none;border-color:hsl(158,30%,55%)}
+.inp.err{border-color:hsl(12,42%,58%)}
+.flabel{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#A69D90;font-weight:600;margin-top:14px;display:block}
+.stepper{display:flex;align-items:center;gap:12px;margin-top:10px}
+.stepbtn{width:36px;height:32px;border:1px solid rgba(231,227,218,.32);background:none;color:#E7E3DA;font-size:15px;cursor:pointer}
+.stepbtn:hover{border-color:hsl(158,30%,55%);color:hsl(158,30%,55%)}
+.pendfig{font-size:20px;font-weight:600;min-width:74px;text-align:center}
+.amendbox{display:none;margin-top:6px}
+.amendbox.x{display:block}
+.confirmline{font-size:13px;color:hsl(158,30%,55%);margin-top:12px}
+.warnline{font-size:13px;color:hsl(12,42%,58%);margin-top:8px}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="nav">
+      <span class="brand serif">Palingenesis</span>
+      <div class="tabs">
+        <span>Today</span><span>Pipeline</span><span>Library</span><span>Portfolio</span><span>Simulation</span><span class="cur">Engine Room</span>
+      </div>
+      <div class="clockbox"><span id="clock" class="mono">17:26:08</span><span class="mut sm">farm UTC−05</span></div>
+    </div>
+    <div class="courserow" id="courserow"></div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="mast">
+    <h1 class="serif">Engine Room</h1>
+    <div class="mastdate mono">Fri 22 Aug 2026 · farm local UTC−05</div>
+    <p class="lede"><span class="chip sage">Nominal</span>Ten cycles closed, one struck; $107.13 of $500.00 spent; cycle 12 is mid-Simulate; cycle 13 opens 18:00:00.</p>
+  </section>
+
+  <section class="band">
+    <div class="bandhead"><span class="label">Ledger</span><span class="mut sm">spent · of allot · ≈close</span></div>
+    <div class="grid7" id="ledger"></div>
+  </section>
+
+  <section class="band">
+    <div class="bandhead"><span class="label">Timetable</span><span class="sm"><span class="mono sage" id="ttnow">now 17:26:08</span><span class="mut"> · one open per hour · 06:00–21:00</span></span></div>
+    <div class="tt" id="tt"></div>
+  </section>
+
+  <section class="band">
+    <div class="bandhead"><span class="label">Volumes</span><span class="mut sm mono">to 17:26 · farm local</span></div>
+    <div class="grid6" id="volumes"></div>
+  </section>
+
+  <section class="band">
+    <div class="grid2" id="sysrow"></div>
+  </section>
+
+  <section class="band">
+    <div class="bandhead"><span class="label">Standing Orders</span><span class="mut sm">value · provenance</span></div>
+    <div class="grid4" id="standing"></div>
+  </section>
+
+  <section class="band">
+    <div class="bandhead"><span class="label">Log</span><button class="linky" data-act="minutes" data-root="1" id="minlink">21.2 min lost · of 960 ▸</button></div>
+    <div id="logrows"></div>
+  </section>
+
+  <section class="band">
+    <div class="bandhead"><span class="label">Control</span></div>
+    <div id="control"></div>
+  </section>
+
+</main>
+
+<footer>Every claim sourced · every cost computed · every verdict recorded</footer>
+
+<aside id="rail">
+  <button class="tab" data-act="toggle">Inspector</button>
+  <div class="railhead">
+    <div id="crumb"></div>
+    <button class="xbtn" data-act="close" title="collapse">✕</button>
+  </div>
+  <div class="railbody" id="railbody"></div>
+</aside>
+
+<script>
+/* ============================== DATA ============================== */
+const pad2 = n => String(n).padStart(2,'0');
+const timeOf = (n,off) => pad2(5+n)+':'+pad2(off);
+const money = c => '$'+(c/100).toFixed(2);
+const allotFmt = c => c%100===0 ? '$'+(c/100) : money(c);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const STAGES = [
+  {key:'open',  name:'Open',       svc:'scout',   off:0},
+  {key:'read',  name:'Read',       svc:'reader',  off:4},
+  {key:'delib', name:'Deliberate', svc:'council', off:12},
+  {key:'sim',   name:'Simulate',   svc:'sim',     off:22},
+  {key:'rec',   name:'Record',     svc:'arch',    off:34},
+  {key:'close', name:'Close',      svc:'courier', off:41}
+];
+
+const SVC = {
+  scout:  {name:'Scout',     job:'stocks the docket',  spent:862,  close:1240, state:'idle · next 18:00',  last:'17:00 · r-2212 · 12 sourced'},
+  reader: {name:'Reader',    job:'reads the stack',    spent:1984, close:2890, state:'idle · next 18:04',  last:'17:04 · r-2212 · 5 read'},
+  council:{name:'Council',   job:'votes the verdict',  spent:3690, close:5370, state:'idle · next 18:12',  last:'17:12 · r-2212 · voted'},
+  sim:    {name:'Simulator', job:'runs the trial',     spent:3155, close:4600, state:'running · r-2212',   last:'17:22 · r-2212 · running', live:true},
+  arch:   {name:'Archivist', job:'writes lineage',     spent:571,  close:830,  state:'waits · 17:34',      last:'16:34 · r-2211 · v-2211'},
+  courier:{name:'Courier',   job:'posts and closes',   spent:451,  close:660,  state:'waits · 17:41',      last:'16:41 · r-2211 · posted'}
+};
+const SVCKEYS = ['scout','reader','council','sim','arch','courier'];
+
+/* papers: [title, journal-year, claims kept, read cost cents] */
+const RUNS = [
+{n:1,id:'r-2201',st:'closed',src:12,verdict:'v-2201',c:{scout:78,reader:186,council:338,sim:298,arch:58,courier:46},papers:[
+  ['Rhizobium co-inoculation under saline irrigation','Field Crops Res 2025',7,34],
+  ['Osmoprotectant priming of chickpea seed at 8 dS/m','Plant Soil 2024',6,29],
+  ['Salt-tolerant Sinorhizobium strains for alfalfa stands','Soil Biol Biochem 2023',5,32],
+  ['Nodulation failure thresholds under brackish fertigation','Agric Water Manag 2025',8,28],
+  ['Trehalose accumulation in osmotically stressed rhizobia','J Exp Bot 2022',6,33],
+  ['Inoculant carrier survival in sodic seedbeds','Appl Soil Ecol 2024',6,30]]},
+{n:2,id:'r-2202',st:'closed',src:12,verdict:'v-2202',c:{scout:77,reader:155,council:322,sim:305,arch:56,courier:45},papers:[
+  ['Salicornia rotations for sodium drawdown','Agric Ecosyst Environ 2024',7,33],
+  ['Quinoa as a desalinizing break crop','Eur J Agron 2023',6,29],
+  ['Kochia forage yield on saline seeps','Crop Sci 2021',8,31],
+  ['Cover-crop biomass and leachate conductivity','Soil Tillage Res 2025',5,34],
+  ['Halophyte litter effects on soil aggregation','Geoderma 2024',7,28]]},
+{n:3,id:'r-2203',st:'closed',src:12,verdict:'v-2203',c:{scout:78,reader:186,council:341,sim:291,arch:57,courier:44},papers:[
+  ['Deficit irrigation scheduling by canopy temperature','Agric Water Manag 2024',6,30],
+  ['Partial root-zone drying in processing tomato','Irrig Sci 2023',7,33],
+  ['Sensor-fused evapotranspiration for pivot control','Comput Electron Agric 2025',8,28],
+  ['Regulated deficit and pod set in dry bean','Field Crops Res 2022',5,32],
+  ['Night irrigation and salt-flushing efficiency','Agric Water Manag 2021',7,29],
+  ['Forecast-driven scheduling error propagation','Precis Agric 2024',6,34]]},
+{n:4,id:'r-2204',st:'closed',src:12,verdict:'v-2204',c:{scout:77,reader:217,council:356,sim:312,arch:59,courier:47},papers:[
+  ['Gypsum rate response on sodic clay loams','Soil Sci Soc Am J 2023',6,35],
+  ['Biochar feedstock and exchangeable sodium','Geoderma 2025',7,28],
+  ['Elemental sulfur oxidation kinetics in calcareous soils','Plant Soil 2022',5,32],
+  ['Flue-gas desulfurization gypsum field trials','J Environ Qual 2021',8,30],
+  ['Compost–gypsum blends and infiltration rate','Soil Tillage Res 2024',6,33],
+  ['Polyacrylamide with amendment co-application','Agric Water Manag 2023',7,29],
+  ['Amendment economics under canal-water pricing','Agric Syst 2025',5,30]]},
+{n:5,id:'r-2205',st:'closed',src:12,verdict:'v-2205',c:{scout:77,reader:186,council:330,sim:296,arch:57,courier:45},papers:[
+  ['Genome-wide association for sodium exclusion in lentil','Theor Appl Genet 2024',6,34],
+  ['HKT1;5 orthologs across grain legumes','Plant Physiol 2023',5,30],
+  ['Wild Cicer introgression for salinity tolerance','Crop Sci 2025',7,29],
+  ['Ion-homeostasis QTL in mungbean recombinant lines','Front Plant Sci 2022',8,33],
+  ['Speed-breeding salt screens at seedling stage','Plant Methods 2024',5,28],
+  ['Genomic selection accuracy under stress interaction','Theor Appl Genet 2021',6,32]]},
+{n:6,id:'r-2206',st:'closed',src:12,verdict:'v-2206',c:{scout:78,reader:155,council:318,sim:288,arch:55,courier:44},papers:[
+  ['ACC-deaminase bacteria under osmotic stress','Front Plant Sci 2023',6,31],
+  ['Synthetic consortia stability in field soils','ISME J 2024',7,28],
+  ['Mycorrhizal inoculation and potassium–sodium ratios','Mycorrhiza 2022',5,34],
+  ['Endophyte-mediated proline accumulation','Plant Cell Environ 2025',6,29],
+  ['Biofertilizer shelf-life claims audited','Agron Sustain Dev 2024',7,33]]},
+{n:7,id:'r-2207',st:'struck',src:0,verdict:null,c:{scout:12},papers:[]},
+{n:8,id:'r-2208',st:'closed',src:12,verdict:'v-2208',c:{scout:77,reader:186,council:335,sim:302,arch:58,courier:46},papers:[
+  ['Hyperspectral indices for early salt stress','Remote Sens 2024',7,29],
+  ['UAV thermal mapping of seep expansion','Precis Agric 2023',6,34],
+  ['Sentinel-2 conductivity retrieval on bare fields','Remote Sens Environ 2022',8,30],
+  ['Canopy fluorescence under ionic stress','J Exp Bot 2025',6,28],
+  ['Soil-salinity inversion with random forests','Comput Electron Agric 2021',7,33],
+  ['Ground-truth spacing for conductivity calibration','Geoderma 2024',6,32]]},
+{n:9,id:'r-2209',st:'closed',src:12,verdict:'v-2209',late:21,act:{sim:'14:43',rec:'14:55',close:'15:02'},c:{scout:77,reader:217,council:352,sim:319,arch:60,courier:45},papers:[
+  ['Root cortical aerenchyma and drought carbon cost','Plant Physiol 2023',7,30],
+  ['Deep-rooting alleles under terminal water deficit','J Exp Bot 2024',6,35],
+  ['Rhizosheath traits in water-limited barley','Ann Bot 2022',8,28],
+  ['Minirhizotron phenotyping throughput limits','Plant Methods 2023',5,32],
+  ['Osmotic adjustment heritability in faba bean','Field Crops Res 2025',7,29],
+  ['Root-hair density in polyethylene-glycol screens','Funct Plant Biol 2021',6,33],
+  ['Hydraulic redistribution in mixed stands','Plant Cell Environ 2024',6,30]]},
+{n:10,id:'r-2210',st:'closed',src:12,verdict:'v-2210',c:{scout:77,reader:155,council:315,sim:285,arch:54,courier:43},papers:[
+  ['Cereal–legume strip intercrop water use','Field Crops Res 2023',6,28],
+  ['Border-row effects in wheat–pea mixtures','Eur J Agron 2024',7,33],
+  ['Land-equivalent ratios on saline margins','Agric Syst 2022',6,31],
+  ['Facilitation via rhizosphere acidification','Plant Soil 2025',8,29],
+  ['Harvest logistics penalties in crop mixtures','Agron J 2021',5,34]]},
+{n:11,id:'r-2211',st:'closed',src:12,verdict:'v-2211',c:{scout:77,reader:186,council:340,sim:304,arch:57,courier:46},papers:[
+  ['Cyclic reuse of drainage water in forage systems','Agric Water Manag 2023',5,32],
+  ['Subsurface drip with 6 dS/m supply water','Irrig Sci 2024',7,29],
+  ['Tile-drain spacing on irrigated sodic soils','Trans ASABE 2021',6,34],
+  ['Salt-balance closure in reuse districts','J Irrig Drain Eng 2022',8,28],
+  ['Shallow groundwater contribution to crop water use','Agric For Meteorol 2025',6,30],
+  ['Blending rules for marginal water sources','Agric Water Manag 2020',6,33]]},
+{n:12,id:'r-2212',st:'live',src:12,verdict:null,c:{scout:77,reader:155,council:343,sim:155},papers:[
+  ['Osmotic adjustment and yield stability in chickpea','Field Crops Res 2024',7,31],
+  ['Turgor loss point as a screening trait','Plant Cell Environ 2023',5,34],
+  ['Pod abortion under transient water deficit','Eur J Agron 2025',8,28],
+  ['Canopy conductance recovery after stress relief','Agric For Meteorol 2022',6,33],
+  ['Proline dynamics versus marketable yield','J Agron Crop Sci 2024',6,29]]},
+{n:13,id:'r-2213',st:'booked',src:null,verdict:null,c:{},papers:[]},
+{n:14,id:'r-2214',st:'booked',src:null,verdict:null,c:{},papers:[]},
+{n:15,id:'r-2215',st:'booked',src:null,verdict:null,c:{},papers:[]},
+{n:16,id:'r-2216',st:'booked',src:null,verdict:null,c:{},papers:[]}
+];
+RUNS.forEach(r=>{
+  r.claims = r.papers.reduce((a,p)=>a+p[2],0);
+  r.total  = SVCKEYS.reduce((a,k)=>a+(r.c[k]||0),0);
+});
+const RUN = id => RUNS.find(r=>r.id===id);
+
+/* honesty checks — silent when true */
+console.assert(RUNS.reduce((a,r)=>a+r.total,0)===10713,'day total');
+console.assert(RUNS.reduce((a,r)=>a+(r.c.reader||0),0)===1984,'reader total');
+console.assert(RUNS.reduce((a,r)=>a+r.claims,0)===409,'claims total');
+console.assert(RUNS.reduce((a,r)=>a+r.papers.length,0)===64,'papers total');
+console.assert(RUNS.reduce((a,r)=>a+(r.src||0),0)===132,'sources total');
+RUNS.forEach(r=>{ if(r.papers.length) console.assert(r.papers.reduce((a,p)=>a+p[3],0)===r.c.reader, 'reader sum '+r.id); });
+
+const LOG = [
+ {t:'09:12', txt:'Simulator allot raised $150→$175', tag:'ERIK', link:{type:'svc',id:'sim'},
+  what:'Simulator allot raised from $150 to $175, ordered during cycle 04.',
+  act:'applied to the day ledger at once · all later cycles trial under the new allot.', min:null},
+ {t:'10:00', txt:'course set: drought wheat × cycles 13–24', tag:'ERIK', link:{type:'course'},
+  what:'course set to drought-tolerant wheat, cycles 13–24, from the bridge.',
+  act:'takes effect at cycle 13 · 18:00:00 · cycles already open finish their booked course.', min:null},
+ {t:'12:01', txt:'feed empty, cycle 07 → struck kept on book', link:{type:'run',id:'r-2207'},
+  what:'cycle 07 opened 12:00; the scout polled the feed; zero sources returned.',
+  act:'cycle struck at 12:01 · kept on book · no retry — an empty feed is not an error.', min:0.0},
+ {t:'14:22', txt:'simulator queue stall, cycle 09 → requeued 14:43, closed 15:02', link:{type:'run',id:'r-2209'},
+  what:'simulator queue stalled at Simulate open, 14:22, cycle 09.',
+  act:'retry ×1 failed · requeued 14:43 · trial ran clean · run closed 15:02, +21 — under the +25 strike rule.', min:21.0},
+ {t:'17:15', txt:'snapshot checksum fail → write 2 verified 17:15:09', link:{type:'data'},
+  what:'hourly snapshot write 1 failed its checksum at 17:15:00.',
+  act:'write 2 verified 17:15:09 · 412 MB · archive unharmed.', min:0.2}
+];
+
+const S = {
+  open:false, stack:[], arm:false, suspended:false,
+  allot:{scout:4500,reader:6000,council:13000,sim:17500,arch:4000,courier:5000},
+  course:{topic:'drought-tolerant wheat', cycles:'13–24', prov:'set 10:00 by Erik', orderIdx:1},
+  standing:{
+    cadence:{label:'Cadence', val:'hourly 06:00–21:00', prov:'default', scope:'governs when cycles open — one generation cycle per booked hour.'},
+    strike:{label:'Strike',  val:'past +25',           prov:'default', scope:'a run later than +25 minutes is struck and kept on book.'},
+    retry:{label:'Retry',    val:'×1 then requeue',    prov:'default', scope:'a failed stage retries once, then requeues at the tail of the hour.'},
+    snapshot:{label:'Snapshot', val:'hourly :15',      prov:'default', scope:'the data plane snapshots at :15 each hour and verifies by checksum.'}
+  },
+  rerun:{}, pendSvc:null, pendAllot:0, confirmSvc:null, confirmT:null, ccDone:null, standDone:null
+};
+const sumAllot = () => SVCKEYS.reduce((a,k)=>a+S.allot[k],0);
+
+/* ============================== CLOCK ============================== */
+let NOWs = 17*3600 + 26*60 + 8;
+const clockStr = () => pad2(Math.floor(NOWs/3600))+':'+pad2(Math.floor(NOWs/60)%60)+':'+pad2(NOWs%60);
+const clockHM  = () => clockStr().slice(0,5);
+function positionNow(){
+  const el = document.getElementById('nowline');
+  if(!el) return;
+  let pct = ((NOWs/3600)-6)/16*100;
+  pct = Math.max(0, Math.min(100, pct));
+  el.style.left = pct+'%';
+}
+setInterval(()=>{
+  NOWs++;
+  document.getElementById('clock').textContent = clockStr();
+  document.getElementById('ttnow').textContent = 'now '+clockStr();
+  positionNow();
+},1000);
+
+/* ============================== STAGE MODEL ============================== */
+function stInfo(r,i){
+  const st = STAGES[i], booked = timeOf(r.n, st.off);
+  const base = {booked, actual:null, delta:0, state:'booked', cost:null, svc:st.svc};
+  if(r.st==='booked'){ base.state = S.suspended ? 'held' : 'booked'; return base; }
+  if(r.st==='struck'){
+    if(i===0) return {...base, actual:'12:00', state:'struck', cost:r.c.scout};
+    return {...base, state:'did not run'};
+  }
+  if(r.st==='live'){
+    if(i<3)   return {...base, actual:booked, state:'done', cost:r.c[st.svc]};
+    if(i===3) return {...base, actual:booked, state:'running', cost:r.c.sim};
+    return base;
+  }
+  const act = (r.act && r.act[st.key]) || booked;
+  return {...base, actual:act, delta:(r.act && r.act[st.key]) ? r.late : 0, state:'done', cost:r.c[st.svc]};
+}
+const runStateWord = r => r.st==='booked' ? (S.suspended?'held':'booked') : r.st;
+
+/* ============================== PAGE RENDER ============================== */
+function renderCourse(){
+  const c = S.course;
+  document.getElementById('courserow').innerHTML =
+    '<span class="label">Course</span>'+
+    '<span class="cval">'+esc(c.topic)+' · cycles '+esc(c.cycles)+'</span>'+
+    '<button class="linky" data-act="inc" data-i="'+c.orderIdx+'" data-root="1">'+esc(c.prov)+'</button>'+
+    '<button class="btn" data-act="course" data-root="1" style="margin-left:auto">Change course</button>'+
+    (S.suspended ? '<span class="chip clay">generation held</span>' : '');
+}
+
+function renderLedger(){
+  const dayHtml =
+    '<div class="blk drill" data-act="day" data-root="1" title="open day sheet">'+
+      '<div class="blkhead"><span class="label">Day</span><span class="cue">▸</span></div>'+
+      '<div class="fig tnum">'+money(10713)+'</div>'+
+      '<div class="sub tnum">of '+money(sumAllot())+' · ≈$155.90</div>'+
+      '<div class="state sage">on pace</div>'+
+      '<div class="job">sixteen cycles · six services</div>'+
+    '</div>';
+  const svcHtml = SVCKEYS.map(k=>{
+    const v = SVC[k];
+    return '<div class="blk drill" data-act="svc" data-id="'+k+'" data-root="1" title="open service sheet">'+
+      '<div class="blkhead"><span class="label">'+v.name+'</span><span class="cue">▸</span></div>'+
+      '<button class="pm" data-act="allot" data-id="'+k+'" data-root="1" title="edit allot">±</button>'+
+      '<div class="fig tnum">'+money(v.spent)+'</div>'+
+      '<div class="sub tnum">of '+allotFmt(S.allot[k])+' · ≈'+money(v.close)+'</div>'+
+      '<div class="state '+(v.live?'sage':'mut')+'">'+v.state+'</div>'+
+      '<div class="job">'+v.job+'</div>'+
+    '</div>';
+  }).join('');
+  document.getElementById('ledger').innerHTML = dayHtml + svcHtml;
+}
+
+function cellHTML(r,i){
+  const s = stInfo(r,i);
+  if(s.state==='did not run') return '<div class="ttcell none">—</div>';
+  if(s.state==='booked'||s.state==='held') return '<div class="ttcell bkd"><span class="t mono">'+s.booked+'</span></div>';
+  if(s.state==='struck')  return '<div class="ttcell"><span class="t mono">'+s.actual+'</span><span class="cs clay">struck</span></div>';
+  if(s.state==='running') return '<div class="ttcell livec"><span class="t mono">'+s.actual+'</span><span class="cs sage">running</span></div>';
+  return '<div class="ttcell"><span class="t mono">'+s.actual+'</span>'+(s.delta?'<span class="cs clay">+'+s.delta+'</span>':'')+'</div>';
+}
+
+function renderTT(){
+  const lab =
+    '<div class="ttlab"><div class="tthead"><span class="label">Stage</span></div>'+
+    STAGES.map(s=>'<div class="ttlabcell"><span class="label">'+s.name+'</span><span class="mut sm">'+SVC[s.svc].name+' · +'+s.off+'</span></div>').join('')+
+    '</div>';
+  const cols = RUNS.map(r=>{
+    const w = runStateWord(r);
+    const cls = w==='live' ? 'sage' : (w==='struck'||w==='held') ? 'clay' : 'mut';
+    return '<div class="ttcol '+(r.st==='struck'?'struckrun':'')+'" data-act="run" data-id="'+r.id+'" data-root="1" title="open run sheet '+r.id+'">'+
+      '<div class="tthead"><div class="ttn">'+pad2(r.n)+'</div><div class="ttid mono">'+r.id+'</div><div class="ttst '+cls+'">'+w+'</div></div>'+
+      STAGES.map((_,i)=>cellHTML(r,i)).join('')+
+      '</div>';
+  }).join('');
+  document.getElementById('tt').innerHTML = lab + '<div class="ttcols">'+cols+'<div class="nowline" id="nowline"></div></div>';
+  positionNow();
+}
+
+function renderVolumes(){
+  const V = [
+    ['Sources','132','scouted','sources'],
+    ['Papers','64','read','papers'],
+    ['Claims','409','kept','claims'],
+    ['Trials','11','run','trials'],
+    ['Verdicts','10','recorded','verdicts'],
+    ['Digests','10','posted','digests']
+  ];
+  document.getElementById('volumes').innerHTML = V.map(v=>
+    '<div class="blk drill" data-act="vol" data-id="'+v[3]+'" data-root="1" title="per-run breakdown">'+
+      '<div class="blkhead"><span class="label">'+v[0]+'</span><span class="cue">▸</span></div>'+
+      '<div class="fig tnum">'+v[1]+'</div>'+
+      '<div class="state mut">'+v[2]+'</div>'+
+    '</div>').join('');
+}
+
+function renderSys(){
+  const schedState = S.suspended ? '<div class="state clay">held</div>' : '<div class="state sage">on cadence</div>';
+  document.getElementById('sysrow').innerHTML =
+    '<div class="blk drill" data-act="sched" data-root="1" title="open scheduler sheet">'+
+      '<div class="blkhead"><span class="label">Scheduler</span><span class="cue">▸</span></div>'+
+      '<div class="fig mono tnum">18:00:00</div>'+
+      '<div class="sub">next open · cycle 13 · <span class="mono">r-2213</span></div>'+
+      schedState+
+      '<div class="facts"><div>one open per hour · 06:00–21:00</div><div>strike past +25 · worst today +21</div><div>clock farm local · UTC−05</div></div>'+
+    '</div>'+
+    '<div class="blk drill" data-act="data" data-root="1" title="open data sheet">'+
+      '<div class="blkhead"><span class="label">Data</span><span class="cue">▸</span></div>'+
+      '<div class="fig mono tnum">17:15:09</div>'+
+      '<div class="sub">snapshot · 412 MB</div>'+
+      '<div class="state sage">verified</div>'+
+      '<div class="facts"><div>archive 1,283 runs · 9.6 GB · to 16:43</div><div>backfill 0 owed · last repair Aug 19</div><div>next snap 18:15:00 · hourly :15</div></div>'+
+    '</div>';
+}
+
+function renderStanding(){
+  document.getElementById('standing').innerHTML = Object.keys(S.standing).map(k=>{
+    const o = S.standing[k];
+    return '<div class="blk drill" data-act="stand" data-id="'+k+'" data-root="1" title="open standing order">'+
+      '<div class="blkhead"><span class="label">'+o.label+'</span><span class="cue">▸</span></div>'+
+      '<div class="fig" style="font-size:17px">'+esc(o.val)+'</div>'+
+      '<div class="sub">'+esc(o.prov)+'</div>'+
+    '</div>';
+  }).join('');
+}
+
+function renderLog(){
+  document.getElementById('logrows').innerHTML = LOG.map((e,i)=>{
+    const tail = e.tag ? '<span class="chip sage">Erik</span>'
+      : '<span class="tnum '+(e.min>0?'clay':'mut')+'">'+e.min.toFixed(1)+'</span>';
+    return '<div class="lrow" data-act="inc" data-i="'+i+'" data-root="1">'+
+      '<span class="lt mono">'+e.t+'</span>'+
+      '<span class="ltx">'+esc(e.txt)+'</span>'+
+      '<span class="tail">'+tail+'</span><span class="cue">▸</span></div>';
+  }).join('');
+}
+
+function renderControl(){
+  let inner;
+  if(S.suspended){
+    inner = '<button class="btn sageb bigbtn" data-act="resume">Resume generation</button>'+
+      '<div class="conseq">Held · cycles 13–16 will not open · resume reopens at the next booked hour.</div>';
+  } else if(S.arm){
+    inner = '<button class="btn solidclay bigbtn" data-act="sus-confirm">Confirm suspend</button>'+
+      '<button class="btn bigbtn" data-act="sus-cancel">Cancel</button>'+
+      '<div class="conseq clay">Confirming holds cycles 13–16 · cycle 12 still runs to 17:41.</div>';
+  } else {
+    inner = '<button class="btn clayb bigbtn" data-act="suspend">Suspend generation</button>'+
+      '<div class="conseq">Cycle 12 runs to 17:41 · 13–16 do not open · resume reopens next booked hour.</div>';
+  }
+  document.getElementById('control').innerHTML = '<div class="controlblk">'+inner+'</div>';
+}
+
+/* ============================== TICKS ============================== */
+function ticksHTML(getter, opts){
+  const vals = RUNS.map(r=>({r, v:getter(r)}));
+  const max = Math.max(...vals.map(x=>x.v||0), 1);
+  const bars = vals.map(x=>{
+    const r = x.r;
+    if(x.v==null) return '<div class="tick pend" style="height:12px" title="cycle '+pad2(r.n)+' · booked"></div>';
+    const h = Math.max(4, Math.round(4 + (x.v/max)*40));
+    const cls = r.st==='struck' ? ' clayey' : (r.st==='live' ? ' sagey' : '');
+    return '<div class="tick'+cls+'" style="height:'+h+'px" data-act="tick" data-id="'+r.id+'" title="cycle '+pad2(r.n)+' · '+money(x.v)+(r.st==='struck'?' · struck':'')+(r.st==='live'?' · running':'')+'"></div>';
+  }).join('');
+  const nums = RUNS.map(r=>'<span>'+pad2(r.n)+'</span>').join('');
+  return '<div class="ticks">'+bars+'</div><div class="ticknums">'+nums+'</div>';
+}
+
+/* ============================== RAIL SHEETS ============================== */
+function crumbLabel(v){
+  switch(v.type){
+    case 'run': return v.id;
+    case 'svc': return SVC[v.id].name;
+    case 'vol': return v.id;
+    case 'inc': return LOG[v.i].t;
+    case 'course': return 'course';
+    case 'stand': return v.id;
+    case 'day': return 'day';
+    case 'sched': return 'scheduler';
+    case 'data': return 'data';
+    case 'minutes': return 'minutes';
+    default: return 'inspector';
+  }
+}
+
+function linkRow(label, right, act, extra){
+  return '<div class="rrow click" data-act="'+act+'" '+(extra||'')+'><span>'+label+'</span><span class="rr">'+(right||'')+' <span class="cue">▸</span></span></div>';
+}
+
+function runSheet(id){
+  const r = RUN(id);
+  const w = runStateWord(r);
+  let chip = '<span class="chip mutc">closed</span>';
+  if(r.st==='closed' && r.late) chip = '<span class="chip clay">closed · +21</span>';
+  if(r.st==='struck') chip = '<span class="chip clay">struck · feed empty</span>';
+  if(r.st==='live')   chip = '<span class="chip sage">live · Simulate</span>';
+  if(r.st==='booked') chip = S.suspended ? '<span class="chip clay">held</span>' : '<span class="chip mutc">booked</span>';
+
+  let head = '<div class="sfig mono">'+r.id+'</div>'+
+    '<div class="ssub">cycle '+pad2(r.n)+' · opens '+timeOf(r.n,0)+'</div>'+chip;
+
+  let costline = '';
+  if(r.st==='closed') costline = '<div class="kline tnum">run cost <b>'+money(r.total)+'</b>'+(r.late?' <span class="mut">· +21 under strike +25 · kept</span>':'')+'</div>';
+  if(r.st==='struck') costline = '<div class="kline tnum">run cost <b>'+money(r.total)+'</b> <span class="mut">· scout act only</span></div>';
+  if(r.st==='live')   costline = '<div class="kline tnum">cost so far <b>'+money(r.total)+'</b></div>';
+  if(r.st==='booked') costline = '<div class="kline mut">no spend yet · course: '+esc(S.course.topic)+'</div>';
+
+  const stagesHtml = STAGES.map((st,i)=>{
+    const s = stInfo(r,i);
+    const timeCell = s.actual ? s.actual : (s.state==='did not run' ? '—' : s.booked);
+    const costCell = s.cost!=null ? money(s.cost) : '—';
+    let det = 'booked '+s.booked;
+    if(s.state==='done') det += ' · actual '+s.actual+(s.delta?' · <span class="clay">+'+s.delta+' late</span>':' · on book');
+    else if(s.state==='running') det += ' · began '+s.actual+' · <span class="sage">running</span>';
+    else if(s.state==='struck') det += ' · opened 12:00 · <span class="clay">struck 12:01</span>';
+    else if(s.state==='did not run') det += ' · did not run';
+    else det += ' · '+(s.state==='held'?'<span class="clay">held</span>':'not yet open');
+    det += '<br>'+SVC[st.svc].name+' · '+SVC[st.svc].job+(s.cost!=null?' · cost '+money(s.cost):'');
+    return '<div class="srow" data-act="stage"><div class="sr-main">'+
+      '<span class="sr-name">'+st.name+'</span><span class="sr-svc">'+SVC[st.svc].name+'</span>'+
+      '<span class="sr-time mono">'+timeCell+'</span><span class="sr-cost tnum">'+costCell+'</span>'+
+      '</div><div class="sdet tnum">'+det+'</div></div>';
+  }).join('');
+
+  let papersHtml = '';
+  if(r.papers.length){
+    papersHtml = '<div class="sect"><span>Papers ingested</span><span class="right tnum">'+r.papers.length+' · '+money(r.c.reader)+'</span></div>'+
+      '<div class="note">docket '+r.src+' sourced · '+r.papers.length+' read · click a paper for its claims and cost</div>'+
+      r.papers.map(p=>'<div class="prow" data-act="paper"><div class="prow-main">'+
+        '<span class="ptitle">'+esc(p[0])+'</span><span class="pmeta tnum">'+p[2]+' · '+money(p[3])+'</span></div>'+
+        '<div class="pdet">'+esc(p[1])+'<br>claims kept <b>'+p[2]+'</b> · read cost <b>'+money(p[3])+'</b></div></div>').join('');
+  } else if(r.st==='struck'){
+    papersHtml = '<div class="sect"><span>Papers ingested</span><span class="right">0</span></div>'+
+      '<div class="note">feed empty · 0 sources · nothing read</div>';
+  } else {
+    papersHtml = '<div class="sect"><span>Papers ingested</span><span class="right">—</span></div>'+
+      '<div class="note">docket not yet scouted · scout opens '+timeOf(r.n,0)+'</div>';
+  }
+
+  let verdict = '';
+  if(r.st==='closed'){
+    const rec = stInfo(r,4).actual, cls = stInfo(r,5).actual;
+    verdict = '<div class="kline mono">verdict '+r.verdict+' <span class="mut">· recorded '+rec+' · posted '+cls+'</span></div>';
+  }
+  if(r.st==='live')   verdict = '<div class="kline mut">verdict pends · records 17:34</div>';
+  if(r.st==='struck') verdict = '<div class="kline mut">no verdict · struck kept on book</div>';
+  if(r.st==='booked') verdict = '<div class="kline mut">verdict books '+timeOf(r.n,34)+'</div>';
+
+  let trace = '';
+  if(r.id==='r-2207') trace = linkRow('trace 12:01 · feed empty','', 'inc','data-i="2"');
+  if(r.id==='r-2209') trace = linkRow('trace 14:22 · queue stall','', 'inc','data-i="3"');
+
+  let rerun = '';
+  if(r.st==='closed'||r.st==='struck'){
+    rerun = S.rerun[r.id]
+      ? '<div class="confirmline">re-run queued · after cycle 16</div>'
+      : '<div style="margin-top:16px"><button class="btn sageb" data-act="rerun" data-id="'+r.id+'">Re-run</button></div>';
+  }
+
+  return '<div class="sheet">'+head+costline+
+    '<div class="sect"><span>Stages</span><span class="right">booked → actual</span></div>'+stagesHtml+
+    papersHtml+verdict+trace+rerun+'</div>';
+}
+
+function svcSheet(id){
+  const v = SVC[id];
+  let prov = '';
+  if(id==='sim') prov = '<div class="rrow click" data-act="inc" data-i="0"><span class="mut">allot raised $150→$175 · 09:12 · Erik</span><span class="rr"><span class="cue">▸</span></span></div>';
+  const pend = S.pendAllot;
+  const cur = S.allot[id];
+  let warn = '';
+  if(pend < v.spent) warn = '<div class="warnline">pending allot below spent '+money(v.spent)+'</div>';
+  else if(pend < v.close) warn = '<div class="warnline">pending allot below ≈close '+money(v.close)+'</div>';
+  const confirm = (S.confirmSvc===id) ? '<div class="confirmline">order posted · '+S.confirmT+'</div>' : '';
+  return '<div class="sheet">'+
+    '<div class="sfig tnum">'+money(v.spent)+'</div>'+
+    '<div class="ssub tnum">of '+allotFmt(cur)+' · ≈close '+money(v.close)+'</div>'+
+    '<span class="chip '+(v.live?'sage':'mutc')+'">'+v.state+'</span>'+
+    '<div class="kline">'+v.name+' · '+v.job+'</div>'+
+    '<div class="kline mut sm">last act · <span class="mono">'+v.last+'</span></div>'+prov+
+    '<div class="sect"><span>By cycle</span><span class="right tnum">'+money(v.spent)+' spent</span></div>'+
+    ticksHTML(r=>{
+      if(r.st==='booked') return null;
+      if(r.st==='live' && (id==='arch'||id==='courier')) return null;
+      return r.c[id]||0;
+    })+
+    '<div class="note">tick height is spend that cycle · click a tick for the run sheet</div>'+
+    '<div class="sect"><span>Allot</span><span class="right">± steps of $5</span></div>'+
+    '<div class="stepper">'+
+      '<button class="stepbtn" data-act="step" data-id="'+id+'" data-d="-1">−</button>'+
+      '<span class="pendfig tnum" id="pendval">'+allotFmt(pend)+'</span>'+
+      '<button class="stepbtn" data-act="step" data-id="'+id+'" data-d="1">+</button>'+
+      '<button class="btn '+(pend===cur?'':'sageb')+'" data-act="set-allot" data-id="'+id+'">Set allot</button>'+
+    '</div>'+warn+confirm+
+    '<div class="note">an allot order posts to the log and applies to later cycles at once</div>'+
+    '</div>';
+}
+
+function volSheet(kind){
+  const rows = [];
+  let head='', sub='', sect='', right='';
+  if(kind==='sources'){
+    head='132'; sub='sources scouted · to 17:26'; sect='By run'; right='11 scouts · 12 each';
+    RUNS.filter(r=>r.st!=='booked').forEach(r=>{
+      rows.push(linkRow('<span class="mono">'+r.id+'</span>', r.st==='struck'?'<span class="clay">0 · struck</span>':String(r.src),'run','data-id="'+r.id+'"'));
+    });
+  }
+  if(kind==='papers'){
+    head='64'; sub='papers read · to 17:26'; sect='By run'; right='64 · $19.84';
+    RUNS.filter(r=>r.papers.length).forEach(r=>{
+      rows.push(linkRow('<span class="mono">'+r.id+'</span>', r.papers.length+' · '+money(r.c.reader),'run','data-id="'+r.id+'"'));
+    });
+  }
+  if(kind==='claims'){
+    head='409'; sub='claims kept · 64 papers'; sect='By run'; right='409 kept';
+    RUNS.filter(r=>r.papers.length).forEach(r=>{
+      rows.push(linkRow('<span class="mono">'+r.id+'</span>', String(r.claims),'run','data-id="'+r.id+'"'));
+    });
+  }
+  if(kind==='trials'){
+    head='11'; sub='trials run · to 17:26'; sect='By run'; right='11 · $31.55';
+    RUNS.filter(r=>r.c.sim!=null).forEach(r=>{
+      const st = r.st==='live' ? '<span class="sage">running</span> · '+money(r.c.sim)
+        : (r.id==='r-2209' ? 'requeued ×1 · '+money(r.c.sim) : 'ran · '+money(r.c.sim));
+      rows.push(linkRow('<span class="mono">'+r.id+'</span>', st,'run','data-id="'+r.id+'"'));
+    });
+  }
+  if(kind==='verdicts'){
+    head='10'; sub='verdicts recorded'; sect='By run'; right='10 recorded';
+    RUNS.filter(r=>r.verdict).forEach(r=>{
+      rows.push(linkRow('<span class="mono">'+r.id+'</span>', '<span class="mono">'+r.verdict+'</span> · '+stInfo(r,4).actual,'run','data-id="'+r.id+'"'));
+    });
+  }
+  if(kind==='digests'){
+    head='10'; sub='digests posted'; sect='By run'; right='10 posted';
+    RUNS.filter(r=>r.verdict).forEach(r=>{
+      rows.push(linkRow('<span class="mono">'+r.id+'</span>', 'posted '+stInfo(r,5).actual,'run','data-id="'+r.id+'"'));
+    });
+  }
+  return '<div class="sheet"><div class="sfig tnum">'+head+'</div><div class="ssub">'+sub+'</div>'+
+    '<div class="sect"><span>'+sect+'</span><span class="right tnum">'+right+'</span></div>'+rows.join('')+
+    '<div class="note">every row opens its run sheet</div></div>';
+}
+
+function incSheet(i){
+  const e = LOG[i];
+  const kind = e.tag ? '<span class="chip sage">order · Erik</span>' : '<span class="chip clay">incident</span>';
+  let linked = '';
+  if(e.link){
+    const lbl = e.link.type==='run' ? '<span class="mono">'+e.link.id+'</span>'
+      : e.link.type==='svc' ? SVC[e.link.id].name
+      : e.link.type==='course' ? 'course' : 'data plane';
+    const extra = e.link.type==='run' ? 'data-id="'+e.link.id+'"' : e.link.type==='svc' ? 'data-id="'+e.link.id+'"' : '';
+    linked = '<div class="sect"><span>Linked</span></div>'+linkRow(lbl,'',e.link.type,extra);
+  }
+  const mins = e.min==null ? 'none lost — an order, not a fault'
+    : '<span class="'+(e.min>0?'clay':'mut')+' tnum">'+e.min.toFixed(1)+' lost</span> · of 960 booked';
+  return '<div class="sheet"><div class="sfig mono">'+e.t+'</div><div class="ssub">'+esc(e.txt)+'</div>'+kind+
+    '<div class="sect"><span>What</span></div><div class="note" style="font-size:13px;color:#E7E3DA">'+esc(e.what)+'</div>'+
+    '<div class="sect"><span>Action</span></div><div class="note" style="font-size:13px;color:#E7E3DA">'+esc(e.act)+'</div>'+
+    '<div class="sect"><span>Minutes</span></div><div class="kline">'+mins+'</div>'+linked+'</div>';
+}
+
+function minutesSheet(){
+  const rows = LOG.map((e,i)=>({e,i})).filter(x=>x.e.min!=null).map(x=>
+    linkRow('<span class="mono">'+x.e.t+'</span> '+esc(x.e.txt.split('→')[0].trim()),
+      '<span class="'+(x.e.min>0?'clay':'mut')+' tnum">'+x.e.min.toFixed(1)+'</span>','inc','data-i="'+x.i+'"')).join('');
+  return '<div class="sheet"><div class="sfig tnum">21.2</div><div class="ssub">minutes lost · of 960 booked</div>'+
+    '<div class="sect"><span>By incident</span><span class="right">minutes</span></div>'+rows+
+    '<div class="note">orders cost no minutes · struck cycle 07 lost none — its hour was never owed work after the strike</div></div>';
+}
+
+function daySheet(){
+  const rows = SVCKEYS.map(k=>{
+    const v=SVC[k];
+    return linkRow(v.name, money(v.spent)+' of '+allotFmt(S.allot[k]),'svc','data-id="'+k+'"');
+  }).join('');
+  return '<div class="sheet"><div class="sfig tnum">'+money(10713)+'</div>'+
+    '<div class="ssub tnum">of '+money(sumAllot())+' · ≈close $155.90</div>'+
+    '<span class="chip sage">on pace</span>'+
+    '<div class="sect"><span>By cycle</span><span class="right tnum">run cost</span></div>'+
+    ticksHTML(r=> r.st==='booked' ? null : r.total)+
+    '<div class="note">≈close projects the booked cycles at the day mean run cost</div>'+
+    '<div class="sect"><span>By service</span><span class="right">spent of allot</span></div>'+rows+
+    linkRow('minutes lost','<span class="clay tnum">21.2</span> of 960','minutes','')+
+    '</div>';
+}
+
+function schedSheet(){
+  const opens = RUNS.filter(r=>r.st==='booked').map(r=>
+    linkRow('<span class="mono">'+timeOf(r.n,0)+':00</span> · cycle '+pad2(r.n),
+      '<span class="mono">'+r.id+'</span> · '+(S.suspended?'<span class="clay">held</span>':'booked'),'run','data-id="'+r.id+'"')).join('');
+  return '<div class="sheet"><div class="sfig mono">18:00:00</div><div class="ssub">next open · cycle 13 · r-2213</div>'+
+    (S.suspended?'<span class="chip clay">held</span>':'<span class="chip sage">on cadence</span>')+
+    '<div class="sect"><span>Cadence</span></div>'+
+    '<div class="kline">one open per hour · 06:00–21:00 · sixteen cycles</div>'+
+    '<div class="kline">clock farm local · UTC−05</div>'+
+    '<div class="sect"><span>Late rule</span></div>'+
+    '<div class="kline">struck past +25 · worst today +21</div>'+
+    linkRow('worst +21 · cycle 09 · queue stall','','inc','data-i="3"')+
+    '<div class="sect"><span>Remaining opens</span><span class="right">'+(S.suspended?'held':'4 booked')+'</span></div>'+opens+'</div>';
+}
+
+function dataSheet(){
+  return '<div class="sheet"><div class="sfig mono">17:15:09</div><div class="ssub">last snapshot · 412 MB · verified</div>'+
+    '<span class="chip sage">verified</span>'+
+    '<div class="sect"><span>Snapshot</span></div>'+
+    linkRow('write 2 verified · write 1 checksum fail','<span class="mono">17:15:09</span>','inc','data-i="4"')+
+    '<div class="kline">next snap <span class="mono">18:15:00</span> · hourly :15</div>'+
+    '<div class="sect"><span>Archive</span></div>'+
+    '<div class="kline tnum">1,283 runs · 9.6 GB · to 16:43</div>'+
+    '<div class="kline tnum">backfill 0 owed · last repair Aug 19</div>'+
+    '<div class="note">the archive holds every closed run since commissioning Jun 03 · struck cycles stay on book</div></div>';
+}
+
+function standSheet(key){
+  const o = S.standing[key];
+  const confirm = (S.standDone===key) ? '<div class="confirmline">order posted · standing order amended</div>' : '';
+  return '<div class="sheet"><div class="sfig">'+esc(o.val)+'</div><div class="ssub">'+o.label.toLowerCase()+' · standing order</div>'+
+    '<span class="chip mutc">'+esc(o.prov)+'</span>'+
+    '<div class="sect"><span>Scope</span></div>'+
+    '<div class="note" style="font-size:13px;color:#E7E3DA">'+esc(o.scope)+'</div>'+
+    '<div class="sect"><span>Provenance</span></div>'+
+    '<div class="kline">'+esc(o.prov)+(o.prov==='default'?' · commissioned Jun 03':'')+'</div>'+
+    '<div class="sect"><span>Amend</span></div>'+
+    '<button class="btn" data-act="amend" style="margin-top:10px">Amend</button>'+
+    '<div class="amendbox"><label class="flabel" for="st-inp">new value</label>'+
+    '<input class="inp" id="st-inp" value="'+esc(o.val)+'">'+
+    '<div style="margin-top:10px"><button class="btn sageb" data-act="set-stand" data-id="'+key+'">Set</button></div></div>'+
+    confirm+
+    '<div class="note">an amended standing order posts to the log and governs from the next cycle</div></div>';
+}
+
+function courseSheet(){
+  const c = S.course;
+  const confirm = S.ccDone ? '<div class="confirmline">order posted · '+S.ccDone+' · applies from the next booked open</div>' : '';
+  return '<div class="sheet"><span class="chip sage">command · course</span>'+
+    '<div class="sfig" style="margin-top:10px">'+esc(c.topic)+'</div>'+
+    '<div class="ssub">cycles '+esc(c.cycles)+' · '+esc(c.prov)+'</div>'+
+    '<div class="sect"><span>Change course</span></div>'+
+    '<label class="flabel" for="cc-topic">topic</label>'+
+    '<input class="inp" id="cc-topic" value="'+esc(c.topic)+'">'+
+    '<label class="flabel" for="cc-cycles">cycles</label>'+
+    '<input class="inp" id="cc-cycles" value="'+esc(c.cycles)+'">'+
+    '<div style="margin-top:14px"><button class="btn sageb" data-act="set-course">Set course</button></div>'+
+    confirm+
+    '<div class="note">a course order posts to the log on the clock, tagged Erik · open cycles finish their booked course · the new course reads from its first booked open</div></div>';
+}
+
+function hintSheet(){
+  return '<div class="sheet"><div class="sfig serif">Inspector</div>'+
+    '<div class="ssub">every figure opens its receipt</div>'+
+    '<div class="sect"><span>Entry points</span></div>'+
+    linkRow('<span class="mono">r-2212</span> · live · mid-Simulate','','run','data-id="r-2212"')+
+    linkRow('<span class="mono">r-2209</span> · closed · <span class="clay">+21</span>','','run','data-id="r-2209"')+
+    linkRow('<span class="mono">r-2207</span> · <span class="clay">struck</span> · feed empty','','run','data-id="r-2207"')+
+    linkRow('Simulator · running','','svc','data-id="sim"')+
+    linkRow('papers read · 64','','vol','data-id="papers"')+
+    linkRow('minutes lost · 21.2','','minutes','')+
+    '<div class="note">click a cycle column, a service block, a volume figure, or a log row · rows inside this rail drill deeper in place</div></div>';
+}
+
+function viewHTML(v){
+  switch(v.type){
+    case 'run': return runSheet(v.id);
+    case 'svc': return svcSheet(v.id);
+    case 'vol': return volSheet(v.id);
+    case 'inc': return incSheet(v.i);
+    case 'minutes': return minutesSheet();
+    case 'day': return daySheet();
+    case 'sched': return schedSheet();
+    case 'data': return dataSheet();
+    case 'stand': return standSheet(v.id);
+    case 'course': return courseSheet();
+    default: return hintSheet();
+  }
+}
+
+function renderRail(){
+  const rail = document.getElementById('rail');
+  rail.classList.toggle('open', S.open);
+  if(!S.open) return;
+  if(!S.stack.length) S.stack = [{type:'hint'}];
+  const v = S.stack[S.stack.length-1];
+  if(v.type==='svc' && S.pendSvc!==v.id){ S.pendSvc=v.id; S.pendAllot=S.allot[v.id]; }
+  document.getElementById('crumb').innerHTML = S.stack.map((x,i)=>
+    '<button class="cseg'+(i===S.stack.length-1?' curc':'')+'" data-act="crumb" data-i="'+i+'">'+crumbLabel(x)+'</button>'
+  ).join('<span class="csep">▸</span>');
+  document.getElementById('railbody').innerHTML = viewHTML(v);
+  document.getElementById('railbody').scrollTop = 0;
+}
+
+/* ============================== ORDERS ============================== */
+function postOrder(txt){
+  LOG.push({t:clockStr(), txt, tag:'ERIK', link:null,
+    what:txt+' — ordered from the bridge.', act:'applied · logged on the clock.', min:null});
+  renderLog();
+  const rows = document.querySelectorAll('#logrows .lrow');
+  const last = rows[rows.length-1];
+  if(last){ last.classList.add('fresh'); setTimeout(()=>last.classList.remove('fresh'), 2200); }
+  return LOG.length-1;
+}
+
+function stepAllot(id,d){
+  S.pendAllot = Math.max(0, S.pendAllot + d*500);
+  renderRail();
+}
+function setAllot(id){
+  if(S.pendAllot===S.allot[id]) return;
+  const old = S.allot[id];
+  S.allot[id] = S.pendAllot;
+  postOrder(SVC[id].name+' allot '+allotFmt(old)+'→'+allotFmt(S.allot[id]));
+  S.confirmSvc = id; S.confirmT = clockStr();
+  renderLedger(); renderRail();
+}
+function setCourse(){
+  const ti = document.getElementById('cc-topic');
+  const ci = document.getElementById('cc-cycles');
+  const topic = ti.value.trim(), cyc = ci.value.trim();
+  ti.classList.toggle('err', !topic); ci.classList.toggle('err', !cyc);
+  if(!topic || !cyc) return;
+  const idx = postOrder('course set: '+topic+' × cycles '+cyc);
+  S.course = {topic, cycles:cyc, prov:'set '+clockHM()+' by Erik', orderIdx:idx};
+  S.ccDone = clockStr();
+  renderCourse(); renderRail();
+}
+function setStanding(key){
+  const inp = document.getElementById('st-inp');
+  const nv = inp.value.trim();
+  if(!nv || nv===S.standing[key].val){ inp.classList.add('err'); return; }
+  const old = S.standing[key].val;
+  S.standing[key].val = nv;
+  S.standing[key].prov = 'set '+clockHM()+' by Erik';
+  postOrder('standing order '+key+': '+old+' → '+nv);
+  S.standDone = key;
+  renderStanding(); renderRail();
+}
+function orderRerun(id){
+  if(S.rerun[id]) return;
+  S.rerun[id] = true;
+  postOrder('re-run ordered: '+id+' · queued after cycle 16');
+  renderRail();
+}
+function doSuspend(){
+  S.suspended = true; S.arm = false;
+  postOrder('generation suspended · cycles 13–16 held');
+  renderControl(); renderTT(); renderSys(); renderCourse();
+}
+function doResume(){
+  S.suspended = false;
+  postOrder('generation resumed · next open 18:00:00');
+  renderControl(); renderTT(); renderSys(); renderCourse();
+}
+
+/* ============================== EVENTS ============================== */
+document.addEventListener('click', function(e){
+  const el = e.target.closest('[data-act]');
+  if(!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  const root = el.dataset.root==='1';
+  const go = v => { if(root){ S.stack=[v]; } else { S.stack.push(v); } S.open=true; renderRail(); };
+  switch(act){
+    case 'run':     go({type:'run', id}); break;
+    case 'svc':     go({type:'svc', id}); break;
+    case 'allot':   go({type:'svc', id}); break;
+    case 'vol':     go({type:'vol', id}); break;
+    case 'inc':     go({type:'inc', i:+el.dataset.i}); break;
+    case 'stand':   go({type:'stand', id}); break;
+    case 'course':  go({type:'course'}); break;
+    case 'day':     go({type:'day'}); break;
+    case 'sched':   go({type:'sched'}); break;
+    case 'data':    go({type:'data'}); break;
+    case 'minutes': go({type:'minutes'}); break;
+    case 'tick':    S.stack.push({type:'run', id}); S.open=true; renderRail(); break;
+    case 'crumb':   S.stack = S.stack.slice(0, +el.dataset.i+1); renderRail(); break;
+    case 'close':   S.open=false; renderRail(); break;
+    case 'toggle':  S.open=!S.open; renderRail(); break;
+    case 'paper':   el.closest('.prow').classList.toggle('x'); break;
+    case 'stage':   el.closest('.srow').classList.toggle('x'); break;
+    case 'step':    stepAllot(id, +el.dataset.d); break;
+    case 'set-allot':  setAllot(id); break;
+    case 'set-course': setCourse(); break;
+    case 'amend':      { const b = document.querySelector('.amendbox'); if(b) b.classList.toggle('x'); } break;
+    case 'set-stand':  setStanding(id); break;
+    case 'rerun':      orderRerun(id); break;
+    case 'suspend':    S.arm=true; renderControl(); break;
+    case 'sus-cancel': S.arm=false; renderControl(); break;
+    case 'sus-confirm':doSuspend(); break;
+    case 'resume':     doResume(); break;
+  }
+});
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape' && S.open){ S.open=false; renderRail(); }
+});
+
+/* ============================== INIT ============================== */
+renderCourse();
+renderLedger();
+renderTT();
+renderVolumes();
+renderSys();
+renderStanding();
+renderLog();
+renderControl();
+</script>
+</body>
+</html>
