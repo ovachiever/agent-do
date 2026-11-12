@@ -63,6 +63,10 @@ Commands:
   secrets                    List secrets (names only)
   triage <run-id> [--repo R] Classify a failed run and draft a triage summary (dry-run)
 
+Global options (any position):
+  --repo owner/repo          Target another repository instead of the origin remote
+  --json                     Structured output
+
 Supported platforms:
   - GitHub Actions (auto-detected via gh CLI)
 
@@ -73,6 +77,7 @@ Examples:
   agent-ci logs 12345
   agent-ci artifacts 12345
   agent-ci triage 12345 --repo owner/repo
+  agent-ci runs --repo owner/other-repo --json
 EOF
 }
 
@@ -92,6 +97,10 @@ check_gh() {
 # Get repo from git remote. Tolerant of missing remote under set -e/pipefail:
 # a non-GitHub or absent origin yields empty output, never a nonzero exit.
 get_repo() {
+    if [[ -n "${CI_REPO:-}" ]]; then
+        printf '%s\n' "$CI_REPO"
+        return 0
+    fi
     { git remote get-url origin 2>/dev/null || true; } \
         | sed -E 's/.*github.com[:/]([^/]+\/[^.]+)(\.git)?/\1/'
 }
@@ -427,16 +436,34 @@ cmd_triage() {
     python3 "${py_args[@]}"
 }
 
-# Strip --json from the argument list (anywhere) so it never leaks to gh, and
-# set OUTPUT_FORMAT. Plain-mode invocations are untouched.
+# Strip --json and --repo <owner/repo> from the argument list (anywhere) so
+# neither leaks to gh as a positional. --json sets OUTPUT_FORMAT; --repo sets
+# CI_REPO, which get_repo() prefers over the origin remote so every verb can
+# target another repository. Plain-mode invocations are untouched.
 ARGS=()
+CI_REPO="${CI_REPO:-}"
+_expect_repo=0
 for arg in "$@"; do
-    if [[ "$arg" == "--json" ]]; then
+    if [[ "$_expect_repo" == "1" ]]; then
+        CI_REPO="$arg"; _expect_repo=0
+    elif [[ "$arg" == "--json" ]]; then
         OUTPUT_FORMAT="json"
+    elif [[ "$arg" == "--repo" ]]; then
+        _expect_repo=1
+    elif [[ "$arg" == --repo=* ]]; then
+        CI_REPO="${arg#--repo=}"
     else
         ARGS+=("$arg")
     fi
 done
+if [[ "$_expect_repo" == "1" ]]; then
+    echo "Error: --repo requires a value (owner/repo)" >&2
+    exit 2
+fi
+if [[ -n "$CI_REPO" && ! "$CI_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "Error: --repo must be owner/repo, got '$CI_REPO'" >&2
+    exit 2
+fi
 set -- ${ARGS[@]+"${ARGS[@]}"}
 
 # Main
