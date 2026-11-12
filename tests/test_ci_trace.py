@@ -68,7 +68,7 @@ elif args[:2] == ['run', 'view']:
     print('old line')
     print('Authorization: Bearer super-secret-token')
     print('token=plain-secret')
-    print('ghp_abcdefghijklmnopqrstuvwxyz123456')
+    print('ghp_' + 'abcdefghijklmnopqrstuvwxyz123456')
     print('newest line')
 elif args[0] == 'api':
     print(json.dumps([{
