@@ -3896,7 +3896,7 @@ Concurrency: `mixed`
 - search and filter issues with Sentry query syntax
 - view issue details with assignee, level, and event count
 - resolve, unresolve, ignore, and assign issues
-- list alert rules across all projects
+- list alerts (Sentry workflows) with environment, on/off and projects
 - list recent releases
 - full account snapshot as JSON
 
@@ -3910,8 +3910,8 @@ Concurrency: `mixed`
 - `unresolve`: Reopen a resolved issue
 - `ignore`: Mark an issue as ignored
 - `assign`: Assign an issue to a user by email
-- `alerts`: List alert rules
-- `alert`: Detailed alert rule info
+- `alerts`: List alerts (Sentry workflows)
+- `alert`: Detailed alert info by workflow ID
 - `releases`: List recent releases (--project)
 - `snapshot`: Full account state as JSON
 
@@ -3928,7 +3928,7 @@ agent-do sentry issues --project versova-chat
 agent-do sentry issue VERSOVA-CHAT-B
 # resolve a sentry issue
 agent-do sentry resolve VERSOVA-CHAT-B
-# list sentry alert rules
+# list sentry alerts
 agent-do sentry alerts
 # get sentry account snapshot
 agent-do sentry snapshot

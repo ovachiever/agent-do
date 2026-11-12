@@ -339,6 +339,7 @@ EOF
 # --- agent-sentry ---
 check_output "sentry help includes PROJECTS header" "PROJECTS" "$AGENT_DO" sentry --help
 check_output "sentry help lists snapshot command" "snapshot" "$AGENT_DO" sentry --help
+check_output "sentry help describes alerts as workflows" "Sentry workflows" "$AGENT_DO" sentry --help
 check_error_output "sentry unknown command exits with error" "Unknown command" "$AGENT_DO" sentry bogus-command-xyz
 
 check_output "bootstrap recommendation detects pending work" '"needs_bootstrap": true' "$AGENT_DO" bootstrap --recommend --json --cwd "$BOOTSTRAP_PROJECT"

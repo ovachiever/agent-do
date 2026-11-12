@@ -84,8 +84,8 @@ ISSUES
   assign <id> <email>           Assign an issue to a user by email
 
 ALERTS
-  alerts                        List alert rules across all projects
-  alert <rule_id>               Detailed alert rule info
+  alerts                        List alerts (Sentry workflows) with env, on/off, projects
+  alert <alert_id>              Detailed alert info (IDs from 'alerts')
 
 RELEASES
   releases [--project <slug>]   List recent releases
@@ -579,45 +579,58 @@ cmd_alerts() {
     base_url=$(sentry_base_url) || return 1
     org=$(sentry_org) || return 1
 
-    local result
-    result=$(sentry_get "${base_url}/organizations/${org}/combined-rules/") || return 1
+    # Sentry moved alerts to "Monitors & Alerts": alerts are workflows, attached
+    # to detectors (monitors), which belong to projects. The legacy
+    # /combined-rules/ and /alert-rules/ endpoints now return 404.
+    # https://docs.sentry.io/api/monitors/fetch-alerts/
+    local workflows detectors projects
+    workflows=$(sentry_get "${base_url}/organizations/${org}/workflows/?per_page=100") || {
+        echo "Error: could not read alerts from Sentry (GET /organizations/${org}/workflows/). Token needs alerts:read or org:read." >&2
+        return 1
+    }
 
     if $_json_mode; then
-        _emit_json "$result"
+        _emit_json "$workflows"
         return
     fi
 
-    printf '%s' "$result" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
+    detectors=$(sentry_get "${base_url}/organizations/${org}/detectors/?per_page=100") || detectors='[]'
+    projects=$(sentry_get "${base_url}/organizations/${org}/projects/?per_page=100") || projects='[]'
+
+    SENTRY_WF="$workflows" SENTRY_DET="$detectors" SENTRY_PROJ="$projects" python3 -c "
+import os, json, sys
+data = json.loads(os.environ['SENTRY_WF'])
 if isinstance(data, dict) and 'detail' in data:
     print('Error:', data['detail'], file=sys.stderr)
     sys.exit(1)
 if not data:
-    print('No alert rules found.')
+    print('No alerts found.')
     sys.exit(0)
-fmt = '{:<8} {:<35} {:<12} {:<15} {:<20}'
-print(fmt.format('ID', 'NAME', 'TYPE', 'STATUS', 'PROJECT'))
-print('-' * 90)
-for r in data:
-    rtype = r.get('type', 'unknown')
-    status = ''
-    proj = ''
-    if rtype == 'alert_rule':
-        status = r.get('status', '')
-        proj_list = r.get('projects', [])
-        proj = proj_list[0] if proj_list else ''
-    else:
-        status = r.get('status', '')
-        proj_list = r.get('projects', [])
-        proj = proj_list[0] if proj_list else ''
+try:
+    dets = json.loads(os.environ['SENTRY_DET'])
+    projs = json.loads(os.environ['SENTRY_PROJ'])
+except ValueError:
+    dets, projs = [], []
+slug = {str(p.get('id')): p.get('slug', '') for p in projs if isinstance(p, dict)}
+det_proj = {str(d.get('id')): (slug.get(str(d.get('projectId')), str(d.get('projectId')))
+                                if d.get('projectId') is not None else 'org-wide')
+            for d in dets if isinstance(d, dict)}
+fmt = '{:<9} {:<34} {:<12} {:<8} {:<12} {}'
+print(fmt.format('ID', 'NAME', 'ENV', 'ENABLED', 'ACTIONS', 'PROJECTS'))
+print('-' * 100)
+for w in data:
+    actions = sorted({a.get('type', '') for g in w.get('actionFilters', []) for a in g.get('actions', [])})
+    names = sorted({det_proj.get(str(d), str(d)) for d in w.get('detectorIds', [])})
     print(fmt.format(
-        str(r.get('id', ''))[:8],
-        r.get('name', '')[:35],
-        rtype[:12],
-        str(status)[:15],
-        str(proj)[:20],
+        str(w.get('id', ''))[:9],
+        str(w.get('name', ''))[:34],
+        str(w.get('environment') or 'all')[:12],
+        'yes' if w.get('enabled') else 'no',
+        ','.join(actions)[:12] or '-',
+        ','.join(names) or '-',
     ))
+if len(data) >= 100:
+    print('Note: 100 alerts returned; the list may be truncated (per_page=100).', file=sys.stderr)
 "
 }
 
@@ -625,13 +638,17 @@ cmd_alert() {
     local -a args=()
     _pop_json_flag "$@"
     args=("${_JSON_ARGS[@]}")
-    local rule_id="${args[0]:?Usage: agent-sentry alert <rule_id>}"
+    local alert_id="${args[0]:?Usage: agent-sentry alert <alert_id>}"
     local base_url org
     base_url=$(sentry_base_url) || return 1
     org=$(sentry_org) || return 1
 
     local result
-    result=$(sentry_get "${base_url}/organizations/${org}/alert-rules/${rule_id}/") || return 1
+    # https://docs.sentry.io/api/monitors/fetch-an-alert/
+    result=$(sentry_get "${base_url}/organizations/${org}/workflows/${alert_id}/") || {
+        echo "Error: could not read alert ${alert_id} (GET /organizations/${org}/workflows/${alert_id}/). IDs come from 'agent-sentry alerts'." >&2
+        return 1
+    }
 
     if $_json_mode; then
         _emit_json "$result"
@@ -847,19 +864,27 @@ if isinstance(raw_issues, list):
             'project': proj,
         })
 
-# --- Alert Rules ---
-raw_alerts = api_get(BASE + '/organizations/' + ORG + '/combined-rules/')
+# --- Alerts (Sentry Monitors and Alerts: workflows attached to detectors) ---
+raw_alerts = fetch_paginated(BASE + '/organizations/' + ORG + '/workflows/')
+raw_detectors = fetch_paginated(BASE + '/organizations/' + ORG + '/detectors/')
+det_proj = {}
+if isinstance(raw_detectors, list):
+    slug_by_id = {str(p.get('id')): p.get('slug', '') for p in projects if isinstance(p, dict)}
+    for d in raw_detectors:
+        pid = d.get('projectId')
+        det_proj[str(d.get('id'))] = slug_by_id.get(str(pid), str(pid)) if pid is not None else 'org-wide'
 alerts = []
 if isinstance(raw_alerts, list):
-    for r in raw_alerts:
-        projs = r.get('projects', [])
+    for w in raw_alerts:
         alerts.append({
-            'id': r.get('id', ''),
-            'name': r.get('name', ''),
-            'type': r.get('type', ''),
-            'status': r.get('status', ''),
-            'projects': projs,
-            'dateCreated': r.get('dateCreated', ''),
+            'id': w.get('id', ''),
+            'name': w.get('name', ''),
+            'type': 'workflow',
+            'status': 'active' if w.get('enabled') else 'disabled',
+            'enabled': bool(w.get('enabled')),
+            'environment': w.get('environment'),
+            'projects': sorted({det_proj.get(str(x), str(x)) for x in w.get('detectorIds', [])}),
+            'dateCreated': w.get('dateCreated', ''),
         })
 
 # --- Releases (last 25) ---

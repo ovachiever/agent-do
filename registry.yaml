@@ -6725,7 +6725,7 @@ tools:
     - search and filter issues with Sentry query syntax
     - view issue details with assignee, level, and event count
     - resolve, unresolve, ignore, and assign issues
-    - list alert rules across all projects
+    - list alerts (Sentry workflows) with environment, on/off and projects
     - list recent releases
     - full account snapshot as JSON
     commands:
@@ -6737,8 +6737,8 @@ tools:
       unresolve: Reopen a resolved issue
       ignore: Mark an issue as ignored
       assign: Assign an issue to a user by email
-      alerts: List alert rules
-      alert: Detailed alert rule info
+      alerts: List alerts (Sentry workflows)
+      alert: Detailed alert info by workflow ID
       releases: List recent releases (--project)
       snapshot: Full account state as JSON
     examples:
@@ -6752,7 +6752,7 @@ tools:
       command: agent-sentry issue VERSOVA-CHAT-B
     - intent: resolve a sentry issue
       command: agent-sentry resolve VERSOVA-CHAT-B
-    - intent: list sentry alert rules
+    - intent: list sentry alerts
       command: agent-sentry alerts
     - intent: get sentry account snapshot
       command: agent-sentry snapshot
@@ -6781,7 +6781,7 @@ tools:
       readiness:
         check: agent-do sentry projects
         fix: agent-do creds store SENTRY_AUTH_TOKEN --stdin
-        note: 'Requires SENTRY_AUTH_TOKEN resolved from env or secure storage. Minimum token scopes by capability: org:read (project listing), project:read (project detail), event:read (issue searches and details), event:write (resolve/unresolve/ignore/assign)'
+        note: 'Requires SENTRY_AUTH_TOKEN resolved from env or secure storage. Minimum token scopes by capability: org:read (project listing; alerts, or alerts:read), project:read (project detail), event:read (issue searches and details), event:write (resolve/unresolve/ignore/assign)'
     contracts:
       snapshot:
       - projects
