@@ -10,13 +10,14 @@ ROOT_NAME = ".agent-do-incident"; MAX_RESPONSE = 1_048_576
 SOURCES = ("github", "kubernetes", "render")
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 SECRET = re.compile(r"(?i)\b(token|secret|password|api[_-]?key|authorization)([=:]\s*)\S+")
+SECRET_KEY = re.compile(r"(?i)(?:token|secret|password|api[_-]?key|authorization)")
 
 class IncidentError(RuntimeError): pass
 def now() -> str: return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 def redact(v: Any) -> Any:
     if isinstance(v,str): return SECRET.sub(lambda m:m.group(1)+m.group(2)+"[REDACTED]", v)
     if isinstance(v,list): return [redact(x) for x in v]
-    if isinstance(v,dict): return {str(k): "[REDACTED]" if SECRET.search(str(k)) else redact(x) for k,x in v.items()}
+    if isinstance(v,dict): return {str(k): "[REDACTED]" if SECRET_KEY.search(str(k)) else redact(x) for k,x in v.items()}
     return v
 def root(start: Path) -> Path:
     for p in (start, *start.parents):
