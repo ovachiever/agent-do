@@ -90,10 +90,14 @@ def stable_hash(value: str) -> str:
 
 
 def redact_text(value: str, limit: int = 240) -> str:
-    text = value[:limit]
+    # Redact before truncating, so a secret cut by the limit cannot slip past
+    # a pattern that needs its trailing delimiter.
+    text = value
     text = re.sub(r"(?i)(api[_-]?key|token|secret|password|passwd|authorization)=\S+", r"\1=<redacted>", text)
     text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/-]+", r"\1<redacted>", text)
-    return text
+    # Password in a URL's userinfo (postgresql://user:pass@host, https://u:p@h)
+    text = re.sub(r"(?i)\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@/]+@", r"\1:<redacted>@", text)
+    return text[:limit]
 
 
 def clean_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -314,8 +318,92 @@ def clear_nudges() -> None:
         item.unlink()
 
 
+REDACTED = "<redacted>"
+
+
+def _positionals(
+    args: list[str],
+    start: int,
+    value_flags: tuple[str, ...] = (),
+    bool_flags: tuple[str, ...] = (),
+) -> list[int]:
+    """Indexes of positional arguments from ``start``.
+
+    Only the flags each tool actually parses are skipped, so a secret that
+    happens to start with "-" is still treated as the positional it is.
+    """
+    positions: list[int] = []
+    i = start
+    while i < len(args):
+        arg = args[i]
+        if arg in value_flags:
+            i += 2
+            continue
+        if arg not in bool_flags:
+            positions.append(i)
+        i += 1
+    return positions
+
+
+def _flag_values(args: list[str], flags: tuple[str, ...]) -> set[int]:
+    """Indexes of the values that follow any of ``flags``."""
+    return {i + 1 for i, arg in enumerate(args[:-1]) if arg in flags}
+
+
+def _secret_value_indexes(tool: str, args: list[str]) -> set[int]:
+    """Argument positions that carry a secret value for verbs known to take one.
+
+    Mirrors each tool's own argument parsing:
+      render   env-set <svc> <KEY> <VALUE>
+      render   env-group set <eg> <KEY> <VALUE>
+      creds    store <KEY> [VALUE] [--stdin]
+      psql     connect <conn_string> | --profile <name>
+      psql     profile add <name> <conn_string>
+      vercel   env-set <project> <KEY> <VALUE> [--target t]
+      supabase secret-set <ref> <KEY> <VALUE>
+      supabase create ... --db-pass|--password <p>
+      gcp      secret-set <project> <name> <value>
+    """
+    sub = args[0] if args else ""
+    sub2 = args[1] if len(args) > 1 else ""
+    if tool == "render" and sub == "env-set":
+        return set(range(3, len(args)))
+    if tool == "render" and sub == "env-group" and sub2 == "set":
+        return set(range(4, len(args)))
+    if tool == "creds" and sub == "store":
+        return set(_positionals(args, 1, bool_flags=("--stdin",))[1:])
+    if tool == "psql" and sub == "connect":
+        return set(_positionals(args, 1, ("--profile", "-p"), ("--help", "-h")))
+    if tool == "psql" and sub == "profile" and sub2 == "add":
+        return set(range(3, len(args)))
+    if tool == "vercel" and sub == "env-set":
+        return set(_positionals(args, 1, ("--target",))[2:])
+    if tool in ("supabase", "gcp") and sub == "secret-set":
+        return set(range(3, len(args)))
+    if tool == "supabase" and sub == "create":
+        return _flag_values(args, ("--db-pass", "--password"))
+    return set()
+
+
 def redact_tool_args(tool: str, args: list[str]) -> list[str]:
-    """Redact tool-specific sensitive argument payloads before telemetry."""
+    """Redact tool-specific sensitive argument payloads before telemetry.
+
+    Secret values (env var values, stored credentials, connection strings) must
+    never reach events.jsonl: they would sit in plain text in a local log that
+    every later `nudges`/`harness` read can surface.
+    """
+    out = list(args)
+    for i in _secret_value_indexes(tool, args):
+        out[i] = REDACTED
+    if tool == "render":
+        # --env KEY=VALUE (render create, env-group create, project create):
+        # keep the key name, drop the value.
+        for i, arg in enumerate(args[:-1]):
+            if arg == "--env":
+                key, sep, _ = args[i + 1].partition("=")
+                out[i + 1] = f"{key}={REDACTED}" if sep else REDACTED
+    args = out
+
     if tool != "appleevents":
         return list(args)
 

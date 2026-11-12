@@ -202,6 +202,7 @@ check_output "contracts validate gates bounds too" "Bounds:" "$AGENT_DO" harness
 check_cmd "tools reference doc in sync" "$SCRIPT_DIR/bin/gen-tools-doc" --check
 check_cmd "health probe tests" python3 "$SCRIPT_DIR/tests/test_health_probes.py"
 check_cmd "hook outcome telemetry tests" python3 "$SCRIPT_DIR/tests/test_hook_outcome_telemetry.py"
+check_cmd "telemetry secret redaction tests" python3 "$SCRIPT_DIR/tests/test_telemetry_secret_redaction.py"
 check_cmd "global hook nonblocking tests" python3 "$SCRIPT_DIR/tests/test_global_hooks_nonblocking.py"
 check_cmd "nudge smarts tests" python3 "$SCRIPT_DIR/tests/test_nudge_smarts.py"
 check_cmd "notify tests" python3 "$SCRIPT_DIR/tests/test_notify.py"
