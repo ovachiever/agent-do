@@ -43,6 +43,8 @@ Commands:
   conflicts        List unmerged files and conflict-marker counts
   recover          Read-only reflog and unreachable-commit report
   sweep [--apply]  Preview safe local branch cleanup; apply explicitly
+                   (never offers main/master/staging/develop/development/production/trunk,
+                   the remote default, or names/globs in `git config agent-do.sweep.protect`)
   integration enable --target <branch> --check <cmd> [--check <cmd>...] --authorized-by <who>
                      [--workspace-root <dir>] [--candidate-path <dir>]
     Opt this repository into Managed Integration. The policy lives in the
@@ -986,6 +988,7 @@ cmd_sweep() {
     local apply=false
     [[ "${1:-}" == "--apply" ]] && apply=true
     APPLY="$apply" JSON_MODE_VALUE="$JSON_MODE" python3 <<'PYEOF'
+import fnmatch
 import json
 import os
 import subprocess
@@ -994,10 +997,21 @@ def run(args, check=False):
     return subprocess.run(args, text=True, capture_output=True, check=check)
 
 current = run(["git", "branch", "--show-current"], check=True).stdout.strip()
-protected = {"main", "master", current}
+# Long-lived base branches are "merged" by ancestry whenever main contains them,
+# but they are integration branches, not finished work. Never offer them.
+protected = {"main", "master", "staging", "develop", "development", "production", "trunk", current}
 default = run(["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
 if default.returncode == 0 and default.stdout.strip():
     protected.add(default.stdout.strip().split("/", 1)[-1])
+# Repo-specific additions: `git config --add agent-do.sweep.protect <name-or-glob>`.
+protected_patterns = [
+    line.strip()
+    for line in run(["git", "config", "--get-all", "agent-do.sweep.protect"]).stdout.splitlines()
+    if line.strip()
+]
+
+def is_protected(name):
+    return name in protected or any(fnmatch.fnmatchcase(name, pattern) for pattern in protected_patterns)
 
 worktree_branches = set()
 for line in run(["git", "worktree", "list", "--porcelain"], check=True).stdout.splitlines():
@@ -1012,7 +1026,7 @@ candidates = []
 excluded = []
 for row in rows:
     branch, _, upstream = row.partition("\t")
-    if branch in protected:
+    if is_protected(branch):
         excluded.append({"branch": branch, "reason": "protected"})
         continue
     if branch in worktree_branches:

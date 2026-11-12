@@ -2097,7 +2097,7 @@ Concurrency: `mixed`
 - `snap restore`: Recover a file to .recovered, or overwrite only with --in-place
 - `conflicts`: List unmerged files with conflict-marker counts
 - `recover`: Read-only reflog and unreachable-commit report
-- `sweep`: Preview safe local branch deletion; mutate only with --apply
+- `sweep`: Preview safe local branch deletion; mutate only with --apply; never offers main, master, staging, develop, development, production, trunk, the remote default, or names/globs in git config agent-do.sweep.protect
 - `integration enable`: Opt this repository into Managed Integration (target, checks, authority) in the common git dir's config
 - `integration disable`: Stop new dispatch and automatic landing; keep status, recovery, pending submissions and worktrees
 - `integration config`: Show the integration policy and whether it is off, enabled, disabled or invalid
