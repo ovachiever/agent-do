@@ -176,7 +176,9 @@ render_request_checked() {
 
     local tmp_body
     tmp_body="$(mktemp)"
-    trap 'rm -f "$tmp_body"' RETURN
+    # No RETURN trap here: bash RETURN traps are not function-scoped, so one set
+    # in this helper fires again when the *caller* returns, after this local
+    # is gone — "tmp_body: unbound variable" under set -u. Clean up explicitly.
 
     local args=(-sS --max-time 30 --connect-timeout 10 -o "$tmp_body" -w "%{http_code}" -X "$method" "${RENDER_API}${endpoint}" \
         -H "Authorization: Bearer $token" \
@@ -188,9 +190,10 @@ render_request_checked() {
     fi
 
     local status
-    status=$(curl "${args[@]}")
+    status=$(curl "${args[@]}") || { rm -f "$tmp_body"; return 1; }
     local body
     body="$(cat "$tmp_body")"
+    rm -f "$tmp_body"
 
     if [[ "$status" =~ ^2 ]]; then
         printf '%s' "$body"
