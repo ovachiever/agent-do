@@ -35,6 +35,29 @@ roles:
 # Capability records below were read from Anthropic's complete /v1/models
 # response on 2026-07-20. `agent-do models doctor` refreshes and verifies them.
 models:
+  anthropic/claude-fable-5-1:
+    # Read from GET /v1/models/claude-fable-5-1 on 2026-09-24.
+    provider: anthropic
+    endpoint: messages
+    modalities: [text, image, pdf]
+    max_input_tokens: 1000000
+    max_tokens: 128000
+    capabilities:
+      image_input: {supported: true}
+      pdf_input: {supported: true}
+      structured_outputs: {supported: true}
+      thinking:
+        supported: true
+        types:
+          adaptive: {supported: true}
+          enabled: {supported: false}
+      effort:
+        supported: true
+        low: {supported: true}
+        medium: {supported: true}
+        high: {supported: true}
+        xhigh: {supported: true}
+        max: {supported: true}
   anthropic/claude-sonnet-5:
     provider: anthropic
     endpoint: messages

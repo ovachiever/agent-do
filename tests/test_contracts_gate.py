@@ -323,7 +323,7 @@ def check_cli_surface() -> None:
         f"known destructive verb missing: {payload['destructive'][:5]}",
     )
     require(
-        {"tool": "dpt", "verb": "baseline"} in payload["own_state"],
+        {"tool": "brief", "verb": "holy"} in payload["own_state"],
         f"known own_state verb missing: {payload['own_state'][:5]}",
     )
     require(len(payload["read_only"]) > 400, "read surface implausibly small")

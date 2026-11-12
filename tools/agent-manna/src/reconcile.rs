@@ -29,6 +29,71 @@ pub enum FindingKind {
     Skipped,
 }
 
+impl FindingKind {
+    /// Every kind, in declaration order (for --only's error text).
+    pub const ALL: [FindingKind; 12] = [
+        FindingKind::LandedOpen,
+        FindingKind::DeadClaim,
+        FindingKind::BlockerDesync,
+        FindingKind::StaleDream,
+        FindingKind::DanglingTrack,
+        FindingKind::FederationIntegrity,
+        FindingKind::DocReference,
+        FindingKind::PromptPairing,
+        FindingKind::HandoffPresentation,
+        FindingKind::WorkflowSprawl,
+        FindingKind::OrphanHandoff,
+        FindingKind::Skipped,
+    ];
+
+    /// The snake_case name the drift contract writes.
+    pub fn name(self) -> &'static str {
+        match self {
+            FindingKind::LandedOpen => "landed_open",
+            FindingKind::DeadClaim => "dead_claim",
+            FindingKind::BlockerDesync => "blocker_desync",
+            FindingKind::StaleDream => "stale_dream",
+            FindingKind::DanglingTrack => "dangling_track",
+            FindingKind::FederationIntegrity => "federation_integrity",
+            FindingKind::DocReference => "doc_reference",
+            FindingKind::PromptPairing => "prompt_pairing",
+            FindingKind::HandoffPresentation => "handoff_presentation",
+            FindingKind::WorkflowSprawl => "workflow_sprawl",
+            FindingKind::OrphanHandoff => "orphan_handoff",
+            FindingKind::Skipped => "skipped",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<FindingKind> {
+        FindingKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.name() == name)
+    }
+
+    /// The kinds `reconcile --fix` has a repair for: releasing a claim coord
+    /// has positively verified gone, and clearing resolved blockers. Every
+    /// other kind is advisory in every path. `landed_open` in particular has
+    /// no repair anywhere (mn-880173): a `Manna:` trailer identifies the work
+    /// a commit advanced, it does not approve completion, so no reconcile
+    /// path transitions a row to done; closure is `manna done` or managed
+    /// acceptance.
+    pub fn repairable(self) -> bool {
+        matches!(self, FindingKind::DeadClaim | FindingKind::BlockerDesync)
+    }
+
+    /// The repairable kinds, named for error text.
+    pub fn repairable_names() -> String {
+        FindingKind::ALL
+            .iter()
+            .copied()
+            .filter(|kind| kind.repairable())
+            .map(|kind| kind.name())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 /// One reconcile finding, shaped for `.manna/drift.yaml`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Finding {
@@ -193,6 +258,11 @@ pub fn parse_session_pid(session_id: &str) -> Option<u32> {
 
 /// landed_open: issues referenced by landed commit trailers but not yet done.
 ///
+/// Advisory in every path. The trailer identifies the work a commit advanced;
+/// completion and acceptance are declared by `manna done` (claim-holder,
+/// operator, or landed evidence, each an explicit act) or by managed
+/// acceptance, never inferred here (mn-880173).
+///
 /// `landed` maps issue ID -> commit SHAs whose bodies carry its trailer.
 /// Report-only: merge judgment stays with the human/orchestrator.
 pub fn check_landed_open(issues: &[Issue], landed: &HashMap<String, Vec<String>>) -> Vec<Finding> {
@@ -219,7 +289,7 @@ pub fn check_landed_open(issues: &[Issue], landed: &HashMap<String, Vec<String>>
                 ),
                 evidence: Some(evidence.join(", ")),
                 proposed_fix: Some(format!(
-                    "review the commits; if the work landed, claim and done {}",
+                    "review the commits; a trailer identifies the work, it does not approve completion — when the work is complete and accepted, claim and done {} (or the operator closes it)",
                     issue.id
                 )),
             });
@@ -230,8 +300,9 @@ pub fn check_landed_open(issues: &[Issue], landed: &HashMap<String, Vec<String>>
 
 /// blocker_desync: blocked status out of sync with the blocked_by list.
 ///
-/// Routine drift since done never auto-unblocks dependents. A blocker counts
-/// as resolved when it is done or no longer exists on the board.
+/// Backstop for deleted blockers, older binaries, and hand-edited boards;
+/// `done` releases its dependents inline. A blocker counts as resolved when
+/// it is done or no longer exists on the board.
 pub fn check_blocker_desync(issues: &[Issue]) -> Vec<Finding> {
     let by_id: HashMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     let mut findings = Vec::new();

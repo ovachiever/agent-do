@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Engine Room</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --fnt:#6E675E;            /* 14px+ only */
+    --hair:rgba(231,227,218,0.14);
+    --sage:hsl(158,30%,55%);
+    --clay:hsl(12,42%,58%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{color:var(--ink);font:400 14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+  ::selection{background:var(--sage);color:var(--bg)}
+  .wrap{max-width:1228px;margin:0 auto;padding:0 44px}
+  .mono{font-family:var(--mono)}
+  .num{font-variant-numeric:tabular-nums}
+  .lbl{font-size:12px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;color:var(--mut)}
+  .lbl-ink{color:var(--ink)}
+
+  /* doorway cue — every figure opens its ledger */
+  a{color:inherit;text-decoration:none}
+  a.fig{border-bottom:1px dotted rgba(231,227,218,0.26);padding:6px 1px;margin:-6px -1px;font-variant-numeric:tabular-nums}
+  a.fig:hover{color:var(--sage);border-bottom-color:var(--sage)}
+  a.fig:focus-visible,nav a:focus-visible{outline:1px solid var(--sage);outline-offset:2px;border-radius:2px}
+
+  /* ── nav ─────────────────────────────────────────── */
+  header{border-bottom:1px solid var(--hair)}
+  .nav{display:flex;align-items:stretch;justify-content:space-between;height:58px}
+  .wordmark{display:flex;align-items:center;gap:10px;font:400 19px var(--serif);color:var(--ink)}
+  .wordmark i{display:block;width:7px;height:7px;background:var(--sage)}
+  .nav ul{display:flex;list-style:none}
+  .nav ul a{display:flex;align-items:center;height:100%;padding:0 14px;font-size:12px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .nav ul a:hover{color:var(--ink)}
+  .nav ul a.active{color:var(--ink);border-bottom-color:var(--sage)}
+
+  /* ── verdict lede ────────────────────────────────── */
+  .lede{padding-top:30px}
+  .lede-top{display:flex;justify-content:space-between;align-items:baseline}
+  .verdict{font:400 37px/1.15 var(--serif);letter-spacing:-.01em;margin:24px 0 30px}
+  .figs{display:flex;padding-bottom:6px}
+  .figblock{padding:0 46px;border-left:1px solid var(--hair)}
+  .figblock:first-child{padding-left:0;border-left:none}
+  .figblock .big{display:inline-block;margin-top:10px;font-size:40px;font-weight:300;line-height:1.05;letter-spacing:-.01em}
+  .figblock .sub{margin-top:8px;font-size:12px;color:var(--mut)}
+  .figblock .sub a.fig{border-bottom-color:rgba(231,227,218,0.2)}
+
+  /* ── sections ────────────────────────────────────── */
+  section{margin-top:48px}
+  .shead{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--hair);padding-bottom:10px}
+
+  /* ── the day's ledger ────────────────────────────── */
+  table{width:100%;border-collapse:collapse}
+  #ledger th{font-size:12px;font-weight:500;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);text-align:left;padding:14px 16px 9px 0;border-bottom:1px solid var(--hair)}
+  #ledger th.r,#ledger td.r{text-align:right}
+  #ledger th:last-child,#ledger td:last-child{padding-right:0}
+  #ledger td{padding:12px 16px 12px 0;border-bottom:1px solid var(--hair);vertical-align:baseline}
+  #ledger tbody tr:hover{background:rgba(231,227,218,0.025)}
+  .svc{font-family:var(--mono);font-size:14px;white-space:nowrap}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:9px;vertical-align:0}
+  .dot.on{background:var(--sage)}
+  .dot.off{background:transparent;border:1px solid var(--mut);width:5px;height:5px}
+  .job{color:var(--mut)}
+  .state{font-size:13px;white-space:nowrap}
+  .state .since{color:var(--mut)}
+  .act{font-size:13px;color:var(--mut)}
+  .act .t{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .act .id{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  td.r .unit{font-size:12px;color:var(--mut)}
+  .share{display:inline-block;width:72px;height:2px;background:rgba(231,227,218,0.10);vertical-align:2px}
+  .share i{display:block;height:2px;background:rgba(231,227,218,0.38)}
+  #ledger tfoot td{padding:13px 16px 13px 0;font-weight:590;border-bottom:none}
+  #ledger tfoot .lbl{font-weight:500}
+
+  .meter{display:flex;align-items:center;gap:16px;margin-top:20px}
+  .meter .track{flex:1;height:3px;background:var(--hair)}
+  .meter .track i{display:block;height:3px;background:var(--sage)}
+  .meter-sub{margin-top:9px;text-align:right;font-size:12px;color:var(--mut)}
+
+  /* ── handoffs strip ──────────────────────────────── */
+  .strip svg{display:block;width:100%;margin-top:10px}
+  .strip .tI{fill:var(--ink)}
+  .strip .tM{fill:var(--mut)}
+  .strip a:hover .tI,.strip a:hover .tM{fill:var(--sage)}
+  .strip a:focus-visible{outline:1px solid var(--sage);outline-offset:2px}
+  .legend .dot{margin:0 6px 0 14px}
+  .legend .dot:first-child{margin-left:0}
+
+  /* ── plan ────────────────────────────────────────── */
+  #plan td{padding:10px 16px 10px 0;border-bottom:1px solid var(--hair);vertical-align:baseline}
+  #plan td:last-child{padding-right:0;text-align:right}
+  #plan .time{font-family:var(--mono);font-size:13px;white-space:nowrap}
+  #plan .who{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  #plan .out{font-size:13px;color:var(--mut)}
+  #plan .chip{font-size:12px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+  #plan .filed .chip{color:var(--mut)}
+  #plan .filed .time,#plan .filed .title{color:var(--mut)}
+  #plan .prog .chip{color:var(--sage)}
+  #plan .tocome .chip{color:var(--ink)}
+  #plan tr.next td{background:rgba(231,227,218,0.03)}
+  #plan tr.next td:first-child{border-left:2px solid var(--sage);padding-left:12px}
+  #plan tbody tr:hover td{background:rgba(231,227,218,0.025)}
+  #plan tr.next:hover td{background:rgba(231,227,218,0.04)}
+
+  /* ── data · incidents ────────────────────────────── */
+  .bottom{display:grid;grid-template-columns:1.2fr 1fr;gap:0 58px;margin-top:48px}
+  .kv{display:grid;grid-template-columns:104px 1fr;gap:12px 14px;margin-top:14px;font-size:13px}
+  .kv .tag{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding-top:1px}
+  .kv .val{color:var(--mut)}
+  .kv .val b{font-weight:400;color:var(--ink)}
+  .micro{display:inline-block;width:84px;height:2px;background:rgba(231,227,218,0.10);vertical-align:2px;margin:0 2px}
+  .micro i{display:block;height:2px;background:var(--sage)}
+  .inc{display:grid;grid-template-columns:16px 52px 1fr;gap:12px;margin-top:14px;font-size:13px;color:var(--mut)}
+  .inc .idot{width:7px;height:7px;background:var(--clay);border-radius:50%;margin-top:5px}
+  .inc .t{font-family:var(--mono);font-size:12px;color:var(--clay)}
+  .inc .id{font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+  footer{margin-top:58px;border-top:1px solid var(--hair);padding:22px 0 36px;text-align:center}
+  footer p{font:italic 400 13px var(--serif);color:var(--mut)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <span class="wordmark"><i></i>Palingenesis</span>
+    <ul>
+      <li><a href="#/today">Today</a></li>
+      <li><a href="#/pipeline">Pipeline</a></li>
+      <li><a href="#/library">Library</a></li>
+      <li><a href="#/portfolio">Portfolio</a></li>
+      <li><a href="#/simulation">Simulation</a></li>
+      <li><a class="active" href="#/engine" aria-current="page">Engine Room</a></li>
+    </ul>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- 1 · verdict -->
+  <section class="lede" style="margin-top:0">
+    <div class="lede-top">
+      <span class="lbl">The Engine Room</span>
+      <span class="lbl">Friday, August 22, 2026 · <a class="fig" href="#/engine/log">14:32 utc</a> · operating day <a class="fig" href="#/engine/history">141</a></span>
+    </div>
+    <h1 class="verdict">Nothing is broken.</h1>
+    <div class="figs">
+      <div class="figblock">
+        <span class="lbl">Spent today</span><br>
+        <a class="fig big num" href="#ledger">$147.82</a>
+        <div class="sub"><a class="fig" href="#ledger">29.6%</a> of the <a class="fig" href="#ledger">$500.00</a> hard cap</div>
+      </div>
+      <div class="figblock">
+        <span class="lbl">Next cycle</span><br>
+        <a class="fig big num" href="#plan">16:00</a>
+        <div class="sub">council session II · in <a class="fig" href="#plan">1h 28m</a></div>
+      </div>
+      <div class="figblock">
+        <span class="lbl">Services answering</span><br>
+        <a class="fig big num" href="#ledger">6 of 6</a>
+        <div class="sub">all heartbeats under <a class="fig" href="#/engine/heartbeats">60s</a></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · the day's ledger -->
+  <section id="ledger">
+    <div class="shead">
+      <span class="lbl lbl-ink">The Day&rsquo;s Ledger</span>
+      <span class="lbl">resets 00:00 utc · hard cap <a class="fig" href="#/engine/cap">$500.00</a></span>
+    </div>
+    <table>
+      <colgroup><col style="width:122px"><col style="width:218px"><col style="width:172px"><col><col style="width:132px"><col style="width:106px"><col style="width:96px"></colgroup>
+      <thead><tr>
+        <th>Service</th><th>What it does</th><th>State</th><th>Last act</th><th class="r">Acts today</th><th class="r">Cost today</th><th class="r">Share</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td class="svc"><span class="dot on"></span><a href="#/engine/scout">scout</a></td>
+          <td class="job">watches feeds and registries</td>
+          <td class="state">working <span class="since">· since <a class="fig" href="#/engine/scout/log">06:12</a></span></td>
+          <td class="act">Flagged a new USDA drought trial <span class="t">· <a class="fig" href="#/engine/scout/log">14:18</a></span></td>
+          <td class="r num"><a class="fig" href="#/engine/scout/acts">212</a> <span class="unit">checks</span></td>
+          <td class="r num"><a class="fig" href="#/engine/scout/cost">$6.47</a></td>
+          <td class="r"><span class="share" title="4.4% of today's spend"><i style="width:4.4%"></i></span></td>
+        </tr>
+        <tr>
+          <td class="svc"><span class="dot off"></span><a href="#/engine/reader">reader</a></td>
+          <td class="job">reads the day&rsquo;s papers</td>
+          <td class="state">idle <span class="since">· since <a class="fig" href="#/engine/reader/log">13:26</a></span></td>
+          <td class="act">Filed <a class="fig" href="#/library/recent">4</a> papers to the library <span class="t">· <a class="fig" href="#/engine/reader/log">13:26</a></span></td>
+          <td class="r num"><a class="fig" href="#/engine/reader/acts">1,473</a> <span class="unit">reads</span></td>
+          <td class="r num"><a class="fig" href="#/engine/reader/cost">$38.11</a></td>
+          <td class="r"><span class="share" title="25.8% of today's spend"><i style="width:25.8%"></i></span></td>
+        </tr>
+        <tr>
+          <td class="svc"><span class="dot off"></span><a href="#/engine/council">council</a></td>
+          <td class="job">judges claims, issues verdicts</td>
+          <td class="state">idle <span class="since">· since <a class="fig" href="#/engine/council/log">09:14</a></span></td>
+          <td class="act">Shelved claim <span class="id">cl-1402</span> — thin controls <span class="t">· <a class="fig" href="#/engine/council/log">09:14</a></span></td>
+          <td class="r num"><a class="fig" href="#/engine/council/acts">36</a> <span class="unit">turns</span></td>
+          <td class="r num"><a class="fig" href="#/engine/council/cost">$41.06</a></td>
+          <td class="r"><span class="share" title="27.8% of today's spend"><i style="width:27.8%"></i></span></td>
+        </tr>
+        <tr>
+          <td class="svc"><span class="dot off"></span><a href="#/engine/simulator">simulator</a></td>
+          <td class="job">runs virtual field trials</td>
+          <td class="state">idle <span class="since">· since <a class="fig" href="#/engine/simulator/log">12:31</a></span></td>
+          <td class="act">Closed batch <span class="id">41</span> — <a class="fig" href="#/simulation/batch-41">7 of 8</a> clean <span class="t">· <a class="fig" href="#/engine/simulator/log">12:31</a></span></td>
+          <td class="r num"><a class="fig" href="#/engine/simulator/acts">8</a> <span class="unit">runs</span></td>
+          <td class="r num"><a class="fig" href="#/engine/simulator/cost">$54.90</a></td>
+          <td class="r"><span class="share" title="37.1% of today's spend"><i style="width:37.1%"></i></span></td>
+        </tr>
+        <tr>
+          <td class="svc"><span class="dot on"></span><a href="#/engine/archivist">archivist</a></td>
+          <td class="job">files evidence, tends the library</td>
+          <td class="state">working <span class="since">· since <a class="fig" href="#/engine/archivist/log">14:10</a></span></td>
+          <td class="act">PubAg backfill passed <a class="fig" href="#data">62%</a> <span class="t">· <a class="fig" href="#/engine/archivist/log">14:31</a></span></td>
+          <td class="r num"><a class="fig" href="#/engine/archivist/acts">57</a> <span class="unit">filings</span></td>
+          <td class="r num"><a class="fig" href="#/engine/archivist/cost">$4.83</a></td>
+          <td class="r"><span class="share" title="3.3% of today's spend"><i style="width:3.3%"></i></span></td>
+        </tr>
+        <tr>
+          <td class="svc"><span class="dot off"></span><a href="#/engine/courier">courier</a></td>
+          <td class="job">delivers briefs and alerts</td>
+          <td class="state">idle <span class="since">· since <a class="fig" href="#/engine/courier/log">13:31</a></span></td>
+          <td class="act">Mailed the sweep II digest <span class="t">· <a class="fig" href="#/engine/courier/log">13:31</a></span></td>
+          <td class="r num"><a class="fig" href="#/engine/courier/acts">5</a> <span class="unit">deliveries</span></td>
+          <td class="r num"><a class="fig" href="#/engine/courier/cost">$2.45</a></td>
+          <td class="r"><span class="share" title="1.7% of today's spend"><i style="width:1.7%"></i></span></td>
+        </tr>
+      </tbody>
+      <tfoot><tr>
+        <td class="lbl">Total</td>
+        <td></td><td></td><td></td>
+        <td class="r num"><a class="fig" href="#/engine/acts">1,791</a> <span class="unit">acts</span></td>
+        <td class="r num"><a class="fig" href="#/engine/cost">$147.82</a></td>
+        <td></td>
+      </tr></tfoot>
+    </table>
+    <div class="meter" role="img" aria-label="$147.82 spent of the $500.00 daily cap">
+      <span class="lbl">Spent <a class="fig lbl-ink" href="#/engine/cost">$147.82</a></span>
+      <span class="track"><i style="width:29.6%"></i></span>
+      <span class="lbl">Cap <a class="fig" href="#/engine/cap">$500.00</a></span>
+    </div>
+    <div class="meter-sub">on pace <a class="fig" href="#/engine/cost/pace">$244</a> by 00:00</div>
+  </section>
+
+  <!-- 3 · handoffs strip -->
+  <section class="strip" id="handoffs">
+    <div class="shead">
+      <span class="lbl lbl-ink">How Work Moves</span>
+      <span class="lbl legend"><span class="dot on"></span>working <span class="dot off"></span>idle · counts are today&rsquo;s</span>
+    </div>
+    <svg viewBox="0 0 1220 78" role="img" aria-label="Scout hands 1,486 queued items to Reader; Reader hands 23 claims to Council; Council orders 8 runs from Simulator; Simulator files 8 reports with Archivist; Archivist hands 5 briefs to Courier.">
+      <defs>
+        <marker id="ah" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M1,1 L6.5,4 L1,7" fill="none" stroke="rgba(231,227,218,0.5)" stroke-width="1.1"/>
+        </marker>
+      </defs>
+      <!-- flow lines -->
+      <line x1="52"  y1="44" x2="252"  y2="44" stroke="rgba(231,227,218,0.28)" stroke-width="1" marker-end="url(#ah)"/>
+      <line x1="280" y1="44" x2="480"  y2="44" stroke="rgba(231,227,218,0.28)" stroke-width="1" marker-end="url(#ah)"/>
+      <line x1="508" y1="44" x2="708"  y2="44" stroke="rgba(231,227,218,0.28)" stroke-width="1" marker-end="url(#ah)"/>
+      <line x1="736" y1="44" x2="936"  y2="44" stroke="rgba(231,227,218,0.28)" stroke-width="1" marker-end="url(#ah)"/>
+      <line x1="964" y1="44" x2="1164" y2="44" stroke="rgba(231,227,218,0.28)" stroke-width="1" marker-end="url(#ah)"/>
+      <!-- flow counts -->
+      <a href="#/engine/flows/scout-reader"><rect x="106" y="8" width="96" height="28" fill="transparent"/><text x="154" y="24" font-size="12" text-anchor="middle"><tspan class="tI" font-variant="tabular-nums">1,486</tspan><tspan class="tM"> queued</tspan></text><line x1="116" y1="30" x2="192" y2="30" stroke="rgba(231,227,218,0.3)" stroke-width="1" stroke-dasharray="2 3"/></a>
+      <a href="#/engine/flows/reader-council"><rect x="336" y="8" width="92" height="28" fill="transparent"/><text x="382" y="24" font-size="12" text-anchor="middle"><tspan class="tI">23</tspan><tspan class="tM"> claims</tspan></text><line x1="354" y1="30" x2="410" y2="30" stroke="rgba(231,227,218,0.3)" stroke-width="1" stroke-dasharray="2 3"/></a>
+      <a href="#/engine/flows/council-simulator"><rect x="566" y="8" width="88" height="28" fill="transparent"/><text x="610" y="24" font-size="12" text-anchor="middle"><tspan class="tI">8</tspan><tspan class="tM"> runs</tspan></text><line x1="588" y1="30" x2="632" y2="30" stroke="rgba(231,227,218,0.3)" stroke-width="1" stroke-dasharray="2 3"/></a>
+      <a href="#/engine/flows/simulator-archivist"><rect x="792" y="8" width="92" height="28" fill="transparent"/><text x="838" y="24" font-size="12" text-anchor="middle"><tspan class="tI">8</tspan><tspan class="tM"> reports</tspan></text><line x1="810" y1="30" x2="866" y2="30" stroke="rgba(231,227,218,0.3)" stroke-width="1" stroke-dasharray="2 3"/></a>
+      <a href="#/engine/flows/archivist-courier"><rect x="1020" y="8" width="92" height="28" fill="transparent"/><text x="1066" y="24" font-size="12" text-anchor="middle"><tspan class="tI">5</tspan><tspan class="tM"> briefs</tspan></text><line x1="1041" y1="30" x2="1091" y2="30" stroke="rgba(231,227,218,0.3)" stroke-width="1" stroke-dasharray="2 3"/></a>
+      <!-- nodes -->
+      <a href="#/engine/scout"><rect x="0" y="52" width="80" height="26" fill="transparent"/><circle cx="40" cy="44" r="4" fill="hsl(158,30%,55%)"/><text class="tI" x="40" y="70" font-size="12" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,monospace">scout</text></a>
+      <a href="#/engine/reader"><rect x="228" y="52" width="80" height="26" fill="transparent"/><circle cx="268" cy="44" r="3.5" fill="#1B1917" stroke="#A69D90" stroke-width="1"/><text class="tI" x="268" y="70" font-size="12" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,monospace">reader</text></a>
+      <a href="#/engine/council"><rect x="456" y="52" width="80" height="26" fill="transparent"/><circle cx="496" cy="44" r="3.5" fill="#1B1917" stroke="#A69D90" stroke-width="1"/><text class="tI" x="496" y="70" font-size="12" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,monospace">council</text></a>
+      <a href="#/engine/simulator"><rect x="678" y="52" width="92" height="26" fill="transparent"/><circle cx="724" cy="44" r="3.5" fill="#1B1917" stroke="#A69D90" stroke-width="1"/><text class="tI" x="724" y="70" font-size="12" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,monospace">simulator</text></a>
+      <a href="#/engine/archivist"><rect x="906" y="52" width="92" height="26" fill="transparent"/><circle cx="952" cy="44" r="4" fill="hsl(158,30%,55%)"/><text class="tI" x="952" y="70" font-size="12" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,monospace">archivist</text></a>
+      <a href="#/engine/courier"><rect x="1140" y="52" width="80" height="26" fill="transparent"/><circle cx="1180" cy="44" r="3.5" fill="#1B1917" stroke="#A69D90" stroke-width="1"/><text class="tI" x="1180" y="70" font-size="12" text-anchor="middle" font-family="ui-monospace,'SF Mono',Menlo,monospace">courier</text></a>
+    </svg>
+  </section>
+
+  <!-- 4 · the plan for the day -->
+  <section id="plan">
+    <div class="shead">
+      <span class="lbl lbl-ink">The Plan for the Day</span>
+      <span class="lbl">all times utc · <a class="fig" href="#/engine/schedule">10</a> bookings</span>
+    </div>
+    <table>
+      <colgroup><col style="width:86px"><col style="width:296px"><col style="width:118px"><col><col style="width:150px"></colgroup>
+      <tbody>
+        <tr class="filed">
+          <td class="time num"><a class="fig" href="#/engine/schedule/0500">05:00</a></td>
+          <td class="title">Literature sweep I</td>
+          <td class="who">reader</td>
+          <td class="out"><a class="fig" href="#/library/sweep-1">1,412</a> abstracts read · <a class="fig" href="#/library/kept">19</a> kept</td>
+          <td><span class="chip">Filed</span></td>
+        </tr>
+        <tr class="filed">
+          <td class="time num"><a class="fig" href="#/engine/schedule/0630">06:30</a></td>
+          <td class="title">Registry sweep</td>
+          <td class="who">scout</td>
+          <td class="out"><a class="fig" href="#/engine/scout/sweep">148</a> registries checked · <a class="fig" href="#/engine/scout/flags">3</a> flags</td>
+          <td><span class="chip">Filed</span></td>
+        </tr>
+        <tr class="filed">
+          <td class="time num"><a class="fig" href="#/engine/schedule/0800">08:00</a></td>
+          <td class="title">Council session I</td>
+          <td class="who">council</td>
+          <td class="out"><a class="fig" href="#/pipeline/session-1">19</a> claims heard · <a class="fig" href="#/pipeline/verdicts">3</a> verdicts</td>
+          <td><span class="chip">Filed</span></td>
+        </tr>
+        <tr class="filed">
+          <td class="time num"><a class="fig" href="#/engine/schedule/0930">09:30</a></td>
+          <td class="title">Simulation batch 41</td>
+          <td class="who">simulator</td>
+          <td class="out"><a class="fig" href="#/simulation/batch-41">8</a> runs · <a class="fig" href="#/simulation/batch-41">7</a> clean · 1 fault → <a class="fig" href="#incidents">11:42</a></td>
+          <td><span class="chip">Filed</span></td>
+        </tr>
+        <tr class="filed">
+          <td class="time num"><a class="fig" href="#/engine/schedule/1300">13:00</a></td>
+          <td class="title">Literature sweep II</td>
+          <td class="who">reader</td>
+          <td class="out"><a class="fig" href="#/library/sweep-2">61</a> full texts read · <a class="fig" href="#/library/kept">4</a> kept</td>
+          <td><span class="chip">Filed</span></td>
+        </tr>
+        <tr class="prog">
+          <td class="time num"><a class="fig" href="#/engine/schedule/1410">14:10</a></td>
+          <td class="title">Backfill — PubAg 2019–2021</td>
+          <td class="who">archivist</td>
+          <td class="out"><a class="fig" href="#data">41,208</a> of <a class="fig" href="#data">66,470</a> records · <a class="fig" href="#data">62%</a></td>
+          <td><span class="chip">In progress</span></td>
+        </tr>
+        <tr class="tocome next">
+          <td class="time num"><a class="fig" href="#/engine/schedule/1600">16:00</a></td>
+          <td class="title">Council session II</td>
+          <td class="who">council</td>
+          <td class="out">docket: <a class="fig" href="#/pipeline/docket">4</a> claims</td>
+          <td><span class="chip">To come</span></td>
+        </tr>
+        <tr class="tocome">
+          <td class="time num"><a class="fig" href="#/engine/schedule/1830">18:30</a></td>
+          <td class="title">Simulation batch 42</td>
+          <td class="who">simulator</td>
+          <td class="out"><a class="fig" href="#/simulation/batch-42">9</a> runs queued · incl. <a class="fig" href="#incidents">1</a> re-run</td>
+          <td><span class="chip">To come</span></td>
+        </tr>
+        <tr class="tocome">
+          <td class="time num"><a class="fig" href="#/engine/schedule/2100">21:00</a></td>
+          <td class="title">Literature sweep III</td>
+          <td class="who">reader</td>
+          <td class="out"><a class="fig" href="#/engine/reader/queue">13</a> items already queued</td>
+          <td><span class="chip">To come</span></td>
+        </tr>
+        <tr class="tocome">
+          <td class="time num"><a class="fig" href="#/engine/schedule/2330">23:30</a></td>
+          <td class="title">The evening brief</td>
+          <td class="who">courier</td>
+          <td class="out">ledger · verdicts · incidents</td>
+          <td><span class="chip">To come</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 5 · data · incidents -->
+  <div class="bottom">
+    <section id="data" style="margin-top:0">
+      <div class="shead">
+        <span class="lbl lbl-ink">The Data</span>
+        <span class="lbl">next snapshot <a class="fig" href="#/engine/snapshots">20:00</a></span>
+      </div>
+      <div class="kv">
+        <span class="tag">snapshot</span>
+        <span class="val">Library at <a class="fig" href="#/library/snapshot">14:26</a> — <b><a class="fig" href="#/library/claims">12,408</a></b> claims · <b><a class="fig" href="#/library/sources">3,187</a></b> sources</span>
+        <span class="tag">backfill</span>
+        <span class="val">PubAg 2019–2021 — <a class="fig" href="#/engine/backfills/pubag">41,208</a> of <a class="fig" href="#/engine/backfills/pubag">66,470</a> <span class="micro"><i style="width:62%"></i></span> <b><a class="fig" href="#/engine/backfills/pubag">62%</a></b> · finishes aug <a class="fig" href="#/engine/backfills/pubag">24</a></span>
+        <span class="tag">backfill</span>
+        <span class="val">FAOSTAT yields 1961–2000 — queued after PubAg</span>
+      </div>
+    </section>
+    <section id="incidents" style="margin-top:0">
+      <div class="shead">
+        <span class="lbl lbl-ink">Incidents</span>
+        <span class="lbl"><a class="fig" href="#/engine/incidents">1</a> today · <a class="fig" href="#/engine/incidents/open">0</a> open</span>
+      </div>
+      <div class="inc">
+        <span class="idot"></span>
+        <span class="t"><a class="fig" href="#/engine/incidents/1142">11:42</a></span>
+        <span>Simulator run <span class="id">41.3</span> diverged (bad soil-moisture value) — killed, inputs quarantined, re-queued into batch <span class="id">42</span> · resolved <a class="fig" href="#/engine/incidents/1142">11:58</a></span>
+      </div>
+    </section>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Every claim sourced &middot; every cost computed &middot; every verdict recorded</p>
+  </div>
+</footer>
+
+</body>
+</html>

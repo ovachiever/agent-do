@@ -1,5 +1,5 @@
 {
-  "_comment": "Codex hook registration template for agent-do. Copy to ~/.codex/hooks.json and merge with existing entries if you already have any. All six wrappers runpy-pass-through to checked-in repo hooks (under hooks/codex/, except the now stamp, which needs no Codex-side shim and resolves hooks/claude/agent-do-now-stamp.py directly), so updates flow through automatically once the wrappers are installed. The Stop hook runs stop-quality-gate.sh which runs DPT scoring against the active agent-do browse session (via agent-do dpt). agent-do does not bundle auto-commit; if you want auto-commit at Stop, add a separate hook entry pointing at your own auto-commit script. Codex supports hookSpecificOutput.additionalContext on PreToolUse as of the May 2026 hooks release.",
+  "_comment": "Codex hook registration template for agent-do. Merge with existing ~/.codex/hooks.json entries. Installed wrappers delegate to checked-in repo hooks; the now stamp, pulse recorder, and coordination doorbell share their Claude-side sources. The doorbell emits fixed context at UserPromptSubmit or requests one Stop continuation, guarded by stop_hook_active. It never carries ledger content or replaces notify. agent-do does not bundle auto-commit. Codex hook delivery shapes were verified against official documentation on 2026-09-22.",
   "hooks": {
     "SessionStart": [
       {
@@ -17,6 +17,12 @@
     "UserPromptSubmit": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/agent-do-coord-doorbell.py",
+            "timeout": 5,
+            "statusMessage": "Checking the coordination ledger bell"
+          },
           {
             "type": "command",
             "command": "python3 ~/.codex/hooks/agent-do-prompt-router.py",
@@ -82,6 +88,12 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/agent-do-coord-doorbell.py",
+            "timeout": 5,
+            "statusMessage": "Checking the coordination ledger bell"
+          },
           {
             "type": "command",
             "command": "~/.codex/hooks/stop-quality-gate.sh",
