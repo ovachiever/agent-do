@@ -22,6 +22,14 @@ Commands:
   port-forward <pod> <ports> Forward ports
   snapshot                     Full cluster state as JSON (pods, services, deployments)
 
+Trace-safe read commands (explicit context; JSON only):
+  deployment <name> --context C --namespace N --json
+                               Deployment, ReplicaSet, image, pod, and restart facts
+  events --for-deployment <name> --context C --namespace N --json
+                               Recent deployment/ReplicaSet/pod events
+  logs <pod> --container C --context C --namespace N --since 30m --tail 200 --json
+                               Bounded current or --previous container-log excerpt
+
 Options:
   -n, --namespace <ns>       Namespace
   -f, --follow               Follow logs
@@ -33,7 +41,15 @@ Examples:
   agent-k8s shell my-pod
   agent-k8s port-forward my-pod 8080:80
   agent-k8s get deployments -n production
+  agent-k8s deployment payments-api --context production-aks --namespace payments --json
+  agent-k8s events --for-deployment payments-api --context production-aks --namespace payments --json
 EOF
+}
+
+trace_read() {
+    # This helper uses direct kubectl argv calls with an explicit context. It
+    # cannot mutate kubeconfig or enter a container, unlike the legacy verbs.
+    python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/k8s_trace.py" "$@"
 }
 
 # Check for kubectl
@@ -374,13 +390,27 @@ print(json.dumps(snapshot, indent=2))
 
 # Main
 case "${1:-help}" in
+    deployment|deploy)
+        shift
+        trace_read deployment "$@"
+        ;;
+    events)
+        shift
+        trace_read events "$@"
+        ;;
     pods|po)
         shift || true
         cmd_pods "$@"
         ;;
     logs|log)
         shift
-        cmd_logs "$@"
+        # Explicit context identifies the safe incident-trace form. Preserve
+        # the historical interactive/legacy logs command otherwise.
+        if [[ " $* " == *" --context "* || " $* " == *" --context="* ]]; then
+            trace_read logs "$@"
+        else
+            cmd_logs "$@"
+        fi
         ;;
     exec)
         shift
