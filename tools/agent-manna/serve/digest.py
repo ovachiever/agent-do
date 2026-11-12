@@ -6,8 +6,8 @@ item delivers, short enough for one line. The same move agent-sessions makes
 for session titles: a fast model writes it once, a content hash keeps it
 until the title or description changes, and the raw title stays available
 (in the inspector). Digests are display only: they live under
-$AGENT_DO_HOME/manna/serve/digests/, never in the board, and no agent reads
-them.
+$AGENT_DO_HOME/manna/serve/digests/, never in the board. No agent reads them;
+human-facing clients may consume hash-current values through `manna state`.
 """
 
 from __future__ import annotations
@@ -158,25 +158,54 @@ def _retry_due(entry: dict[str, Any]) -> bool:
     return (datetime.now(timezone.utc) - failed_at).total_seconds() >= _cooldown_seconds()
 
 
-def apply(slug: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Attach cached digests to rows in place; report what is missing."""
+def _digest_state(
+    cache: dict[str, dict[str, Any]], row: dict[str, Any]
+) -> tuple[str | None, bool]:
+    """Return (current digest, generation due) without changing the row."""
+    if row.get("kind") == "track":
+        return None, False
+    entry = cache.get(row["id"])
+    h = content_hash(row)
+    if entry and entry.get("hash") == h and entry.get("digest"):
+        return str(entry["digest"]), False
+    permanent = bool(
+        entry and entry.get("hash") == h and entry.get("failed") and not entry.get("transient")
+    )
+    cooling = bool(
+        entry and entry.get("hash") == h and entry.get("transient") and not _retry_due(entry)
+    )
+    return None, not permanent and not cooling
+
+
+def _report(
+    slug: str, rows: list[dict[str, Any]], *, attach: bool
+) -> dict[str, Any]:
     cache = load_cache(slug)
     missing: list[dict[str, Any]] = []
+    ready = 0
     for row in rows:
-        if row.get("kind") == "track":
-            row["digest"] = None
-            continue
-        entry = cache.get(row["id"])
-        h = content_hash(row)
-        if entry and entry.get("hash") == h and entry.get("digest"):
-            row["digest"] = entry["digest"]
-        else:
-            row["digest"] = None
-            permanent = bool(entry and entry.get("hash") == h and entry.get("failed") and not entry.get("transient"))
-            cooling = bool(entry and entry.get("hash") == h and entry.get("transient") and not _retry_due(entry))
-            if not permanent and not cooling:
-                missing.append(row)
-    return {"ready": sum(1 for r in rows if r.get("digest")), "missing": len(missing), "missing_rows": missing, "model": next((e.get("model") for e in cache.values() if e.get("model")), None)}
+        digest, generation_due = _digest_state(cache, row)
+        ready += int(bool(digest))
+        if attach:
+            row["digest"] = digest
+        if generation_due:
+            missing.append(row)
+    return {
+        "ready": ready,
+        "missing": len(missing),
+        "missing_rows": missing,
+        "model": next((entry.get("model") for entry in cache.values() if entry.get("model")), None),
+    }
+
+
+def apply(slug: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compatibility helper: attach cached digests and report gaps."""
+    return _report(slug, rows, attach=True)
+
+
+def plan(slug: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Report generation gaps without reattaching the core's row fields."""
+    return _report(slug, rows, attach=False)
 
 
 # ---------------------------------------------------------------- generation
@@ -327,8 +356,8 @@ def schedule(slug: str, issues: list[dict[str, Any]], caller: Callable = default
 # ---------------------------------------------------------------- summaries
 # A digest is a line; a summary is the paragraph a reader wants when they
 # open the item: what it is, why it exists, what has to happen, what done
-# looks like. Written once per content hash, on first view, by the same
-# fast role; cached beside the digest; never stored in the board.
+# looks like. Written once per content hash by a human-facing presentation
+# layer, cached beside the digest, and never stored in the board.
 
 SUMMARY_SYSTEM = (
     "You explain software work items on a project board to the person who runs the project. "
