@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --lift:#201D1A;
+    --cream:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair2:rgba(231,227,218,0.07);
+    --sage:hsl(158,30%,55%);
+    --sage-up:hsl(158,32%,62%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--ground);color:var(--cream);font-family:var(--sans);font-size:14px;line-height:1.5;min-width:1240px}
+  a{color:inherit;text-decoration:none}
+  ::selection{background:hsl(158,30%,30%);color:var(--cream)}
+  .container{max-width:1280px;margin:0 auto;padding-left:48px;padding-right:48px}
+  .seclabel{font-family:var(--sans);font-size:12px;font-weight:400;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .ok{color:var(--sage)}
+  .id{font-family:var(--mono);font-size:12px;color:var(--cream);letter-spacing:.01em}
+  b{font-weight:600;color:var(--cream)}
+
+  /* ---------- top nav ---------- */
+  .topnav{border-bottom:1px solid var(--hair)}
+  .nav-inner{display:flex;align-items:center;height:60px}
+  .wordmark{font-family:var(--serif);font-size:19px;letter-spacing:.04em;padding:14px 0}
+  .navlinks{display:flex;gap:30px;margin-left:52px}
+  .navlinks a{font-size:13.5px;color:var(--muted);padding:21px 2px 18px;border-bottom:2px solid transparent}
+  .navlinks a:hover{color:var(--cream)}
+  .navlinks a.active{color:var(--cream);border-bottom-color:var(--sage)}
+  .navclock{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.05em}
+
+  /* ---------- page head ---------- */
+  .pagehead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:56px;align-items:end;padding-top:46px;padding-bottom:38px;border-bottom:1px solid var(--hair)}
+  .pagehead h1{font-family:var(--serif);font-weight:400;font-size:33px;line-height:1.16;margin-top:14px}
+  .lede{margin-top:14px;max-width:560px;color:var(--muted);font-size:14.5px;line-height:1.62}
+  .ph-bals{display:flex}
+  .bal{padding:2px 26px;border-left:1px solid var(--hair)}
+  .bal:last-child{padding-right:0}
+  .bal .v{font-family:var(--serif);font-size:34px;line-height:1;color:var(--cream)}
+  .bal .k{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:9px}
+  .bal .p{font-size:12px;color:var(--faint);margin-top:5px;max-width:168px;line-height:1.45}
+
+  /* ---------- body grid ---------- */
+  .bodygrid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:48px;align-items:start;margin-top:36px}
+
+  /* ---------- the register ---------- */
+  .reg-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;border-top:1px solid var(--hair);padding-top:18px}
+  .reg-meta{font-family:var(--mono);font-size:12px;color:var(--faint);white-space:nowrap}
+  .colheads{display:grid;grid-template-columns:56px minmax(0,1fr) minmax(0,1fr);margin-top:24px;padding-bottom:9px;border-bottom:1px solid var(--hair)}
+  .colheads span{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .ch-acq{display:flex;justify-content:space-between;padding-right:28px}
+  .ch-yld{border-left:1px solid var(--hair);padding-left:28px}
+  .broughtfwd{font-family:var(--mono);font-size:12px;color:var(--faint);text-align:right;padding:10px 0;border-bottom:1px solid var(--hair2)}
+
+  .dayrule{display:flex;align-items:baseline;gap:14px;margin-top:28px}
+  .daylabel{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+  .ttag{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--sage);white-space:nowrap}
+  .rline{flex:1;height:1px;background:var(--hair);align-self:center}
+
+  .entry{display:grid;grid-template-columns:56px minmax(0,1fr) minmax(0,1fr);padding:16px 0 14px;border-bottom:1px solid var(--hair2)}
+  .day .entry:last-of-type{border-bottom:0}
+  .entry:hover{background:rgba(231,227,218,0.02)}
+  .et{font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:3px}
+  .acq{padding-right:28px}
+  .acq-top{display:flex;justify-content:space-between;gap:16px;align-items:baseline}
+  .acq h3{font-size:14.5px;font-weight:500;line-height:1.4;letter-spacing:.005em}
+  .cost{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+  .src{font-size:13px;color:var(--muted);margin-top:6px;line-height:1.5}
+  .prov{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:6px;line-height:1.55}
+  .yld{border-left:1px solid var(--hair);padding-left:28px}
+  .yrow{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;font-size:13px;color:var(--muted);margin-bottom:4px;line-height:1.5}
+  .yrow .n{font-family:var(--mono);font-size:13px;color:var(--cream);text-align:right}
+  .note{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--faint);margin:5px 0 4px 40px;line-height:1.5}
+  .recon{display:flex;justify-content:space-between;gap:16px;font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:10px;padding-top:8px;border-top:1px solid var(--hair2)}
+  .dayfoot{display:flex;justify-content:space-between;gap:24px;border-top:1px solid var(--hair);padding:12px 0 4px;font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6}
+
+  .entry.commitment h3{color:var(--muted);font-weight:400}
+  .entry.commitment .src{color:var(--faint)}
+  .commit-tag{display:inline-block;font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border:1px solid var(--hair);padding:1px 7px;margin-right:8px}
+  .pending{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--faint);line-height:1.6}
+
+  /* ---------- rail ---------- */
+  .rail section{border-top:1px solid var(--hair);padding-top:18px}
+  .rail section + section{margin-top:46px}
+  .rail-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+  .oo{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;padding:14px 0;border-bottom:1px solid var(--hair2)}
+  .oo .pos{font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:2px}
+  .oo h4{font-size:14px;font-weight:500;line-height:1.45}
+  .oo .meta{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:5px;line-height:1.6}
+  .oo .stat{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:7px}
+  .oo.first .stat{color:var(--cream)}
+  .oo-foot{padding-top:13px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .btn{display:inline-flex;align-items:center;margin-top:18px;background:var(--sage);color:#16211C;font-size:13px;font-weight:600;letter-spacing:.03em;padding:11px 18px;border-radius:2px}
+  .btn:hover{background:var(--sage-up)}
+  .btn-help{font-size:13px;color:var(--faint);margin-top:13px;line-height:1.55;max-width:340px}
+
+  .audit-lede{font-size:13px;color:var(--muted);margin-top:13px;line-height:1.55}
+  .chain{border-left:1px solid var(--hair);margin:20px 0 0 3px;padding-left:22px}
+  .cnode{position:relative;padding-bottom:19px}
+  .cnode:last-child{padding-bottom:2px}
+  .cnode::before{content:"";position:absolute;left:-26px;top:5px;width:6px;height:6px;background:var(--ground);border:1px solid var(--muted)}
+  .cnode.end::before{background:var(--sage);border-color:var(--sage)}
+  .cnode .nl{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+  .cnode .nc{font-size:13px;color:var(--muted);margin-top:5px;line-height:1.55}
+  .quote{font-family:var(--serif);font-style:italic;color:var(--cream);font-size:14px;line-height:1.5}
+  .q2{font-family:var(--serif);font-style:italic;font-size:13px}
+  .audit-foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--hair2);font-family:var(--mono);font-size:12px;color:var(--faint);line-height:1.6}
+
+  /* ---------- balances table ---------- */
+  .balances{margin-top:50px;margin-bottom:34px}
+  .balances table{width:100%;border-collapse:collapse;margin-top:16px}
+  .balances th{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:400;text-align:right;vertical-align:bottom;padding:0 0 10px 18px;border-bottom:1px solid var(--hair)}
+  .balances th.l{text-align:left;padding-left:0}
+  .balances td{font-family:var(--mono);font-size:13px;text-align:right;padding:12px 0 12px 18px;border-bottom:1px solid var(--hair2);color:var(--cream)}
+  .balances td.l{font-family:var(--sans);font-size:14px;text-align:left;padding-left:0}
+  .balances td.lp{font-size:12px;color:var(--muted);white-space:nowrap}
+  .balances td.tc{width:92px}
+  .balances tbody tr:not(.total):hover{background:rgba(231,227,218,0.02)}
+  tr.total td{border-top:3px double rgba(231,227,218,0.4);border-bottom:0;padding-top:14px;font-weight:600}
+  tr.total td.l{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .trace{display:inline-block;font-family:var(--mono);font-size:12px;line-height:1;letter-spacing:.06em;text-transform:uppercase;color:var(--sage);border:1px solid hsla(158,30%,55%,.35);padding:6px 10px;border-radius:2px;font-weight:400}
+  .trace:hover{background:hsla(158,30%,55%,.12);border-color:var(--sage)}
+  .bal-close{display:flex;justify-content:space-between;gap:24px;font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:12px}
+
+  /* ---------- running foot ---------- */
+  .footstrip{position:sticky;bottom:0;background:var(--lift);border-top:1px solid var(--hair);z-index:9}
+  .fs-inner{display:flex;justify-content:space-between;align-items:center;gap:24px;padding-top:13px;padding-bottom:13px;font-family:var(--mono);font-size:12px;color:var(--cream)}
+  .fs-label{font-family:var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-right:10px;font-size:12px}
+  .fs-r{color:var(--muted);white-space:nowrap}
+
+  footer{padding:28px 0 38px;text-align:center}
+  footer p{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--faint);letter-spacing:.02em}
+</style>
+</head>
+<body>
+
+<header class="topnav">
+  <div class="container nav-inner">
+    <a class="wordmark" href="#">Palingenesis</a>
+    <nav class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#" class="active" aria-current="page">Library</a>
+      <a href="#">Engine Room</a>
+    </nav>
+    <span class="navclock">06:14 · SAT 22 AUG 2026</span>
+  </div>
+</header>
+
+<main>
+  <div class="container">
+
+    <section class="pagehead">
+      <div class="ph-left">
+        <div class="seclabel">The Library</div>
+        <h1>What was read, and what it yielded.</h1>
+        <p class="lede">Every acquisition is entered twice — the reading on one side, its yield on the other. Nothing is held that was not entered, and nothing is claimed that cannot be traced back through this register to its source.</p>
+      </div>
+      <div class="ph-bals">
+        <div class="bal">
+          <div class="v">12,847</div>
+          <div class="k">Holdings</div>
+          <div class="p">papers, signals &amp; records · counted 06:14</div>
+        </div>
+        <div class="bal">
+          <div class="v">2,507</div>
+          <div class="k">Evidence records</div>
+          <div class="p">each resolves to a source</div>
+        </div>
+        <div class="bal">
+          <div class="v">806</div>
+          <div class="k">Claims in force</div>
+          <div class="p">cited by 14 open dossiers</div>
+        </div>
+        <div class="bal">
+          <div class="v">31</div>
+          <div class="k">Contradictions open</div>
+          <div class="p">each holds two sourced sides</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="bodygrid">
+
+      <!-- ============ THE REGISTER ============ -->
+      <section class="register" id="register">
+        <div class="reg-head">
+          <h2 class="seclabel">General Register — acquisition against yield</h2>
+          <span class="reg-meta">5,214 entries · ruled since 14 Mar 2025 · costs metered per read</span>
+        </div>
+
+        <div class="colheads">
+          <span>Time</span>
+          <span class="ch-acq"><span>Acquired — what came in</span><span>Read cost</span></span>
+          <span class="ch-yld">Yielded — what it became</span>
+        </div>
+
+        <div class="broughtfwd">Brought forward — Thu 20 Aug · 12,732 held · 2,479 evidence records · in balance <span class="ok">✓</span></div>
+
+        <!-- ······ Friday 21 August ······ -->
+        <section class="day">
+          <div class="dayrule"><span class="daylabel">Friday 21 August 2026</span><span class="rline"></span></div>
+
+          <article class="entry">
+            <div class="et">09:02</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>Preprint watch · arXiv &amp; bioRxiv — standing queries, morning pass</h3>
+                <span class="cost">$0.31</span>
+              </div>
+              <p class="src"><b>5 preprints</b> — q-bio.PE 2 · econ.GN 1 · eess.SY 2</p>
+              <p class="prov">standing queries QW-011…QW-014 · provisional tier until peer review posts</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">1</span><span>cited to evidence → <span class="id">D-0138</span> Insect meal in layer rations</span></div>
+              <div class="yrow"><span class="n">4</span><span>to holdings — provisional tier</span></div>
+              <div class="recon"><span>1 + 4 = 5</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">14:30</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>USDA ERS · Egg Markets Overview — weekly release</h3>
+                <span class="cost">$0.00</span>
+              </div>
+              <p class="src"><b>3 series</b> — retail dozen · Midwest wholesale · export volume</p>
+              <p class="prov">released 21 Aug · retrieved 14:30 · ers.usda.gov · public tier</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">3</span><span>posted to holdings — markets &amp; policy</span></div>
+              <p class="note"><span class="id">D-0139</span> Cage-free premium — demand curve refreshed</p>
+              <div class="recon"><span>3 = 3</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">16:44</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>Sweep <span class="id">S-0445</span> complete · Water reuse in egg-wash lines</h3>
+                <span class="cost">$2.87</span>
+              </div>
+              <p class="src"><b>24 papers</b> — Scopus 14 · USDA ARS 6 · patents 4</p>
+              <p class="prov">commissioned 18 Aug by M. Okafor · read 16:02–16:44</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">6</span><span>cited to evidence → <span class="id">D-0140</span> Wash-water reclaim</span></div>
+              <div class="yrow"><span class="n">1</span><span>contradiction logged — against <span class="id">CLM-2495</span> reuse-cycle limit</span></div>
+              <div class="yrow"><span class="n">17</span><span>to holdings — no claim extracted</span></div>
+              <div class="recon"><span>6 + 1 + 17 = 24</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry commitment">
+            <div class="et">18:05</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3><span class="commit-tag">Commitment</span>Commission placed · <span class="id">S-0448</span> — Eggshell membrane recovery, pharma-grade markets</h3>
+                <span class="cost">est $6.20</span>
+              </div>
+              <p class="src">scope approved — ≈55 papers · queued №1 for Sun 02:00</p>
+              <p class="prov">commissioned by R. Calloway · 18:05</p>
+            </div>
+            <div class="yld">
+              <p class="pending">No entry until the reading posts — held on order. Nothing enters without its counterpart.</p>
+              <div class="recon"><span>0 = 0</span><span>posts on completion</span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">23:12</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>EFSA panel opinion · direct deposit — welfare of laying hens, space allowances</h3>
+                <span class="cost">$0.04</span>
+              </div>
+              <p class="src"><b>1 document</b> — EFSA Journal 24(8) · adopted 19 Aug, published 21 Aug</p>
+              <p class="prov">standing watch: regulatory opinions · efsa.europa.eu · public tier</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">1</span><span>cited to evidence → <span class="id">D-0137</span> Welfare-space compliance</span></div>
+              <p class="note">verdict re-graded — compliance cost raised, margin holds</p>
+              <div class="recon"><span>1 = 1</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <div class="dayfoot">
+            <span>Posted Fri 21 Aug — 33 acquired · 8 cited · 1 contradiction · 24 to holdings · $3.22 read</span>
+            <span>in balance <span class="ok">✓</span> · carried forward — 12,765 held · 2,487 evidence</span>
+          </div>
+        </section>
+
+        <!-- ······ Saturday 22 August ······ -->
+        <section class="day">
+          <div class="dayrule"><span class="daylabel">Saturday 22 August 2026</span><span class="ttag">· Today</span><span class="rline"></span></div>
+
+          <article class="entry">
+            <div class="et">03:58</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>Preprint watch · arXiv &amp; bioRxiv — standing queries, overnight pass</h3>
+                <span class="cost">$0.37</span>
+              </div>
+              <p class="src"><b>6 preprints</b> — q-bio.PE 3 · econ.GN 1 · eess.SY 2</p>
+              <p class="prov">standing queries QW-011…QW-014 · provisional tier until peer review posts</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">1</span><span>cited to evidence → <span class="id">D-0142</span> Heat-stress economics</span></div>
+              <div class="yrow"><span class="n">5</span><span>to holdings — provisional tier</span></div>
+              <div class="recon"><span>1 + 5 = 6</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">04:41</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>Sweep <span class="id">S-0446</span> complete · Ammonia scrubbing at layer-house scale</h3>
+                <span class="cost">$3.14</span>
+              </div>
+              <p class="src"><b>27 papers</b> — ScienceDirect 11 · Wiley 7 · NREL 5 · patents 4</p>
+              <p class="prov">commissioned 20 Aug by E. Voss · read 03:52–04:41</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">8</span><span>cited to evidence → <span class="id">D-0143</span> Ammonia capture as fertilizer feedstock</span></div>
+              <div class="yrow"><span class="n">1</span><span>contradiction logged — against <span class="id">CLM-2611</span> scrubber opex</span></div>
+              <div class="yrow"><span class="n">18</span><span>to holdings — no claim extracted</span></div>
+              <p class="note">CLM-2611 now holds two sourced sides — queued for adjudication</p>
+              <div class="recon"><span>8 + 1 + 18 = 27</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">05:30</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>USDA ERS · Feed Grains Database — weekly refresh</h3>
+                <span class="cost">$0.00</span>
+              </div>
+              <p class="src"><b>4 series</b> — corn · sorghum · soybean meal · DDGS</p>
+              <p class="prov">released 21 Aug · retrieved 05:30 · ers.usda.gov · public tier</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">4</span><span>posted to holdings — feed &amp; nutrition</span></div>
+              <p class="note">feed-cost baselines refreshed — 6 open dossiers re-priced</p>
+              <div class="recon"><span>4 = 4</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">05:52</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>Feedinfo · amino-acid spot assessments — daily</h3>
+                <span class="cost">$0.18</span>
+              </div>
+              <p class="src"><b>2 series</b> — L-lysine HCl EU · DL-methionine EU</p>
+              <p class="prov">assessed 22 Aug · retrieved 05:52 · feedinfo.com · licensed tier</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">2</span><span>posted to holdings — feed &amp; nutrition</span></div>
+              <p class="note"><span class="id">D-0139</span> Cage-free premium — margin narrowed 4.1% → 3.6%, verdict holds</p>
+              <div class="recon"><span>2 = 2</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <article class="entry">
+            <div class="et">06:14</div>
+            <div class="acq">
+              <div class="acq-top">
+                <h3>Overnight sweep <span class="id">S-0447</span> complete · Manure valorization — frass economics</h3>
+                <span class="cost">$4.12</span>
+              </div>
+              <p class="src"><b>43 papers</b> — PubMed 21 · bioRxiv 9 · ScienceDirect 13</p>
+              <p class="prov">self-commissioned 19 Aug from candidate C-0172 · read 04:58–06:14</p>
+            </div>
+            <div class="yld">
+              <div class="yrow"><span class="n">11</span><span>cited to evidence → <span class="id">D-0141</span> Frass as revenue · <span class="id">D-0138</span> Insect meal in layer rations</span></div>
+              <div class="yrow"><span class="n">2</span><span>contradictions logged — against <span class="id">CLM-2790</span> drying cost · <span class="id">CLM-2718</span> nitrogen retention</span></div>
+              <div class="yrow"><span class="n">1</span><span>candidate seeded — <span class="id">C-0181</span> On-site frass pelletizing → Pipeline intake</span></div>
+              <div class="yrow"><span class="n">29</span><span>to holdings — no claim extracted</span></div>
+              <div class="recon"><span>11 + 2 + 1 + 29 = 43</span><span>in balance <span class="ok">✓</span></span></div>
+            </div>
+          </article>
+
+          <div class="dayfoot">
+            <span>Posted Sat 22 Aug, to 06:14 — 82 acquired · 20 cited · 3 contradictions · 1 candidate · 58 to holdings · $7.81 read</span>
+            <span>in balance <span class="ok">✓</span> · stands at — 12,847 held · 2,507 evidence</span>
+          </div>
+        </section>
+      </section>
+
+      <!-- ============ RAIL ============ -->
+      <aside class="rail">
+
+        <section id="on-order">
+          <div class="rail-head">
+            <h2 class="seclabel">On order — commissioned reading</h2>
+            <span class="reg-meta">queue runs nightly · 02:00</span>
+          </div>
+
+          <div class="oo first">
+            <span class="pos">01</span>
+            <div>
+              <h4>Eggshell membrane recovery — pharma-grade markets <span class="id">S-0448</span></h4>
+              <p class="meta">R. Calloway · placed 21 Aug 18:05 · ≈55 papers · est $6.20</p>
+              <p class="stat">Reads tonight · Sun 02:00</p>
+            </div>
+          </div>
+
+          <div class="oo">
+            <span class="pos">02</span>
+            <div>
+              <h4>Photoperiod &amp; lay persistency — LED spectra <span class="id">S-0449</span></h4>
+              <p class="meta">self-commissioned from C-0176 · ≈38 papers · est $4.40</p>
+              <p class="stat">Queued · Mon 02:00</p>
+            </div>
+          </div>
+
+          <div class="oo">
+            <span class="pos">03</span>
+            <div>
+              <h4>Carbon-credit protocols for manure digestion <span class="id">S-0450</span></h4>
+              <p class="meta">E. Voss · placed 21 Aug · scope estimate ≈61 papers · est $7.05</p>
+              <p class="stat">Scoping — awaiting approval</p>
+            </div>
+          </div>
+
+          <p class="oo-foot">3 sweeps on order · ≈154 papers · $17.65 committed</p>
+
+          <a class="btn" href="#on-order">Commission a sweep</a>
+          <p class="btn-help">State the question. The machine scopes sources, estimates papers and cost, and posts both sides here when the reading completes.</p>
+        </section>
+
+        <section id="audit">
+          <div class="rail-head">
+            <h2 class="seclabel">The audit trail</h2>
+          </div>
+          <p class="audit-lede">Any balance opens back through its entries. One thread, pulled from this morning's register:</p>
+
+          <div class="chain">
+            <div class="cnode">
+              <div class="nl">Balance</div>
+              <div class="nc">Manure valorization · <b>148 claims in force</b></div>
+            </div>
+            <div class="cnode">
+              <div class="nl">Claim in force</div>
+              <div class="nc"><span class="quote">"Black-soldier-fly larvae convert layer manure to harvestable biomass at 11–14% dry-mass efficiency."</span><br><span class="id">CLM-2841</span> · in force since 06:14 today · cited at <span class="id">D-0141</span> §3.2</div>
+            </div>
+            <div class="cnode">
+              <div class="nl">Evidence record</div>
+              <div class="nc"><span class="q2">"Mean bioconversion across twelve trials was 12.3 ± 1.4% on a dry basis"</span> — Table 3, p. 7 · <span class="id">EV-4102</span> · extracted 06:11</div>
+            </div>
+            <div class="cnode">
+              <div class="nl">Source</div>
+              <div class="nc">Nakamura, T. et&nbsp;al. — <span class="q2">Mass balance of Hermetia illucens bioconversion on poultry manure.</span> J.&nbsp;Insects as Food &amp; Feed 12(2), 2026 · <span class="id">DOI 10.3920/JIFF-2026-0117</span> · peer-reviewed · tier 1</div>
+            </div>
+            <div class="cnode end">
+              <div class="nl">Register entry</div>
+              <div class="nc">Sweep <span class="id">S-0447</span> · Sat 22 Aug, 06:14 · paper 17 of 43 · read cost $0.09</div>
+            </div>
+          </div>
+
+          <p class="audit-foot">Four links, no gaps — <b>2,507 of 2,507</b> evidence records resolve to a ruled entry <span class="ok">✓</span> · audited continuously</p>
+        </section>
+
+      </aside>
+    </div>
+
+    <!-- ============ BALANCES BY DOMAIN ============ -->
+    <section class="balances" id="balances">
+      <div class="reg-head">
+        <h2 class="seclabel">Balances by domain — the foot of the register</h2>
+        <span class="reg-meta">every figure the sum of its ruled entries</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="l">Domain</th>
+            <th>Holdings</th>
+            <th>Evidence records</th>
+            <th>Claims in force</th>
+            <th>Contradictions open</th>
+            <th>Read cost · Aug</th>
+            <th>Last posting</th>
+            <th class="tc"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="l">Manure valorization</td>
+            <td>1,986</td><td>412</td><td>148</td><td>6</td><td>$31.20</td>
+            <td class="lp">06:14 today</td>
+            <td class="tc"><a class="trace" href="#audit">Trace →</a></td>
+          </tr>
+          <tr>
+            <td class="l">Feed &amp; nutrition</td>
+            <td>3,124</td><td>688</td><td>231</td><td>11</td><td>$27.15</td>
+            <td class="lp">05:52 today</td>
+            <td class="tc"><a class="trace" href="#audit">Trace →</a></td>
+          </tr>
+          <tr>
+            <td class="l">Flock health &amp; biosecurity</td>
+            <td>2,417</td><td>505</td><td>176</td><td>4</td><td>$19.42</td>
+            <td class="lp">03:58 today</td>
+            <td class="tc"><a class="trace" href="#audit">Trace →</a></td>
+          </tr>
+          <tr>
+            <td class="l">Housing, welfare &amp; environment</td>
+            <td>1,433</td><td>297</td><td>88</td><td>3</td><td>$9.83</td>
+            <td class="lp">04:41 today</td>
+            <td class="tc"><a class="trace" href="#audit">Trace →</a></td>
+          </tr>
+          <tr>
+            <td class="l">Energy &amp; water</td>
+            <td>1,209</td><td>214</td><td>61</td><td>2</td><td>$7.11</td>
+            <td class="lp">21 Aug · 16:44</td>
+            <td class="tc"><a class="trace" href="#audit">Trace →</a></td>
+          </tr>
+          <tr>
+            <td class="l">Markets &amp; policy</td>
+            <td>2,678</td><td>391</td><td>102</td><td>5</td><td>$12.61</td>
+            <td class="lp">21 Aug · 14:30</td>
+            <td class="tc"><a class="trace" href="#audit">Trace →</a></td>
+          </tr>
+          <tr class="total">
+            <td class="l">Register total — struck 06:14</td>
+            <td>12,847</td><td>2,507</td><td>806</td><td>31</td><td>$107.32</td>
+            <td class="lp">in balance <span class="ok">✓</span></td>
+            <td class="tc"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="bal-close">
+        <span>Nothing held that was not entered · nothing entered that cannot be traced</span>
+        <span>struck at 06:14, Saturday 22 August 2026</span>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<div class="footstrip">
+  <div class="container fs-inner">
+    <span class="fs-l"><span class="fs-label">Register stands at</span>12,847 held · 2,507 evidence records · 806 claims in force · 31 contradictions open · $107.32 read this month</span>
+    <span class="fs-r">in balance <span class="ok">✓</span> · audited 06:14 · Sat 22 Aug 2026</span>
+  </div>
+</div>
+
+<footer>
+  <p>Every claim sourced · every cost computed · every verdict recorded</p>
+</footer>
+
+</body>
+</html>

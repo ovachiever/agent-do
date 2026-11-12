@@ -146,7 +146,30 @@ def test_macos_static_commands() -> None:
         require(dictionary_payload["dictionary"]["counts"]["suites"] >= 1, f"expected suites: {dictionary_payload}")
 
 
+def test_run_has_no_default_deadline() -> None:
+    options = ops.parse_source_options(["--script", "return 1"])
+    require(options["timeout"] is None, f"run must not impose a default deadline: {options}")
+    options = ops.parse_source_options(["--script", "return 1", "--timeout", "600"])
+    require(options["timeout"] == 600.0, f"--timeout must reach the run path: {options}")
+
+
+def test_timeout_is_classified() -> None:
+    if platform.system() != "Darwin":
+        return
+    # A bare delay sends no AppleEvent to any app, so this runs without a live gate.
+    timed_out = ops.execute_script(source="delay 3", language="applescript", target=None, launch=False, timeout=1)
+    require(timed_out["automation"] == "timed_out", f"timeout must not read as unknown_error: {timed_out}")
+    require(timed_out["timeout_s"] == 1, f"payload must carry the deadline used: {timed_out}")
+    require(ops.run_exit_code(timed_out) == ops.EXIT_TIMEOUT, f"timeout must exit {ops.EXIT_TIMEOUT}")
+
+    finished = ops.execute_script(source="delay 1\nreturn 1", language="applescript", target=None, launch=False, timeout=None)
+    require(finished["ok"] is True and finished["timeout_s"] is None, f"unbounded run must finish: {finished}")
+    require(ops.run_exit_code(finished) == ops.EXIT_SUCCESS, "finished run must exit 0")
+
+
 def main() -> int:
+    test_run_has_no_default_deadline()
+    test_timeout_is_classified()
     test_sdef_parser()
     test_classifier()
     test_registry_routing()
