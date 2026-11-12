@@ -102,6 +102,9 @@ def native_bootstrap(agent_do: str, cwd: str | None, ask: str, root: str) -> boo
         return False
 
     auto_response = os.environ.get("AGENT_DO_BOOTSTRAP_AUTO_RESPONSE", "").strip().lower()
+    # Only a person who answered the dialog may be shown a second, blocking
+    # failure dialog; an auto-response is a script with nobody at the screen.
+    answered_by_person = auto_response not in ("bootstrap", "not_now")
     if auto_response == "bootstrap":
         response = "Bootstrap"
     elif auto_response == "not_now":
@@ -180,6 +183,11 @@ def native_bootstrap(agent_do: str, cwd: str | None, ask: str, root: str) -> boo
                     ],
                     check=False,
                 )
+                print(
+                    f"[agent-do bootstrap] FAILED for {project_label} (exit {run_exit}). Log: {log_file}",
+                    file=sys.stderr,
+                )
+            if run_exit != 0 and answered_by_person:
                 # Failure dialog with "Open log" option.
                 failure_message = (
                     f"agent-do bootstrap failed (exit {run_exit}) for {project_label}."
