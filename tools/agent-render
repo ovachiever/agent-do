@@ -33,6 +33,9 @@ DEPLOYS
   deploy show <svc> <deploy>    Deploy details
   deploy cancel <svc> <deploy>  Cancel in-progress deploy
   rollback <svc> <deploy>       Roll back to a prior deploy
+    deploy options: --clear-cache clears the build cache; a refusal by Render
+    is shown with exit 1 (no deploy created); 202 is reported as queued;
+    --commit is refused for cron jobs (Render does not support it)
 
 ONE-OFF JOBS
   jobs <svc>                    List one-off jobs
@@ -419,40 +422,87 @@ print(f\"Updated:  {svc.get('updatedAt', '')}\")
 }
 
 cmd_deploy() {
-    local name_or_id=""
-    local commit=""
-
+    local usage="Usage: agent-render deploy <service> [--commit SHA] [--clear-cache]"
+    local name_or_id="" commit="" clear_cache=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --commit|-c) commit="$2"; shift 2 ;;
-            *) name_or_id="$1"; shift ;;
+            --commit|-c)
+                if [[ $# -lt 2 || "$2" == -* ]]; then echo "Error: $1 needs a commit SHA" >&2; return 2; fi
+                commit="$2"; shift 2 ;;
+            --clear-cache) clear_cache=1; shift ;;
+            -*) echo "Error: unknown option '$1'" >&2; echo "$usage" >&2; return 2 ;;
+            *)
+                if [[ -n "$name_or_id" ]]; then echo "Error: one service at a time (got '$name_or_id' and '$1')" >&2; return 2; fi
+                name_or_id="$1"; shift ;;
         esac
     done
-
-    if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render deploy <service> [--commit SHA]"
-        return 1
+    if [[ -z "$name_or_id" ]]; then echo "$usage" >&2; return 2; fi
+    if [[ -n "$commit" && ! "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+        echo "Error: --commit takes a git SHA (7-40 hex characters), got '$commit'" >&2
+        return 2
     fi
 
     local sid
     sid=$(resolve_service "$name_or_id") || return 1
 
-    local body="{}"
+    # Render: commitId is "Not supported for cron jobs" (create-deploy spec).
     if [[ -n "$commit" ]]; then
-        body="{\"commitId\": \"$commit\"}"
+        local svc kind
+        svc=$(render_request_checked GET "/services/$sid") || return 1
+        kind=$(printf '%s' "$svc" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("type", ""))')
+        if [[ "$kind" == "cron_job" ]]; then
+            echo "Error: Render does not deploy cron jobs by commit (commitId is not supported for cron jobs)." >&2
+            echo "  Nothing was sent. Run 'agent-render deploy $name_or_id' to deploy the branch head." >&2
+            return 2
+        fi
     fi
 
-    local result
-    result=$(render_request POST "/services/$sid/deploys" "$body")
+    local body
+    body=$(python3 -c '
+import json, sys
+out = {}
+if sys.argv[1]: out["commitId"] = sys.argv[1]
+if sys.argv[2] == "1": out["clearCache"] = "clear"
+print(json.dumps(out))
+' "$commit" "$clear_cache")
 
-    echo "$result" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(f\"Deploy ID: {d.get('id', '')}\")
-print(f\"Status:    {d.get('status', '')}\")
-print(f\"Commit:    {d.get('commit', {}).get('id', 'latest')}\")
-print(f\"Created:   {d.get('createdAt', '')}\")
-"
+    local result
+    # $(...) keeps render_request_checked's RETURN trap out of this function.
+    result=$(render_request_checked POST "/services/$sid/deploys" "$body") || {
+        echo "No deploy was created for $name_or_id." >&2
+        return 1
+    }
+
+    printf '%s' "$result" | NAME="$name_or_id" OUT_JSON="${RENDER_JSON:-0}" python3 -c '
+import json, os, sys
+raw = sys.stdin.read()
+name = os.environ["NAME"]
+as_json = os.environ["OUT_JSON"] == "1"
+if not raw.strip():
+    # 202 Queued: Render accepted the deploy but returned no record yet.
+    if as_json:
+        print(json.dumps({"queued": True, "id": None}))
+    else:
+        print("Deploy queued: Render accepted it but returned no deploy record yet.")
+        print(f"  Follow it with: agent-render deploys {name}")
+    sys.exit(0)
+try:
+    d = json.loads(raw)
+except ValueError:
+    d = None
+if not isinstance(d, dict) or not d.get("id"):
+    print("Error: Render answered without a deploy record; no deploy is confirmed:", file=sys.stderr)
+    print(raw[:500], file=sys.stderr)
+    sys.exit(1)
+if as_json:
+    print(json.dumps(d, indent=2))
+    sys.exit(0)
+commit = (d.get("commit") or {}).get("id") or "branch head (resolved at build)"
+print("Deploy ID: " + d["id"])
+print("Status:    " + str(d.get("status") or ""))
+print("Commit:    " + commit)
+print("Created:   " + str(d.get("createdAt") or ""))
+'
 }
 
 cmd_deploys() {
