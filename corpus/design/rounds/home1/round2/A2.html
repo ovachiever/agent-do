@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* dark institution */
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --ink-mid:#B7B2A6;
+    --ink-dim:#948F81;
+    --rule:rgba(231,227,218,0.35);
+    --rule-soft:rgba(231,227,218,0.14);
+    --rule-faint:rgba(231,227,218,0.08);
+    --sage:#9CB08C;
+    --clay:#C17A52;
+    --sage-deep:#2e6b3f;
+    /* the single paper inset */
+    --paper:#F8F7F5;
+    --paper-ink:#262019;
+    --paper-muted:#6f6557;
+    --paper-hair:#dcd3c0;
+    /* type: five sizes on the page, 8px baseline */
+    --t-xs:12px; --lh-xs:16px;
+    --t-sm:14px; --lh-sm:24px;
+    --t-md:18px; --lh-md:32px;
+    --t-lg:28px; --lh-lg:32px;
+    --t-xl:56px; --lh-xl:64px;
+    --serif:'Source Serif 4',Georgia,serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    /* grid: 12 × 88 with 24 gutters = 1320; page padding 60; column starts every 112 from x=60
+       six-column river: 6 × 200 with 24 gutters = 1320; node centres at 160 · 384 · 608 · 832 · 1056 · 1280 */
+    --col:88px; --gut:24px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink)}
+  body{
+    width:1440px;margin:0 auto;
+    font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{padding:0 60px}
+  .g12{display:grid;grid-template-columns:repeat(12,var(--col));column-gap:var(--gut)}
+  .g6{display:grid;grid-template-columns:repeat(6,200px);column-gap:var(--gut)}
+  .lbl{display:block;font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:500}
+  .mono{font-family:var(--mono)}
+  .sage{color:var(--sage)}
+  .clay{color:var(--clay)}
+
+  /* ---------- nav strip ---------- */
+  .nav{display:flex;align-items:center;height:64px;border-bottom:1px solid var(--rule-soft)}
+  .brand{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);font-weight:600;letter-spacing:.02em;width:200px}
+  .rooms{display:flex;gap:32px;margin-left:24px}
+  .rooms a{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim)}
+  .rooms a:hover{color:var(--ink)}
+  .acts{margin-left:auto;display:flex;align-items:center;gap:32px}
+  .acts a{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}
+  .acts a.btn{border:1px solid var(--sage);color:var(--sage);padding:7px 15px}
+  .acts a:hover{color:var(--ink)}
+
+  /* ---------- record strip (monospace) ---------- */
+  .record{height:56px;align-items:center;border-bottom:1px solid var(--rule-soft);font-family:var(--mono)}
+  .record .lbl{grid-column:1 / span 2;color:var(--ink)}
+  .record .fig{font-size:var(--t-xs);line-height:var(--lh-sm);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);white-space:nowrap}
+  .record .fig b{font-family:var(--mono);font-size:var(--t-md);line-height:var(--lh-sm);letter-spacing:0;font-weight:500;color:var(--ink);margin-left:12px}
+  .record .f1{grid-column:3 / span 2}
+  .record .f2{grid-column:5 / span 2}
+  .record .f3{grid-column:7 / span 2}
+  .record .f4{grid-column:9 / span 2}
+
+  /* ---------- the opening: auction-lot serif ---------- */
+  .open{padding-top:96px}
+  .open .text{grid-column:1 / span 9}
+  .open h1{font-size:var(--t-xl);line-height:var(--lh-xl);font-weight:400;letter-spacing:-.012em;text-wrap:balance}
+  .open .second{margin-top:40px;font-style:italic;font-size:var(--t-md);line-height:var(--lh-md);color:var(--ink-mid);max-width:64ch}
+
+  /* ---------- the river: the primary instrument ---------- */
+  .river{margin-top:96px;border-top:1px solid var(--rule-soft);padding-top:64px}
+  .river .node{text-align:center}
+  .river .node .n{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;color:var(--ink-dim)}
+  .river .node .verb{margin-top:8px;font-family:var(--mono);font-size:var(--t-lg);line-height:var(--lh-lg);font-weight:700;color:var(--ink)}
+  .axis{display:block;width:1320px;height:80px;margin-top:16px}
+
+  /* ---------- the six reaches: paragraph + instrument + doorway ---------- */
+  .reach{margin-top:64px;border-top:1px solid var(--rule-faint);padding-top:56px}
+  .reach:first-of-type{margin-top:48px;border-top:none;padding-top:0}
+  .reach .mark{grid-column:1 / span 2}
+  .reach .mark .n{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;color:var(--ink-dim)}
+  .reach .mark .verb{margin-top:8px;font-family:var(--mono);font-size:var(--t-lg);line-height:var(--lh-lg);font-weight:700;color:var(--ink)}
+  .reach .mark .where{display:block;width:200px;height:16px;margin-top:16px}
+  .reach .body{grid-column:3 / span 6;font-size:var(--t-md);line-height:var(--lh-md);color:var(--ink)}
+  .reach .side{grid-column:10 / span 3}
+
+  .inst{position:relative;border:1px solid var(--rule-soft);padding:24px 16px;font-family:var(--mono);font-size:var(--t-sm);line-height:var(--lh-sm);color:var(--ink)}
+  .inst .corner{position:absolute;width:8px;height:8px}
+  .inst .corner.tl{top:-1px;left:-1px;border-top:1px solid var(--ink-dim);border-left:1px solid var(--ink-dim)}
+  .inst .corner.tr{top:-1px;right:-1px;border-top:1px solid var(--ink-dim);border-right:1px solid var(--ink-dim)}
+  .inst .corner.bl{bottom:-1px;left:-1px;border-bottom:1px solid var(--ink-dim);border-left:1px solid var(--ink-dim)}
+  .inst .corner.br{bottom:-1px;right:-1px;border-bottom:1px solid var(--ink-dim);border-right:1px solid var(--ink-dim)}
+  .inst .kv{display:grid;grid-template-columns:128px 56px 1fr;column-gap:8px;align-items:center;height:24px}
+  .inst .kv + .kv{margin-top:8px}
+  .inst .kv .k{font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);white-space:nowrap}
+  .inst .kv .v{text-align:right;color:var(--ink);white-space:nowrap}
+  .inst .kv.wide .v{grid-column:2 / span 2}
+  .inst .kv .v.sage{color:var(--sage)}
+  .inst .kv svg{display:block;width:100%;height:16px}
+  .inst .row{margin-top:16px}
+  .inst .row .k{display:block;font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:8px}
+  .inst .row svg{display:block;width:100%;height:auto}
+  .inst .line{margin-top:16px;color:var(--ink-mid)}
+
+  .door{display:flex;align-items:baseline;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--rule-soft)}
+  .door .room{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-sm);font-weight:600;color:var(--ink)}
+  .door .go{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--sage)}
+  .door .go:hover{color:var(--ink)}
+
+  /* ---------- the closing reach, with the one paper inset ---------- */
+  .close{margin-top:96px;border-top:1px solid var(--rule-soft);padding-top:64px}
+  .close .text{grid-column:3 / span 6;font-size:var(--t-md);line-height:var(--lh-md);color:var(--ink)}
+  .close .text p + p{margin-top:32px}
+  .paper{grid-column:10 / span 3;align-self:start;background:var(--paper);color:var(--paper-ink);padding:24px;text-align:center}
+  .paper .mast{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-sm);letter-spacing:.18em;text-indent:.18em;text-transform:uppercase}
+  .paper .rule{margin-top:16px;border-top:2px solid var(--paper-ink)}
+  .paper .rule::after{content:"";display:block;margin-top:2px;border-top:1px solid var(--paper-ink)}
+  .paper .ed{margin-top:16px;font-family:var(--serif);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.14em;text-indent:.14em;text-transform:uppercase;color:var(--paper-muted)}
+  .paper .score{margin-top:16px;padding:16px 0;border-top:1px solid var(--paper-hair);border-bottom:1px solid var(--paper-hair);display:grid;grid-template-columns:repeat(3,1fr)}
+  .paper .score .k{display:block;font-family:var(--serif);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--paper-muted)}
+  .paper .score .v{display:block;margin-top:8px;font-family:var(--serif);font-size:var(--t-sm);line-height:var(--lh-sm);font-weight:600;color:var(--paper-ink)}
+  .paper .score .v.verdict{color:var(--sage-deep);letter-spacing:.08em}
+  .paper .act{display:inline-block;margin-top:16px;font-family:var(--serif);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:var(--sage-deep);border-bottom:1px solid rgba(46,107,63,.35)}
+
+  /* ---------- the owner ---------- */
+  .owner{margin-top:96px;border-top:1px solid var(--rule-soft);padding-top:64px;padding-bottom:96px}
+  .owner .lbl{grid-column:1 / span 12;margin-bottom:40px}
+  .owner .text{grid-column:1 / span 8}
+  .owner h2{font-size:var(--t-xl);line-height:var(--lh-xl);font-weight:400;letter-spacing:-.012em}
+  .owner .rest{margin-top:40px;font-size:var(--t-md);line-height:var(--lh-md);color:var(--ink);max-width:60ch}
+  .owner .ops{grid-column:10 / span 3;display:flex;flex-direction:column;gap:16px;align-self:end}
+  .owner .ops a{display:block;text-align:center;font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.16em;text-transform:uppercase;font-weight:700;padding:15px 16px}
+  .owner .ops a.pri{background:var(--sage);color:var(--bg);border:1px solid var(--sage)}
+  .owner .ops a.sec{border:1px solid var(--rule);color:var(--ink-mid)}
+  .owner .ops a.sec:hover{color:var(--ink);border-color:var(--ink-mid)}
+
+  /* ---------- foot ---------- */
+  .foot{border-top:1px solid var(--rule-soft);height:64px;display:flex;align-items:center}
+  .foot span{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim)}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <nav class="nav" data-blk>
+    <a class="brand" href="#">Palingenesis</a>
+    <div class="rooms">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#">Engine Room</a>
+    </div>
+    <div class="acts">
+      <a href="#">Sign in</a>
+      <a class="btn" href="#">Open Today</a>
+    </div>
+  </nav>
+
+  <div class="record g12">
+    <span class="lbl">THE RECORD</span>
+    <span class="fig f1">Papers read<b>212</b></span>
+    <span class="fig f2">Claims scored<b>41</b></span>
+    <span class="fig f3">Interval coverage<b>84%</b></span>
+    <span class="fig f4">Positions<b>9</b></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- THE OPENING: paragraphs 1 and 2 -->
+  <section class="open g12">
+    <div class="text" data-blk>
+      <h1>Palingenesis turns published research into tested innovations, and it does the whole job itself: the reading, the inventing, the arguing, the simulating. You do the ruling.</h1>
+      <p class="second">Most R&amp;D still works one idea at a time. Somebody has a hunch, a team spends months on it, and at the end it gets graded on a single number, usually profit. Palingenesis doesn't work that way. It runs candidates by the hundred, overnight, and grades each of them on six things at once.</p>
+    </div>
+  </section>
+
+  <!-- THE RIVER: six nodes on one axis -->
+  <section class="river" data-blk>
+    <div class="g6">
+      <div class="node"><div class="n">01</div><div class="verb">reads</div></div>
+      <div class="node"><div class="n">02</div><div class="verb">breeds</div></div>
+      <div class="node"><div class="n">03</div><div class="verb">argues</div></div>
+      <div class="node"><div class="n">04</div><div class="verb">simulates</div></div>
+      <div class="node"><div class="n">05</div><div class="verb">ships</div></div>
+      <div class="node"><div class="n">06</div><div class="verb">learns</div></div>
+    </div>
+    <svg class="axis" viewBox="0 0 1320 80" role="img" aria-label="The lifecycle river: reads, breeds, argues, simulates, ships, learns; the last returns to the first">
+      <!-- the river -->
+      <line x1="100" y1="24" x2="1220" y2="24" stroke="var(--ink-mid)" stroke-width="1"/>
+      <!-- tail and head -->
+      <line x1="0" y1="24" x2="100" y2="24" stroke="var(--rule-soft)" stroke-width="1"/>
+      <line x1="1220" y1="24" x2="1320" y2="24" stroke="var(--rule-soft)" stroke-width="1"/>
+      <!-- nodes -->
+      <circle cx="100" cy="24" r="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="324" cy="24" r="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="548" cy="24" r="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="772" cy="24" r="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="996" cy="24" r="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="1220" cy="24" r="6" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <!-- what returns: learns feeds reads -->
+      <path d="M1220 30 V56 H100 V30" fill="none" stroke="var(--sage)" stroke-width="1" stroke-dasharray="2 4"/>
+      <circle cx="100" cy="30" r="2" fill="var(--sage)"/>
+    </svg>
+  </section>
+
+  <!-- 01 reads -->
+  <section class="reach g12">
+    <div class="mark" data-blk>
+      <div class="n">01</div>
+      <div class="verb">reads</div>
+      <svg class="where" viewBox="0 0 200 16" aria-hidden="true">
+        <line x1="8" y1="8" x2="192" y2="8" stroke="var(--rule-soft)" stroke-width="1"/>
+        <circle cx="8" cy="8" r="4" fill="var(--sage)"/>
+        <circle cx="44.8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="81.6" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="118.4" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="155.2" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="192" cy="8" r="2" fill="var(--ink-dim)"/>
+      </svg>
+    </div>
+    <p class="body" data-blk>The reading never stops, and it isn't picky. Papers, patents, preprints, field reports: whatever touches the problem gets read, including work from fields that have never cited each other. It doesn't summarize any of it. It takes each paper apart into findings, keeps every claim word for word with the passage it came from, and then starts connecting them. When enough findings point the same way it names the cluster and writes up what they agree on. When they thin out it logs a gap and scores it (how new, how feasible, how much it would matter, how risky), because a gap is where the next idea lives. And when it finds something proven on paper that nobody ever tried in the real world, it flags that specifically. Those are the best raw material there is.</p>
+    <div class="side" data-blk>
+      <div class="inst">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="kv"><span class="k">Papers</span><span class="v">212</span>
+          <svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="6" width="100" height="4" fill="var(--ink-mid)"/></svg></div>
+        <div class="kv"><span class="k">Findings</span><span class="v">45</span>
+          <svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="6" width="21.2" height="4" fill="var(--ink-mid)"/></svg></div>
+        <div class="kv"><span class="k">Evidence clusters</span><span class="v sage">3</span>
+          <svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="6" width="1.4" height="4" fill="var(--sage)"/></svg></div>
+      </div>
+      <div class="door"><span class="room">Library</span><a class="go" href="#">Open ▸</a></div>
+    </div>
+  </section>
+
+  <!-- 02 breeds -->
+  <section class="reach g12">
+    <div class="mark" data-blk>
+      <div class="n">02</div>
+      <div class="verb">breeds</div>
+      <svg class="where" viewBox="0 0 200 16" aria-hidden="true">
+        <line x1="8" y1="8" x2="192" y2="8" stroke="var(--rule-soft)" stroke-width="1"/>
+        <circle cx="8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="44.8" cy="8" r="4" fill="var(--sage)"/><circle cx="81.6" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="118.4" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="155.2" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="192" cy="8" r="2" fill="var(--ink-dim)"/>
+      </svg>
+    </div>
+    <p class="body" data-blk>From all of that it breeds. Not one idea but populations of them, generation after generation, using twelve strategies: borrow a mechanism from biology, invert the assumption everyone shares, relax the constraint everyone accepts, chase the edge case, cross two parents, split a lineage into species so the whole population stops converging on the same answer. Duplicates get caught before they cost anything. Every candidate keeps its parentage, so you can trace any idea back through its ancestors to the paper that started it.</p>
+    <div class="side" data-blk>
+      <div class="inst">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="kv"><span class="k">Generation</span><span class="v">12</span><span></span></div>
+        <div class="kv"><span class="k">Items</span><span class="v">40</span><span></span></div>
+        <div class="row">
+          <span class="k">Best fitness</span>
+          <svg viewBox="0 0 280 40" role="img" aria-label="Best fitness 0.91 on a 0 to 1 scale">
+            <line x1="4" y1="12" x2="276" y2="12" stroke="var(--rule)" stroke-width="1"/>
+            <line x1="4" y1="6" x2="4" y2="18" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="140" y1="6" x2="140" y2="18" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="276" y1="6" x2="276" y2="18" stroke="var(--ink-dim)" stroke-width="1"/>
+            <circle cx="251.5" cy="12" r="4" fill="var(--sage)"/>
+            <text x="251.5" y="36" text-anchor="middle" font-size="12" fill="var(--sage)" font-family="'JetBrains Mono',monospace">0.91</text>
+          </svg>
+        </div>
+      </div>
+      <div class="door"><span class="room">Pipeline</span><a class="go" href="#">Open ▸</a></div>
+    </div>
+  </section>
+
+  <!-- 03 argues -->
+  <section class="reach g12">
+    <div class="mark" data-blk>
+      <div class="n">03</div>
+      <div class="verb">argues</div>
+      <svg class="where" viewBox="0 0 200 16" aria-hidden="true">
+        <line x1="8" y1="8" x2="192" y2="8" stroke="var(--rule-soft)" stroke-width="1"/>
+        <circle cx="8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="44.8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="81.6" cy="8" r="4" fill="var(--sage)"/><circle cx="118.4" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="155.2" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="192" cy="8" r="2" fill="var(--ink-dim)"/>
+      </svg>
+    </div>
+    <p class="body" data-blk>Then the arguing starts, and it happens in three rounds. First a panel of experts scores the candidate on six dimensions at the same time: technical, economic, welfare, ecological, social, ethical. They have to reach consensus or reject it. Then twelve archetypal judges read the same case from twelve temperaments, the cautious one and the reckless one included. Last comes the thirteenth seat, Ophiuchus, whose only job is to find what everyone else missed: the hidden harm, the quiet bias, the side effect nobody priced in, the cost that lands on someone else. It holds a veto that nothing in the system can override. Every judge's reasoning is written down against the exact text they judged, so a verdict is always tied to the thing it judged.</p>
+    <div class="side" data-blk>
+      <div class="inst">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="kv"><span class="k">Council</span><span class="v">5 of 6</span>
+          <svg viewBox="0 0 100 16" aria-hidden="true">
+            <rect x="0" y="4" width="8" height="8" fill="var(--sage)"/><rect x="14" y="4" width="8" height="8" fill="var(--sage)"/><rect x="28" y="4" width="8" height="8" fill="var(--sage)"/><rect x="42" y="4" width="8" height="8" fill="var(--sage)"/><rect x="56" y="4" width="8" height="8" fill="var(--sage)"/><rect x="70.5" y="4.5" width="7" height="7" fill="none" stroke="var(--ink-dim)" stroke-width="1"/>
+          </svg></div>
+        <div class="kv wide"><span class="k">Verdict</span><span class="v sage">GREENLIGHT</span></div>
+        <div class="kv wide"><span class="k">Fitness</span><span class="v">87.4</span></div>
+      </div>
+      <div class="door"><span class="room">Dossier</span><a class="go" href="#">Open ▸</a></div>
+    </div>
+  </section>
+
+  <!-- 04 simulates -->
+  <section class="reach g12">
+    <div class="mark" data-blk>
+      <div class="n">04</div>
+      <div class="verb">simulates</div>
+      <svg class="where" viewBox="0 0 200 16" aria-hidden="true">
+        <line x1="8" y1="8" x2="192" y2="8" stroke="var(--rule-soft)" stroke-width="1"/>
+        <circle cx="8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="44.8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="81.6" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="118.4" cy="8" r="4" fill="var(--sage)"/><circle cx="155.2" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="192" cy="8" r="2" fill="var(--ink-dim)"/>
+      </svg>
+    </div>
+    <p class="body" data-blk>Whatever survives the council goes to a calibrated simulator before anyone builds anything. Physics and systems models get run against the scenarios that matter, with the economics alongside, and a second council of simulated agents argues over the results. The simulator keeps a public score of its own accuracy against what really happened afterward, and when it can't simulate something it says so instead of guessing.</p>
+    <div class="side" data-blk>
+      <div class="inst">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="kv"><span class="k">Hindcast skill</span><span class="v">0.82</span>
+          <svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="8" x2="100" y2="8" stroke="var(--rule)" stroke-width="1"/><rect x="0" y="6" width="82" height="4" fill="var(--ink-mid)"/></svg></div>
+        <div class="kv"><span class="k">90% coverage</span><span class="v">88%</span>
+          <svg viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="8" x2="100" y2="8" stroke="var(--rule)" stroke-width="1"/><rect x="0" y="6" width="88" height="4" fill="var(--ink-mid)"/><rect x="89.5" y="2" width="1" height="12" fill="var(--sage)"/></svg></div>
+      </div>
+      <div class="door"><span class="room">Simulation</span><a class="go" href="#">Open ▸</a></div>
+    </div>
+  </section>
+
+  <!-- 05 ships -->
+  <section class="reach g12">
+    <div class="mark" data-blk>
+      <div class="n">05</div>
+      <div class="verb">ships</div>
+      <svg class="where" viewBox="0 0 200 16" aria-hidden="true">
+        <line x1="8" y1="8" x2="192" y2="8" stroke="var(--rule-soft)" stroke-width="1"/>
+        <circle cx="8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="44.8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="81.6" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="118.4" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="155.2" cy="8" r="4" fill="var(--sage)"/><circle cx="192" cy="8" r="2" fill="var(--ink-dim)"/>
+      </svg>
+    </div>
+    <p class="body" data-blk>Survivors go to pilot, then launch, then scale. The claim that got approved stays frozen next to what the field actually measures, for as long as the product lives. A failure doesn't get quietly dropped either. It stays in the book, counted.</p>
+    <div class="side" data-blk>
+      <div class="inst">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="kv"><span class="k">Claims scored</span><span class="v">41</span><span></span></div>
+        <div class="kv"><span class="k">On or above</span><span class="v sage">29</span><span></span></div>
+        <div class="row">
+          <svg viewBox="0 0 280 16" role="img" aria-label="41 claims: 29 on or above, 12 below">
+            <g fill="var(--sage)">
+              <rect x="0" y="2" width="3" height="12"/><rect x="7" y="2" width="3" height="12"/><rect x="14" y="2" width="3" height="12"/><rect x="21" y="2" width="3" height="12"/><rect x="28" y="2" width="3" height="12"/><rect x="35" y="2" width="3" height="12"/><rect x="42" y="2" width="3" height="12"/><rect x="49" y="2" width="3" height="12"/><rect x="56" y="2" width="3" height="12"/><rect x="63" y="2" width="3" height="12"/><rect x="70" y="2" width="3" height="12"/><rect x="77" y="2" width="3" height="12"/><rect x="84" y="2" width="3" height="12"/><rect x="91" y="2" width="3" height="12"/><rect x="98" y="2" width="3" height="12"/><rect x="105" y="2" width="3" height="12"/><rect x="112" y="2" width="3" height="12"/><rect x="119" y="2" width="3" height="12"/><rect x="126" y="2" width="3" height="12"/><rect x="133" y="2" width="3" height="12"/><rect x="140" y="2" width="3" height="12"/><rect x="147" y="2" width="3" height="12"/><rect x="154" y="2" width="3" height="12"/><rect x="161" y="2" width="3" height="12"/><rect x="168" y="2" width="3" height="12"/><rect x="175" y="2" width="3" height="12"/><rect x="182" y="2" width="3" height="12"/><rect x="189" y="2" width="3" height="12"/><rect x="196" y="2" width="3" height="12"/>
+            </g>
+            <g fill="var(--clay)">
+              <rect x="203" y="2" width="3" height="12"/><rect x="210" y="2" width="3" height="12"/><rect x="217" y="2" width="3" height="12"/><rect x="224" y="2" width="3" height="12"/><rect x="231" y="2" width="3" height="12"/><rect x="238" y="2" width="3" height="12"/><rect x="245" y="2" width="3" height="12"/><rect x="252" y="2" width="3" height="12"/><rect x="259" y="2" width="3" height="12"/><rect x="266" y="2" width="3" height="12"/><rect x="273" y="2" width="3" height="12"/><rect x="280" y="2" width="0" height="12"/>
+            </g>
+          </svg>
+        </div>
+        <div class="kv" style="margin-top:16px"><span class="k">Coverage</span><span class="v">84%</span><span></span></div>
+      </div>
+      <div class="door"><span class="room">Portfolio</span><a class="go" href="#">Open ▸</a></div>
+    </div>
+  </section>
+
+  <!-- 06 learns -->
+  <section class="reach g12">
+    <div class="mark" data-blk>
+      <div class="n">06</div>
+      <div class="verb">learns</div>
+      <svg class="where" viewBox="0 0 200 16" aria-hidden="true">
+        <line x1="8" y1="8" x2="192" y2="8" stroke="var(--rule-soft)" stroke-width="1"/>
+        <circle cx="8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="44.8" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="81.6" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="118.4" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="155.2" cy="8" r="2" fill="var(--ink-dim)"/><circle cx="192" cy="8" r="4" fill="var(--sage)"/>
+      </svg>
+    </div>
+    <p class="body" data-blk>Every outcome changes what the machine reads and believes next. Kept, beaten, missed, failed, it all feeds back: which papers it trusts, which strategies it breeds from, how tightly it holds its own alignment when the population starts to drift, how much it believes its own simulator. It remembers all of it, every candidate, every verdict, every cycle, forever.</p>
+    <div class="side" data-blk>
+      <div class="inst">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="kv"><span class="k">Wheels</span><span class="v">6</span>
+          <svg viewBox="0 0 100 16" aria-hidden="true">
+            <circle cx="5" cy="8" r="4" fill="none" stroke="var(--ink-mid)" stroke-width="1"/><circle cx="19" cy="8" r="4" fill="none" stroke="var(--ink-mid)" stroke-width="1"/><circle cx="33" cy="8" r="4" fill="none" stroke="var(--ink-mid)" stroke-width="1"/><circle cx="47" cy="8" r="4" fill="none" stroke="var(--ink-mid)" stroke-width="1"/><circle cx="61" cy="8" r="4" fill="none" stroke="var(--ink-mid)" stroke-width="1"/><circle cx="75" cy="8" r="4" fill="none" stroke="var(--ink-mid)" stroke-width="1"/>
+          </svg></div>
+        <div class="kv"><span class="k">Positions</span><span class="v">9</span><span></span></div>
+        <p class="line">every order logged on the clock</p>
+      </div>
+      <div class="door"><span class="room">Engine Room</span><a class="go" href="#">Open ▸</a></div>
+    </div>
+  </section>
+
+  <!-- THE CLOSING: paragraphs 9 and 10, with the Today edition beside them -->
+  <section class="close g12">
+    <div class="text" data-blk>
+      <p>Generations run overnight and the council sits twice a day. Every order you give it is logged on the clock, and nothing is ever deleted.</p>
+      <p>It isn't built for one industry. The engine stays the same; the literature it reads and what its judges know get fitted to whatever field you point it at, and so do the simulator's models.</p>
+    </div>
+    <aside class="paper" data-blk>
+      <div class="mast">Palingenesis</div>
+      <div class="rule" aria-hidden="true"></div>
+      <div class="ed">Today</div>
+      <div class="score">
+        <span><span class="k">Council</span><span class="v">5 of 6</span></span>
+        <span><span class="k">Verdict</span><span class="v verdict">Greenlight</span></span>
+        <span><span class="k">Fitness</span><span class="v">87.4</span></span>
+      </div>
+      <a class="act" href="#">Open Today →</a>
+    </aside>
+  </section>
+
+  <!-- THE OWNER: paragraph 11 and the two actions -->
+  <section class="owner g12">
+    <span class="lbl">THE OWNER</span>
+    <div class="text" data-blk>
+      <h2>You decide.</h2>
+      <p class="rest">The machine does the reading and the breeding, the judging and the modeling. It keeps its own books, too. You look at the winners, check the receipts, and rule.</p>
+    </div>
+    <div class="ops" data-blk>
+      <a class="sec" href="#">Sign in</a>
+      <a class="pri" href="#">Open Today</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <div class="foot" data-blk><span>Palingenesis</span></div>
+</footer>
+
+</body>
+</html>

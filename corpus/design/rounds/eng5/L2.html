@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --flow:rgba(231,227,218,0.45);
+    --ctl:rgba(231,227,218,0.35);
+    --sage:hsl(158,30%,55%);
+    --clay:#C98A6B;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{min-width:1440px;color:var(--ink);font-family:var(--sans);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+  .page{width:1376px;margin:0 auto;padding-bottom:26px}
+
+  /* ---------- shared ---------- */
+  .lab{font-family:var(--sans);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+  .mono{font-family:var(--mono)}
+  .fig{border-bottom:1px dotted rgba(231,227,218,.38);cursor:help}
+  .sage{color:var(--sage)}
+  .clay{color:var(--clay)}
+  .mut{color:var(--mut)}
+  .shead{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 10px}
+  .src{font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ---------- nav ---------- */
+  nav{height:54px;display:flex;align-items:center;gap:28px;border-bottom:1px solid var(--hair)}
+  .brand{font-family:var(--serif);font-size:18px;letter-spacing:.04em;color:var(--ink);margin-right:8px}
+  nav a{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;color:var(--mut);padding:19px 0 17px;border-bottom:2px solid transparent}
+  nav a.on{color:var(--sage);border-bottom-color:var(--sage)}
+  .clock{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .clock b{color:var(--ink);font-weight:400}
+
+  /* ---------- lede ---------- */
+  .lede{margin:20px 0 6px;font-family:var(--serif);font-size:21px;line-height:1.5;color:var(--ink);max-width:1220px}
+  .ledesub{font-family:var(--mono);font-size:12px;color:var(--mut);margin:6px 0 22px}
+
+  /* ---------- the line ---------- */
+  .g{display:grid;grid-template-columns:repeat(5,1fr 60px) 1fr}
+  .legend{display:flex;gap:18px;align-items:center;font-size:12px;color:var(--mut)}
+  .legend .sw{display:inline-block;vertical-align:middle;margin-right:6px}
+  .sw-flow{width:18px;border-top:1px solid var(--flow)}
+  .sw-ctl{width:18px;border-top:1px dashed var(--ctl)}
+  .sw-clay{width:8px;height:8px;border:1px solid var(--clay)}
+
+  .decknodes{position:relative;align-items:center;min-height:88px}
+  .decknodes::before{content:'';position:absolute;left:0;right:0;top:50%;border-top:1px dashed var(--ctl)}
+  .dnode{position:relative;z-index:2;background:var(--bg);border:1px dashed var(--ctl);padding:8px 11px;font-size:12px;color:var(--mut);line-height:1.5}
+  .dnode .dl{font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-size:12px;color:var(--mut)}
+  .dnode .dv{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .n-feeds{grid-column:1}
+  .n-clock{grid-column:5/8;text-align:center}
+  .n-clock .big{font-family:var(--mono);font-size:20px;color:var(--sage);line-height:1.3}
+  .n-owner{grid-column:11}
+
+  .drops{height:66px}
+  .dcell{position:relative}
+  .dcell.tick::before{content:'';position:absolute;left:50%;top:0;bottom:0;border-left:1px dashed var(--ctl)}
+  .dcell.data::before{content:'';position:absolute;left:50%;top:0;bottom:0;border-left:1px solid var(--flow)}
+  .dcell svg{position:absolute;left:50%;transform:translateX(-50%)}
+  .dcell .cv{position:absolute;left:calc(50% + 8px);top:4px;font-family:var(--mono);font-size:12px;white-space:nowrap;color:var(--ink)}
+  .dcell .cv i{font-style:normal;color:var(--mut)}
+  .dcell .cv.mid{top:24px}
+  .pin{position:absolute;top:24px;left:calc(50% + 12px);z-index:3;background:var(--bg);border:1px solid rgba(201,138,107,.6);padding:3px 8px;font-family:var(--mono);font-size:12px;line-height:1.45;color:var(--clay);white-space:nowrap}
+  .pin::before{content:'';position:absolute;left:-13px;top:50%;width:12px;height:1px;background:rgba(201,138,107,.6)}
+
+  .st{border:1px solid var(--hair);background:rgba(231,227,218,0.03);padding:10px 12px;display:flex;flex-direction:column;gap:5px}
+  .st.run{border-color:rgba(106,175,149,.5)}
+  .strow{display:flex;justify-content:space-between;align-items:baseline}
+  .sid{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .chip.run{color:var(--sage)}
+  .sname{font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink)}
+  .sjob{font-size:12px;line-height:1.45;color:var(--mut);min-height:34px}
+  .sbig{font-size:26px;font-weight:600;line-height:1.1;color:var(--ink)}
+  .sunit{font-size:12px;color:var(--mut)}
+  .ssrc{font-family:var(--mono);font-size:12px;color:var(--fnt0,var(--mut));margin-top:2px}
+  .conn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+  .conn .cnt{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .conn .u{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .acts{margin-top:7px}
+  .act{padding:0 12px;font-family:var(--mono);font-size:12px;color:var(--mut);line-height:1.5}
+  .act .k{font-weight:600;letter-spacing:.1em;color:var(--mut);opacity:.85}
+  .act b{font-weight:400;color:var(--ink)}
+
+  /* ---------- ledger ---------- */
+  .ledger{margin-top:26px}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);text-align:left;padding:0 10px 7px 0;border-bottom:1px solid var(--hair);white-space:nowrap}
+  th.r,td.r{text-align:right}
+  td{font-size:13px;line-height:1.5;vertical-align:top;padding:9px 10px 9px 0;border-bottom:1px solid var(--hair);color:var(--ink)}
+  td .d{color:var(--mut)}
+  td.id,.tmono{font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap}
+  td .svc{font-weight:600}
+  .num{white-space:nowrap}
+  .bar{position:relative;height:6px;border:1px solid var(--hair);margin-top:6px;width:150px}
+  .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--sage)}
+  .bar em{position:absolute;left:71%;top:-3px;bottom:-3px;width:1px;background:rgba(231,227,218,.55)}
+  tr.tot td{border-bottom:none;border-top:1px solid rgba(231,227,218,.28);font-weight:600}
+  tr.tot td .d{font-weight:400}
+  .method{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:9px}
+
+  /* ---------- rails ---------- */
+  .rails{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:26px}
+  .rail{border:1px solid var(--hair);padding:14px 16px 15px}
+  .rail .shead{margin-bottom:12px}
+  .bigrow{display:flex;align-items:baseline;gap:12px}
+  .bignum{font-family:var(--mono);font-size:20px;color:var(--ink)}
+  .facts{font-size:12px;color:var(--mut);line-height:1.7;margin-top:10px}
+  .facts b{font-weight:400;color:var(--ink);font-family:var(--mono)}
+  .dots{display:flex;gap:7px;margin:14px 0 24px}
+  .dw{position:relative;width:10px;height:10px}
+  .d10{width:10px;height:10px;border-radius:50%}
+  .don{background:var(--sage)}
+  .dnext{border:1px solid var(--sage)}
+  .doff{border:1px solid rgba(231,227,218,.25)}
+  .dl{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap}
+  .dl.s{color:var(--sage)}
+  .suspend{display:flex;gap:14px;align-items:flex-start;border-top:1px solid var(--hair);margin-top:13px;padding-top:13px}
+  .sbtn{flex:none;background:transparent;border:1px solid rgba(231,227,218,.6);color:var(--ink);font-family:var(--sans);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:14px 18px;cursor:pointer}
+  .clause{font-size:12px;line-height:1.55;color:var(--mut)}
+  .stanza{margin-bottom:13px}
+  .stanza .lab{display:block;margin-bottom:4px}
+  .stanza .v{font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--mut)}
+  .stanza .v b{font-weight:400;color:var(--ink)}
+  .bfbar{position:relative;height:6px;border:1px solid var(--hair);margin:7px 0 6px}
+  .bfbar i{position:absolute;left:0;top:0;bottom:0;width:87.3%;background:var(--sage)}
+  .inc{display:grid;grid-template-columns:48px 1fr 36px;gap:0 8px;padding:8px 0;border-bottom:1px solid var(--hair)}
+  .inc:first-of-type{padding-top:2px}
+  .inc .t{font-family:var(--mono);font-size:12px;color:var(--clay)}
+  .inc .w{font-size:12px;line-height:1.5;color:var(--ink)}
+  .inc .a{font-size:12px;line-height:1.5;color:var(--mut)}
+  .inc .m{font-family:var(--mono);font-size:12px;color:var(--ink);text-align:right}
+  .incfoot{font-size:12px;color:var(--mut);line-height:1.6;margin-top:9px}
+  .incfoot b{font-weight:400;color:var(--ink);font-family:var(--mono)}
+
+  footer{display:flex;justify-content:space-between;margin-top:26px;padding-top:13px;border-top:1px solid var(--hair);font-family:var(--mono);font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav>
+    <span class="brand">Palingenesis</span>
+    <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a class="on" href="#">Engine&nbsp;Room</a>
+    <span class="clock">2026-08-22 · <b>14:52:07 CT</b> · engine v0.9.4</span>
+  </nav>
+
+  <p class="lede">All six services healthy through <span class="fig" title="scheduler/ticks.log — cycles 1–10 sealed, 10 of 10 on-time">10 clean cycles</span>: <span class="fig" title="ledger/2026-08.csv Σ rows L3–L8 · verified 14:52:07">$247.12</span> of the <span class="fig" title="config/caps.yaml — August total cap">$500.00</span> August cap is spent against <span class="fig" title="day 22 of 31 = 71.0% of August elapsed">71.0%</span> of the month elapsed, projected close <span class="fig" title="projection = 247.12 ÷ 22 days × 31 days">$348.22</span>, and cycle <span class="fig" title="scheduler/ticks.log — next tick">11 of 16</span> fires at <span class="fig" title="scheduler/ticks.log — cadence 90 min from 00:30:00">15:30:00</span>.</p>
+  <p class="ledesub">as of 14:52:07 CT · every dotted figure drills to its source line · ledger verified 14:52:07</p>
+
+  <!-- ================= THE LINE ================= -->
+  <section>
+    <div class="shead">
+      <span class="lab">The Line — cycle 10 sealed 14:08:12</span>
+      <span class="legend">
+        <span><span class="sw sw-flow"></span>data flow · count = today</span>
+        <span><span class="sw sw-ctl"></span>control tick · 90-min deck</span>
+        <span><span class="sw sw-clay"></span>clay pin = exception · action attached</span>
+      </span>
+    </div>
+
+    <!-- control deck -->
+    <div class="g decknodes">
+      <div class="dnode n-feeds">
+        <span class="dl">In · Feeds ×6</span><br>
+        <span class="dv"><span class="fig" title="feeds.log c1–c10 · 6 feeds; 2 AGRIS pulls failed → incident 13:33">142 docs</span> today</span><br>
+        USDA 31 · FAO 24 · <span class="clay">AGRIS 18</span> · arXiv 39 · USPTO 12 · trade 18
+      </div>
+      <div class="dnode n-clock">
+        <span class="dl">Cycle clock</span><br>
+        <span class="big fig" title="scheduler/ticks.log — tick 11 of 16, cadence 90 min">15:30:00</span><br>
+        cycle <span class="dv">11</span> of <span class="dv">16</span> · T−<span class="dv">37:53</span> · 90-min cadence
+      </div>
+      <div class="dnode n-owner">
+        <span class="dl">Out · Owner</span><br>
+        <span class="dv">2 briefs</span> sent today<br>
+        08:00 · 12:30 · <span class="sage">17:00 next</span> · 21:30
+      </div>
+    </div>
+
+    <!-- drops + pins -->
+    <div class="g drops">
+      <div class="dcell data">
+        <span class="cv">142 <i>docs</i></span>
+        <span class="pin">13:33 · AGRIS timeout ×2<br>→ retry at 15:30 tick</span>
+        <svg width="10" height="6" style="bottom:1px" viewBox="0 0 10 6"><path d="M1 1 L5 5 L9 1" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+      </div>
+      <div></div>
+      <div class="dcell tick"></div>
+      <div></div>
+      <div class="dcell tick"></div>
+      <div></div>
+      <div class="dcell tick">
+        <span class="pin">09:41 · run 22 diverged<br>→ requeued · passed 09:52</span>
+      </div>
+      <div></div>
+      <div class="dcell tick"></div>
+      <div></div>
+      <div class="dcell data">
+        <span class="cv mid">2 <i>delivered</i></span>
+        <svg width="10" height="6" style="top:1px" viewBox="0 0 10 6"><path d="M1 5 L5 1 L9 5" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+      </div>
+    </div>
+
+    <!-- stations -->
+    <div class="g">
+      <div class="st">
+        <div class="strow"><span class="sid">RDR-01</span><span class="chip">○ IDLE · 14:02</span></div>
+        <div class="sname">Reader</div>
+        <div class="sjob">pulls and parses field research</div>
+        <div class="sbig"><span class="fig" title="rdr.jsonl c1–c10 · parse_ok count">128</span></div>
+        <div class="sunit">docs parsed · 14 rejected</div>
+        <div class="ssrc mut">log rdr.jsonl</div>
+      </div>
+      <div class="conn">
+        <span class="cnt fig" title="flow.log — Reader→Scout handoffs, c1–c10">128</span>
+        <svg width="60" height="8" viewBox="0 0 60 8"><line x1="0" y1="4" x2="52" y2="4" stroke="rgba(231,227,218,0.45)" stroke-width="1"/><path d="M52 1 L58 4 L52 7" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+        <span class="u">docs</span>
+      </div>
+      <div class="st">
+        <div class="strow"><span class="sid">SCT-02</span><span class="chip">○ IDLE · 14:04</span></div>
+        <div class="sname">Scout</div>
+        <div class="sjob">ranks parsed work, proposes ideas</div>
+        <div class="sbig"><span class="fig" title="sct.jsonl c1–c10 · proposals filed">9</span></div>
+        <div class="sunit">ideas proposed · median 0.62</div>
+        <div class="ssrc mut">log sct.jsonl</div>
+      </div>
+      <div class="conn">
+        <span class="cnt fig" title="flow.log — Scout→Council handoffs, c1–c10">9</span>
+        <svg width="60" height="8" viewBox="0 0 60 8"><line x1="0" y1="4" x2="52" y2="4" stroke="rgba(231,227,218,0.45)" stroke-width="1"/><path d="M52 1 L58 4 L52 7" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+        <span class="u">ideas</span>
+      </div>
+      <div class="st">
+        <div class="strow"><span class="sid">CNL-03</span><span class="chip">○ IDLE · 14:08</span></div>
+        <div class="sname">Council</div>
+        <div class="sjob">argues each idea, records verdict</div>
+        <div class="sbig"><span class="fig" title="verdicts/0822 · status=advanced">3</span></div>
+        <div class="sunit">advanced of 9 heard</div>
+        <div class="ssrc mut">log cnl.jsonl</div>
+      </div>
+      <div class="conn">
+        <span class="cnt fig" title="flow.log — Council→Simulator handoffs, c1–c10">3</span>
+        <svg width="60" height="8" viewBox="0 0 60 8"><line x1="0" y1="4" x2="52" y2="4" stroke="rgba(231,227,218,0.45)" stroke-width="1"/><path d="M52 1 L58 4 L52 7" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+        <span class="u">advanced</span>
+      </div>
+      <div class="st run">
+        <div class="strow"><span class="sid">SIM-04</span><span class="chip run">● RUNNING · 14:08</span></div>
+        <div class="sname">Simulator</div>
+        <div class="sjob">tests advanced ideas on farm models</div>
+        <div class="sbig"><span class="fig" title="runs/0822 · status=done">46</span></div>
+        <div class="sunit">runs done · 2 running</div>
+        <div class="ssrc mut">log sim.jsonl</div>
+      </div>
+      <div class="conn">
+        <span class="cnt fig" title="flow.log — Simulator→Archivist run records, c1–c10">46</span>
+        <svg width="60" height="8" viewBox="0 0 60 8"><line x1="0" y1="4" x2="52" y2="4" stroke="rgba(231,227,218,0.45)" stroke-width="1"/><path d="M52 1 L58 4 L52 7" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+        <span class="u">runs</span>
+      </div>
+      <div class="st">
+        <div class="strow"><span class="sid">ARC-05</span><span class="chip">○ IDLE · 14:41</span></div>
+        <div class="sname">Archivist</div>
+        <div class="sjob">writes every record to the library</div>
+        <div class="sbig"><span class="fig" title="arc.jsonl — 194 records + 10 cycle seals">204</span></div>
+        <div class="sunit">writes · 0 failed</div>
+        <div class="ssrc mut">log arc.jsonl</div>
+      </div>
+      <div class="conn">
+        <span class="cnt fig" title="flow.log — Archivist→Courier brief packs, c1–c10">2</span>
+        <svg width="60" height="8" viewBox="0 0 60 8"><line x1="0" y1="4" x2="52" y2="4" stroke="rgba(231,227,218,0.45)" stroke-width="1"/><path d="M52 1 L58 4 L52 7" fill="none" stroke="rgba(231,227,218,0.45)" stroke-width="1"/></svg>
+        <span class="u">briefs</span>
+      </div>
+      <div class="st">
+        <div class="strow"><span class="sid">COU-06</span><span class="chip">○ IDLE · 12:31</span></div>
+        <div class="sname">Courier</div>
+        <div class="sjob">packs and delivers owner briefs</div>
+        <div class="sbig"><span class="fig" title="cou.jsonl · delivered, 0 bounced">2</span></div>
+        <div class="sunit">briefs delivered · next 17:00</div>
+        <div class="ssrc mut">log cou.jsonl</div>
+      </div>
+    </div>
+
+    <!-- last act row -->
+    <div class="g acts">
+      <div class="act"><span class="k">LAST</span> <b>14:02</b> · parsed salinity field study</div>
+      <div></div>
+      <div class="act"><span class="k">LAST</span> <b>14:04</b> · proposed C-2214 drip retrofit</div>
+      <div></div>
+      <div class="act"><span class="k">LAST</span> <b>14:07</b> · advanced C-2214 four to one</div>
+      <div></div>
+      <div class="act"><span class="k">LAST</span> <b>14:39</b> · finished run 46 of 48</div>
+      <div></div>
+      <div class="act"><span class="k">LAST</span> <b>14:41</b> · wrote 12 run records</div>
+      <div></div>
+      <div class="act"><span class="k">LAST</span> <b>12:31</b> · delivered midday brief #394</div>
+    </div>
+  </section>
+
+  <!-- ================= LEDGER ================= -->
+  <section class="ledger">
+    <div class="shead">
+      <span class="lab">Service Ledger — August caps</span>
+      <span class="src">src ledger/2026-08.csv · meter api-usage/daily.json · caps config/caps.yaml</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Service · Job</th><th>State · Since · Up</th><th>Last acts</th><th>Today's numbers</th>
+          <th class="r">$ Today</th><th>Aug $ vs cap</th><th class="r">Pace ±pts</th><th class="r">Proj close</th><th>Src</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="id">RDR-01</td>
+          <td><span class="svc">Reader</span><br><span class="d">pulls and parses field research</span></td>
+          <td class="tmono">○ IDLE · 14:02<br>up 3d 7h</td>
+          <td class="tmono">14:02 parsed salinity study a7f3<br>14:00 pulled 11 docs (c10)</td>
+          <td><span class="num">142 in · 128 parsed · 14 rejected</span><br><span class="d">9 dupe · 3 paywall · 2 malformed</span></td>
+          <td class="r num">$1.87</td>
+          <td><span class="num">$41.20 <span class="d">/ $80.00 · 51.5%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:51.5%"></i><em></em></div></td>
+          <td class="r num">−19.5 <span class="d">under</span></td>
+          <td class="r num">$58.05</td>
+          <td class="tmono">rdr.jsonl · L3</td>
+        </tr>
+        <tr>
+          <td class="id">SCT-02</td>
+          <td><span class="svc">Scout</span><br><span class="d">ranks parsed work, proposes ideas</span></td>
+          <td class="tmono">○ IDLE · 14:04<br>up 3d 7h</td>
+          <td class="tmono">14:04 proposed C-2214 (0.71)<br>14:03 ranked 12 fresh docs</td>
+          <td><span class="num">128 read · 37 shortlisted · 9 proposed</span><br><span class="d">score floor 0.40 · median 0.62</span></td>
+          <td class="r num">$1.31</td>
+          <td><span class="num">$28.77 <span class="d">/ $60.00 · 48.0%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:48%"></i><em></em></div></td>
+          <td class="r num">−23.0 <span class="d">under</span></td>
+          <td class="r num">$40.54</td>
+          <td class="tmono">sct.jsonl · L4</td>
+        </tr>
+        <tr>
+          <td class="id">CNL-03</td>
+          <td><span class="svc">Council</span><br><span class="d">argues each idea, records verdict</span></td>
+          <td class="tmono">○ IDLE · 14:08<br>up 22h 12m · restart 08-21 16:40</td>
+          <td class="tmono">14:07 advanced C-2214 4–1<br>14:06 declined C-2213 water cost</td>
+          <td><span class="num">9 heard · 3 advanced · 5 declined · 1 deferred</span><br><span class="d">avg hearing 4m 06s</span></td>
+          <td class="r num">$3.06</td>
+          <td><span class="num">$67.41 <span class="d">/ $120.00 · 56.2%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:56.2%"></i><em></em></div></td>
+          <td class="r num">−14.8 <span class="d">under</span></td>
+          <td class="r num">$94.99</td>
+          <td class="tmono">cnl.jsonl · L5</td>
+        </tr>
+        <tr>
+          <td class="id">SIM-04</td>
+          <td><span class="svc">Simulator</span><br><span class="d">tests advanced ideas on farm models</span></td>
+          <td class="tmono"><span class="sage">● RUNNING · 14:08</span><br>up 3d 7h</td>
+          <td class="tmono">14:39 run 46 passed, yield +8.2%<br>14:08 started C-2214 batch (16)</td>
+          <td><span class="num">48 scheduled · 46 done · 2 running</span><br><span class="d">1 requeued (run 22) · avg 2m 24s</span></td>
+          <td class="r num">$3.82</td>
+          <td><span class="num">$84.03 <span class="d">/ $150.00 · 56.0%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:56%"></i><em></em></div></td>
+          <td class="r num">−15.0 <span class="d">under</span></td>
+          <td class="r num">$118.41</td>
+          <td class="tmono">sim.jsonl · L6</td>
+        </tr>
+        <tr>
+          <td class="id">ARC-05</td>
+          <td><span class="svc">Archivist</span><br><span class="d">writes every record to the library</span></td>
+          <td class="tmono">○ IDLE · 14:41<br>up 3d 7h</td>
+          <td class="tmono">14:41 wrote 12 run records<br>14:08 sealed cycle 10 (a41f2c9)</td>
+          <td><span class="num">194 records · 10 cycle seals · 0 failed</span><br><span class="d">archive now 18,342</span></td>
+          <td class="r num">$0.44</td>
+          <td><span class="num">$9.61 <span class="d">/ $30.00 · 32.0%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:32%"></i><em></em></div></td>
+          <td class="r num">−39.0 <span class="d">under</span></td>
+          <td class="r num">$13.54</td>
+          <td class="tmono">arc.jsonl · L7</td>
+        </tr>
+        <tr>
+          <td class="id">COU-06</td>
+          <td><span class="svc">Courier</span><br><span class="d">packs and delivers owner briefs</span></td>
+          <td class="tmono">○ IDLE · 12:31<br>up 3d 7h</td>
+          <td class="tmono">12:31 delivered brief #394<br>08:01 delivered brief #393</td>
+          <td><span class="num">2 delivered · 0 bounced</span><br><span class="d">next brief 17:00 · then 21:30</span></td>
+          <td class="r num">$0.73</td>
+          <td><span class="num">$16.10 <span class="d">/ $60.00 · 26.8%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:26.8%"></i><em></em></div></td>
+          <td class="r num">−44.2 <span class="d">under</span></td>
+          <td class="r num">$22.69</td>
+          <td class="tmono">cou.jsonl · L8</td>
+        </tr>
+        <tr class="tot">
+          <td class="id">Σ</td>
+          <td>Six services<br><span class="d">10 cycles today</span></td>
+          <td class="tmono">1 running · 5 idle</td>
+          <td class="tmono">last seal 14:08:12</td>
+          <td><span class="num">11 min lost to incidents</span><br><span class="d">0 records lost</span></td>
+          <td class="r num"><span class="fig" title="api-usage/daily.json Σ services, c1–c10">$11.23</span></td>
+          <td><span class="num"><span class="fig" title="ledger/2026-08.csv Σ rows L3–L8">$247.12</span> <span class="d">/ $500.00 · 49.4%</span></span><div class="bar" title="tick = 71.0% of August elapsed"><i style="width:49.4%"></i><em></em></div></td>
+          <td class="r num">−21.6 <span class="d">under</span></td>
+          <td class="r num"><span class="fig" title="projection = 247.12 ÷ 22 × 31">$348.22</span></td>
+          <td class="tmono">ledger.csv</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="method">bar = spent share of cap · cream tick = 71.0% of August elapsed (day 22 of 31) · proj close = spent ÷ 22 × 31 · margin under cap $151.78</p>
+  </section>
+
+  <!-- ================= RAILS ================= -->
+  <div class="rails">
+
+    <div class="rail">
+      <div class="shead"><span class="lab">Scheduler</span><span class="src">ticks.log</span></div>
+      <div class="bigrow">
+        <span class="bignum"><span class="fig" title="ticks.log — cycles sealed today">10</span> <span class="mut">/ 16 sealed</span></span>
+        <span class="bignum sage"><span class="fig" title="ticks.log — tick 11, cadence 90 min from 00:30:00">next 15:30:00</span></span>
+        <span class="tmono">T−37:53</span>
+      </div>
+      <div class="dots">
+        <span class="dw"><span class="d10 don"></span><span class="dl">00:30</span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 don"></span></span>
+        <span class="dw"><span class="d10 dnext"></span><span class="dl s">15:30</span></span>
+        <span class="dw"><span class="d10 doff"></span></span>
+        <span class="dw"><span class="d10 doff"></span></span>
+        <span class="dw"><span class="d10 doff"></span></span>
+        <span class="dw"><span class="d10 doff"></span></span>
+        <span class="dw"><span class="d10 doff"></span><span class="dl">23:00</span></span>
+      </div>
+      <div class="facts">cadence <b>90 min</b> · 16 cycles/day · last <b>14:00:00 → 14:08:12</b> (<b>8m 12s</b>) · avg <b>8m 42s</b> · longest c7 <b>11m 03s</b> · on-time <b>10 of 10</b> · avg cost/cycle <b>$1.12</b></div>
+      <div class="suspend">
+        <button class="sbtn" type="button">Suspend generation</button>
+        <p class="clause">Halts Scout, Council and Simulator at the 15:30:00 tick; Reader, Archivist and Courier drain queued work, then stop; spend freezes at $247.12; no record is deleted; resume is manual and writes to the incident log.</p>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="shead"><span class="lab">Data</span><span class="src">index.sqlite · manifest.json</span></div>
+      <div class="stanza">
+        <span class="lab">Snapshot</span>
+        <span class="v"><b>snap-0822-c10</b> · <b>14:08:31</b> · <b><span class="fig" title="snapshots/manifest.json — size on disk">412 MB</span></b> · sha <b>a41f2c9</b> · verified OK <b>14:09:02</b></span>
+      </div>
+      <div class="stanza">
+        <span class="lab">Archive</span>
+        <div class="bigrow"><span class="bignum"><span class="fig" title="library/index.sqlite — count(records)">18,342</span></span><span class="v">records · <b>+194</b> today</span></div>
+        <span class="v">papers <b>9,114</b> · candidates <b>1,286</b> · verdicts <b>1,150</b> · runs <b>6,398</b> · briefs <b>394</b></span>
+      </div>
+      <div class="stanza" style="margin-bottom:0">
+        <span class="lab">Backfill — legacy corpus 2019–2024</span>
+        <div class="bigrow"><span class="bignum"><span class="fig" title="backfill/progress.json — 11,204 ÷ 12,834">87.3%</span></span><span class="v"><b>11,204</b> of <b>12,834</b> docs</span></div>
+        <div class="bfbar" title="backfill/progress.json"><i></i></div>
+        <span class="v"><b>+138</b> today · remaining <b>1,630</b> · done ≈ <b>08-29</b> at current rate</span>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="shead"><span class="lab">Incidents — today</span><span class="src">incidents/0822.log</span></div>
+      <div class="inc">
+        <span class="t">06:32</span>
+        <span><span class="w">Reader — 3 sources paywalled (Elsevier)</span><br><span class="a">→ skipped, flagged to Library queue</span></span>
+        <span class="m fig" title="incidents/0822.log #1 — minutes lost">0m</span>
+      </div>
+      <div class="inc">
+        <span class="t">09:41</span>
+        <span><span class="w">Simulator — run 22 diverged, soil-moisture NaN</span><br><span class="a">→ requeued with damped step · passed 09:52</span></span>
+        <span class="m fig" title="incidents/0822.log #2 — minutes lost">7m</span>
+      </div>
+      <div class="inc">
+        <span class="t">13:33</span>
+        <span><span class="w">Reader — AGRIS feed timed out ×2</span><br><span class="a clay">→ retry queued for 15:30 tick</span></span>
+        <span class="m fig" title="incidents/0822.log #3 — minutes lost">4m</span>
+      </div>
+      <div class="incfoot"><b>3</b> incidents · <b>11 min</b> lost · <b>1</b> retry pending · Aug to date <b>41</b> incidents · <b>0</b> data loss</div>
+    </div>
+
+  </div>
+
+  <footer>
+    <span>Every claim sourced · every cost computed · every verdict recorded</span>
+    <span>engine v0.9.4 · deployed 08-19 07:12 · up 3d 7h 40m · ledger verified 14:52:07</span>
+  </footer>
+
+</div>
+</body>
+</html>
