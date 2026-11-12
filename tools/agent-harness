@@ -695,7 +695,7 @@ def library_components() -> list[dict[str, Any]]:
 def tool_components(registry: dict[str, Any]) -> list[dict[str, Any]]:
     components = []
     sys.path.insert(0, str(REPO_ROOT / "lib"))
-    from registry import get_tool_contracts, get_tool_secret_envs, validate_tool_contracts  # noqa: WPS433
+    from registry import get_tool_command_concurrency, get_tool_contracts, get_tool_secret_envs, validate_tool_contracts  # noqa: WPS433
 
     for name, info in sorted(registry.items()):
         files = tool_files(name)
@@ -712,6 +712,7 @@ def tool_components(registry: dict[str, Any]) -> list[dict[str, Any]]:
             "commands": commands,
             "capabilities": info.get("capabilities") or [],
             "concurrency": info.get("concurrency", "mixed"),
+            "command_concurrency": get_tool_command_concurrency(info),
             "credentials": credentials,
             "contracts": get_tool_contracts(info),
             "contract_validation": contract_validation,
