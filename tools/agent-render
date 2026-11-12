@@ -204,6 +204,38 @@ render_request_checked() {
     return 1
 }
 
+# Multipart POST (curl -F). Used by endpoints that refuse JSON bodies, e.g.
+# /blueprints/validate. Args: endpoint, then any number of curl -F specs
+# ("name=value" or "file=@path"). Same explicit temp-file cleanup as
+# render_request_checked (no RETURN trap).
+render_request_multipart() {
+    local endpoint="$1"; shift
+    local token="${RENDER_API_KEY:-}"
+    if [[ -z "$token" ]]; then
+        echo "Error: RENDER_API_KEY not set" >&2
+        return 1
+    fi
+    local tmp_body
+    tmp_body="$(mktemp)"
+    local args=(-sS --max-time 60 --connect-timeout 10 -o "$tmp_body" -w "%{http_code}" -X POST "${RENDER_API}${endpoint}" \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/json")
+    local spec
+    for spec in "$@"; do args+=(-F "$spec"); done
+    local status
+    status=$(curl "${args[@]}") || { rm -f "$tmp_body"; return 1; }
+    local body
+    body="$(cat "$tmp_body")"
+    rm -f "$tmp_body"
+    if [[ "$status" =~ ^2 ]]; then
+        printf '%s' "$body"
+        return 0
+    fi
+    echo "Error: Render API POST ${endpoint} returned HTTP ${status}" >&2
+    [[ -n "$body" ]] && printf '%s\n' "$body" >&2
+    return 1
+}
+
 resolve_service() {
     local name_or_id="$1"
 
@@ -2309,23 +2341,54 @@ for item in items:
             render_request GET "/blueprints/$id" | python3 -m json.tool
             ;;
         validate)
-            local file="${1:-render.yaml}"
+            # API contract (api-docs.render.com/reference/validate-blueprint):
+            # multipart/form-data with two fields, ownerId (workspace id, required)
+            # and file (the render.yaml, binary). Body <= 10MB. Returns 200 whether
+            # the file is valid or not; the answer is the "valid" field.
+            local file="" owner=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --owner) owner="$2"; shift 2 ;;
+                    --help|-h) echo "Usage: agent-render blueprint validate [render.yaml] [--owner <workspace>] [--json]"; return 0 ;;
+                    -*) echo "Error: unknown option '$1'" >&2; return 1 ;;
+                    *) file="$1"; shift ;;
+                esac
+            done
+            file="${file:-render.yaml}"
             if [[ ! -f "$file" ]]; then
                 echo "Error: $file not found" >&2
                 return 1
             fi
-            local body
-            body=$(python3 -c "
-import sys, json, yaml
-y = yaml.safe_load(open(sys.argv[1]))
-print(json.dumps({'spec': y}))
-" "$file" 2>/dev/null) || {
-                # Fallback if PyYAML not available — send raw text under 'specYaml'
-                local raw
-                raw=$(cat "$file")
-                body=$(python3 -c "import sys, json; print(json.dumps({'specYaml': sys.stdin.read()}))" <<< "$raw")
-            }
-            render_request_checked POST "/blueprints/validate" "$body" | python3 -m json.tool
+            if [[ -z "$owner" ]]; then
+                owner=$(default_owner_id) || true
+                [[ -z "$owner" ]] && { echo "Error: --owner required (could not determine workspace)" >&2; return 1; }
+            else
+                owner=$(resolve_owner "$owner") || return 1
+            fi
+            local result
+            result=$(render_request_multipart "/blueprints/validate" "ownerId=$owner" "file=@$file") || return 1
+            if [[ "${RENDER_JSON:-0}" == "1" ]]; then printf '%s\n' "$result"; return 0; fi
+            printf '%s' "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+valid = d.get('valid')
+print('valid:', valid)
+for e in d.get('errors') or []:
+    loc = ':'.join(str(x) for x in (e.get('line'), e.get('column')) if x) or '-'
+    path = e.get('path') or ''
+    print(f\"  error: {e.get('error', '')}  (line:col {loc}{'  path ' + path if path else ''})\")
+plan = d.get('plan') or {}
+if plan:
+    print(f\"plan: {plan.get('totalActions', 0)} action(s)\")
+    for kind in ('services', 'databases', 'keyValue', 'envGroups', 'workflows'):
+        items = plan.get(kind) or []
+        for r in items:
+            if isinstance(r, dict):
+                print(f\"  {kind}: {r.get('action', '')} {r.get('name', '')}\".rstrip())
+            else:
+                print(f\"  {kind}: {r}\")
+sys.exit(0 if valid else 2)
+"
             ;;
         update|patch)
             local id; id=$(resolve_blueprint "${1:-}") || return 1
@@ -2372,7 +2435,7 @@ Usage: agent-render blueprint <subcommand>
 
   list                          List blueprints
   show <bp>                     Blueprint details
-  validate [render.yaml]        Validate a render.yaml against the API
+  validate [render.yaml] [--owner <ws>] [--json]   Validate a render.yaml (multipart; exit 2 if invalid)
   update <bp> [--auto-sync yes|no] [--name X]
   delete <bp> --yes
   syncs <bp>                    Sync history (which resources got created)
