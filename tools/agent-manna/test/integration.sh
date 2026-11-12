@@ -90,6 +90,24 @@ extract_id() {
     echo "$output" | grep -o 'id: mn-[a-f0-9]*' | head -1 | awk '{print $2}'
 }
 
+# Assert the complete release list, including the empty-list response contract.
+check_released() {
+    local output="$1"
+    local desc="$2"
+    shift 2
+    if DONE_OUTPUT="$output" python3 - "$@" <<'PY'
+import os, sys, yaml
+data = yaml.safe_load(os.environ['DONE_OUTPUT'])
+assert data['success'] is True
+assert data['released'] == sys.argv[1:], data
+PY
+    then
+        pass "$desc"
+    else
+        fail "$desc" "$output"
+    fi
+}
+
 # ============================================================================
 # Test Suite
 # ============================================================================
@@ -337,6 +355,7 @@ echo "Test 9: done"
 output=$("$MANNA" done "$ID1" 2>&1) || true
 check_yaml "$output" "success: true" "done returns success"
 check_yaml "$output" "status: done" "done sets status to done"
+check_released "$output" "done reports an empty release list without dependents"
 
 # Verify done issue shows in list
 output=$("$MANNA" list --status done 2>&1) || true
@@ -517,8 +536,11 @@ MANNA_SESSION_ID="$RACE_OWNER" "$MANNA" abandon "$RACE_ID" >/dev/null 2>&1
 output=$("$MANNA" create "Missing identity target" 2>&1)
 UNPINNED_ID=$(extract_id "$output")
 unpinned_exit=0
+# MANNA_OPERATOR=0: this script may run from a terminal, and a terminal is
+# now an identity (the operator's). The opt-out keeps this the no-identity path.
 env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
     -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+    MANNA_OPERATOR=0 \
     "$MANNA" claim "$UNPINNED_ID" >/dev/null 2>&1 || unpinned_exit=$?
 check_exit 2 "$unpinned_exit" "claim fails closed without a pinned session identity"
 
@@ -754,14 +776,62 @@ check_yaml "$output" '"clean":true' "lint --json reports clean"
 # ----------------------------------------------------------------------------
 echo ""
 echo "Test G5: reconcile"
-# Manufacture a blocker desync: A blocks B, A completes, B stays blocked.
+# Completion releases dependents inline, with no intervening reconcile or sync.
 output=$("$MANNA" create "Blocker work" --track "$TRACK_ID" 2>&1) || true
 A_ID=$(extract_id "$output")
 output=$("$MANNA" create "Dependent work" --track "$TRACK_ID" 2>&1) || true
 B_ID=$(extract_id "$output")
+output=$("$MANNA" create "Second blocker work" --track "$TRACK_ID" 2>&1) || true
+C_ID=$(extract_id "$output")
+output=$("$MANNA" create "Dependent with two blockers" --track "$TRACK_ID" 2>&1) || true
+D_ID=$(extract_id "$output")
 "$MANNA" block "$B_ID" "$A_ID" >/dev/null 2>&1
+"$MANNA" block "$D_ID" "$A_ID" >/dev/null 2>&1
+"$MANNA" block "$D_ID" "$C_ID" >/dev/null 2>&1
 "$MANNA" claim "$A_ID" >/dev/null 2>&1
-"$MANNA" done "$A_ID" >/dev/null 2>&1
+done_exit=0
+output=$("$MANNA" done "$A_ID" 2>&1) || done_exit=$?
+check_exit 0 "$done_exit" "done with dependents exits 0"
+check_released "$output" "done lists only the fully released dependent" "$B_ID"
+output=$("$MANNA" show "$B_ID" 2>&1) || true
+check_yaml "$output" "status: open" "done immediately opens its single dependent"
+check_yaml "$output" "blocked_by: []" "done removes the completed blocker edge"
+output=$("$MANNA" show "$D_ID" 2>&1) || true
+check_yaml "$output" "status: blocked" "two-blocker dependent stays blocked after the first done"
+if ISSUE_OUTPUT="$output" python3 - "$C_ID" <<'PY'
+import os, sys, yaml
+assert yaml.safe_load(os.environ['ISSUE_OUTPUT'])['issue']['blocked_by'] == [sys.argv[1]]
+PY
+then
+    pass "only the unfinished blocker remains on the dependent"
+else
+    fail "only the unfinished blocker remains on the dependent" "$output"
+fi
+claim_exit=0
+"$MANNA" claim "$B_ID" >/dev/null 2>&1 || claim_exit=$?
+check_exit 0 "$claim_exit" "released dependent is immediately claimable"
+"$MANNA" abandon "$B_ID" >/dev/null 2>&1
+"$MANNA" claim "$C_ID" >/dev/null 2>&1
+done_exit=0
+output=$("$MANNA" done "$C_ID" 2>&1) || done_exit=$?
+check_exit 0 "$done_exit" "last blocker completion exits 0"
+check_released "$output" "last blocker done lists the newly released dependent" "$D_ID"
+output=$("$MANNA" show "$D_ID" 2>&1) || true
+check_yaml "$output" "status: open" "two-blocker dependent opens after both complete"
+check_yaml "$output" "blocked_by: []" "both completed blocker edges are removed"
+
+# Deliberately hand-edit this isolated fixture to emulate an older binary's
+# stale board. Reconcile must still repair it, although current done cannot
+# produce the desync through the normal lifecycle path.
+python3 - "$B_ID" "$A_ID" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path('.manna/issues.jsonl')
+rows = [json.loads(line) for line in path.read_text().splitlines()]
+dependent = next(row for row in rows if row['id'] == sys.argv[1])
+dependent['status'] = 'blocked'
+dependent['blocked_by'] = [sys.argv[2]]
+path.write_text(''.join(json.dumps(row, separators=(',', ':')) + '\n' for row in rows))
+PY
 "$MANNA" sync >/dev/null 2>&1
 
 rec_exit=0
@@ -861,10 +931,12 @@ cd "$TEST_DIR"
 rm -rf "$GRAMMAR_DIR"
 
 # ----------------------------------------------------------------------------
-# Test G5b: reconcile --fix cures a landed, orphaned-proof claim (mn-ba8db6)
+# Test G5b: landed_open is advisory in every path; --fix never closes a claim
+# (the orphan cure of mn-ba8db6 is retired by mn-880173: a trailer identifies
+# the work a commit advanced, it does not approve completion)
 # ----------------------------------------------------------------------------
 echo ""
-echo "Test G5b: landed_open --fix closes orphaned in_progress claims"
+echo "Test G5b: landed_open --fix closes nothing; explicit done closes"
 WEDGE_DIR=$(mktemp -d)
 cd "$WEDGE_DIR"
 git init -q
@@ -893,15 +965,29 @@ Manna: $WEDGE_ID"
 output=$("$MANNA" reconcile 2>&1) || true
 check_yaml "$output" "landed_open" "reconcile sees the landed evidence"
 
-# The owner cures its own claim by presenting the VERIFIED proof (label
-# alone is spoofable and never bypasses the liveness guard). The verified
-# path needs no coord lookup, so this holds in any environment; the
-# lost-proof path rides coord liveness and is covered at the unit level.
+# Even the owner, presenting the VERIFIED proof, gets no close from
+# reconcile: the finding is advisory in every path and the row stays as it
+# was. Closure is the owner's explicit `done` (or the operator's, or managed
+# acceptance), never a repair that reads a trailer as completion.
 output=$(MANNA_SESSION_ID="ses_wedge_$$" MANNA_SESSION_TOKEN="wedge-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
     "$MANNA" reconcile --fix 2>&1) || true
-check_yaml "$output" "closed on landed evidence" "reconcile --fix closes on the receipt"
+check_yaml "$output" "landed_open" "reconcile --fix still reports the landed evidence"
+if grep -q "closed on landed evidence" <<<"$output"; then
+    fail "reconcile --fix closes nothing on a trailer" "the retired orphan cure closed the row: $output"
+else
+    pass "reconcile --fix closes nothing on a trailer"
+fi
 output=$("$MANNA" show "$WEDGE_ID" 2>&1) || true
-check_yaml "$output" "status: done" "wedged item is done after the cure"
+check_yaml "$output" "status: in_progress" "wedged item stays in_progress under its claim after --fix"
+check_yaml "$output" "claimed_by: ses_wedge_$$" "the claim is untouched by --fix"
+only_exit=0
+output=$("$MANNA" reconcile --fix --only landed_open 2>&1) || only_exit=$?
+check_exit 1 "$only_exit" "--only landed_open is refused: there is no such repair"
+check_yaml "$output" "landed_open is advisory" "the refusal says a trailer does not approve completion"
+MANNA_SESSION_ID="ses_wedge_$$" MANNA_SESSION_TOKEN="wedge-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "$MANNA" done "$WEDGE_ID" >/dev/null 2>&1 || true
+output=$("$MANNA" show "$WEDGE_ID" 2>&1) || true
+check_yaml "$output" "status: done" "the claim-holder's explicit done closes the landed item"
 "$MANNA" sync >/dev/null 2>&1
 
 # Unclaimed landed_open stays advisory — merge judgment stays human.
@@ -913,6 +999,70 @@ Manna: $ADVIS_ID"
 output=$("$MANNA" reconcile --fix 2>&1) || true
 output=$("$MANNA" show "$ADVIS_ID" 2>&1) || true
 check_yaml "$output" "status: open" "unclaimed landed_open stays advisory"
+
+# ----------------------------------------------------------------------------
+# Test G5d: done closes on landed evidence (mn-4061c8)
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test G5d: done closes on landed evidence"
+# A filing-chore trailer (board files only) is not evidence: the advisory
+# item above carries one, and a stranger's done still needs a claim.
+chore_exit=0
+MANNA_SESSION_ID="ses_stranger_$$" MANNA_SESSION_TOKEN="stranger-token-cccccccccccccccccccccccccccccccc" \
+    "$MANNA" done "$ADVIS_ID" >/dev/null 2>&1 || chore_exit=$?
+check_exit 1 "$chore_exit" "a trailer on an empty commit is not evidence"
+
+# The work lands: a commit carrying the trailer touches source. Anyone with an
+# identity may then close; the evidence authorizes, never the requester.
+output=$("$MANNA" create "Evidence work" 2>&1) || true
+EVIDENCE_ID=$(extract_id "$output")
+MANNA_SESSION_ID="ses_builder_$$" MANNA_SESSION_TOKEN="builder-token-dddddddddddddddddddddddddddddddd" \
+    "$MANNA" claim "$EVIDENCE_ID" >/dev/null 2>&1
+printf 'shipped\n' > src.txt
+git add src.txt
+git -c user.email=manna@test -c user.name=manna-test commit -q -m "feat: shipped
+
+Manna: $EVIDENCE_ID"
+EVIDENCE_SHA=$(git rev-parse HEAD)
+output=$(MANNA_SESSION_ID="ses_stranger_$$" MANNA_SESSION_TOKEN="stranger-token-cccccccccccccccccccccccccccccccc" \
+    "$MANNA" done "$EVIDENCE_ID" 2>&1) || true
+check_yaml "$output" "success: true" "a stranger closes a landed item on evidence"
+check_yaml "$output" "authority: evidence" "the close names evidence as its authority"
+check_yaml "$output" "$EVIDENCE_SHA" "the close cites the landed commit"
+check_yaml "$output" "claimed_by: ses_builder_$$" "the builder's claim stays as history"
+output=$("$MANNA" show "$EVIDENCE_ID" 2>&1) || true
+check_yaml "$output" "status: done" "landed item is done"
+
+# The wrong checkout names the right board instead of failing on identity.
+ELSEWHERE_DIR=$(mktemp -d)
+(cd "$ELSEWHERE_DIR" && git init -q && "$MANNA" init >/dev/null 2>&1)
+output=$(cd "$ELSEWHERE_DIR" && env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+    -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+    MANNA_OPERATOR=0 "$MANNA" done "$EVIDENCE_ID" 2>&1) || true
+check_yaml "$output" "not found" "a foreign id is reported as not found before identity is demanded"
+rm -rf "$ELSEWHERE_DIR"
+
+# ----------------------------------------------------------------------------
+# Test G5e: the operator's terminal is an identity
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test G5e: operator identity from a terminal"
+if [[ "$(uname -s)" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
+    output=$("$MANNA" create "Operator work" 2>&1) || true
+    OPERATOR_ID=$(extract_id "$output")
+    MANNA_SESSION_ID="ses_gone_$$" MANNA_SESSION_TOKEN="gone-token-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" \
+        "$MANNA" claim "$OPERATOR_ID" >/dev/null 2>&1
+    # script(1) lends the command a pseudo-terminal, which is what a human's
+    # shell has and an agent's pipe does not.
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" done "$OPERATOR_ID" 2>&1 </dev/null) || true
+    check_yaml "$output" "authority: operator" "the operator closes over a stranded claim from a terminal"
+    output=$("$MANNA" show "$OPERATOR_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "operator-closed item is done"
+else
+    echo "  - skipped: needs macOS script(1) to lend a pseudo-terminal"
+fi
 
 # ----------------------------------------------------------------------------
 # Test G5c: machine-key derived identity survives a process restart
@@ -1021,14 +1171,28 @@ check_yaml "$output" "success: true" "handoff seal binds an intentional edit"
 claim_exit=0
 "$MANNA" claim "$PAIR_ID" >/dev/null 2>&1 || claim_exit=$?
 check_exit 0 "$claim_exit" "sealed handoff becomes claimable"
-printf '\nEdited after claim without resealing.\n' >> "$PROMPT_A"
+# An edit after claim without resealing is paperwork drift: the close on the
+# owner's proof still lands, and the response carries the stale seal as a
+# warning (mn-4061c8). A second paired item keeps PAIR_ID live for the
+# metadata trap below.
+output=$("$MANNA" create "Stale seal close" 2>&1) || true
+STALE_ID=$(extract_id "$output")
+"$MANNA" sync >/dev/null 2>&1 || true
+STALE_PROMPT=$("$MANNA" show "$STALE_ID" | awk -F': ' '/^  prompt:/ {print $2; exit}')
+"$MANNA" claim "$STALE_ID" >/dev/null 2>&1
+printf '\nEdited after claim without resealing.\n' >> "$STALE_PROMPT"
 done_exit=0
-output=$("$MANNA" done "$PAIR_ID" 2>&1) || done_exit=$?
-check_exit 1 "$done_exit" "done refuses a handoff edited after claim"
+output=$("$MANNA" done "$STALE_ID" 2>&1) || done_exit=$?
+check_exit 0 "$done_exit" "done closes a handoff edited after claim"
+check_yaml "$output" "warnings:" "done carries the drift as a warning"
 check_yaml "$output" "binding is stale" "done names the stale handoff seal"
-output=$("$MANNA" show "$PAIR_ID" 2>&1) || true
-check_yaml "$output" "status: in_progress" "failed done leaves the live claim in progress"
-"$MANNA" handoff seal "$PAIR_ID" >/dev/null 2>&1
+output=$("$MANNA" show "$STALE_ID" 2>&1) || true
+check_yaml "$output" "status: done" "warned close is done"
+# Seal the late edit and move the completed handoff to its history name so
+# the board below stays presentation-clean for the lint and reconcile gates.
+"$MANNA" handoff seal "$STALE_ID" >/dev/null 2>&1 || true
+"$MANNA" sync >/dev/null 2>&1 || true
+"$MANNA" handoff seal "$PAIR_ID" >/dev/null 2>&1 || true
 "$MANNA" abandon "$PAIR_ID" >/dev/null 2>&1
 
 printf '\nUnsealed metadata trap.\n' >> "$PROMPT_A"
@@ -1126,7 +1290,14 @@ cp "$PROMPT_A" "$LINK_TARGET"
 mkdir -p .dev/linked
 ln -s "$LINK_TARGET" .dev/linked/shadow.md
 output=$("$MANNA" reconcile --json 2>&1) || true
-check_yaml "$output" ".dev/linked/shadow.md" "sprawl scan reads symlinked work-order content"
+# A symlink is never followed: an alias of outside content is not a tracked
+# work-order surface, and an internal alias points at files the walk already
+# sees by their real path (mn-4061c8).
+if [[ "$output" != *".dev/linked/shadow.md"* ]]; then
+    pass "sprawl scan never follows a symlinked file"
+else
+    fail "sprawl scan never follows a symlinked file" "$output"
+fi
 rm -f "$LINK_TARGET"
 
 printf 'agent-do manna claim %s\n' "$PAIR_ID" > neutral-notes.md
@@ -1138,8 +1309,18 @@ NEUTRAL_TARGET=$(mktemp -d)
 printf 'agent-do manna claim %s\n' "$PAIR_ID" > "$NEUTRAL_TARGET/work.md"
 ln -s "$NEUTRAL_TARGET" resources
 output=$("$MANNA" reconcile --json 2>&1) || true
-check_yaml "$output" "resources" "neutral external symlink directories are rejected"
-rm -f resources
+if [[ "$output" != *"resources"* ]]; then
+    pass "neutral external symlink directories are skipped"
+else
+    fail "neutral external symlink directories are skipped" "$output"
+fi
+# A handoff-shaped alias is the one symlink that is reported: board-level,
+# without an item, so it informs and never holds one item's claim.
+ln -s "$NEUTRAL_TARGET" handoff-mirror
+output=$("$MANNA" reconcile --json 2>&1) || true
+check_yaml "$output" "handoff-mirror" "a handoff-shaped symlink root is reported"
+check_yaml "$output" '{"kind":"workflow_sprawl","detail":"symlinked shadow handoff root is forbidden","evidence":"./handoff-mirror"' "the handoff-shaped alias finding carries no item"
+rm -f handoff-mirror resources
 rm -rf "$NEUTRAL_TARGET"
 
 LEGACY_DIR=$(mktemp -d)
@@ -1670,6 +1851,1088 @@ cd "$TEST_DIR"
 rm -rf "$GATE_DIR"
 
 # ============================================================================
+# Managed lifecycle: coordinator-owned handoff and closure (mn-59f1e4)
+# ============================================================================
+
+echo ""
+echo "=== Managed Lifecycle Tests ==="
+
+# json_field <json-on-stdin> <python expr over d>
+json_field() {
+    python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"
+}
+
+# reviewed_submission <id>: the current submission key as the lead sees it.
+reviewed_submission() {
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$1" --json 2>/dev/null | json_field 'd["submission_key"] or ""'
+}
+# reviewed_attempt <id>: the current attempt as the lead sees it.
+reviewed_attempt() {
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$1" --json 2>/dev/null | json_field 'd["attempt"]'
+}
+# lead_accept <id> <check> <target> <evidence> [extra args...]: accept what the lead just reviewed.
+lead_accept() {
+    local id="$1" check="$2" target="$3" evidence="$4"
+    shift 4
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$id" --check "$check" --target "$target" --evidence "$evidence" \
+        --submission "$(reviewed_submission "$id")" --attempt "$(reviewed_attempt "$id")" "$@"
+}
+
+if [[ "$(uname -s)" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
+    echo ""
+    echo "Test M1: worker submits, source lands elsewhere, coordinator accepts and closes without the worker"
+    MANAGED_DIR=$(mktemp -d)
+    cd "$MANAGED_DIR"
+    git init -q -b main
+    git -c user.email=manna@test -c user.name=manna-test commit -q --allow-empty -m "root"
+    WORKER_ID="ses_mworker_$$"; WORKER_TOKEN="mworker-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    LEAD_ID="ses_mlead_$$";     LEAD_TOKEN="mlead-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    OTHER_ID="ses_mother_$$";   OTHER_TOKEN="mother-token-cccccccccccccccccccccccccccccccccc"
+    "$MANNA" init >/dev/null 2>&1
+    output=$("$MANNA" create "Managed feature" "coordinator-owned closure" 2>&1) || true
+    M_ID=$(extract_id "$output")
+    output=$("$MANNA" create "Depends on managed feature" "released by the managed close" 2>&1) || true
+    M_DEP=$(extract_id "$output")
+    "$MANNA" block "$M_DEP" "$M_ID" >/dev/null 2>&1
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file managed items"
+
+    # The coordinator session prints its proof; the operator grants against it.
+    LEAD_PROOF=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" identity --json 2>/dev/null | json_field 'd["proof"]')
+    if [[ "$LEAD_PROOF" == sha256:* ]]; then
+        pass "identity prints a sha256 proof, never the token"
+    else
+        fail "identity prints a sha256 proof, never the token" "got: $LEAD_PROOF"
+    fi
+
+    # A coordinator cannot grant itself; neither can a coord label or a worker secret.
+    self_grant_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$M_ID" --reason "self" >/dev/null 2>&1 || self_grant_exit=$?
+    check_exit 2 "$self_grant_exit" "a session cannot grant itself coordinator authority"
+
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$M_ID" --reason "lead for the managed feature" 2>&1 </dev/null | tr -d '\r') || true
+    check_yaml "$output" "coordinator_id: $LEAD_ID" "the operator grants scoped coordinator authority"
+    GRANT_ID=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+
+    # Only the grant-holder (or operator) puts the item under managed closure.
+    other_require_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" \
+        "$MANNA" managed require "$M_ID" --check integration >/dev/null 2>&1 || other_require_exit=$?
+    check_exit 2 "$other_require_exit" "an ungranted session cannot require managed checks"
+    # The same label with a different secret is not the coordinator.
+    impostor_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" \
+        "$MANNA" managed require "$M_ID" --check integration >/dev/null 2>&1 || impostor_exit=$?
+    check_exit 2 "$impostor_exit" "the coordinator label without its proof holds no grant"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" managed require "$M_ID" --check integration --check deployed 2>&1) || true
+    check_yaml "$output" "level: coordinator" "the grant-holder requires integration and deployed acceptance"
+
+    # The worker claims and builds on a feature branch; the board checkout stays on main.
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$M_ID" >/dev/null 2>&1
+    git checkout -q -b feat/managed
+    printf 'feature\n' > feature.txt
+    git add feature.txt
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "feat: managed feature
+
+Manna: $M_ID"
+    FEATURE_SHA=$(git rev-parse HEAD)
+    git checkout -q main
+
+    # A source-touching trailer exists, but a managed item does not close on it.
+    stranger_done_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" done "$M_ID" >/dev/null 2>&1 || stranger_done_exit=$?
+    check_exit 2 "$stranger_done_exit" "a trailer commit does not close a managed item for a stranger"
+    git merge -q --no-ff feat/managed -m "merge managed feature into main"
+    MAIN_WITH_FEATURE=$(git rev-parse HEAD)
+    lead_early_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" >/dev/null 2>&1 || lead_early_exit=$?
+    check_exit 2 "$lead_early_exit" "even on HEAD, a trailer without acceptance does not close for the coordinator"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" 2>&1) || true
+    check_yaml "$output" "no submission for attempt 1" "the refusal names the missing submission"
+
+    # reconcile --fix sees landed_open on HEAD and closes nothing: the finding
+    # is advisory for every item (mn-880173), managed ones included.
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" reconcile --fix 2>&1) || true
+    check_yaml "$output" "landed_open" "reconcile sees the landed trailer on the board checkout"
+    if grep -q "closed on landed evidence" <<<"$output"; then
+        fail "reconcile --fix closes nothing on a trailer, managed or not" "$output"
+    else
+        pass "reconcile --fix closes nothing on a trailer, managed or not"
+    fi
+    output=$("$MANNA" show "$M_ID" 2>&1) || true
+    check_yaml "$output" "status: in_progress" "the managed item is still in progress after reconcile --fix"
+
+    # Submission is the worker's; a stranger cannot submit, and it is not acceptance.
+    printf 'Built the feature. cargo test: ok. Left: nothing.\n' > report.md
+    stranger_submit_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" submit "$M_ID" --report report.md >/dev/null 2>&1 || stranger_submit_exit=$?
+    check_exit 1 "$stranger_submit_exit" "a stranger cannot submit for the claim-holder"
+    output=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$M_ID" --report report.md --revision "$FEATURE_SHA" 2>&1) || true
+    check_yaml "$output" "status: submitted" "the worker submits its report for attempt 1"
+    output=$("$MANNA" show "$M_ID" 2>&1) || true
+    check_yaml "$output" "status: in_progress" "submission leaves the item in progress"
+
+    # Integration lands on a branch the board checkout is not on.
+    git branch staging "$MAIN_WITH_FEATURE"
+    git checkout -q -b scratch main
+    printf 'unrelated\n' > scratch.txt
+    git add scratch.txt
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "scratch: board checkout moves on"
+    # The board checkout is `scratch` now; staging is where the work integrated.
+
+    # The read-only assessment pins the target explicitly and never checks out or fetches.
+    assess_json=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$M_ID" --target staging --json 2>/dev/null)
+    if [[ "$(printf '%s' "$assess_json" | json_field 'd["closable"]')" == "False" ]]; then
+        pass "assess reports not closable before acceptance"
+    else
+        fail "assess reports not closable before acceptance" "$assess_json"
+    fi
+    if [[ "$(printf '%s' "$assess_json" | json_field 'd["integration_target"]["kind"]')" == "local_branch" ]]; then
+        pass "assess classifies the target as a local branch"
+    else
+        fail "assess classifies the target as a local branch" "$assess_json"
+    fi
+    if [[ "$(printf '%s' "$assess_json" | json_field 'd["integration_target"]["is_current_head"]')" == "False" ]]; then
+        pass "assess distinguishes the target from the checkout's HEAD"
+    else
+        fail "assess distinguishes the target from the checkout's HEAD" "$assess_json"
+    fi
+    if [[ "$(printf '%s' "$assess_json" | json_field '[c["relation"] for c in d["trailer_commits"] if c["sha"]=="'"$FEATURE_SHA"'"][0]')" == "in_target" ]]; then
+        pass "assess finds the trailer commit inside the integration target"
+    else
+        fail "assess finds the trailer commit inside the integration target" "$assess_json"
+    fi
+    if [[ "$(printf '%s' "$assess_json" | json_field 'd["authority"]["level"]')" == "coordinator" ]]; then
+        pass "assess names the caller's authority"
+    else
+        fail "assess names the caller's authority" "$assess_json"
+    fi
+    bad_target=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$M_ID" --target origin/nowhere --json 2>/dev/null | json_field 'd["integration_target"]["error"] is not None and d["closable"] is False')
+    if [[ "$bad_target" == "True" ]]; then
+        pass "an unavailable target fails clearly and is never closable"
+    else
+        fail "an unavailable target fails clearly and is never closable" "$bad_target"
+    fi
+
+    # Acceptance: granted coordinator only, at an explicitly pinned target.
+    other_accept_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" \
+        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "merged" --submission "$(reviewed_submission "$M_ID")" --attempt 1 >/dev/null 2>&1 || other_accept_exit=$?
+    check_exit 2 "$other_accept_exit" "an ungranted session cannot record acceptance"
+    worker_accept_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" \
+        "$MANNA" accept "$M_ID" --check integration --target staging --evidence "I say so" --submission "$(reviewed_submission "$M_ID")" --attempt 1 >/dev/null 2>&1 || worker_accept_exit=$?
+    check_exit 2 "$worker_accept_exit" "the worker cannot accept its own submission"
+    output=$(lead_accept $M_ID integration staging "merge $FEATURE_SHA reachable from staging" 2>&1) || true
+    check_yaml "$output" "check: integration" "the coordinator accepts integration at the pinned target"
+    check_yaml "$output" "kind: local_branch" "the pinned target records how the reference resolved"
+    wrong_target_exit=0
+    lead_accept $M_ID deployed scratch "deploy 1" >/dev/null 2>&1 || wrong_target_exit=$?
+    check_exit 1 "$wrong_target_exit" "acceptance at a different target than the pinned one is refused"
+    partial_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" >/dev/null 2>&1 || partial_exit=$?
+    check_exit 2 "$partial_exit" "one outstanding check still blocks closure"
+    output=$(lead_accept $M_ID deployed staging "release 7 serves $MAIN_WITH_FEATURE" 2>&1) || true
+    check_yaml "$output" "check: deployed" "the coordinator accepts deployment"
+
+    # The assessment digest guards the close against a stale look.
+    ASSESSMENT=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$M_ID" --json 2>/dev/null | json_field 'd["assessment"]')
+    stale_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" --assessment assess:0000 >/dev/null 2>&1 || stale_exit=$?
+    check_exit 2 "$stale_exit" "a stale assessment digest refuses the close"
+    stranger_final_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" done "$M_ID" --assessment "$ASSESSMENT" >/dev/null 2>&1 || stranger_final_exit=$?
+    check_exit 2 "$stranger_final_exit" "a stranger cannot close even with a current assessment"
+
+    # The worker is gone: nothing below resumes or impersonates it.
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$M_ID" --assessment "$ASSESSMENT" 2>&1) || true
+    check_yaml "$output" "authority: coordinator" "the coordinator closes on recorded acceptance"
+    check_yaml "$output" "status: done" "the managed item is done"
+    check_yaml "$output" "claimed_by: $WORKER_ID" "the worker's claim stays as history"
+    check_yaml "$output" "released:" "the close releases dependents in the same write"
+    output=$("$MANNA" show "$M_DEP" 2>&1) || true
+    check_yaml "$output" "status: open" "the dependent is open after the managed close"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed history "$M_ID" --json 2>/dev/null | json_field '",".join(e["action"] for e in d["events"])')
+    if [[ "$output" == "require,claim,submit,accept,accept,close" ]]; then
+        pass "the lifecycle audit holds the whole story in order"
+    else
+        fail "the lifecycle audit holds the whole story in order" "got: $output"
+    fi
+    if [[ -f .manna/lifecycle.jsonl && -f .manna/managed.json && -f .manna/coordinators.json ]]; then
+        pass "lifecycle records live in durable sidecar files"
+    else
+        fail "lifecycle records live in durable sidecar files" "$(ls .manna)"
+    fi
+    "$MANNA" sync >/dev/null 2>&1
+    git add -A >/dev/null 2>&1
+    lint_exit=0
+    lint_output=$("$MANNA" lint 2>&1) || lint_exit=$?
+    if [[ "$lint_exit" -eq 0 ]]; then
+        pass "tracked sidecars pass lint"
+    else
+        fail "tracked sidecars pass lint" "$lint_output"
+    fi
+    state_managed=$("$MANNA" state --json 2>/dev/null | json_field '[r["managed"]["attempt"] for r in d["all"] if r["id"]=="'"$M_ID"'"][0]')
+    if [[ "$state_managed" == "1" ]]; then
+        pass "manna state carries the managed summary for human-facing consumers"
+    else
+        fail "manna state carries the managed summary for human-facing consumers" "got: $state_managed"
+    fi
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M2: release needs a verified stop or an isolated checkout; superseded worker; changed target"
+    # Manna reaches coord through agent-do on PATH; the repo root carries both.
+    export PATH="$SCRIPT_DIR/../../..:$PATH"
+    COORD="$SCRIPT_DIR/../../agent-coord"
+    output=$("$MANNA" create "Managed rework" "worker goes missing" 2>&1) || true
+    R_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file rework"
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$R_ID" --reason "lead for rework" 2>&1 </dev/null | tr -d '\r') || true
+    check_yaml "$output" "success: true" "the operator grants the rework item"
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$R_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$R_ID" >/dev/null 2>&1
+    printf 'half done\n' > half.md
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$R_ID" --report half.md >/dev/null 2>&1
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$R_ID" --reason "tests missing" 2>&1) || true
+    check_yaml "$output" "status: correction_requested" "the coordinator requests a correction"
+    corr_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$R_ID" >/dev/null 2>&1 || corr_exit=$?
+    check_exit 2 "$corr_exit" "a requested correction blocks closure"
+
+    # No coord peer for the worker: liveness unknown, and unknown is not death.
+    unknown_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$R_ID" --reason "worker vanished" 2>&1) || unknown_exit=$?
+    check_exit 2 "$unknown_exit" "release refuses while the worker's liveness is unknown"
+    check_yaml "$output" "not a verified stop" "the refusal says what would count"
+
+    # The worker's coord presence ages into `stale` while its process is alive:
+    # an old lease is not death, and the release still refuses. The touch runs
+    # in the worker's own shell, where coord asks `manna identity` and binds
+    # the claim proof on the record; the lifecycle matches the claim to that
+    # binding, never by respelling the label (mn-4e7229).
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" AGENT_DO_COORD_SESSION="$WORKER_ID" AGENT_DO_COORD_ACTIVE_SECONDS=1 "$COORD" touch --json >/dev/null 2>&1
+    bound_label=$(AGENT_DO_COORD_SESSION="$LEAD_ID" "$COORD" peers --all --json 2>/dev/null | json_field '[(p.get("manna") or {}).get("session") for p in d["peers"] if p["agent_id"].startswith("session-sesmworker")][0]')
+    if [[ "$bound_label" == "$WORKER_ID" ]]; then
+        pass "the worker's coord record carries its bound Manna label"
+    else
+        fail "the worker's coord record carries its bound Manna label" "got: $bound_label"
+    fi
+    sleep 2
+    stale_status=$(AGENT_DO_COORD_SESSION="$LEAD_ID" AGENT_DO_COORD_IDLE_SECONDS=0 "$COORD" peers --all --json 2>/dev/null | json_field '[p["status"] for p in d["peers"] if p["agent_id"].startswith("session-sesmworker")][0]')
+    if [[ "$stale_status" == "stale" ]]; then
+        pass "coord classifies the live worker's aged lease as stale"
+    else
+        fail "coord classifies the live worker's aged lease as stale" "got: $stale_status"
+    fi
+    stale_exit=0
+    output=$(AGENT_DO_COORD_IDLE_SECONDS=0 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$R_ID" --reason "looks old" 2>&1) || stale_exit=$?
+    check_exit 2 "$stale_exit" "a stale lease on a live process does not authorize release"
+    check_yaml "$output" "liveness is \`stale\`" "the refusal names the stale verdict and its source"
+    output=$(AGENT_DO_COORD_IDLE_SECONDS=0 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$R_ID" --json 2>/dev/null | json_field 'd["claimant"]["status"] + "/" + str(d["claimant"]["verified_gone"]) + "/" + d["claimant"]["source"]')
+    if [[ "$output" == "stale/False/agent-do coord peers --json" ]]; then
+        pass "assess reports liveness with its source and says stale is not verified gone"
+    else
+        fail "assess reports liveness with its source and says stale is not verified gone" "got: $output"
+    fi
+
+    # Isolation is validated, never taken on a name.
+    other_release_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed release "$R_ID" --reason "mine now" --isolated-checkout "$MANAGED_DIR" >/dev/null 2>&1 || other_release_exit=$?
+    check_exit 2 "$other_release_exit" "an ungranted session cannot release a managed claim"
+    missing_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$R_ID" --reason "replacement" --isolated-checkout "$MANAGED_DIR-nowhere" >/dev/null 2>&1 || missing_exit=$?
+    check_exit 1 "$missing_exit" "a nonexistent isolated checkout is refused"
+    same_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$R_ID" --reason "replacement" --isolated-checkout "$MANAGED_DIR" 2>&1) || same_exit=$?
+    check_exit 1 "$same_exit" "this checkout is not an isolated checkout"
+    check_yaml "$output" "resolves to this checkout" "the refusal names the shared working tree"
+    REPLACEMENT_TREE="$MANAGED_DIR-replacement"
+    git worktree add -q "$REPLACEMENT_TREE" -b replacement HEAD >/dev/null 2>&1
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$R_ID" --reason "worker session unreachable; replacement works in its own tree" --isolated-checkout "$REPLACEMENT_TREE" 2>&1) || true
+    check_yaml "$output" "attempt: 2" "release into a real separate working tree advances the attempt"
+    check_yaml "$output" "basis: isolated_checkout" "release records its basis"
+    check_yaml "$output" "isolation_toplevel:" "release records the validated toplevel"
+    check_yaml "$output" "claim_release: released" "the two-phase release completed"
+    check_yaml "$output" "status: open" "the released item is open for a replacement"
+
+    # A verified stop: the worker's own session retires through coord.
+    output=$("$MANNA" create "Managed stop" "worker retires" 2>&1) || true
+    S_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file stop item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$S_ID" --reason "lead for stop item" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$S_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$S_ID" >/dev/null 2>&1
+    AGENT_DO_COORD_SESSION="$WORKER_ID" "$COORD" stop --note "lane ended" --json >/dev/null 2>&1
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$S_ID" --reason "worker retired" 2>&1) || true
+    check_yaml "$output" "basis: coord_dead" "a coord-verified stop releases without isolation"
+    check_yaml "$output" "worker_liveness: stopped" "the release records the verified verdict"
+
+    # The superseded worker cannot submit or close; the replacement starts attempt 2.
+    old_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$R_ID" --report half.md >/dev/null 2>&1 || old_submit_exit=$?
+    check_exit 1 "$old_submit_exit" "the superseded worker cannot submit"
+    old_done_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" done "$R_ID" >/dev/null 2>&1 || old_done_exit=$?
+    check_exit 2 "$old_done_exit" "the superseded worker cannot close"
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" claim "$R_ID" >/dev/null 2>&1
+    printf 'redone with tests\n' > redone.md
+    output=$(MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" submit "$R_ID" --report redone.md 2>&1) || true
+    check_yaml "$output" "attempt: 2" "the replacement submits for attempt 2"
+    lead_accept $R_ID integration HEAD "reviewed" >/dev/null 2>&1
+    # A changed target after acceptance makes the recorded acceptance stop counting.
+    printf 'moved\n' > moved.txt
+    git add moved.txt
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "scratch: head moves"
+    moved=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$R_ID" --target HEAD --json 2>/dev/null | json_field 'd["integration_target"]["matches_pinned"]')
+    if [[ "$moved" == "False" ]]; then
+        pass "assess reports a requested target that differs from the pinned one"
+    else
+        fail "assess reports a requested target that differs from the pinned one" "got: $moved"
+    fi
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$R_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "the replacement's accepted attempt closes at the pinned target"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M4: acceptance binds to the exact submission (independent review finding 1)"
+    output=$("$MANNA" create "Managed resubmit" "A accepted, B must not inherit it" 2>&1) || true
+    B_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file resubmit item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$B_ID" --reason "lead for resubmit" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$B_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$B_ID" >/dev/null 2>&1
+    printf 'Submission A: tested revision A.\n' > sub-a.md
+    SUB_A=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$B_ID" --report sub-a.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
+    if [[ "$SUB_A" == sub-* ]]; then
+        pass "a submission carries a stable id"
+    else
+        fail "a submission carries a stable id" "got: $SUB_A"
+    fi
+    output=$(lead_accept $B_ID integration HEAD "Reviewed submission A" 2>&1) || true
+    check_yaml "$output" "submission: $SUB_A" "the acceptance names the submission it reviewed"
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$B_ID" --reason "Submission A needs changes" >/dev/null 2>&1
+    sent_back_exit=0
+    lead_accept $B_ID integration HEAD "again" >/dev/null 2>&1 || sent_back_exit=$?
+    check_exit 1 "$sent_back_exit" "a submission that was sent back cannot be accepted until resubmitted"
+    printf 'Submission B: changed result, not reviewed.\n' > sub-b.md
+    SUB_B=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$B_ID" --report sub-b.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
+    if [[ "$SUB_B" == sub-* && "$SUB_B" != "$SUB_A" ]]; then
+        pass "a resubmission is a new submission"
+    else
+        fail "a resubmission is a new submission" "A=$SUB_A B=$SUB_B"
+    fi
+    assess_b=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$B_ID" --json 2>/dev/null)
+    if [[ "$(printf '%s' "$assess_b" | json_field 'd["closable"]')" == "False" ]]; then
+        pass "after an unreviewed resubmit the item is not closable"
+    else
+        fail "after an unreviewed resubmit the item is not closable" "$assess_b"
+    fi
+    if [[ "$(printf '%s' "$assess_b" | json_field 'd["superseded_acceptances"][0]["submission"] + "|" + d["superseded_acceptances"][0]["why"]')" == "$SUB_A|given on an earlier submission; the current one has not been accepted" ]]; then
+        pass "assess names the superseded acceptance and why it no longer counts"
+    else
+        fail "assess names the superseded acceptance and why it no longer counts" "$assess_b"
+    fi
+    worker_b_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" done "$B_ID" >/dev/null 2>&1 || worker_b_exit=$?
+    check_exit 2 "$worker_b_exit" "the worker cannot close B on A's acceptance"
+    lead_b_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$B_ID" >/dev/null 2>&1 || lead_b_exit=$?
+    check_exit 2 "$lead_b_exit" "the coordinator cannot close B on A's acceptance"
+    output=$("$MANNA" show "$B_ID" 2>&1) || true
+    check_yaml "$output" "status: in_progress" "B is still in progress"
+    lead_accept $B_ID integration HEAD "Reviewed submission B" >/dev/null 2>&1
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$B_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "B closes once B itself is accepted"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M4b: an acceptance names what it reviewed (review pass 2, finding 1)"
+    output=$("$MANNA" create "Managed accept race" "accept paused, submission changes" 2>&1) || true
+    AR_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file accept-race item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$AR_ID" --reason "lead for accept race" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$AR_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$AR_ID" >/dev/null 2>&1
+    printf 'Submission A reviewed\n' > ar-a.md
+    AR_SUB_A=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AR_ID" --report ar-a.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
+    no_sub_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "x" --attempt 1 >/dev/null 2>&1 || no_sub_exit=$?
+    check_exit 2 "$no_sub_exit" "accept without --submission is refused by the CLI"
+    # The coordinator reviewed A, starts accepting, and holds before the lock;
+    # the worker submits B meanwhile. The acceptance must not land on B.
+    MANNA_MANAGED_PAUSE_BEFORE_LOCK=3 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "I reviewed submission A" --submission "$AR_SUB_A" --attempt 1 > ar-accept.out 2>&1 &
+    AR_ACCEPT_PID=$!
+    sleep 1.2
+    printf 'Submission B NOT reviewed\n' > ar-b.md
+    AR_SUB_B=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AR_ID" --report ar-b.md --json 2>/dev/null | json_field 'd["managed"]["submission"]["id"]')
+    ar_exit=0
+    wait "$AR_ACCEPT_PID" || ar_exit=$?
+    output=$(cat ar-accept.out)
+    check_exit 1 "$ar_exit" "an acceptance started on A is refused once B is the current submission"
+    check_yaml "$output" "you reviewed submission $AR_SUB_A" "the refusal names the submission the coordinator reviewed"
+    ar_state=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AR_ID" --json 2>/dev/null | json_field 'str(d["closable"]) + "/" + str(len(d["accepted_checks"])) + "/" + str(len(d["record"]["acceptances"]))')
+    if [[ "$ar_state" == "False/0/0" ]]; then
+        pass "nothing was accepted and B is not closable"
+    else
+        fail "nothing was accepted and B is not closable" "got: $ar_state"
+    fi
+    wrong_attempt_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "x" --submission "$AR_SUB_B" --attempt 2 >/dev/null 2>&1 || wrong_attempt_exit=$?
+    check_exit 1 "$wrong_attempt_exit" "an acceptance naming the wrong attempt is refused"
+    stale_sub_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "x" --submission "$AR_SUB_A" --attempt 1 >/dev/null 2>&1 || stale_sub_exit=$?
+    check_exit 1 "$stale_sub_exit" "an acceptance naming the superseded submission is refused"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AR_ID" --check integration --target HEAD --evidence "I reviewed submission B" --submission "$AR_SUB_B" --attempt 1 2>&1) || true
+    check_yaml "$output" "submission: $AR_SUB_B" "an acceptance naming the current submission lands"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M4c: a blocked assessment never authorizes a close (review pass 2, finding 2)"
+    # The board checkout's own branch is the integration target here, as in
+    # the reviewer's fixture; it advances after acceptance.
+    BA_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    output=$("$MANNA" create "Managed blocked assessment" "target advances after acceptance" 2>&1) || true
+    BA_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file blocked-assessment item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BA_ID" --reason "lead for blocked assessment" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$BA_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$BA_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$BA_ID" --report half.md >/dev/null 2>&1
+    lead_accept $BA_ID integration "$BA_BRANCH" "reviewed at the branch head" >/dev/null 2>&1
+    EARLY_TOKEN=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BA_ID" --json 2>/dev/null | json_field 'd["assessment"]')
+    if [[ "$EARLY_TOKEN" == assess:v2:* ]]; then
+        pass "a closable assessment yields an assess:v2 token"
+    else
+        fail "a closable assessment yields an assess:v2 token" "got: $EARLY_TOKEN"
+    fi
+    # The target branch advances after acceptance.
+    printf 'advance\n' > advance.txt
+    git add advance.txt
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "the branch advances past the pinned target"
+    BLOCKED_TOKEN=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BA_ID" --target "$BA_BRANCH" --json 2>/dev/null | json_field 'd["assessment"] + "|" + str(d["closable"])')
+    if [[ "$BLOCKED_TOKEN" == blocked:v2:*"|False" ]]; then
+        pass "assess --target <branch> is blocked and yields a blocked:v2 token"
+    else
+        fail "assess --target <branch> is blocked and yields a blocked:v2 token" "got: $BLOCKED_TOKEN"
+    fi
+    BLOCKED_TOKEN="${BLOCKED_TOKEN%%|*}"
+    blocked_close_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "$BLOCKED_TOKEN" 2>&1) || blocked_close_exit=$?
+    check_exit 2 "$blocked_close_exit" "done refuses a blocked assessment token"
+    check_yaml "$output" "blocked assessment never authorizes" "the refusal says why"
+    early_close_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "$EARLY_TOKEN" 2>&1) || early_close_exit=$?
+    check_exit 2 "$early_close_exit" "done refuses a closable token taken before the reference moved"
+    check_yaml "$output" "points at" "the refusal names where the reference points now"
+    v1_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "assess:0123456789abcdef" >/dev/null 2>&1 || v1_exit=$?
+    check_exit 2 "$v1_exit" "done refuses an old-format assessment token"
+    output=$("$MANNA" show "$BA_ID" 2>&1) || true
+    check_yaml "$output" "status: in_progress" "the item is still in progress after the refused closes"
+    FRESH_TOKEN=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BA_ID" --json 2>/dev/null | json_field 'd["assessment"]')
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$BA_ID" --assessment "$FRESH_TOKEN" 2>&1) || true
+    check_yaml "$output" "status: done" "a fresh closable assessment taken under the current conditions closes"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M6: an audit that cannot be written stops the item until recovered (review pass 2, finding 3)"
+    output=$("$MANNA" create "Managed audit failure" "lifecycle destination unwritable" 2>&1) || true
+    AF_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file audit-failure item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$AF_ID" --reason "lead for audit failure" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$AF_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$AF_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AF_ID" --report half.md >/dev/null 2>&1
+    AF_SUB=$(reviewed_submission "$AF_ID")
+    chmod 000 .manna/lifecycle.jsonl
+    af_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AF_ID" --check integration --target HEAD --evidence "Audit-failure fixture acceptance" --submission "$AF_SUB" --attempt 1 2>&1) || af_exit=$?
+    if [[ "$af_exit" -ne 0 ]]; then
+        pass "an acceptance whose audit cannot be written does not succeed"
+    else
+        fail "an acceptance whose audit cannot be written does not succeed" "$output"
+    fi
+    check_yaml "$output" "did not complete" "the failure names the incomplete transaction"
+    pending=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + str(d["closable"]) + "/" + d["next_action"]')
+    if [[ "$pending" == "1/False/agent-do manna managed recover $AF_ID" ]]; then
+        pass "assess reports the incomplete transaction, blocks closure, and names recover"
+    else
+        fail "assess reports the incomplete transaction, blocks closure, and names recover" "got: $pending"
+    fi
+    chmod 644 .manna/lifecycle.jsonl
+    second_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$AF_ID" --check integration --target HEAD --evidence "again" --submission "$AF_SUB" --attempt 1 >/dev/null 2>&1 || second_exit=$?
+    check_exit 1 "$second_exit" "no further acceptance lands while the transaction is incomplete"
+    blocked_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$AF_ID" --report half.md >/dev/null 2>&1 || blocked_submit_exit=$?
+    check_exit 1 "$blocked_submit_exit" "no submission lands while the transaction is incomplete"
+    blocked_done_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$AF_ID" >/dev/null 2>&1 || blocked_done_exit=$?
+    check_exit 2 "$blocked_done_exit" "no close lands while the transaction is incomplete"
+    stranger_recover_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed recover "$AF_ID" >/dev/null 2>&1 || stranger_recover_exit=$?
+    check_exit 2 "$stranger_recover_exit" "a stranger cannot recover the transaction"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"]))')
+    if [[ "$output" == "1" ]]; then
+        pass "the coordinator recovers the incomplete transaction"
+    else
+        fail "the coordinator recovers the incomplete transaction" "got: $output"
+    fi
+    accept_lines=$(grep -c "\"action\":\"accept\",\"issue_id\":\"$AF_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$accept_lines" "recovery writes the missing audit line exactly once"
+    after=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + str(d["closable"]) + "/" + str(len(d["accepted_checks"]))')
+    if [[ "$after" == "0/True/1" ]]; then
+        pass "after recovery the acceptance stands once and the item is closable"
+    else
+        fail "after recovery the acceptance stands once and the item is closable" "got: $after"
+    fi
+    if [[ ! -e .manna/managed-intent.json ]]; then
+        pass "no intent remains after recovery"
+    else
+        fail "no intent remains after recovery" "$(cat .manna/managed-intent.json)"
+    fi
+    # The close audit is a transaction too: an unwritable destination leaves
+    # the row done, the audit pending, and the command FAILED (nonzero), so
+    # no caller reads a clean close; recover finishes it.
+    chmod 000 .manna/lifecycle.jsonl
+    close_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$AF_ID" 2>&1) || close_exit=$?
+    check_exit 2 "$close_exit" "a close whose audit transaction did not complete exits nonzero (review pass 3, finding 1)"
+    check_yaml "$output" "success: false" "the incomplete close is a failure, not a warning"
+    check_yaml "$output" "status: done" "the failure still reports the durable row"
+    check_yaml "$output" "did not complete" "the failure names the incomplete close transaction"
+    check_yaml "$output" "next_action: agent-do manna managed recover $AF_ID" "the failure names recover"
+    output=$("$MANNA" show "$AF_ID" 2>&1) || true
+    check_yaml "$output" "status: done" "the row is done on the board"
+    pending=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + d["incomplete_transactions"][0]["action"] + "/" + d["next_action"]')
+    if [[ "$pending" == "1/close/agent-do manna managed recover $AF_ID" ]]; then
+        pass "assess reports the incomplete close transaction and names recover"
+    else
+        fail "assess reports the incomplete close transaction and names recover" "got: $pending"
+    fi
+    chmod 644 .manna/lifecycle.jsonl
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$AF_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$output" "recover finishes the close's audit transaction"
+    close_lines=$(grep -c "\"action\":\"close\",\"issue_id\":\"$AF_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$close_lines" "the close audit line lands exactly once"
+    if [[ ! -e .manna/managed-intent.json ]]; then
+        pass "no intent remains after the close is recovered"
+    else
+        fail "no intent remains after the close is recovered" "$(cat .manna/managed-intent.json)"
+    fi
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M7: a grant or revocation whose writes did not both land stops the board until the operator recovers it (review pass 3, finding 2)"
+    output=$("$MANNA" create "Managed board recovery" "grant audit unwritable" 2>&1) || true
+    BR_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file board-recovery item"
+    # The operator: a terminal, no pinned agent identity.
+    op() {
+        script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+            -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+            "$@" </dev/null
+    }
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BR_ID" --reason "lead for board recovery" --json 2>/dev/null)
+    # pty output carries a ^D echo before the payload: take the id by shape.
+    BR_GRANT1=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$BR_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$BR_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$BR_ID" --report half.md >/dev/null 2>&1
+    BR_SUB=$(reviewed_submission "$BR_ID")
+    # A second grant whose audit cannot be written (the reviewer's sequence):
+    # the grants file takes it, the audit does not, the intent stays pending.
+    chmod 000 .manna/lifecycle.jsonl
+    grant_exit=0
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BR_ID" --reason "board recovery fixture" 2>&1) || grant_exit=$?
+    output=$(printf '%s' "$output" | tr -d '\r')
+    chmod 644 .manna/lifecycle.jsonl
+    check_exit 1 "$grant_exit" "a grant whose audit cannot be written does not succeed"
+    check_yaml "$output" "managed recover board" "the failure names board recovery"
+    intent_scope=$(python3 -c 'import json; d=json.load(open(".manna/managed-intent.json")); print(",".join(i["issue_id"]+":"+i["action"] for i in d["intents"]))' 2>/dev/null)
+    if [[ "$intent_scope" == "board:grant" ]]; then
+        pass "the pending intent is board-scoped"
+    else
+        fail "the pending intent is board-scoped" "got: $intent_scope"
+    fi
+    grants_for_item=$("$MANNA" coordinator list --json 2>/dev/null | json_field 'str(len([g for g in d["grants"] if g["scope"]["items"] == ["'"$BR_ID"'"]]))')
+    check_exit 2 "$grants_for_item" "the grants file took the grant before the audit failed (state landed, audit did not)"
+    # Nothing managed moves and no grant changes while the board transaction is pending.
+    accept_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$BR_ID" --check integration --target HEAD --evidence "Board recovery fixture" --submission "$BR_SUB" --attempt 1 2>&1) || accept_exit=$?
+    check_exit 1 "$accept_exit" "accept refuses while a board transaction is incomplete"
+    check_yaml "$output" "recover board" "the acceptance refusal names board recovery"
+    submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$BR_ID" --report half.md >/dev/null 2>&1 || submit_exit=$?
+    check_exit 1 "$submit_exit" "submit refuses while a board transaction is incomplete"
+    require_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$BR_ID" --check extra >/dev/null 2>&1 || require_exit=$?
+    check_exit 1 "$require_exit" "managed require refuses while a board transaction is incomplete"
+    grant_again_exit=0
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$BR_ID" --reason "third" 2>&1) || grant_again_exit=$?
+    check_exit 1 "$grant_again_exit" "no further grant lands while a board transaction is incomplete"
+    check_yaml "$(printf '%s' "$output" | tr -d '\r')" "recover board" "the grant refusal names board recovery"
+    revoke_blocked_exit=0
+    op "$MANNA" coordinator revoke "$BR_GRANT1" --reason "blocked" >/dev/null 2>&1 || revoke_blocked_exit=$?
+    check_exit 1 "$revoke_blocked_exit" "no revocation lands while a board transaction is incomplete"
+    pending=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$BR_ID" --json 2>/dev/null | json_field 'str(len(d["incomplete_transactions"])) + "/" + d["incomplete_transactions"][0]["scope"] + "/" + str(d["closable"]) + "/" + d["next_action"]')
+    if [[ "$pending" == "1/board/False/operator: agent-do manna managed recover board" ]]; then
+        pass "assess reports the board transaction, blocks closure, and names the operator's recovery"
+    else
+        fail "assess reports the board transaction, blocks closure, and names the operator's recovery" "got: $pending"
+    fi
+    # Only the operator finishes a board transaction: a coordinator cannot decide its own authority.
+    lead_recover_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover board >/dev/null 2>&1 || lead_recover_exit=$?
+    check_exit 2 "$lead_recover_exit" "a coordinator cannot recover a board transaction"
+    other_recover_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed recover board >/dev/null 2>&1 || other_recover_exit=$?
+    check_exit 2 "$other_recover_exit" "a stranger cannot recover a board transaction"
+    note=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$BR_ID" --json 2>/dev/null | json_field 'd["note"] + "|" + ("board" if d.get("board") else "-")')
+    if [[ "$note" == "no incomplete transaction|board" ]]; then
+        pass "item recovery reports nothing pending on the item and the board transaction beside it"
+    else
+        fail "item recovery reports nothing pending on the item and the board transaction beside it" "got: $note"
+    fi
+    output=$(op "$MANNA" managed recover board --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$recovered" "the operator recovers the board transaction"
+    grant_lines=$(grep -c "\"action\":\"grant\".*\"reason\":\"board recovery fixture\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$grant_lines" "recovery writes the grant's audit line exactly once"
+    if [[ ! -e .manna/managed-intent.json ]]; then
+        pass "no intent remains after board recovery"
+    else
+        fail "no intent remains after board recovery" "$(cat .manna/managed-intent.json)"
+    fi
+    accept_after_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" accept "$BR_ID" --check integration --target HEAD --evidence "Board recovery fixture" --submission "$BR_SUB" --attempt 1 >/dev/null 2>&1 || accept_after_exit=$?
+    check_exit 0 "$accept_after_exit" "after board recovery the acceptance lands"
+    # A revocation that dies after its intent is durable and before the grants
+    # file or the audit is written: the file still says the grant is live, and
+    # the file is not the truth until the operator recovers the board.
+    BR_GRANT2=$("$MANNA" coordinator list --json 2>/dev/null | json_field '[g["id"] for g in d["grants"] if g["reason"] == "board recovery fixture"][0]')
+    op "$MANNA" coordinator revoke "$BR_GRANT2" --reason "fixture done" >/dev/null 2>&1
+    fault_exit=0
+    MANNA_MANAGED_FAULT=after_board_intent op "$MANNA" coordinator revoke "$BR_GRANT1" --reason "rotate" >/dev/null 2>&1 || fault_exit=$?
+    check_exit 70 "$fault_exit" "the revocation died after its intent was durable"
+    live_in_file=$("$MANNA" coordinator list --json 2>/dev/null | json_field 'str([g for g in d["grants"] if g["id"] == "'"$BR_GRANT1"'"][0].get("revoked") is None)')
+    if [[ "$live_in_file" == "True" ]]; then
+        pass "the grants file still shows the grant live (its write never ran)"
+    else
+        fail "the grants file still shows the grant live (its write never ran)" "got: $live_in_file"
+    fi
+    correct_exit=0
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$BR_ID" --reason "pending revocation" 2>&1) || correct_exit=$?
+    check_exit 1 "$correct_exit" "a coordinator cannot act on a grant whose revocation is pending"
+    check_yaml "$output" "recover board" "the refusal names board recovery, not the stale grants file"
+    output=$(op "$MANNA" managed recover board --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$recovered" "the operator recovers the revocation"
+    revoked_now=$("$MANNA" coordinator list --json 2>/dev/null | json_field 'str([g for g in d["grants"] if g["id"] == "'"$BR_GRANT1"'"][0].get("revoked") is not None)')
+    if [[ "$revoked_now" == "True" ]]; then
+        pass "recovery lands the revocation in the grants file"
+    else
+        fail "recovery lands the revocation in the grants file" "got: $revoked_now"
+    fi
+    revoke_lines=$(grep -c "\"action\":\"revoke\".*\"grant\":\"$BR_GRANT1\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$revoke_lines" "the revocation's audit line lands exactly once"
+    after_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed correct "$BR_ID" --reason "after recovery" >/dev/null 2>&1 || after_exit=$?
+    check_exit 2 "$after_exit" "after recovery the revocation stands: the coordinator holds no authority"
+    unset -f op
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M8: recovery is authorized under the board lock; a grant revoked while recovery waited never carries forward (review pass 3, recovery race)"
+    output=$("$MANNA" create "Managed recovery race" "grant revoked before the recovery lock" 2>&1) || true
+    RR_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file recovery-race item"
+    op() {
+        script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+            -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+            "$@" </dev/null
+    }
+    # pending_txns <id>: the transaction ids pending on an item, comma-joined.
+    pending_txns() {
+        python3 -c 'import json, os, sys; p = ".manna/managed-intent.json"; d = json.load(open(p)) if os.path.exists(p) else {"intents": []}; print(",".join(i["txn"] for i in d["intents"] if i["issue_id"] == sys.argv[1]))' "$1"
+    }
+    # state_digest: one digest over the sidecar, the audit, and the intents.
+    state_digest() {
+        { cat .manna/managed.json .manna/lifecycle.jsonl .manna/managed-intent.json 2>/dev/null || true; } | shasum | awk '{print $1}'
+    }
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$RR_ID" --reason "lead for recovery race" --json 2>/dev/null)
+    RR_GRANT=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$RR_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$RR_ID" >/dev/null 2>&1
+    # The reviewer's fixture: the worker's submission is the transaction left
+    # pending (its audit cannot be written), and the coordinator recovers it.
+    chmod 000 .manna/lifecycle.jsonl
+    rr_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$RR_ID" --report half.md >/dev/null 2>&1 || rr_submit_exit=$?
+    chmod 644 .manna/lifecycle.jsonl
+    if [[ "$rr_submit_exit" -ne 0 ]]; then
+        pass "the submission whose audit cannot be written does not succeed"
+    else
+        fail "the submission whose audit cannot be written does not succeed" "exit 0"
+    fi
+    RR_TXN=$(pending_txns "$RR_ID")
+    if [[ "$RR_TXN" == txn-* ]]; then
+        pass "the submission's transaction is pending"
+    else
+        fail "the submission's transaction is pending" "got: $RR_TXN"
+    fi
+    before_state=$(state_digest)
+    # Deterministic race, synchronized on the grant read itself (the reviewer's
+    # fixture): the grants file is a FIFO, so the fixture knows the moment
+    # recovery reads it, whatever recovery did first. A recovery that reads
+    # before its lock (the pass-3 defect) finds the lock free: the fixture
+    # takes it, serves the live grant, puts the revoked grant on disk under the
+    # lock, and lets go; that recovery would then recover on obsolete
+    # permission. A recovery that reads under its lock leaves the fixture
+    # refused the lock, and is served the revoked grant: the grants as they
+    # are at lock time. Either way the revocation precedes the recovery's
+    # lock, and nothing here depends on scheduling.
+    mv .manna/coordinators.json rr-grants.real
+    mkfifo .manna/coordinators.json
+    python3 - "$PWD/.manna/board.lock" "$PWD/.manna/coordinators.json" "$PWD/rr-grants.real" "$RR_GRANT" > rr-fixture.out <<'PY' &
+import fcntl, json, os, sys
+lock_path, fifo, real, grant_id = sys.argv[1:5]
+live = json.load(open(real))
+revoked = json.loads(json.dumps(live))
+for grant in revoked["grants"]:
+    if grant["id"] == grant_id:
+        grant["revoked"] = {"at": "2026-10-31T00:30:00Z", "by": "operator-fixture", "reason": "revoked after read, before recovery lock"}
+fd = os.open(fifo, os.O_WRONLY)  # returns the moment recovery opens the grants
+lock = open(lock_path, "a+")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    held = True
+except BlockingIOError:
+    held = False
+os.write(fd, json.dumps(live if held else revoked).encode())
+os.close(fd)
+os.unlink(fifo)
+with open(real, "w") as handle:
+    json.dump(revoked, handle)
+os.rename(real, fifo)
+if held:
+    fcntl.flock(lock, fcntl.LOCK_UN)
+print("read-before-lock" if held else "read-under-lock")
+PY
+    RR_FIXTURE_PID=$!
+    rr_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$RR_ID" > rr-recover.out 2>&1 || rr_exit=$?
+    if kill -0 "$RR_FIXTURE_PID" 2>/dev/null; then
+        # Recovery ended without ever reading the grants: free the fixture
+        # and put the grants file back so the rest of the suite can go on.
+        sleep 0.2
+        if kill -0 "$RR_FIXTURE_PID" 2>/dev/null; then
+            kill "$RR_FIXTURE_PID" 2>/dev/null || true
+            rm -f .manna/coordinators.json
+            mv rr-grants.real .manna/coordinators.json
+            fail "recovery read the grants" "recovery exited $rr_exit without reading the grants file: $(cat rr-recover.out)"
+        fi
+    fi
+    wait "$RR_FIXTURE_PID" 2>/dev/null || true
+    output=$(cat rr-recover.out)
+    sync_mode=$(cat rr-fixture.out)
+    if [[ "$sync_mode" == "read-under-lock" ]]; then
+        pass "recovery read the grants under its own lock, not before it"
+    else
+        fail "recovery read the grants under its own lock, not before it" "the fixture reports: $sync_mode (the grants were read with the lock free, then revoked under the lock)"
+    fi
+    check_exit 2 "$rr_exit" "a grant revoked before recovery holds the lock does not recover (review pass 3, recovery race)"
+    check_yaml "$output" "level under the lock: none" "the refusal reports the authority as it stands under the lock"
+    after_state=$(state_digest)
+    if [[ "$after_state" == "$before_state" ]]; then
+        pass "the refused recovery changed no state and no audit"
+    else
+        fail "the refused recovery changed no state and no audit" "sidecar/audit/intent digest moved: $before_state -> $after_state"
+    fi
+    if [[ "$(pending_txns "$RR_ID")" == "$RR_TXN" ]]; then
+        pass "the transaction is still pending after the refusal"
+    else
+        fail "the transaction is still pending after the refusal" "got: $(pending_txns "$RR_ID")"
+    fi
+    submit_lines=$(grep -c "\"action\":\"submit\",\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 0 "$submit_lines" "no audit line was written by the refused recovery"
+    again_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$RR_ID" >/dev/null 2>&1 || again_exit=$?
+    check_exit 2 "$again_exit" "the revoked coordinator stays refused once the lock is free"
+    # Preserved: the operator finishes it.
+    output=$(op "$MANNA" managed recover "$RR_ID" --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"])) + "/" + (d["recovered"] or ["-"])[0] + "/" + d.get("authority", {}).get("level", "-")')
+    if [[ "$recovered" == "1/$RR_TXN/operator" ]]; then
+        pass "the operator recovers the transaction the revoked coordinator could not"
+    else
+        fail "the operator recovers the transaction the revoked coordinator could not" "got: $recovered"
+    fi
+    submit_lines=$(grep -c "\"action\":\"submit\",\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit 1 "$submit_lines" "the submission's audit line lands exactly once"
+    if [[ -z "$(pending_txns "$RR_ID")" ]]; then
+        pass "no intent remains after the operator's recovery"
+    else
+        fail "no intent remains after the operator's recovery" "$(cat .manna/managed-intent.json)"
+    fi
+    # Preserved: the session that started a transaction finishes it, grant or
+    # no grant. The worker's next submission is left pending the same way.
+    chmod 000 .manna/lifecycle.jsonl
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$RR_ID" --report half.md >/dev/null 2>&1 || true
+    chmod 644 .manna/lifecycle.jsonl
+    RR_TXN2=$(pending_txns "$RR_ID")
+    stranger_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed recover "$RR_ID" >/dev/null 2>&1 || stranger_exit=$?
+    check_exit 2 "$stranger_exit" "a stranger cannot recover the worker's transaction"
+    recovered=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" managed recover "$RR_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"])) + "/" + (d["recovered"] or ["-"])[0] + "/" + d.get("authority", {}).get("level", "-")')
+    if [[ "$recovered" == "1/$RR_TXN2/owner" ]]; then
+        pass "the session that started the transaction recovers it without a grant"
+    else
+        fail "the session that started the transaction recovers it without a grant" "got: $recovered"
+    fi
+    # The board's own pending transaction is read under the lock too: a
+    # coordinator recovery that holds before the lock, while a revocation of
+    # its grant dies with its intent durable, finds the board pending when it
+    # holds the lock and is refused naming board recovery (the grants file
+    # still shows the grant live; the file is not the truth).
+    output=$(op "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$RR_ID" --reason "lead again for the board race" --json 2>/dev/null)
+    RR_GRANT_B=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    chmod 000 .manna/lifecycle.jsonl
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$RR_ID" --report half.md >/dev/null 2>&1 || true
+    chmod 644 .manna/lifecycle.jsonl
+    RR_TXN3=$(pending_txns "$RR_ID")
+    item_audit_before=$(grep -c "\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    MANNA_MANAGED_PAUSE_BEFORE_LOCK=3 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" managed recover "$RR_ID" > rr-board-recover.out 2>&1 &
+    RR_BOARD_PID=$!
+    sleep 1.2
+    board_fault_exit=0
+    MANNA_MANAGED_FAULT=after_board_intent op "$MANNA" coordinator revoke "$RR_GRANT_B" --reason "rotate during recovery" >/dev/null 2>&1 || board_fault_exit=$?
+    check_exit 70 "$board_fault_exit" "the revocation died after its intent was durable, while recovery waited"
+    rr_board_exit=0
+    wait "$RR_BOARD_PID" || rr_board_exit=$?
+    output=$(cat rr-board-recover.out)
+    check_exit 2 "$rr_board_exit" "a coordinator recovery that finds the board pending under the lock is refused"
+    check_yaml "$output" "recover board" "the refusal names board recovery, not the stale grants file"
+    if [[ "$(pending_txns "$RR_ID")" == "$RR_TXN3" ]]; then
+        pass "the item's transaction is still pending after the board refusal"
+    else
+        fail "the item's transaction is still pending after the board refusal" "got: $(pending_txns "$RR_ID")"
+    fi
+    item_audit_after=$(grep -c "\"issue_id\":\"$RR_ID\"" .manna/lifecycle.jsonl || true)
+    check_exit "$item_audit_before" "$item_audit_after" "the refused recovery wrote no audit line for the item"
+    output=$(op "$MANNA" managed recover board --json 2>/dev/null)
+    recovered=$(printf '%s\n' "$output" | tr -d '\r' | grep -o '{.*}' | head -1 | json_field 'str(len(d["recovered"]))')
+    check_exit 1 "$recovered" "the operator finishes the revocation"
+    lead_after_exit=0
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed recover "$RR_ID" >/dev/null 2>&1 || lead_after_exit=$?
+    check_exit 2 "$lead_after_exit" "once the revocation lands the coordinator holds nothing and stays refused"
+    recovered=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" managed recover "$RR_ID" --json 2>/dev/null | json_field 'str(len(d["recovered"])) + "/" + (d["recovered"] or ["-"])[0]')
+    if [[ "$recovered" == "1/$RR_TXN3" ]]; then
+        pass "the session that started the transaction finishes it after the board recovered"
+    else
+        fail "the session that started the transaction finishes it after the board recovered" "got: $recovered"
+    fi
+    unset -f op pending_txns state_digest
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M5: atomic transitions, authority under the lock, interrupted writes, races"
+    # (a) An interrupted release: the process dies after the pending phase.
+    output=$("$MANNA" create "Managed interrupted" "release dies mid-way" 2>&1) || true
+    I_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file interrupted item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$I_ID" --reason "lead for interrupted" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$I_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$I_ID" >/dev/null 2>&1
+    fault_exit=0
+    MANNA_MANAGED_FAULT=after_release_pending MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" managed release "$I_ID" --reason "worker unreachable" --isolated-checkout "$REPLACEMENT_TREE" >/dev/null 2>&1 || fault_exit=$?
+    check_exit 70 "$fault_exit" "the injected fault ends the process after the pending phase"
+    output=$("$MANNA" show "$I_ID" 2>&1) || true
+    check_yaml "$output" "claimed_by: $WORKER_ID" "the row still carries the claim after the interrupted release"
+    interrupted=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$I_ID" --json 2>/dev/null | json_field 'str(d["release_interrupted"]) + "/" + str(d["attempt"]) + "/" + d["next_action"]')
+    if [[ "$interrupted" == "True/2/coordinator: agent-do manna managed release $I_ID --reason \"complete the interrupted release\"" ]]; then
+        pass "assess reports the interrupted release and the exact next action"
+    else
+        fail "assess reports the interrupted release and the exact next action" "got: $interrupted"
+    fi
+    blocked_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$I_ID" --report half.md >/dev/null 2>&1 || blocked_submit_exit=$?
+    check_exit 1 "$blocked_submit_exit" "no submission lands on an interrupted release"
+    stranger_resume_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" managed release "$I_ID" --reason "finish it" >/dev/null 2>&1 || stranger_resume_exit=$?
+    check_exit 2 "$stranger_resume_exit" "a stranger cannot complete the interrupted release"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$I_ID" --reason "complete the interrupted release" 2>&1) || true
+    check_yaml "$output" "status: open" "the coordinator completes the interrupted release"
+    check_yaml "$output" "attempt: 2" "resuming does not advance the attempt a second time"
+    check_yaml "$output" "claim_release: released" "the pending marker is cleared"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed history "$I_ID" --json 2>/dev/null | json_field '",".join(e["action"] for e in d["events"])')
+    if [[ "$output" == "require,claim,release,release_resume" ]]; then
+        pass "the audit holds the interrupted release and its completion"
+    else
+        fail "the audit holds the interrupted release and its completion" "got: $output"
+    fi
+
+    # (b) Revocation race: the grant is revoked by a writer that wins the board
+    # lock while the coordinator's accept is already past its preview.
+    output=$("$MANNA" create "Managed revoked" "grant revoked under the lock" 2>&1) || true
+    V_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file revoked item"
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$V_ID" --reason "lead for revoked" 2>&1 </dev/null | tr -d '\r') || true
+    V_GRANT=$(printf '%s\n' "$output" | grep -o 'grant-[0-9a-f]\{12\}' | head -1)
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$V_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$V_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$V_ID" --report half.md >/dev/null 2>&1
+    # The accept passes its preview (grant live) and then holds before the
+    # lock; meanwhile a writer takes the lock, revokes the grant, and lets go.
+    # The recheck under the lock must refuse the accept.
+    V_SUB=$(reviewed_submission "$V_ID")
+    MANNA_MANAGED_PAUSE_BEFORE_LOCK=3 MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" \
+        "$MANNA" accept "$V_ID" --check integration --target HEAD --evidence "raced" --submission "$V_SUB" --attempt 1 > race-accept.out 2>&1 &
+    ACCEPT_PID=$!
+    sleep 1.2
+    python3 - "$PWD/.manna/board.lock" "$PWD/.manna/coordinators.json" "$V_GRANT" <<'PY'
+import fcntl, json, sys
+lock = open(sys.argv[1], "a+")
+fcntl.flock(lock, fcntl.LOCK_EX)
+grants = json.load(open(sys.argv[2]))
+for grant in grants["grants"]:
+    if grant["id"] == sys.argv[3]:
+        grant["revoked"] = {"at": "2026-10-30T00:00:00Z", "by": "operator-race", "reason": "revoked while the accept waited"}
+json.dump(grants, open(sys.argv[2], "w"))
+fcntl.flock(lock, fcntl.LOCK_UN)
+PY
+    race_exit=0
+    wait "$ACCEPT_PID" || race_exit=$?
+    output=$(cat race-accept.out)
+    check_exit 1 "$race_exit" "an accept that passed its preview is refused once the grant is revoked under the lock"
+    check_yaml "$output" "no longer holds coordinator authority" "the refusal names the lost authority"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$V_ID" --json 2>/dev/null | json_field 'str(len(d["accepted_checks"])) + "/" + d["authority"]["level"]')
+    if [[ "$output" == "0/none" ]]; then
+        pass "nothing was accepted and the session no longer coordinates"
+    else
+        fail "nothing was accepted and the session no longer coordinates" "got: $output"
+    fi
+
+    # (c) Concurrent release and claim: whichever wins, the board is coherent.
+    for round in 1 2 3; do
+        output=$("$MANNA" create "Managed race $round" "release vs claim" 2>&1) || true
+        C_ID=$(extract_id "$output")
+        git add -A >/dev/null 2>&1
+        git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file race $round"
+        script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+            -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+            "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$C_ID" --reason "lead for race" >/dev/null 2>&1 </dev/null
+        MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$C_ID" --check integration >/dev/null 2>&1
+        MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$C_ID" >/dev/null 2>&1
+        MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed release "$C_ID" --reason "race" --isolated-checkout "$REPLACEMENT_TREE" >/dev/null 2>&1 &
+        RELEASE_PID=$!
+        claim_exit=0
+        MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" claim "$C_ID" >/dev/null 2>&1 || claim_exit=$?
+        wait "$RELEASE_PID" 2>/dev/null || true
+        state=$("$MANNA" show "$C_ID" 2>&1 | grep -E "^  (claimed_by|status):" | sed 's/^  //' | paste -sd' ' -)
+        attempt=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$C_ID" --json 2>/dev/null | json_field 'str(d["attempt"]) + "/" + str(d["release_interrupted"])')
+        case "$claim_exit|$state" in
+            "0|status: in_progress claimed_by: $OTHER_ID"|"0|claimed_by: $OTHER_ID status: in_progress")
+                claim_won="after"
+                ;;
+            *"|status: open"|*"|status: open "*)
+                claim_won="lost"
+                ;;
+            *)
+                claim_won="incoherent"
+                ;;
+        esac
+        if [[ "$claim_won" != "incoherent" && "$attempt" == "2/False" ]]; then
+            pass "race $round: one coherent outcome (claim exit $claim_exit, $state, attempt 2, no interrupted release)"
+        else
+            fail "race $round: board incoherent" "claim exit $claim_exit, state '$state', $attempt"
+        fi
+    done
+
+    # (d) Abandon by the worker: attempt ends and the claim releases in one transaction.
+    output=$("$MANNA" create "Managed abandon" "worker walks away" 2>&1) || true
+    A_ID=$(extract_id "$output")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file abandon item"
+    script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --item "$A_ID" --reason "lead for abandon" >/dev/null 2>&1 </dev/null
+    MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$A_ID" --check integration >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$A_ID" >/dev/null 2>&1
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$A_ID" --report half.md >/dev/null 2>&1
+    stranger_abandon_exit=0
+    MANNA_SESSION_ID="$OTHER_ID" MANNA_SESSION_TOKEN="$OTHER_TOKEN" "$MANNA" abandon "$A_ID" >/dev/null 2>&1 || stranger_abandon_exit=$?
+    check_exit 1 "$stranger_abandon_exit" "a stranger cannot abandon the worker's managed claim"
+    output=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" abandon "$A_ID" 2>&1) || true
+    check_yaml "$output" "status: open" "the worker abandons its managed claim"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" assess "$A_ID" --json 2>/dev/null | json_field 'str(d["attempt"]) + "/" + str(d["release_interrupted"]) + "/" + d["record"]["releases"][-1]["basis"] + "/" + d["record"]["releases"][-1]["claim_release"]')
+    if [[ "$output" == "2/False/abandon/released" ]]; then
+        pass "abandon ends the attempt and completes its two-phase release"
+    else
+        fail "abandon ends the attempt and completes its two-phase release" "got: $output"
+    fi
+    abandoned_submit_exit=0
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" submit "$A_ID" --report half.md >/dev/null 2>&1 || abandoned_submit_exit=$?
+    check_exit 1 "$abandoned_submit_exit" "the worker that abandoned cannot submit"
+
+    # ------------------------------------------------------------------------
+    echo ""
+    echo "Test M3: unmanaged items keep every documented path"
+    output=$("$MANNA" create "Plain work" 2>&1) || true
+    P_ID=$(extract_id "$output")
+    MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" claim "$P_ID" >/dev/null 2>&1
+    output=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" done "$P_ID" 2>&1) || true
+    check_yaml "$output" "authority: owner" "an unmanaged owner close still works"
+    unmanaged=$(MANNA_SESSION_ID="$WORKER_ID" MANNA_SESSION_TOKEN="$WORKER_TOKEN" "$MANNA" assess "$P_ID" --json 2>/dev/null | json_field 'd["managed"]')
+    if [[ "$unmanaged" == "False" ]]; then
+        pass "assess answers for unmanaged items too"
+    else
+        fail "assess answers for unmanaged items too" "got: $unmanaged"
+    fi
+    output=$("$MANNA" managed doctor 2>&1) || true
+    check_yaml "$output" "managed_lifecycle" "doctor names the capability this binary carries"
+    check_yaml "$output" "live:" "doctor reports whether the lifecycle is live, not only compiled"
+
+    cd "$TEST_DIR"
+    rm -rf "$MANAGED_DIR"
+else
+    echo "  - skipped: needs macOS script(1) to lend the operator a pseudo-terminal"
+fi
+
+# ============================================================================
 # Portable Federation Tests
 # ============================================================================
 
@@ -1869,6 +3132,459 @@ check_exit 0 "$fork_lint_exit" "tracked fork manifest and archive pass lint"
 
 cd "$TEST_DIR"
 rm -rf "$FED_SOURCE" "$FED_TARGET" "$FED_REPLICA" "$FED_CLONE"
+
+# ============================================================================
+# Track Dispatch Tests (mn-9b4359)
+# ============================================================================
+# A track that carries a sealed handoff is a whole-track build assignment:
+# one agent claims it and works its items in dependency order, one claim at a
+# time. These tests drive the real binary through the board and read the same
+# derived state the serve page and native clients consume.
+
+echo ""
+echo "=== Track Dispatch Tests ==="
+
+# tjson <python expr over d> : evaluate against JSON on stdin
+tjson() {
+    python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"
+}
+# strip_pair <id>: turn a paired row back into a pre-feature container track
+# (no prompt, no binding, no file) without touching anything else on the row.
+strip_pair() {
+    python3 - "$1" <<'PY'
+import json, pathlib, sys
+target = sys.argv[1]
+path = pathlib.Path('.manna/issues.jsonl')
+rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+for row in rows:
+    if row['id'] == target:
+        prompt = row.pop('prompt', None)
+        row.pop('handoff_digest', None)
+        if prompt:
+            pathlib.Path(prompt).unlink(missing_ok=True)
+path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+PY
+}
+# row_field <id> <field>: one field of a row straight from the board file
+row_field() {
+    python3 - "$1" "$2" <<'PY'
+import json, pathlib, sys
+for line in pathlib.Path('.manna/issues.jsonl').read_text().splitlines():
+    row = json.loads(line)
+    if row['id'] == sys.argv[1]:
+        value = row.get(sys.argv[2])
+        print('' if value is None else value)
+PY
+}
+
+TRACK_DIR=$(mktemp -d)
+cd "$TRACK_DIR"
+git init -q -b main
+git -c user.email=manna@test -c user.name=manna-test commit -q --allow-empty -m "root"
+WORKER_A_ID="ses_track_a_$$"; WORKER_A_TOKEN="track-a-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+WORKER_B_ID="ses_track_b_$$"; WORKER_B_TOKEN="track-b-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+WORKER_C_ID="ses_track_c_$$"; WORKER_C_TOKEN="track-c-token-cccccccccccccccccccccccccccccccccc"
+as_a() { MANNA_SESSION_ID="$WORKER_A_ID" MANNA_SESSION_TOKEN="$WORKER_A_TOKEN" "$MANNA" "$@"; }
+as_b() { MANNA_SESSION_ID="$WORKER_B_ID" MANNA_SESSION_TOKEN="$WORKER_B_TOKEN" "$MANNA" "$@"; }
+as_c() { MANNA_SESSION_ID="$WORKER_C_ID" MANNA_SESSION_TOKEN="$WORKER_C_TOKEN" "$MANNA" "$@"; }
+"$MANNA" init >/dev/null 2>&1
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T1: a new track pairs a sealed dispatch work order and enters the board flow"
+output=$("$MANNA" create "Alpha program" "Ship the alpha program end to end" --type track --source "track dispatch fixture" 2>&1) || true
+check_yaml "$output" "success: true" "create --type track succeeds"
+TR=$(extract_id "$output")
+check_yaml "$output" "type: track" "the row is a track"
+check_yaml "$output" "prompt: .handoff/$TR-alpha-program.md" "the track carries a canonical handoff pointer"
+check_yaml "$output" "handoff_digest: sha256:" "the track carries a sealed binding"
+[[ -f ".handoff/$TR-alpha-program.md" ]] && pass "track handoff file exists" || fail "track handoff file exists" "missing"
+TRACK_DOC=$(cat ".handoff/$TR-alpha-program.md")
+for needle in "## Claim" "agent-do manna claim $TR" "## Work order" "Track dispatch protocol" "children.next" "agent-do manna show $TR --json" "## Completion" "agent-do manna done $TR"; do
+    [[ "$TRACK_DOC" == *"$needle"* ]] && pass "track handoff carries '$needle'" || fail "track handoff carries '$needle'" "$TRACK_DOC"
+done
+[[ "$TRACK_DOC" != *"Progress ledger"* && "$TRACK_DOC" != *"- [ ]"* ]] && pass "track handoff carries no progress ledger" || fail "track handoff carries no progress ledger" "$TRACK_DOC"
+
+A=$(extract_id "$("$MANNA" create "Child A" "first step" --track "$TR" 2>&1)")
+B=$(extract_id "$("$MANNA" create "Child B" "second step" --track "$TR" 2>&1)")
+C=$(extract_id "$("$MANNA" create "Child C" "third step" --track "$TR" 2>&1)")
+D=$(extract_id "$("$MANNA" create "Child D" "independent step" --track "$TR" 2>&1)")
+EXT=$(extract_id "$("$MANNA" create "Outside prerequisite" "lives in no track" 2>&1)")
+"$MANNA" block "$B" "$A" >/dev/null 2>&1
+"$MANNA" block "$C" "$B" >/dev/null 2>&1
+output=$("$MANNA" sync 2>&1) || true
+check_yaml "$output" "success: true" "sync admits the paired track into presentation"
+[[ -f ".handoff/01-$TR-alpha-program.md" ]] && pass "track handoff receives a priority number like an item" || fail "track handoff receives a priority number like an item" "$(/bin/ls .handoff)"
+check_yaml "$(cat .handoff/README.md)" "\`$TR\`" "generated index lists the track"
+git add -A >/dev/null 2>&1
+git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file the alpha program"
+
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "ready" "state derives a paired, unclaimed track with claimable work as ready"
+check_yaml "$(echo "$STATE" | tjson "'$TR' in [r['id'] for r in d['next']]")" "True" "a ready track appears in next: the launch pointer can select it"
+check_yaml "$(echo "$STATE" | tjson "[r['handoff_exists'] for r in d['all'] if r['id']=='$TR'][0]")" "True" "state reports the track handoff exists"
+check_yaml "$(echo "$STATE" | tjson "[r['order'] is not None for r in d['all'] if r['id']=='$TR'][0]")" "True" "the track holds a priority slot"
+check_yaml "$(echo "$STATE" | tjson "[r['children']['next'] for r in d['all'] if r['id']=='$TR'][0]")" "$A" "state carries the track's next eligible child"
+check_yaml "$(echo "$STATE" | tjson "[r['kind'] for r in d['all'] if r['id']=='$TR'][0]")" "track" "the row stays a track: containers are preserved"
+check_yaml "$(echo "$STATE" | tjson "d['tracks'][0]['id']")" "$TR" "the track still groups its items"
+check_yaml "$(echo "$STATE" | tjson "sorted(r['id'] for r in d['tracks'][0]['items'])")" "$(python3 -c "print(sorted(['$A','$B','$C','$D']))")" "track grouping lists exactly its items"
+# The same three fields Holy's worker dispatch reads before it launches.
+check_yaml "$(echo "$STATE" | tjson "[(bool(r['prompt']), bool(r['handoff_digest']), r['handoff_exists']) for r in d['all'] if r['id']=='$TR'][0]")" "(True, True, True)" "dispatch fields (prompt, handoff_digest, handoff_exists) are complete for the track"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T2: show orders eligible children by dependency, then priority, deterministically"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['eligible']")" "['$A', '$D']" "dependency-free children are eligible in priority order"
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$A" "next is the first eligible child"
+check_yaml "$(echo "$output" | tjson "sorted(w['id'] for w in d['children']['waiting'])")" "$(python3 -c "print(sorted(['$B', '$C']))")" "blocked children wait"
+check_yaml "$(echo "$output" | tjson "(d['children']['total'], d['children']['done'], d['children']['open'])")" "(4, 0, 4)" "counts cover every item"
+"$MANNA" order "$D" 2 >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['eligible']")" "['$D', '$A']" "moving priority reorders eligibility"
+"$MANNA" order "$A" 2 >/dev/null 2>&1
+"$MANNA" order "$D" 5 >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$A" "priority restored, next follows"
+check_yaml "$(echo "$output" | tjson "d['children']['eligible']")" "['$A', '$D']" "priority restored, eligibility order follows"
+output=$("$MANNA" show "$A" 2>&1) || true
+[[ "$output" != *"children:"* ]] && pass "an item's show output is unchanged (no children block)" || fail "an item's show output is unchanged (no children block)" "$output"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T3: the track is claimed through the ordinary claim gate"
+output=$(as_a claim "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "worker A claims the track"
+check_yaml "$output" "status: in_progress" "the track is in progress"
+check_yaml "$output" "claimed_by: $WORKER_A_ID" "the track names its holder"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "active" "a claimed track is active"
+check_yaml "$(echo "$STATE" | tjson "'$TR' in [r['id'] for r in d['now']]")" "True" "a claimed track sits in now"
+done_exit=0
+output=$(as_a done "$TR" 2>&1) || done_exit=$?
+check_exit 2 "$done_exit" "premature track completion is refused with exit 2"
+check_yaml "$output" "4 open item(s)" "the refusal counts the open items"
+check_yaml "$output" "$A (open)" "the refusal names an open item with its status"
+check_yaml "$(row_field "$TR" status)" "in_progress" "a refused close writes nothing"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T4: the dispatched agent works children one claim at a time from board truth"
+output=$(as_a claim "$A" 2>&1) || true
+check_yaml "$output" "success: true" "track holder claims the next child individually"
+output=$(as_a done "$A" 2>&1) || true
+check_yaml "$output" "success: true" "track holder closes the child under its own lifecycle"
+check_released "$output" "closing A releases B" "$B"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$B" "refreshed board truth advances next to the released child"
+check_yaml "$(echo "$output" | tjson "d['children']['done']")" "1" "completed children are counted done"
+# A child claimed elsewhere is held, never taken.
+output=$(as_b claim "$B" 2>&1) || true
+check_yaml "$output" "success: true" "another worker claims a child while the track is held: independent dispatch still works"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "[(h['id'], h['claimed_by']) for h in d['children']['held']]")" "[('$B', '$WORKER_B_ID')]" "a child claimed elsewhere is listed as held with its owner"
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$D" "next skips the held child and selects another eligible one"
+steal_exit=0
+as_a claim "$B" >/dev/null 2>&1 || steal_exit=$?
+check_exit 2 "$steal_exit" "the track holder cannot claim a child another session holds (refused, exit 2)"
+check_yaml "$(row_field "$B" claimed_by)" "$WORKER_B_ID" "the other worker's claim is untouched"
+# An external prerequisite blocks the last eligible child: nothing is eligible, the stall says why.
+"$MANNA" block "$D" "$EXT" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "None" "no eligible work: next is null"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "held by live claims: $B ($WORKER_B_ID)" "stall names the claim held elsewhere"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "$D waits on $EXT" "stall names the external prerequisite"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "active" "a held track stays active while nothing is eligible"
+"$MANNA" unblock "$D" "$EXT" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$D" "clearing the prerequisite makes the child eligible again"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T5: competing child claims have one winner; the parent's claim state never gates children"
+for i in {1..6}; do
+    (
+        set +e
+        MANNA_SESSION_ID="ses_track_racer_$i" MANNA_SESSION_TOKEN="racer-token-$i-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+            "$MANNA" claim "$D" >"race.$i.out" 2>&1
+        echo $? >"race.$i.rc"
+        exit 0
+    ) &
+done
+wait
+winners=0
+for i in {1..6}; do
+    [[ "$(cat "race.$i.rc")" -eq 0 ]] && winners=$((winners + 1))
+done
+check_exit 1 "$winners" "concurrent claims on one child under a held track have exactly one winner"
+D_OWNER=$(row_field "$D" claimed_by)
+MANNA_SESSION_ID="$D_OWNER" MANNA_SESSION_TOKEN="racer-token-${D_OWNER##*_}-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$MANNA" abandon "$D" >/dev/null 2>&1
+check_yaml "$(row_field "$D" status)" "open" "the racer released the child"
+# Parent unclaimed: a child still dispatches independently.
+output=$(as_a abandon "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "worker A releases the track"
+check_yaml "$(row_field "$B" claimed_by)" "$WORKER_B_ID" "releasing the track preserves another worker's child claim"
+check_yaml "$(row_field "$A" status)" "done" "releasing the track preserves completed child work"
+output=$(as_c claim "$D" 2>&1) || true
+check_yaml "$output" "success: true" "a child is claimable while its track is unclaimed"
+as_c abandon "$D" >/dev/null 2>&1
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T6: a successor resumes the track from board truth"
+output=$(as_b claim "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "worker B claims the released track"
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['done']")" "1" "successor sees completed children"
+check_yaml "$(echo "$output" | tjson "[h['id'] for h in d['children']['held']]")" "['$B']" "successor sees its own held child"
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "$D" "successor is pointed at the next eligible child"
+# Scope change: a child added after the claim is visible as such, never silent.
+F=$(extract_id "$("$MANNA" create "Child F" "added after the claim" --track "$TR" 2>&1)")
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['added_since_claim']")" "['$F']" "a child added after the claim is flagged"
+check_yaml "$(echo "$output" | tjson "'$F' in d['children']['eligible']")" "True" "the added child is eligible under its own work order"
+# A child moved out of the track disappears; its row and work are untouched.
+"$MANNA" update "$F" --track "" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "'$F' in d['children']['eligible'] or '$F' in d['children']['added_since_claim']")" "False" "a child moved out of the track leaves the children list"
+check_yaml "$(row_field "$F" status)" "open" "the moved child keeps its own row"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T7: the track closes only when every item is done"
+done_exit=0
+output=$(as_b done "$TR" 2>&1) || done_exit=$?
+check_exit 2 "$done_exit" "successor cannot close over open items"
+check_yaml "$(row_field "$TR" claimed_by)" "$WORKER_B_ID" "the refused close leaves the successor's claim intact"
+as_b done "$B" >/dev/null 2>&1
+as_b claim "$C" >/dev/null 2>&1 && as_b done "$C" >/dev/null 2>&1
+as_b claim "$D" >/dev/null 2>&1 && as_b done "$D" >/dev/null 2>&1
+output=$("$MANNA" show "$TR" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['open']")" "0" "every item is done"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "every item is done; the track can close" "stall says the track can close"
+output=$(as_b done "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "the track closes once every item is done"
+check_yaml "$output" "status: done" "the track is done"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$TR'][0]")" "done" "state derives the closed track as done"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T8: an existing track without a handoff is a container until attached, idempotently"
+T2=$(extract_id "$("$MANNA" create "Legacy program" "a track from before dispatch existed" --type track 2>&1)")
+strip_pair "$T2"
+check_yaml "$(row_field "$T2" prompt)" "" "fixture: the track has no handoff pointer"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T2'][0]")" "track" "an unpaired track derives as a container, not as ready"
+check_yaml "$(echo "$STATE" | tjson "'$T2' in [r['id'] for r in d['next']]")" "False" "an unpaired track is not launchable"
+claim_exit=0
+output=$(as_a claim "$T2" 2>&1) || claim_exit=$?
+check_exit 2 "$claim_exit" "claiming an unpaired track is refused with exit 2"
+check_yaml "$output" "agent-do manna handoff attach $T2" "the refusal names the remedy"
+check_yaml "$(row_field "$T2" status)" "open" "the refused claim writes nothing"
+lint_exit=0
+"$MANNA" lint --json >/dev/null 2>&1 || lint_exit=$?
+output=$("$MANNA" lint --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "[f for f in d['findings'] if f.get('issue_id')=='$T2']")" "[]" "lint does not fault a container track for lacking a handoff"
+output=$(as_a handoff attach "$T2" 2>&1) || true
+check_yaml "$output" "success: true" "handoff attach supplies the missing work order"
+check_yaml "$output" "changed: true" "attach reports the change"
+check_yaml "$output" "adopted: false" "a generated order is not an adoption"
+check_yaml "$output" "prompt: .handoff/$T2-legacy-program.md" "attach writes the canonical pointer"
+[[ -f ".handoff/$T2-legacy-program.md" ]] && pass "attach creates the track handoff" || fail "attach creates the track handoff" "missing"
+check_yaml "$(row_field "$T2" status)" "open" "attach does not reset status"
+output=$(as_a handoff attach "$T2" 2>&1) || true
+check_yaml "$output" "success: true" "a second attach succeeds"
+check_yaml "$output" "changed: false" "a second attach changes nothing"
+DIGEST_BEFORE=$(row_field "$T2" handoff_digest)
+as_a handoff attach "$T2" >/dev/null 2>&1
+check_yaml "$(row_field "$T2" handoff_digest)" "$DIGEST_BEFORE" "repeated attach keeps the binding stable"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T2'][0]")" "waiting" "an attached track with no items waits rather than inviting a launch"
+done_exit=0
+output=$(as_a done "$T2" 2>&1) || done_exit=$?
+check_exit 2 "$done_exit" "an empty track cannot close"
+check_yaml "$output" "no items" "the empty-track refusal says why"
+G=$(extract_id "$("$MANNA" create "Legacy child" "work" --track "$T2" 2>&1)")
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T2'][0]")" "ready" "an attached track with claimable work is ready"
+output=$(as_a claim "$T2" 2>&1) || true
+check_yaml "$output" "success: true" "the attached track passes the claim gate"
+as_a abandon "$T2" >/dev/null 2>&1
+item_attach_exit=0
+output=$(as_a handoff attach "$G" 2>&1) || item_attach_exit=$?
+check_exit 1 "$item_attach_exit" "attach refuses an item: items pair at creation"
+check_yaml "$output" "paired at creation" "the item refusal explains itself"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T9: attach adopts a custom handoff already at the canonical path and preserves it"
+T3=$(extract_id "$("$MANNA" create "Custom program" "hand-written track order" --type track 2>&1)")
+strip_pair "$T3"
+cat > ".handoff/$T3-custom-program.md" <<EOF
+---
+workflow: 2
+manna: $T3
+track: null
+source: null
+base_commit: fixture
+scope: Custom program
+inputs: []
+binding: ''
+---
+
+# Handoff: Custom program
+
+## Claim
+
+\`\`\`bash
+agent-do manna claim $T3
+\`\`\`
+
+## Scope
+
+Custom program
+
+## Inputs
+
+- None declared.
+
+## Work order
+
+CUSTOM TRACK INSTRUCTIONS written by hand.
+
+## Completion
+
+1. Hand-written completion.
+EOF
+output=$(as_a handoff attach "$T3" 2>&1) || true
+check_yaml "$output" "success: true" "attach adopts an existing document"
+check_yaml "$output" "adopted: true" "attach reports the adoption"
+check_yaml "$(cat ".handoff/$T3-custom-program.md")" "CUSTOM TRACK INSTRUCTIONS written by hand." "the custom body is preserved byte for byte"
+check_yaml "$(cat ".handoff/$T3-custom-program.md")" "binding: $(row_field "$T3" handoff_digest)" "the adopted document carries the row's binding"
+output=$(as_a claim "$T3" 2>&1) || true
+check_yaml "$output" "success: true" "an adopted custom order passes the claim gate"
+as_a abandon "$T3" >/dev/null 2>&1
+T4=$(extract_id "$("$MANNA" create "Broken custom program" "invalid document" --type track 2>&1)")
+strip_pair "$T4"
+printf '# Not a handoff\n\nno frontmatter, no sections\n' > ".handoff/$T4-broken-custom-program.md"
+broken_exit=0
+output=$(as_a handoff attach "$T4" 2>&1) || broken_exit=$?
+check_exit 2 "$broken_exit" "attach refuses to adopt an invalid document"
+check_yaml "$(cat ".handoff/$T4-broken-custom-program.md")" "no frontmatter, no sections" "the invalid document is left untouched"
+check_yaml "$(row_field "$T4" prompt)" "" "the refused adoption binds nothing"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T10: attach never steals, resets, or rewrites a claimed track"
+T5=$(extract_id "$("$MANNA" create "Held program" "claimed before dispatch existed" --type track 2>&1)")
+strip_pair "$T5"
+C_PROOF=$(as_c identity --json 2>/dev/null | tjson 'd["proof"]')
+python3 - "$T5" "$WORKER_C_ID" "$C_PROOF" <<'PY'
+import json, pathlib, sys
+target, owner, proof = sys.argv[1:4]
+path = pathlib.Path('.manna/issues.jsonl')
+rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+for row in rows:
+    if row['id'] == target:
+        row['status'] = 'in_progress'
+        row['claimed_by'] = owner
+        row['claimed_at'] = '2026-10-01T00:00:00Z'
+        row['claim_token_hash'] = proof
+path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+PY
+H=$(extract_id "$("$MANNA" create "Held child" "work" --track "$T5" 2>&1)")
+"$MANNA" block "$H" "$EXT" >/dev/null 2>&1
+stranger_exit=0
+as_a handoff attach "$T5" >/dev/null 2>&1 || stranger_exit=$?
+check_exit 1 "$stranger_exit" "a stranger cannot attach a work order to a track another session holds"
+check_yaml "$(row_field "$T5" prompt)" "" "the refused attach binds nothing"
+output=$(as_c handoff attach "$T5" 2>&1) || true
+check_yaml "$output" "success: true" "the holder attaches its own track's work order"
+check_yaml "$(row_field "$T5" claimed_by)" "$WORKER_C_ID" "attach preserves the claim"
+check_yaml "$(row_field "$T5" claimed_at)" "2026-10-01T00:00:00Z" "attach preserves the claim time"
+check_yaml "$(row_field "$T5" status)" "in_progress" "attach preserves status"
+check_yaml "$(row_field "$H" blocked_by)" "['$EXT']" "attach preserves child dependencies"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T11: cycles and missing dependencies are named, never worked around"
+T6=$(extract_id "$("$MANNA" create "Tangled program" "cycle fixture" --type track 2>&1)")
+P=$(extract_id "$("$MANNA" create "Cycle P" "p" --track "$T6" 2>&1)")
+Q=$(extract_id "$("$MANNA" create "Cycle Q" "q" --track "$T6" 2>&1)")
+R=$(extract_id "$("$MANNA" create "Needs deleted" "r" --track "$T6" 2>&1)")
+GONE=$(extract_id "$("$MANNA" create "Will be deleted" "gone" 2>&1)")
+"$MANNA" block "$P" "$Q" >/dev/null 2>&1
+"$MANNA" block "$Q" "$P" >/dev/null 2>&1
+"$MANNA" block "$R" "$GONE" >/dev/null 2>&1
+"$MANNA" delete "$GONE" >/dev/null 2>&1
+output=$("$MANNA" show "$T6" --json 2>&1) || true
+check_yaml "$(echo "$output" | tjson "d['children']['next']")" "None" "a cycled track has no eligible child"
+check_yaml "$(echo "$output" | tjson "sorted(w['id'] for w in d['children']['waiting'] if w['cycle'])")" "$(python3 -c "print(sorted(['$P', '$Q']))")" "both cycle members are flagged"
+check_yaml "$(echo "$output" | tjson "[w['missing'] for w in d['children']['waiting'] if w['id']=='$R'][0]")" "['$GONE']" "a dependency on a deleted row is reported missing"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "dependency cycle: $(python3 -c "print(', '.join(sorted(['$P', '$Q'])))")" "stall names the cycle"
+check_yaml "$(echo "$output" | tjson "d['children']['stall']")" "missing dependencies: $R needs missing $GONE" "stall names the missing dependency"
+STATE=$("$MANNA" state --json 2>/dev/null)
+check_yaml "$(echo "$STATE" | tjson "[r['effective'] for r in d['all'] if r['id']=='$T6'][0]")" "waiting" "a track with nothing dispatchable derives as waiting, not ready"
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "Test T12: converting between item and track regenerates the document; dream -> track pairs"
+DREAM=$(extract_id "$("$MANNA" dream "Someday a program" 2>&1)")
+output=$("$MANNA" update "$DREAM" --type track 2>&1) || true
+check_yaml "$output" "success: true" "a dream converts to a track"
+check_yaml "$output" "prompt: .handoff/$DREAM-someday-a-program.md" "the converted track is paired on conversion"
+check_yaml "$(cat ".handoff/$DREAM-someday-a-program.md")" "Track dispatch protocol" "the converted track carries the dispatch protocol"
+output=$("$MANNA" update "$DREAM" --type item --track "$TR" 2>&1) || true
+check_yaml "$output" "success: true" "a track converts to an item"
+check_yaml "$(cat ".handoff/$DREAM-someday-a-program.md")" "This file is the work order for one item only." "the item document is regenerated under the same pointer"
+[[ "$(cat ".handoff/$DREAM-someday-a-program.md")" != *"Track dispatch protocol"* ]] && pass "the item document no longer carries the track protocol" || fail "the item document no longer carries the track protocol" "$(cat ".handoff/$DREAM-someday-a-program.md")"
+reconcile_exit=0
+output=$("$MANNA" reconcile --json 2>&1) || reconcile_exit=$?
+check_yaml "$(echo "$output" | tjson "[f for f in d['findings'] if f['kind'] in ('orphan_handoff','prompt_pairing','workflow_sprawl')]")" "[]" "track handoffs are neither orphans nor sprawl to reconcile"
+
+# ----------------------------------------------------------------------------
+if [[ "$(uname -s)" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
+    echo ""
+    echo "Test T13: a managed child that is submitted but not accepted holds its track open"
+    T7=$(extract_id "$("$MANNA" create "Managed program" "a track with a coordinator-owned child" --type track 2>&1)")
+    MC=$(extract_id "$("$MANNA" create "Managed child" "coordinator-owned closure" --track "$T7" 2>&1)")
+    git add -A >/dev/null 2>&1
+    git -c user.email=manna@test -c user.name=manna-test commit -q -m "board: file the managed program"
+    LEAD_ID="ses_track_lead_$$"; LEAD_TOKEN="track-lead-token-dddddddddddddddddddddddddddddddd"
+    LEAD_PROOF=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" identity --json 2>/dev/null | tjson 'd["proof"]')
+    output=$(script -q /dev/null env -u MANNA_SESSION_ID -u MANNA_SESSION_TOKEN \
+        -u CODEX_THREAD_ID -u CLAUDE_THREAD_ID -u CLAUDE_SESSION_ID -u CLAUDE_AGENT_ID \
+        "$MANNA" coordinator grant --session "$LEAD_ID" --proof "$LEAD_PROOF" --track "$T7" --reason "lead for the managed program" 2>&1 </dev/null | tr -d '\r') || true
+    check_yaml "$output" "success: true" "operator grants the lead authority over the track"
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" managed require "$MC" --check integration 2>&1) || true
+    check_yaml "$output" "success: true" "the lead puts the child under managed closure"
+    output=$(as_a claim "$T7" 2>&1) || true
+    check_yaml "$output" "success: true" "worker A claims the managed program's track"
+    output=$(as_a claim "$MC" 2>&1) || true
+    check_yaml "$output" "success: true" "worker A claims the managed child"
+    printf 'built it\n' > managed-report.md
+    output=$(as_a submit "$MC" --report managed-report.md 2>&1) || true
+    check_yaml "$output" "status: submitted" "worker A submits the managed child"
+    managed_done_exit=0
+    as_a done "$MC" >/dev/null 2>&1 || managed_done_exit=$?
+    check_exit 2 "$managed_done_exit" "the worker cannot close the managed child on a submission"
+    track_done_exit=0
+    output=$(as_a done "$T7" 2>&1) || track_done_exit=$?
+    check_exit 2 "$track_done_exit" "a submitted-but-unaccepted child holds the track open"
+    check_yaml "$output" "$MC (in_progress)" "the refusal names the submitted child as open"
+    output=$("$MANNA" show "$T7" --json 2>&1) || true
+    check_yaml "$(echo "$output" | tjson "[h['id'] for h in d['children']['held']]")" "['$MC']" "the submitted child is held, never counted done"
+    lead_accept "$MC" integration HEAD "reviewed on the integration target" >/dev/null 2>&1 || true
+    output=$(MANNA_SESSION_ID="$LEAD_ID" MANNA_SESSION_TOKEN="$LEAD_TOKEN" "$MANNA" done "$MC" 2>&1) || true
+    check_yaml "$output" "success: true" "the lead accepts and closes the managed child"
+    output=$(as_a done "$T7" 2>&1) || true
+    check_yaml "$output" "success: true" "the track closes once the managed child is accepted and done"
+fi
+
+cd "$TEST_DIR"
+rm -rf "$TRACK_DIR"
 
 # ============================================================================
 # Summary

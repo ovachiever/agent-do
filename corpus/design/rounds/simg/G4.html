@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #1B1917;
+    --bg-raised: #201E1B;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-90: rgba(231,227,218,0.09);
+    --fill-50: rgba(231,227,218,0.22);
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .page{
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 22px 26px 30px;
+  }
+
+  /* ---------- nav ---------- */
+  .topnav{
+    display:flex;
+    align-items:center;
+    gap: 18px;
+    padding-bottom: 11px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+  }
+  .topnav .brand{ color: var(--ink); font-weight: 600; }
+  .topnav .sep{ color: var(--rule); }
+  .topnav .active{ color: var(--ink); font-weight: 600; border-bottom: 1px solid var(--ink); padding-bottom: 2px; }
+
+  /* ---------- status bar ---------- */
+  .statusbar{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 14px;
+    border: 1px solid var(--rule);
+    padding: 13px 18px;
+    margin-bottom: 18px;
+  }
+  .statusbar .meta{
+    display:flex;
+    align-items:center;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--ink-mid);
+  }
+  .statusbar .meta .label{ color: var(--ink); font-weight: 700; letter-spacing: 0.05em; }
+  .statusbar .meta .ok{ color: var(--sage); font-weight: 600; }
+  .statusbar .meta .dot{ color: var(--rule); }
+  .runbtn{
+    flex: 0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height: 28px;
+    padding: 0 16px;
+    border: 1px solid var(--ink-mid);
+    color: var(--ink);
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+
+  /* ---------- workstation frame ---------- */
+  .workstation{
+    position: relative;
+    border: 1px solid var(--rule);
+  }
+  .corner{ position:absolute; width:10px; height:10px; border-color: var(--ink-dim); }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+
+  .grid3{
+    display: grid;
+    grid-template-columns: 208px 1px 1fr 1px 258px;
+    align-items: stretch;
+  }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: 18px 20px; min-width: 0; }
+
+  .colhead{
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    margin-bottom: 14px;
+  }
+
+  /* ---------- RUNS column ---------- */
+  .rungroup{ margin-bottom: 16px; }
+  .rungroup .groupname{
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .runrow{
+    display:flex;
+    gap: 8px;
+    padding: 7px 6px 7px 8px;
+    margin-left: -8px;
+    border-left: 2px solid transparent;
+  }
+  .runrow.selected{
+    background: var(--rule-faint);
+    border-left: 2px solid var(--ink);
+  }
+  .runrow .icon{ flex: 0 0 auto; width: 14px; font-size: 12px; color: var(--ink-mid); line-height: 1.55; }
+  .runrow .rmeta{ flex: 1 1 auto; min-width: 0; }
+  .runrow .time{ color: var(--ink); font-size: 13px; }
+  .runrow .status{ font-size: 12px; color: var(--ink-mid); }
+  .runrow .status.sage{ color: var(--sage); }
+  .runrow .status.clay{ color: var(--clay); }
+  .runrow .rid{ font-size: 12px; color: var(--ink-dim); }
+
+  /* small multiples: per-run sparkline, same axes convention as the big chart */
+  .spark-wrap{ margin-top: 5px; }
+  .spark-wrap.spark-hi{ box-shadow: 0 0 0 1px var(--rule-soft); }
+  .spark{ display:block; width:100%; height:28px; }
+
+  .panefoot{
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--rule-faint);
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- SELECTED RUN column ---------- */
+  .runtitle{
+    display:flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .runtitle .name{ font-size: 17px; font-weight: 700; color: var(--ink); }
+  .runtitle .id{ font-size: 12.5px; color: var(--ink-dim); }
+  .chartwrap{ margin-top: 14px; }
+  .chartwrap svg{ display:block; width: 100%; height: auto; }
+
+  .legend{
+    display:flex;
+    align-items:center;
+    gap: 22px;
+    padding: 10px 2px 0;
+    font-size: 12px;
+    color: var(--ink-mid);
+    flex-wrap: wrap;
+  }
+  .legend .item{ display:flex; align-items:center; gap: 7px; }
+  .legend .swatch{ display:inline-block; width: 18px; height: 0; border-top: 2px solid var(--ink); }
+  .legend .swatch.observed{ border-top: 2.5px solid var(--sage); }
+  .legend .swatch.median{ border-top: 1.5px solid var(--ink); }
+  .legend .box{ display:inline-block; width: 14px; height: 12px; border: 1px solid var(--rule-soft); }
+  .legend .box.b90{ background: var(--fill-90); }
+  .legend .box.b50{ background: var(--fill-50); }
+
+  .breakdown{
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .breakdown .bhead{
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+    margin-bottom: 12px;
+  }
+  .comprow{
+    display:flex;
+    align-items:center;
+    gap: 14px;
+    margin-bottom: 9px;
+    font-size: 12.5px;
+  }
+  .comprow .clabel{ flex: 0 0 168px; color: var(--ink-mid); }
+  .comprow .cbar{ flex: 0 0 220px; height: 8px; background: var(--rule-faint); position: relative; }
+  .comprow .cbar .fill{ position:absolute; top:0; left:0; bottom:0; background: var(--ink-mid); }
+  .comprow .cval{ flex: 0 0 auto; color: var(--ink); min-width: 34px; text-align: right; }
+
+  /* ---------- RUN INSPECTOR column ---------- */
+  .ifield{ margin-bottom: 16px; }
+  .ifield .ilabel{
+    font-size: 11.5px;
+    letter-spacing: 0.07em;
+    color: var(--ink-dim);
+    margin-bottom: 5px;
+  }
+  .ifield .ibig{ font-size: 20px; font-weight: 700; color: var(--ink); }
+  .ifield .isub{ font-size: 12.5px; color: var(--ink-mid); margin-top: 2px; }
+  .ifield .ival{ font-size: 13px; color: var(--ink); }
+  .ifield .idetail{ font-size: 12px; color: var(--ink-mid); margin-top: 2px; }
+  .provlist{ list-style: none; margin: 0; padding: 0; }
+  .provlist li{
+    font-size: 12px;
+    color: var(--ink-mid);
+    padding: 5px 0;
+    border-top: 1px solid var(--rule-faint);
+  }
+  .provlist li:first-child{ border-top: none; }
+  .provlist li span{ color: var(--ink-dim); }
+
+  /* ---------- hindcast ---------- */
+  .hdiv-full{ height: 1px; background: var(--rule); }
+  .hindcast{ padding: 16px 20px 18px; }
+  .hcast-title{
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    margin-bottom: 12px;
+  }
+  table.hctable{ width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.hctable th{
+    text-align: left;
+    font-weight: 600;
+    color: var(--ink-dim);
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    padding: 0 14px 8px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  table.hctable td{
+    padding: 7px 14px 7px 0;
+    color: var(--ink-mid);
+    border-bottom: 1px solid var(--rule-faint);
+    white-space: nowrap;
+  }
+  table.hctable td.metric{ color: var(--ink); }
+  table.hctable td.cov{ color: var(--ink); }
+  table.hctable td.cov.miss{ color: var(--clay); }
+  table.hctable tr:last-child td{ border-bottom: none; }
+
+  /* ---------- footer ---------- */
+  .motto{
+    text-align: center;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+    padding-top: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav class="topnav">
+    <span class="brand">Palingenesis</span>
+    <span class="sep">·</span>
+    <span>Today</span>
+    <span class="sep">·</span>
+    <span>Pipeline</span>
+    <span class="sep">·</span>
+    <span>Library</span>
+    <span class="sep">·</span>
+    <span>Portfolio</span>
+    <span class="sep">·</span>
+    <span class="active">Simulation</span>
+    <span class="sep">·</span>
+    <span>Engine Room</span>
+  </nav>
+
+  <div class="statusbar">
+    <div class="meta">
+      <span class="label">SIMULATION</span>
+      <span class="dot">·</span>
+      <span>Model: palingenesis-sim v0.9.3</span>
+      <span class="dot">·</span>
+      <span class="ok">CALIBRATED</span>
+      <span class="dot">·</span>
+      <span>Valid through 30 Sep</span>
+      <span class="dot">·</span>
+      <span>Site fit 67%</span>
+      <span class="dot">·</span>
+      <span>Hindcast skill 0.82 (baseline 0.61)</span>
+      <span class="dot">·</span>
+      <span>90% coverage: 88%</span>
+    </div>
+    <div class="runbtn">Run scenario</div>
+  </div>
+
+  <div class="workstation">
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+
+    <div class="grid3">
+      <!-- RUNS -->
+      <section class="col">
+        <div class="colhead">RUNS</div>
+
+        <div class="rungroup">
+          <div class="groupname">Today</div>
+          <div class="runrow">
+            <div class="icon">●</div>
+            <div class="rmeta">
+              <div class="time">17:22</div>
+              <div class="status sage">Completed</div>
+              <div class="rid">sim-4473</div>
+              <div class="spark-wrap">
+                <svg class="spark" viewBox="0 0 120 28" preserveAspectRatio="none" role="img" aria-label="quantity trend">
+                  <path d="M66,4 C80,5 95,6.5 108,7.5 C111,7.8 114,8 116,8.2 L116,16.2 C114,16 111,15.8 108,15.5 C95,14.5 80,13 66,12 Z" fill="var(--fill-90)"/>
+                  <path d="M4,18 C20,15 35,12 50,10 C56,9 61,8.5 66,8" fill="none" stroke="var(--sage)" stroke-width="1.6"/>
+                  <path d="M66,8 C80,9 95,10.5 108,11.5 C111,11.8 114,12 116,12.2" fill="none" stroke="var(--ink)" stroke-width="1"/>
+                  <circle cx="66" cy="8" r="1.1" fill="var(--ink)"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div class="runrow selected">
+            <div class="icon">◐</div>
+            <div class="rmeta">
+              <div class="time">14:43</div>
+              <div class="status">Boundary</div>
+              <div class="rid">sim-4471</div>
+              <div class="spark-wrap spark-hi">
+                <svg class="spark" viewBox="0 0 120 28" preserveAspectRatio="none" role="img" aria-label="quantity trend">
+                  <path d="M66,9.5 C80,11 95,12.5 108,14 C111,14.3 114,14.5 116,14.7 L116,23.7 C114,23.4 111,23.1 108,22.7 C95,21.2 80,19.7 66,18.5 Z" fill="var(--fill-90)"/>
+                  <path d="M4,6 C20,8 35,10 50,12 C56,13 61,13.5 66,14" fill="none" stroke="var(--sage)" stroke-width="2"/>
+                  <path d="M66,14 C80,15.5 95,17 108,18.5 C111,18.8 114,19 116,19.2" fill="none" stroke="var(--ink)" stroke-width="1.3"/>
+                  <circle cx="66" cy="14" r="1.4" fill="var(--ink)"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div class="runrow">
+            <div class="icon">○</div>
+            <div class="rmeta">
+              <div class="time">12:04</div>
+              <div class="status clay">No estimate</div>
+              <div class="rid">sim-4474</div>
+              <div class="spark-wrap">
+                <svg class="spark spark-empty" viewBox="0 0 120 28" preserveAspectRatio="none" role="img" aria-label="no quantity estimate">
+                  <rect x="1" y="1" width="118" height="26" fill="none" stroke="var(--rule-faint)" stroke-width="1"/>
+                  <line x1="14" y1="14" x2="106" y2="14" stroke="var(--clay)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rungroup">
+          <div class="groupname">Yesterday</div>
+          <div class="runrow">
+            <div class="icon">○</div>
+            <div class="rmeta">
+              <div class="time">16:20</div>
+              <div class="rid">sim-4475</div>
+              <div class="spark-wrap">
+                <svg class="spark spark-empty" viewBox="0 0 120 28" preserveAspectRatio="none" role="img" aria-label="no quantity estimate">
+                  <rect x="1" y="1" width="118" height="26" fill="none" stroke="var(--rule-faint)" stroke-width="1"/>
+                  <line x1="14" y1="14" x2="106" y2="14" stroke="var(--clay)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div class="runrow">
+            <div class="icon">○</div>
+            <div class="rmeta">
+              <div class="time">14:03</div>
+              <div class="rid">sim-4472</div>
+              <div class="spark-wrap">
+                <svg class="spark spark-empty" viewBox="0 0 120 28" preserveAspectRatio="none" role="img" aria-label="no quantity estimate">
+                  <rect x="1" y="1" width="118" height="26" fill="none" stroke="var(--rule-faint)" stroke-width="1"/>
+                  <line x1="14" y1="14" x2="106" y2="14" stroke="var(--clay)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panefoot">5 runs &middot; 3 quantities</div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- SELECTED RUN -->
+      <section class="col">
+        <div class="colhead">SELECTED RUN</div>
+        <div class="runtitle">
+          <span class="name">Litter moisture</span>
+          <span class="id">sim-4471</span>
+        </div>
+
+        <div class="chartwrap">
+          <svg viewBox="0 0 830 400" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Litter moisture forecast chart">
+
+            <!-- uncertainty envelope bracket -->
+            <line x1="474" y1="38" x2="474" y2="48" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="800" y1="38" x2="800" y2="48" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="474" y1="38" x2="800" y2="38" stroke="var(--ink-dim)" stroke-width="1"/>
+            <text x="637" y="27" text-anchor="middle" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">uncertainty envelope</text>
+
+            <!-- gridlines -->
+            <line x1="60" y1="360" x2="800" y2="360" stroke="var(--rule-faint)" stroke-width="1"/>
+            <line x1="60" y1="260" x2="800" y2="260" stroke="var(--rule-faint)" stroke-width="1"/>
+            <line x1="60" y1="60" x2="800" y2="60" stroke="var(--rule-faint)" stroke-width="1"/>
+
+            <!-- domain boundary -->
+            <line x1="60" y1="160" x2="800" y2="160" stroke="var(--ink-mid)" stroke-width="1" stroke-dasharray="4 4"/>
+            <text x="690" y="151" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">domain boundary</text>
+
+            <!-- 90% envelope fill -->
+            <path d="M474,160 C505,157 525,155 553,155 C590,156 630,159 677,162.5 C715,161 760,160 800,160 L800,310 C760,298 715,285 677,272.5 C630,255 590,240 553,225 C525,205 505,185 474,160 Z" fill="var(--fill-90)"/>
+
+            <!-- 50% envelope fill -->
+            <path d="M474,160 C505,164 525,168 553,172.5 C590,178 630,184 677,190 C715,193 760,196 800,197.5 L800,272.5 C760,264 715,255 677,245 C630,232 590,220 553,207.5 C525,192 505,178 474,160 Z" fill="var(--fill-50)"/>
+
+            <!-- median line -->
+            <path d="M474,160 C505,172 525,180 553,190 C590,200 630,208 677,217.5 C715,224 760,230 800,235" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
+
+            <!-- observed line -->
+            <path d="M60,60 C110,66 150,76 183,90 C225,105 260,112 307,122.5 C370,138 420,148 474,160" fill="none" stroke="var(--sage)" stroke-width="2.25"/>
+
+            <!-- sensor cutoff hairline -->
+            <line x1="474" y1="60" x2="474" y2="360" stroke="var(--ink-dim)" stroke-width="1" stroke-dasharray="2 3"/>
+            <circle cx="474" cy="160" r="2.5" fill="var(--ink)"/>
+
+            <!-- axis -->
+            <line x1="60" y1="360" x2="800" y2="360" stroke="var(--ink-mid)" stroke-width="1"/>
+
+            <!-- y ticks -->
+            <line x1="54" y1="360" x2="60" y2="360" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="54" y1="260" x2="60" y2="260" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="54" y1="160" x2="60" y2="160" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="54" y1="60" x2="60" y2="60" stroke="var(--ink-dim)" stroke-width="1"/>
+            <text x="48" y="364" text-anchor="end" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">-16</text>
+            <text x="48" y="264" text-anchor="end" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">-12</text>
+            <text x="48" y="164" text-anchor="end" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">-8</text>
+            <text x="48" y="64" text-anchor="end" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">-4</text>
+            <text x="30" y="44" text-anchor="middle" font-size="12" fill="var(--ink-dim)" font-family="'JetBrains Mono',monospace">%</text>
+
+            <!-- x ticks -->
+            <line x1="60" y1="360" x2="60" y2="366" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="307" y1="360" x2="307" y2="366" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="553" y1="360" x2="553" y2="366" stroke="var(--ink-dim)" stroke-width="1"/>
+            <text x="60" y="382" text-anchor="start" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">08:00</text>
+            <text x="307" y="382" text-anchor="middle" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">12:00</text>
+            <text x="553" y="382" text-anchor="middle" font-size="12" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">16:00</text>
+            <text x="474" y="382" text-anchor="middle" font-size="12" fill="var(--ink-dim)" font-family="'JetBrains Mono',monospace">14:43</text>
+          </svg>
+
+          <div class="legend">
+            <span class="item"><span class="swatch observed"></span>Observed</span>
+            <span class="item"><span class="swatch median"></span>Median</span>
+            <span class="item"><span class="box b50"></span>50%</span>
+            <span class="item"><span class="box b90"></span>90%</span>
+          </div>
+        </div>
+
+        <div class="breakdown">
+          <div class="bhead">Quantity breakdown / component effects</div>
+          <div class="comprow">
+            <div class="clabel">bedding char</div>
+            <div class="cbar"><div class="fill" style="width:220px"></div></div>
+            <div class="cval">&minus;7</div>
+          </div>
+          <div class="comprow">
+            <div class="clabel">ventilation</div>
+            <div class="cbar"><div class="fill" style="width:94px"></div></div>
+            <div class="cval">&minus;3</div>
+          </div>
+          <div class="comprow">
+            <div class="clabel">ambient RH</div>
+            <div class="cbar"><div class="fill" style="width:31px"></div></div>
+            <div class="cval">&minus;1</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- RUN INSPECTOR -->
+      <section class="col">
+        <div class="colhead">RUN INSPECTOR</div>
+
+        <div class="ifield">
+          <div class="ilabel">RESULT</div>
+          <div class="ibig">&minus;11%</div>
+          <div class="isub">&minus;14&hellip;&minus;8</div>
+        </div>
+
+        <div class="ifield">
+          <div class="ilabel">DOMAIN</div>
+          <div class="ival">Near boundary</div>
+          <div class="idetail">Litter core T1</div>
+          <div class="idetail">calibration pending 30 Sep</div>
+        </div>
+
+        <div class="ifield">
+          <div class="ilabel">PROVENANCE</div>
+          <ul class="provlist">
+            <li><span>Input snapshot</span><br>2026-08-22 14:43</li>
+            <li><span>Sensor cutoff</span><br>14:40</li>
+            <li><span>Model version</span><br>v0.9.3</li>
+            <li><span>Parameter set</span><br>67% site / 33% published</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <div class="hdiv-full"></div>
+
+    <!-- HINDCAST -->
+    <section class="hindcast">
+      <div class="hcast-title">HINDCAST</div>
+      <table class="hctable">
+        <thead>
+          <tr>
+            <th>Issued &#8597;</th>
+            <th>Forecast</th>
+            <th>Interval</th>
+            <th>Actual</th>
+            <th>Covered</th>
+            <th>vs baseline</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2026-07-01</td>
+            <td class="metric">lay rate wk 48</td>
+            <td>91.2&ndash;93.8%</td>
+            <td>92.9</td>
+            <td class="cov">&#10003;</td>
+            <td>0.84 vs 0.61</td>
+          </tr>
+          <tr>
+            <td>2026-07-01</td>
+            <td class="metric">feed intake g/hen/d</td>
+            <td>108&ndash;114</td>
+            <td>111</td>
+            <td class="cov">&#10003;</td>
+            <td>0.79</td>
+          </tr>
+          <tr>
+            <td>2026-07-15</td>
+            <td class="metric">egg mass g/hen/d</td>
+            <td>57.1&ndash;60.4</td>
+            <td>60.9</td>
+            <td class="cov miss">&#10007; +0.5</td>
+            <td>0.71</td>
+          </tr>
+          <tr>
+            <td>2026-07-15</td>
+            <td class="metric">barn RH %</td>
+            <td>61&ndash;69</td>
+            <td>66</td>
+            <td class="cov">&#10003;</td>
+            <td>0.88</td>
+          </tr>
+          <tr>
+            <td>2026-08-01</td>
+            <td class="metric">mortality cum %</td>
+            <td>0.9&ndash;1.4</td>
+            <td>1.1</td>
+            <td class="cov">&#10003;</td>
+            <td>0.83</td>
+          </tr>
+          <tr>
+            <td>2026-08-01</td>
+            <td class="metric">shell thickness &micro;m</td>
+            <td>372&ndash;388</td>
+            <td>381</td>
+            <td class="cov">&#10003;</td>
+            <td>0.80</td>
+          </tr>
+          <tr>
+            <td>2026-08-15</td>
+            <td class="metric">margin $/dozen</td>
+            <td>0.41&ndash;0.58</td>
+            <td>0.52</td>
+            <td class="cov">&#10003;</td>
+            <td>0.77</td>
+          </tr>
+          <tr>
+            <td>2026-08-15</td>
+            <td class="metric">water intake L/hen/d</td>
+            <td>0.19&ndash;0.23</td>
+            <td>0.21</td>
+            <td class="cov">&#10003;</td>
+            <td>0.86</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <div class="motto">Every claim sourced &middot; every cost computed &middot; every verdict recorded</div>
+
+</div>
+</body>
+</html>

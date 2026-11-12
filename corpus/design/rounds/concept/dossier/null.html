@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Dossier PLG-1847</title>
+<style>
+  :root{
+    --bg:#1a1712;
+    --ink:#efe7d5;
+    --ink-92:rgba(239,231,213,.92);
+    --ink-78:rgba(239,231,213,.78);
+    --ink-60:rgba(239,231,213,.60);
+    --ink-45:rgba(239,231,213,.45);
+    --hair:rgba(239,231,213,.17);
+    --hair-soft:rgba(239,231,213,.09);
+    --green:#a3c57c;
+    --serif:"Iowan Old Style","Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","Helvetica Neue",Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{color-scheme:dark}
+  body{
+    background:var(--bg);
+    color:var(--ink-92);
+    font-family:var(--serif);
+    font-size:16px;
+    line-height:1.6;
+    min-width:1220px;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:rgba(163,197,124,.28);color:var(--ink)}
+  .shell{max-width:1104px;margin:0 auto;padding:0 48px}
+
+  /* ---------- nav ---------- */
+  nav{border-bottom:1px solid var(--hair-soft)}
+  .nav-in{display:flex;align-items:baseline;justify-content:space-between;padding:22px 0}
+  .wordmark{font-family:var(--serif);font-size:15px;letter-spacing:.34em;text-transform:uppercase;color:var(--ink);text-decoration:none}
+  .nav-links{display:flex;gap:36px}
+  .nav-links a{font-family:var(--sans);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-45);text-decoration:none;transition:color .2s}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.on{color:var(--ink)}
+  .nav-links a.on::before{content:"";display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--green);margin-right:9px;vertical-align:2px}
+
+  /* ---------- masthead ---------- */
+  .masthead{margin-top:66px}
+  .eyebrow{font-family:var(--sans);font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-45)}
+  h1{
+    margin-top:22px;
+    font-family:var(--serif);font-weight:400;
+    font-size:47px;line-height:1.13;letter-spacing:-.012em;
+    color:var(--ink);max-width:40ch;text-wrap:balance;
+  }
+  .dek{margin-top:24px;font-style:italic;font-size:19.5px;line-height:1.52;color:var(--ink-78);max-width:62ch}
+
+  /* ---------- meta band ---------- */
+  .meta{
+    margin-top:50px;
+    border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);
+    display:grid;grid-template-columns:1.02fr 1fr 1.12fr 1.06fr;
+    padding:26px 0;
+  }
+  .meta > div{padding-right:28px}
+  .meta > div + div{border-left:1px solid var(--hair-soft);padding-left:32px}
+  .meta .k{font-family:var(--sans);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-45)}
+  .meta .v{margin-top:9px;font-family:var(--sans);font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .meta .v.verdict{color:var(--green);letter-spacing:.26em;font-weight:600;text-transform:uppercase}
+  .meta .s{margin-top:6px;font-family:var(--sans);font-size:12px;line-height:1.5;color:var(--ink-45)}
+
+  /* ---------- shared section label ---------- */
+  .lbl{display:flex;align-items:center;gap:20px;font-family:var(--sans);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-45)}
+  .lbl::after{content:"";height:1px;flex:1;background:var(--hair-soft)}
+  .lbl-sub{margin-top:10px;font-family:var(--sans);font-size:12px;color:var(--ink-45);line-height:1.5}
+
+  /* ---------- body grid ---------- */
+  .grid{margin-top:68px;display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:72px;align-items:start}
+  .rail{border-left:1px solid var(--hair-soft);padding-left:56px}
+
+  /* ---------- mechanism ---------- */
+  .prose{margin-top:30px}
+  .prose p{font-size:16.5px;line-height:1.68;color:var(--ink-92)}
+  .prose p + p{margin-top:1.35em}
+  .prose sup{font-family:var(--sans);font-size:10.5px;color:var(--ink-60);letter-spacing:.04em;position:relative;top:-1px;margin-left:2px;vertical-align:super;line-height:0}
+  .srcline{margin-top:26px;border-top:1px solid var(--hair-soft);padding-top:14px;font-family:var(--sans);font-size:12px;line-height:1.65;color:var(--ink-45);max-width:60ch}
+
+  /* ---------- economics ---------- */
+  .econ{margin-top:84px}
+  .econ-note{margin-top:22px;font-family:var(--sans);font-size:12px;color:var(--ink-45)}
+  table{width:100%;border-collapse:collapse;margin-top:16px;font-family:var(--sans);font-variant-numeric:tabular-nums}
+  th{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-45);font-weight:500;text-align:left;padding:0 18px 10px 0;border-bottom:1px solid var(--hair)}
+  th.num,td.num{text-align:right}
+  td{font-size:13px;line-height:1.5;color:var(--ink-92);padding:12px 18px 12px 0;border-bottom:1px solid var(--hair-soft);vertical-align:top}
+  td.qty{color:var(--ink-60);font-size:12.5px}
+  td.num{font-size:13.5px;white-space:nowrap}
+  td.src,th.src{padding-right:0}
+  td.src{color:var(--ink-45);font-size:12px}
+  tr.formula td{border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);color:var(--ink-78);padding:13px 18px 13px 0}
+  tr.formula .f-lbl{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-45)}
+  tr.formula .f-eq{font-size:13.5px;letter-spacing:.02em}
+  .result{margin-top:30px;display:flex;align-items:baseline;justify-content:space-between;gap:32px}
+  .result .big{font-family:var(--serif);font-size:36px;letter-spacing:-.01em;color:var(--green);white-space:nowrap}
+  .result .big em{font-style:italic;font-size:19px;color:var(--ink);letter-spacing:0;margin-left:14px}
+  .result .annot{font-family:var(--sans);font-size:12px;line-height:1.8;color:var(--ink-45);text-align:right;white-space:nowrap}
+  .sens{margin-top:18px;font-family:var(--sans);font-size:12.5px;line-height:1.65;color:var(--ink-45);max-width:60ch}
+
+  /* ---------- fitness ---------- */
+  .dims{margin-top:26px;border-top:1px solid var(--hair-soft)}
+  .dim{padding:15px 0;border-bottom:1px solid var(--hair-soft)}
+  .dim .row{display:flex;align-items:baseline;justify-content:space-between}
+  .dim .name{font-family:var(--sans);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-60)}
+  .dim .score{font-family:var(--sans);font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .meter{margin-top:10px;height:1px;background:var(--hair-soft)}
+  .meter b{display:block;height:1px;background:rgba(239,231,213,.5)}
+  .dim .why{margin-top:9px;font-family:var(--sans);font-size:12px;line-height:1.45;color:var(--ink-45)}
+  .composite{margin-top:20px;padding-top:18px;border-top:1px solid var(--hair)}
+  .composite .row{display:flex;align-items:baseline;justify-content:space-between}
+  .composite .name{font-family:var(--sans);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink)}
+  .composite .score{font-family:var(--sans);font-size:19px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums}
+  .composite .s{margin-top:7px;font-family:var(--sans);font-size:12px;color:var(--ink-45)}
+
+  /* ---------- council ---------- */
+  .council{margin-top:70px}
+  .judge{padding:19px 0;border-bottom:1px solid var(--hair-soft)}
+  .judge:last-of-type{border-bottom:none}
+  .judge .row{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+  .judge .role{font-family:var(--serif);font-style:italic;font-size:16.5px;color:var(--ink)}
+  .judge .word{font-family:var(--sans);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--green);font-weight:600;white-space:nowrap}
+  .judge .rate{margin-top:4px;font-family:var(--sans);font-size:11.5px;color:var(--ink-45)}
+  .judge .op{margin-top:10px;font-size:14.5px;line-height:1.58;color:var(--ink-78)}
+
+  /* ---------- stress ---------- */
+  .stress{margin-top:70px}
+  .strows{margin-top:24px;border-top:1px solid var(--hair-soft)}
+  .st{display:flex;align-items:baseline;justify-content:space-between;gap:18px;padding:12px 0;border-bottom:1px solid var(--hair-soft)}
+  .st .sc{font-family:var(--sans);font-size:12.5px;color:var(--ink-78)}
+  .st .out{font-family:var(--sans);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-60);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .st .out b{font-weight:600;color:var(--ink-60);letter-spacing:.18em}
+  .st.deg .out b{color:var(--ink)}
+  .stnote{margin-top:14px;font-family:var(--sans);font-size:12px;line-height:1.6;color:var(--ink-45)}
+
+  /* ---------- decision ---------- */
+  .decision{margin-top:100px;border-top:1px solid var(--hair);padding-top:4px}
+  .decision-in{border-top:1px solid var(--hair-soft);padding-top:46px}
+  .dec-grid{margin-top:34px;display:grid;grid-template-columns:minmax(0,1fr) 384px;gap:96px;align-items:start}
+  .dec-say{font-family:var(--serif);font-size:25px;line-height:1.44;color:var(--ink);max-width:24ch}
+  .dec-trail{margin-top:22px;font-family:var(--sans);font-size:12px;line-height:1.7;color:var(--ink-45);max-width:44ch}
+  .ballot button{
+    display:block;width:100%;background:transparent;cursor:pointer;
+    font-family:var(--sans);font-size:11.5px;letter-spacing:.24em;text-transform:uppercase;
+    padding:17px 20px;transition:all .2s;
+  }
+  .ballot .advance{border:1px solid var(--green);color:var(--green)}
+  .ballot .advance:hover{background:var(--green);color:var(--bg)}
+  .ballot .kill{margin-top:14px;border:1px solid var(--hair);color:var(--ink-60)}
+  .ballot .kill:hover{border-color:var(--ink-60);color:var(--ink)}
+  .ballot button:focus-visible{outline:1px solid var(--green);outline-offset:3px}
+  .dec-line{margin-top:26px;text-align:center;font-style:italic;font-size:15.5px;color:var(--ink-92)}
+  .dec-sub{margin-top:10px;text-align:center;font-family:var(--sans);font-size:11.5px;line-height:1.6;color:var(--ink-45)}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:110px;border-top:1px solid var(--hair);padding:36px 0 48px;text-align:center}
+  .motto{font-family:var(--sans);font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-60)}
+  .colophon{margin-top:14px;font-family:var(--sans);font-size:11.5px;letter-spacing:.04em;color:var(--ink-45)}
+  .pulse{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--green);margin:0 7px 1px 2px;animation:breathe 3.4s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:.35}50%{opacity:1}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="shell nav-in">
+    <a class="wordmark" href="#">Palingenesis</a>
+    <div class="nav-links">
+      <a href="#">Today</a>
+      <a href="#" class="on">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Engine Room</a>
+    </div>
+  </div>
+</nav>
+
+<main class="shell">
+
+  <header class="masthead">
+    <p class="eyebrow">Pipeline / Nutrition &nbsp;·&nbsp; Dossier PLG-1847 &nbsp;·&nbsp; Generation 12</p>
+    <h1>Precision Amino Acid Micro-Dosing for Late-Cycle Layer Flocks</h1>
+    <p class="dek">Feed the late-cycle hen by her clock instead of her average: two and a half points less crude protein, essential amino acids pulsed to the hour of use, and the ledger comes out fourteen cents ahead per hen, per month.</p>
+
+    <div class="meta">
+      <div>
+        <div class="k">Council verdict</div>
+        <div class="v verdict">Greenlight</div>
+        <div class="s">Unanimous, 3–0 · one condition attached</div>
+      </div>
+      <div>
+        <div class="k">Lineage</div>
+        <div class="v">Generation 12</div>
+        <div class="s">PLG-0791 × PLG-0562 · crossed 02 Aug 2026</div>
+      </div>
+      <div>
+        <div class="k">Evaluated</div>
+        <div class="v">18 August 2026</div>
+        <div class="s">Council of three, scored blind · 4,200 simulated flock-years</div>
+      </div>
+      <div>
+        <div class="k">Composite fitness</div>
+        <div class="v">8.33 / 10</div>
+        <div class="s">Threshold 7.00 · generation-11 median 6.91</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <!-- ================= main column ================= -->
+    <article>
+
+      <section>
+        <div class="lbl">The Mechanism</div>
+        <div class="prose">
+          <p>Commercial rations treat a laying flock as one average bird, and the average is set at peak lay. Past seventy-two weeks the bird has changed — egg mass has plateaued, absorption has slowed — but the specification follows her unrevised, and between 18 and 24 percent of the crude protein she ingests goes unused<sup>4</sup>: deaminated in the liver, excreted as nitrogen, and paid for three times over, in feed, in house ammonia, in manure hauled to fields that did not ask for it.</p>
+          <p>PLG-1847 replaces volume with timing. Albumen formation concentrates the demand for methionine into the eight hours after ovulation<sup>3</sup>, while overnight shell formation draws on almost none of it. The candidate lowers the base ration to 14.1 percent crude protein and returns the difference as free lysine, methionine, and threonine, micro-dosed through the waterline and phase-locked to each house’s recorded oviposition curve. The old hen’s slower absorption stops being a defect: the dose arrives in the hour her gut can use it<sup>2</sup>.</p>
+          <p>The idea is a recombination, not an invention. Parent PLG-0791 proved circadian split feeding but kept protein flat; parent PLG-0562 mapped late-cycle amino acid retention but never touched delivery. Generation 12 crossed them and proposed moving the amino acids out of the ration entirely. Across 4,200 simulated flock-years in eleven climates, hens on the pulse regime held lay persistency 1.1 points longer than controls while eating two and a half points less protein.</p>
+        </div>
+        <p class="srcline">Superscripts count independent primary sources per claim. Nine stand under this section — strongest: Poultry Science 104(6), 2025; INRAE pulse-feeding trials, 2024–26. Thinnest: absorption kinetics past 90 weeks rests on two pre-2023 studies, flagged in the Library.</p>
+      </section>
+
+      <section class="econ">
+        <div class="lbl">The Economics, Computed</div>
+        <p class="econ-note">Sign convention: negative saves money. All prices July 2026; every figure names its source.</p>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Line item</th>
+              <th scope="col">Quantity</th>
+              <th scope="col" class="num">Δ $ / hen · mo</th>
+              <th scope="col" class="src">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Soybean meal displaced</td>
+              <td class="qty">−9.7 kg / hen · yr</td>
+              <td class="num">−0.252</td>
+              <td class="src">CME soybean meal, front-month avg $312/t — Jul 2026</td>
+            </tr>
+            <tr>
+              <td>Corn substituted</td>
+              <td class="qty">+4.6 kg / hen · yr</td>
+              <td class="num">+0.066</td>
+              <td class="src">CME corn, $172/t ($4.37/bu) — Jul 2026</td>
+            </tr>
+            <tr>
+              <td>Synthetic amino acids, pulsed</td>
+              <td class="qty">Lys 8.9 · Met 7.7 · Thr 4.3 g / hen · mo</td>
+              <td class="num">+0.061</td>
+              <td class="src">USDA ERS, feed-grade amino acid series — Jul 2026</td>
+            </tr>
+            <tr>
+              <td>Waterline dosing hardware</td>
+              <td class="qty">$0.98 / hen, 60-mo straight-line</td>
+              <td class="num">+0.016</td>
+              <td class="src">Roxell retrofit quote, three houses — Jun 2026</td>
+            </tr>
+            <tr>
+              <td>Residual formulation shifts</td>
+              <td class="qty">limestone · soy oil · phytase</td>
+              <td class="num">+0.004</td>
+              <td class="src">Least-cost solver residual, same quote set</td>
+            </tr>
+            <tr>
+              <td>Nitrogen handling credit</td>
+              <td class="qty">−14% N excretion</td>
+              <td class="num">−0.035</td>
+              <td class="src">Iowa State Extension, custom-rate survey — Mar 2026</td>
+            </tr>
+            <tr class="formula">
+              <td class="f-lbl">Formula</td>
+              <td class="f-eq" colspan="2">net Δ &nbsp;=&nbsp; −0.252 + 0.066 + 0.061 + 0.016 + 0.004 − 0.035</td>
+              <td class="src">Arithmetic over the six lines above</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="result">
+          <div class="big">$0.14 / hen / month<em>net savings</em></div>
+          <div class="annot">
+            $1.68 / hen / year — arithmetic<br>
+            ≈ $2.0 M / year at a 1.2-million-hen complex — arithmetic
+          </div>
+        </div>
+        <p class="sens">The savings hold at or above $0.087 across the 10th–90th percentile of 2024–26 CME closes, and the sign flips only below soybean meal at $139/t — a price last printed in 2006 — with corn and amino acids held at July 2026.</p>
+      </section>
+
+    </article>
+
+    <!-- ================= rail ================= -->
+    <aside class="rail">
+
+      <section>
+        <div class="lbl">Fitness, Six Dimensions</div>
+        <p class="lbl-sub">Scored by the council after simulation; rubric in the Engine Room.</p>
+        <div class="dims">
+          <div class="dim">
+            <div class="row"><span class="name">Technical</span><span class="score">8.9</span></div>
+            <div class="meter"><b style="width:89%"></b></div>
+            <p class="why">Mechanism replicated in three independent feeding trials.</p>
+          </div>
+          <div class="dim">
+            <div class="row"><span class="name">Economic</span><span class="score">8.4</span></div>
+            <div class="meter"><b style="width:84%"></b></div>
+            <p class="why">Savings survive 10th-percentile ingredient prices.</p>
+          </div>
+          <div class="dim">
+            <div class="row"><span class="name">Welfare</span><span class="score">9.1</span></div>
+            <div class="meter"><b style="width:91%"></b></div>
+            <p class="why">Feather cover and keel scores improve or hold in every scenario.</p>
+          </div>
+          <div class="dim">
+            <div class="row"><span class="name">Ecological</span><span class="score">7.8</span></div>
+            <div class="meter"><b style="width:78%"></b></div>
+            <p class="why">−14% nitrogen excretion; modeled house ammonia −9%.</p>
+          </div>
+          <div class="dim">
+            <div class="row"><span class="name">Social</span><span class="score">7.2</span></div>
+            <div class="meter"><b style="width:72%"></b></div>
+            <p class="why">Retrofit cost may exclude the smallest flocks.</p>
+          </div>
+          <div class="dim">
+            <div class="row"><span class="name">Ethical</span><span class="score">8.6</span></div>
+            <div class="meter"><b style="width:86%"></b></div>
+            <p class="why">No restriction imposed; hens fed to need, not to average.</p>
+          </div>
+        </div>
+        <div class="composite">
+          <div class="row"><span class="name">Composite</span><span class="score">8.33</span></div>
+          <p class="s">Unweighted mean of six · council threshold 7.00</p>
+        </div>
+      </section>
+
+      <section class="council">
+        <div class="lbl">The Council</div>
+        <p class="lbl-sub">Three adversarial judges, scored independently and blind to one another.</p>
+        <div class="judge">
+          <div class="row"><span class="role">Systems Ecologist</span><span class="word">Advance</span></div>
+          <p class="rate">Kills 44% of the candidates it reviews</p>
+          <p class="op">“The nitrogen line is the strongest I have scored this cycle; −14 percent excretion held under my worst-case ventilation model.”</p>
+        </div>
+        <div class="judge">
+          <div class="row"><span class="role">Farm Economist</span><span class="word">Advance</span></div>
+          <p class="rate">Kills 61% of the candidates it reviews</p>
+          <p class="op">“Payback in 6.3 months on the retrofit quote. I priced 2027 futures against it and could not break it.”</p>
+        </div>
+        <div class="judge">
+          <div class="row"><span class="role">Welfare Auditor</span><span class="word">Advance · one condition</span></div>
+          <p class="rate">Kills 37% of the candidates it reviews</p>
+          <p class="op">“Pulse dosing must never gate water access. With a flow-rate floor written into the deployment spec, this candidate saves money by treating the bird better.”</p>
+        </div>
+      </section>
+
+      <section class="stress">
+        <div class="lbl">Stress Tests</div>
+        <p class="lbl-sub">4,200 flock-years, eleven climate profiles; the worst cases below.</p>
+        <div class="strows">
+          <div class="st">
+            <span class="sc">Soybean meal at 90th-percentile price</span>
+            <span class="out"><b>Holds</b> · floor $0.087</span>
+          </div>
+          <div class="st">
+            <span class="sc">21-day heat wave, 35 °C, intake −9%</span>
+            <span class="out"><b>Holds</b> · floor $0.052</span>
+          </div>
+          <div class="st deg">
+            <span class="sc">Early molt across 12% of the flock</span>
+            <span class="out"><b>Degrades</b> · floor $0.031</span>
+          </div>
+          <div class="st">
+            <span class="sc">Waterline biofilm fouling</span>
+            <span class="out"><b>Holds</b> · quarterly flush specified</span>
+          </div>
+        </div>
+        <p class="stnote">The molt case degrades yet stays positive; a molt-window dosing pause is queued as a generation-13 refinement.</p>
+      </section>
+
+    </aside>
+  </div>
+
+  <!-- ================= decision ================= -->
+  <section class="decision">
+    <div class="decision-in">
+      <div class="lbl">The Decision</div>
+      <div class="dec-grid">
+        <div>
+          <p class="dec-say">The machine proposed it. The council contested it. Four thousand simulated flock-years could not break it. What remains is a human judgment.</p>
+          <p class="dec-trail">Proposed by the engine 02 Aug · contested by the council 12–18 Aug · dossier assembled without human edit.</p>
+        </div>
+        <div class="ballot">
+          <button type="button" class="advance">Advance to field trial</button>
+          <button type="button" class="kill">Kill — with reason</button>
+          <p class="dec-line">Your decision becomes part of the lineage.</p>
+          <p class="dec-sub">A kill requires a written reason; the reason enters generation 13’s objective.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="shell">
+    <p class="motto">Every claim sourced &nbsp;·&nbsp; every cost computed &nbsp;·&nbsp; every verdict recorded</p>
+    <p class="colophon">Palingenesis · Dossier PLG-1847 · rendered 22 August 2026, 06:14 UTC ·<span class="pulse"></span>generation 13 searching</p>
+  </div>
+</footer>
+
+</body>
+</html>
