@@ -337,6 +337,7 @@ Use `agent-do zpc`
 EOF
 
 # --- agent-sentry ---
+check_cmd "sentry monitors tests" python3 "$SCRIPT_DIR/tests/test_sentry_monitors.py"
 check_output "sentry help includes PROJECTS header" "PROJECTS" "$AGENT_DO" sentry --help
 check_output "sentry help lists snapshot command" "snapshot" "$AGENT_DO" sentry --help
 check_error_output "sentry unknown command exits with error" "Unknown command" "$AGENT_DO" sentry bogus-command-xyz

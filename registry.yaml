@@ -6728,6 +6728,7 @@ tools:
     - list alert rules across all projects
     - list recent releases
     - full account snapshot as JSON
+    - cron monitor health (status, last and next check-in per environment)
     commands:
       projects: List all projects with platforms
       project: Detailed project info
@@ -6741,6 +6742,7 @@ tools:
       alert: Detailed alert rule info
       releases: List recent releases (--project)
       snapshot: Full account state as JSON
+      monitors: Cron monitors with status, last/next check-in per environment (--project, --environment)
     examples:
     - intent: list sentry projects
       command: agent-sentry projects
@@ -6756,6 +6758,8 @@ tools:
       command: agent-sentry alerts
     - intent: get sentry account snapshot
       command: agent-sentry snapshot
+    - intent: check sentry cron monitor health
+      command: agent-sentry monitors
     credentials:
       required:
       - SENTRY_AUTH_TOKEN
@@ -6765,6 +6769,8 @@ tools:
       - error tracking
       - error monitoring
       - application error
+      - cron monitor
+      - check-in
       prompt_patterns:
       - \bsentry\b
       - \berror\s+tracking\b
@@ -6792,6 +6798,7 @@ tools:
       - alert
       - releases
       - snapshot
+      - monitors
       interact:
       - resolve
       - unresolve

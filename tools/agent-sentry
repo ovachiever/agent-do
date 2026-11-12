@@ -93,6 +93,11 @@ RELEASES
 ACCOUNT
   snapshot                      Full account state as JSON
 
+CRONS
+  monitors [opts]               Cron monitors: status, last and next check-in per environment
+    --project <slug>            Filter by project (repeatable)
+    --environment <name>        Filter by environment (repeatable)
+
 All commands accept --json for structured output.
 
 The org slug and region URL are auto-detected from the auth token
@@ -108,6 +113,7 @@ Minimum token scopes by capability:
   project:read                   project detail
   event:read                     issues searches and detail
   event:write                    resolve, unresolve, ignore, assign
+  alerts:read                    cron monitors (org:read also works)
 
 Examples:
   agent-sentry projects
@@ -116,6 +122,7 @@ Examples:
   agent-sentry issue VERSOVA-CHAT-B
   agent-sentry resolve VERSOVA-CHAT-B
   agent-sentry alerts
+  agent-sentry monitors --project palantir-worker-synthesize
   agent-sentry snapshot
 EOF
 }
@@ -724,6 +731,93 @@ for r in data:
 "
 }
 
+# Cron monitors (Sentry Crons): one row per monitor and environment, with
+# Sentry's own status. GET /organizations/{org}/monitors/ (alerts:read or
+# org:read); filters map to the documented project/environment parameters.
+cmd_monitors() {
+    local -a args=() query=()
+    _pop_json_flag "$@"
+    args=("${_JSON_ARGS[@]+"${_JSON_ARGS[@]}"}")
+    set -- "${args[@]+"${args[@]}"}"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project|--environment)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "Error: $1 needs a value" >&2
+                    return 2
+                fi
+                query+=("${1#--}=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote_plus(sys.argv[1]))' "$2")")
+                shift 2 ;;
+            *)
+                echo "Error: unknown option '$1'" >&2
+                echo "Usage: agent-sentry monitors [--project <slug>]... [--environment <name>]... [--json]" >&2
+                return 2 ;;
+        esac
+    done
+
+    local base_url org url result
+    base_url=$(sentry_base_url) || return 1
+    org=$(sentry_org) || return 1
+    url="${base_url}/organizations/${org}/monitors/"
+    if [[ ${#query[@]} -gt 0 ]]; then
+        url+="?$(IFS='&'; printf '%s' "${query[*]}")"
+    fi
+    result=$(sentry_get "$url") || return 1
+
+    local json_flag=0
+    $_json_mode && json_flag=1
+    local has_project=0
+    [[ "${query[*]+"${query[*]}"}" == *project=* ]] && has_project=1
+    printf '%s' "$result" | JSON_MODE="$json_flag" HAS_PROJECT="$has_project" python3 -c '
+import json, os, sys
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    print("Error: Sentry returned a non-JSON response for monitors", file=sys.stderr)
+    sys.exit(1)
+if isinstance(data, dict):
+    detail = data.get("detail") or data
+    print(f"Error: Sentry refused the monitors request: {detail}", file=sys.stderr)
+    print("  (needs a token with alerts:read or org:read)", file=sys.stderr)
+    if os.environ["HAS_PROJECT"] == "1":
+        print("  (Sentry also answers this way when a --project slug does not exist)", file=sys.stderr)
+    sys.exit(1)
+if len(data) >= 100:
+    print(f"Warning: {len(data)} monitors returned — Sentry pages at 100, so there may be more", file=sys.stderr)
+if os.environ["JSON_MODE"] == "1":
+    print(json.dumps(data, indent=2))
+    sys.exit(0)
+if not data:
+    print("No cron monitors.")
+    sys.exit(0)
+BAD = {"error", "missed_checkin", "timeout"}
+fmt = "{:<30} {:<26} {:<20} {:<12} {:<15} {:<21} {:<21} {}"
+print(fmt.format("MONITOR", "PROJECT", "SCHEDULE", "ENV", "STATUS", "LAST CHECK-IN", "NEXT CHECK-IN", "MUTED"))
+print("-" * 155)
+envs_total = not_ok = 0
+for m in data:
+    cfg = m.get("config") or {}
+    sched = " ".join(x for x in (cfg.get("schedule") or "-", cfg.get("timezone") or "") if x)
+    slug = str(m.get("slug") or "")[:30]
+    project = str((m.get("project") or {}).get("slug") or "-")[:26]
+    envs = m.get("environments") or []
+    if not envs:
+        mstatus = str(m.get("status") or "-")
+        print(fmt.format(slug, project, sched[:20], "-", mstatus, "no check-ins yet", "", ""))
+        continue
+    for e in envs:
+        envs_total += 1
+        status = str(e.get("status") or "-")
+        if status in BAD:
+            not_ok += 1
+        muted = "yes" if (e.get("isMuted") or m.get("isMuted")) else "no"
+        print(fmt.format(slug, project, sched[:20], str(e.get("name") or "-")[:12], status,
+                         str(e.get("lastCheckIn") or "never")[:21], str(e.get("nextCheckIn") or "-")[:21], muted))
+print()
+print(f"{len(data)} monitors, {envs_total} environments: {not_ok} not ok (error, missed check-in or timeout)")
+'
+}
+
 cmd_snapshot() {
     _pop_json_flag "$@"
     local token
@@ -969,6 +1063,10 @@ case "${1:-help}" in
     releases)
         shift || true
         cmd_releases "$@"
+        ;;
+    monitors|crons)
+        shift || true
+        cmd_monitors "$@"
         ;;
     snapshot|snap)
         shift || true
