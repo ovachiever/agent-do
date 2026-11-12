@@ -203,6 +203,17 @@ def configure_fake_security(tmpdir: Path, dump_text: str, dump_exit: int = 0) ->
             if len(sys.argv) >= 2 and sys.argv[1] == "dump-keychain":
                 sys.stdout.write(Path({str(dump_path)!r}).read_text(encoding="utf-8"))
                 raise SystemExit({dump_exit})
+            if len(sys.argv) >= 2 and sys.argv[1] == "find-generic-password" and "-w" in sys.argv:
+                # Real `security -w` ends the password with a newline.
+                account = sys.argv[sys.argv.index("-a") + 1]
+                if account == "MAC_SECRET":
+                    sys.stdout.write("macsecret\\n")
+                    raise SystemExit(0)
+                raise SystemExit(44)
+            if len(sys.argv) >= 2 and sys.argv[1] == "find-generic-password":
+                # Attribute-only probe (no -w): existence without revealing the value.
+                account = sys.argv[sys.argv.index("-a") + 1]
+                raise SystemExit(0 if account == "MAC_SECRET" else 44)
             print("unexpected security argv:", sys.argv, file=sys.stderr)
             raise SystemExit(2)
             """
@@ -449,7 +460,7 @@ def main() -> int:
 
         get_value = run("./agent-do", "creds", "get", "TEST_API_KEY", "--reveal", env=fake_env)
         require(get_value.returncode == 0, f"get --reveal failed: {get_value.stderr}")
-        require(get_value.stdout.strip() == "supersecret", f"unexpected revealed value: {get_value.stdout}")
+        require(get_value.stdout == "supersecret\n", f"--reveal must print the value and one newline: {get_value.stdout!r}")
 
         list_keys = run("./agent-do", "creds", "list", "--json", env=fake_env)
         require(list_keys.returncode == 0, f"list --json failed: {list_keys.stderr}")
@@ -610,6 +621,23 @@ def main() -> int:
             list_macos_text.stdout.strip() == "TEST_API_KEY",
             f"unexpected macos list text: {list_macos_text.stdout!r}",
         )
+
+        # D28: the Keychain value already ends in a newline; --reveal must not
+        # add a second (blank) line, or `$(… | tail -1)` captures nothing.
+        macos_env.pop("MAC_SECRET", None)
+        reveal_macos = run("./agent-do", "creds", "get", "MAC_SECRET", "--reveal", env=macos_env)
+        require(reveal_macos.returncode == 0, f"macos get --reveal failed: {reveal_macos.stderr}")
+        require(
+            reveal_macos.stdout == "macsecret\n",
+            f"macos --reveal must print the value and exactly one newline: {reveal_macos.stdout!r}",
+        )
+
+    # Env-sourced values carry no newline of their own; same single-line contract.
+    env_reveal_env = os.environ.copy()
+    env_reveal_env["ENV_ONLY_SECRET"] = "fromenv"
+    env_reveal = run("./agent-do", "creds", "get", "ENV_ONLY_SECRET", "--reveal", env=env_reveal_env)
+    require(env_reveal.returncode == 0, f"env get --reveal failed: {env_reveal.stderr}")
+    require(env_reveal.stdout == "fromenv\n", f"env --reveal must print value + one newline: {env_reveal.stdout!r}")
 
     with tempfile.TemporaryDirectory() as tmpdir_str:
         tmpdir = Path(tmpdir_str)
