@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair2:rgba(231,227,218,0.22);
+    --accent:hsl(158 30% 55%);
+    --accent-dim:hsl(158 30% 55% / .38);
+    --panelbg:#2A2521;
+    --chipbg:#221F1C;
+    --inputbg:#211E1C;
+    --dockbg:#1E1B19;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{
+    min-width:1380px;
+    color:var(--ink);
+    font:14px/1.45 var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;background:none;border:none;color:inherit;cursor:pointer}
+  a{color:inherit;text-decoration:none;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .lab{
+    font:600 12px var(--sans);
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--mut);
+  }
+  .m{font-family:var(--mono)}
+
+  /* ---------- top nav ---------- */
+  .nav{
+    display:flex;align-items:center;gap:30px;
+    height:56px;padding:0 44px;
+    border-bottom:1px solid var(--hair);
+  }
+  .brand{font:400 19px var(--serif);color:var(--ink);letter-spacing:.01em}
+  .brand .mark{color:var(--accent);font-size:14px;margin-right:8px}
+  .nav .links{display:flex;gap:4px;margin-left:14px}
+  .nav .links a{
+    display:inline-flex;align-items:center;height:32px;
+    padding:0 12px;font-size:14px;color:var(--mut);
+    border-bottom:2px solid transparent;
+  }
+  .nav .links a:hover{color:var(--ink)}
+  .nav .links a.on{color:var(--ink);border-bottom-color:var(--accent)}
+  .navmeta{
+    margin-left:auto;display:flex;align-items:center;gap:8px;
+    font:12px var(--mono);color:var(--mut);
+  }
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block}
+
+  /* ---------- page frame ---------- */
+  .page{margin-right:46px;padding:0 44px}
+  .pagehead{display:flex;align-items:center;gap:22px;padding:22px 0 18px}
+  .pagehead h1{font:400 30px/1 var(--serif)}
+  .pagemeta{font-size:14px;color:var(--faint)}
+  .ask{
+    margin-left:auto;position:relative;display:flex;align-items:center;
+    width:404px;height:42px;background:var(--inputbg);
+    border:1px solid var(--hair2);border-radius:8px;padding:0 12px;gap:10px;
+  }
+  .ask:focus-within{border-color:var(--accent-dim)}
+  .askmark{font:600 14px var(--mono);color:var(--accent)}
+  .ask input{
+    flex:1;background:none;border:none;color:var(--ink);
+    font:14px var(--sans);outline:none;caret-color:var(--accent);
+  }
+  .ask input::placeholder{color:var(--mut)}
+  .kbd{
+    display:inline-flex;align-items:center;height:24px;padding:0 7px;
+    border:1px solid var(--hair);border-radius:5px;
+    font:12px var(--mono);color:var(--mut);
+  }
+
+  .cols{display:grid;grid-template-columns:1fr 356px;column-gap:44px;align-items:start}
+
+  .sechead{display:flex;align-items:center;gap:14px;padding:6px 0 8px;border-bottom:1px solid var(--hair2)}
+  .secmeta{font:12px var(--mono);color:var(--mut)}
+  .push{margin-left:auto}
+  .chipbtn{
+    display:inline-flex;align-items:center;height:26px;padding:0 10px;gap:6px;
+    background:var(--chipbg);border:1px solid var(--hair);border-radius:6px;
+    font:12px var(--sans);color:var(--mut);
+  }
+  .chipbtn:hover{color:var(--ink);border-color:var(--hair2)}
+
+  /* ---------- stats band ---------- */
+  .stats{display:grid;grid-template-columns:repeat(6,1fr);margin-bottom:24px}
+  .stat{padding:4px 14px 6px 16px;border-left:1px solid var(--hair)}
+  .stat:first-child{border-left:none;padding-left:0}
+  .stat .lab{display:block;margin-bottom:7px;white-space:nowrap}
+  .stat .n{
+    font:600 24px/1.1 var(--sans);font-variant-numeric:tabular-nums;
+    color:var(--ink);white-space:nowrap;
+  }
+  .stat .sub{display:block;margin-top:6px;font:12px var(--mono);color:var(--mut);white-space:nowrap}
+  .up{color:var(--accent)}
+  .dn{color:var(--mut)}
+
+  /* ---------- reading record ---------- */
+  .record{margin-bottom:26px}
+  .row{
+    display:grid;grid-template-columns:48px 1fr 62px;column-gap:14px;
+    padding:9px 0 10px;border-bottom:1px solid var(--hair);align-items:baseline;
+  }
+  .row.now{border-left:2px solid var(--accent);padding-left:10px;margin-left:-12px}
+  .time{font:12px var(--mono);color:var(--mut)}
+  .row.now .time{color:var(--accent)}
+  .rtitle{font:400 15px/1.35 var(--serif);color:var(--ink)}
+  .rsub{display:flex;align-items:baseline;gap:10px;margin-top:3px;font-size:12px;color:var(--mut)}
+  .rsub .src{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .disp{margin-left:auto;white-space:nowrap;font:12px var(--mono)}
+  .disp .m{font-family:var(--mono)}
+  .seat{color:var(--accent)}
+  .lnk{color:var(--mut)}
+  .lnk .qid{color:var(--ink)}
+  .con{
+    color:var(--ink);border:1px solid var(--hair2);border-radius:5px;
+    padding:2px 7px;
+  }
+  .dis{color:var(--mut)}
+  .live{color:var(--accent)}
+  .cost{font:12px var(--mono);color:var(--mut);text-align:right}
+
+  /* ---------- sweeps ---------- */
+  .srow{
+    display:grid;grid-template-columns:60px 92px 1fr 118px auto;column-gap:14px;
+    align-items:center;min-height:33px;padding:4px 0;border-bottom:1px solid var(--hair);
+  }
+  .sid{font:12px var(--mono);color:var(--mut)}
+  .sstat{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .sstat.run{color:var(--accent)}
+  .stitle{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sbar{width:118px;height:3px;background:var(--hair);border-radius:2px;overflow:hidden}
+  .sbar i{display:block;height:100%;background:var(--accent)}
+  .smeta{font:12px var(--mono);color:var(--mut);text-align:right;white-space:nowrap}
+
+  /* ---------- signals rail ---------- */
+  .sig{padding:9px 0 10px;border-bottom:1px solid var(--hair)}
+  .sigtop{display:flex;align-items:baseline;gap:10px}
+  .signame{font-size:14px;font-weight:500;color:var(--ink)}
+  .sigval{margin-left:auto;font:13px var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .sigd{font:12px var(--mono);white-space:nowrap}
+  .sigsrc{margin-top:3px;font-size:12px;color:var(--mut)}
+
+  /* ---------- footer ---------- */
+  .foot{
+    margin-top:22px;padding:14px 0 18px;border-top:1px solid var(--hair);
+    text-align:center;font:12px var(--sans);letter-spacing:.1em;color:var(--mut);
+  }
+
+  /* ---------- panel dock (right edge) ---------- */
+  .dock{
+    position:fixed;top:57px;right:0;bottom:0;width:46px;
+    background:var(--dockbg);border-left:1px solid var(--hair);
+    display:flex;flex-direction:column;align-items:flex-end;
+    padding-top:20px;gap:10px;z-index:40;
+  }
+  .tab{
+    writing-mode:vertical-rl;
+    display:inline-flex;align-items:center;gap:10px;
+    width:36px;padding:14px 0;
+    background:var(--chipbg);
+    border:1px solid var(--hair);border-right:none;
+    border-radius:7px 0 0 7px;
+    color:var(--mut);
+  }
+  .tab:hover{background:#2A2622;color:var(--ink)}
+  .tab .tlab{font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase}
+  .tab .tbadge{writing-mode:horizontal-tb;font:12px var(--mono);color:var(--mut)}
+  .tab.on{
+    background:var(--panelbg);color:var(--ink);
+    border-left:2px solid var(--accent);
+  }
+  .tab.on .tbadge{color:var(--accent)}
+
+  /* ---------- kinship map layover ---------- */
+  .panel{
+    position:fixed;top:232px;right:46px;width:436px;z-index:50;
+    background:var(--panelbg);
+    border:1px solid var(--hair2);border-radius:10px 0 0 10px;
+    box-shadow:-14px 14px 0 rgba(9,8,6,0.42);
+    padding:16px 20px 14px;
+  }
+  .phead{display:flex;align-items:center;gap:12px;padding-bottom:11px;border-bottom:1px solid var(--hair)}
+  .phead .lab{color:var(--ink)}
+  .pmeta{font:12px var(--mono);color:var(--mut)}
+  .x{
+    margin-left:auto;width:26px;height:26px;border:1px solid var(--hair);
+    border-radius:6px;color:var(--mut);font-size:13px;line-height:1;
+    display:inline-flex;align-items:center;justify-content:center;
+  }
+  .x:hover{color:var(--ink);border-color:var(--hair2)}
+  .qhead{display:flex;align-items:baseline;gap:12px;margin-top:13px}
+  .qid{font:600 13px var(--mono);color:var(--accent)}
+  .qmeta{font:12px var(--mono);color:var(--mut)}
+  .q{font:italic 400 17px/1.4 var(--serif);color:var(--ink);margin-top:7px}
+  .microlab{
+    font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--mut);margin-top:14px;padding-bottom:6px;border-bottom:1px solid var(--hair);
+  }
+  .ev{padding:9px 0;border-bottom:1px solid var(--hair)}
+  .evtop{display:flex;align-items:center;gap:10px}
+  .evid{font:600 12px var(--mono);color:var(--accent)}
+  .stance{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase}
+  .stance.sup{color:var(--accent)}
+  .stance.contra{
+    color:var(--ink);border:1px solid var(--hair2);border-radius:5px;padding:2px 7px;
+  }
+  .w{font:12px var(--mono);color:var(--mut)}
+  .evcost{margin-left:auto;font:12px var(--mono);color:var(--mut)}
+  .evclaim{margin-top:4px;font-size:13px;color:var(--ink)}
+  .evsrc{margin-top:3px;font-size:12px;color:var(--mut)}
+  .kin{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .kinlab{font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+  .kinchip{
+    display:inline-flex;align-items:center;height:24px;padding:0 9px;
+    border:1px solid var(--hair);border-radius:6px;
+    font:12px var(--mono);color:var(--mut);background:var(--chipbg);
+  }
+  .kinchip:hover{color:var(--ink);border-color:var(--hair2)}
+  .pfoot{
+    display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:10px;
+    border-top:1px solid var(--hair);font:12px var(--mono);color:var(--mut);
+  }
+  .openmap{
+    margin-left:auto;display:inline-flex;align-items:center;height:24px;
+    font:600 12px var(--sans);color:var(--accent);letter-spacing:.04em;
+  }
+  .openmap:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="brand"><span class="mark">✳</span>Palingenesis</span>
+  <span class="links">
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#" class="on">Library</a>
+    <a href="#">Engine Room</a>
+  </span>
+  <span class="navmeta"><span class="dot"></span>reader live · 41 papers/hr</span>
+</nav>
+
+<div class="page">
+
+  <header class="pagehead">
+    <h1>Library</h1>
+    <span class="pagemeta">day 161 of continuous reading · since 14 Mar 2026</span>
+    <div class="ask">
+      <span class="askmark">»</span>
+      <input type="text" placeholder="Ask the Library — answers cite ev- records" aria-label="Ask the Library">
+      <span class="kbd">⌘K</span>
+    </div>
+  </header>
+
+  <div class="cols">
+
+    <div class="colL">
+
+      <section class="stats">
+        <div class="stat">
+          <span class="lab">Corpus</span>
+          <span class="n">48,112</span>
+          <span class="sub"><span class="up">▴ 1,286</span> last 24h</span>
+        </div>
+        <div class="stat">
+          <span class="lab">Read · 24h</span>
+          <span class="n">1,286</span>
+          <span class="sub">41/hr current</span>
+        </div>
+        <div class="stat">
+          <span class="lab">Metered · 24h</span>
+          <span class="n">$41.87</span>
+          <span class="sub">$0.033 avg/paper</span>
+        </div>
+        <div class="stat">
+          <span class="lab">Evidence</span>
+          <span class="n">9,414</span>
+          <span class="sub"><span class="up">▴ 38</span> seated today</span>
+        </div>
+        <div class="stat">
+          <span class="lab">Contradictions</span>
+          <span class="n">23</span>
+          <span class="sub">4 new · 2 resolved</span>
+        </div>
+        <div class="stat">
+          <span class="lab">Sweeps</span>
+          <span class="n">4</span>
+          <span class="sub">in flight · 2 queued</span>
+        </div>
+      </section>
+
+      <section class="record">
+        <div class="sechead">
+          <span class="lab">Reading record</span>
+          <button class="chipbtn">last 24h ▾</button>
+          <span class="secmeta push">1,286 papers · $41.87 metered</span>
+        </div>
+
+        <div class="row now">
+          <span class="time">now</span>
+          <div class="rmain">
+            <div class="rtitle">Limestone particle size and eggshell breaking strength in Hy-Line W-36, 60–90 wk</div>
+            <div class="rsub"><span class="src">Poultry Science 105(3) · 2026</span><span class="disp live">● reading · p 6/22</span></div>
+          </div>
+          <span class="cost">$0.011</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:44</span>
+          <div class="rmain">
+            <div class="rtitle">Split-feed calcium delivery and late-day shell-gland uptake: a three-flock field trial</div>
+            <div class="rsub"><span class="src">J. Appl. Poult. Res. 34(1) · 2026 · 31k tok</span><span class="disp seat">seated → ev-9412</span></div>
+          </div>
+          <span class="cost">$0.029</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:41</span>
+          <div class="rmain">
+            <div class="rtitle">Reduced crude protein with supplemental L-lysine: the performance floor in Lohmann Brown</div>
+            <div class="rsub"><span class="src">Br. Poult. Sci. 66(4) · 2025 · 28k tok</span><span class="disp seat">seated → ev-9411</span></div>
+          </div>
+          <span class="cost">$0.026</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:37</span>
+          <div class="rmain">
+            <div class="rtitle">Midnight feeding windows and shell defect rates: a 31-flock retrospective</div>
+            <div class="rsub"><span class="src">Poultry Science 103(11) · 2024 · 33k tok</span><span class="disp con">contradicts ev-8841 · cx-023</span></div>
+          </div>
+          <span class="cost">$0.031</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:31</span>
+          <div class="rmain">
+            <div class="rtitle">Betaine supplementation under chronic heat stress: meta-analysis of 42 trials</div>
+            <div class="rsub"><span class="src">World's Poult. Sci. J. 81(2) · 2025 · 26k tok</span><span class="disp lnk">linked → <span class="qid">q-0141</span></span></div>
+          </div>
+          <span class="cost">$0.024</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:26</span>
+          <div class="rmain">
+            <div class="rtitle">Oyster shell versus pullet-sized limestone: a two-house comparison</div>
+            <div class="rsub"><span class="src">Poultry Science 58(3) · 1979 · 9k tok</span><span class="disp dis">discarded — n=48, underpowered</span></div>
+          </div>
+          <span class="cost">$0.008</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:22</span>
+          <div class="rmain">
+            <div class="rtitle">Keel fracture prevalence and calcium timing in cage-free aviary systems</div>
+            <div class="rsub"><span class="src">Animal 19(6) · 2025 · 36k tok</span><span class="disp seat">seated → ev-9409</span></div>
+          </div>
+          <span class="cost">$0.034</span>
+        </div>
+
+        <div class="row">
+          <span class="time">09:18</span>
+          <div class="rmain">
+            <div class="rtitle">Phytase superdosing and phosphorus excretion in W-36 layer diets</div>
+            <div class="rsub"><span class="src">Poultry Science 104(9) · 2025 · 7k tok</span><span class="disp dis">duplicate of ev-7203 — merged</span></div>
+          </div>
+          <span class="cost">$0.006</span>
+        </div>
+      </section>
+
+      <section class="sweeps">
+        <div class="sechead">
+          <span class="lab">Research sweeps</span>
+          <span class="secmeta push">1 running · 1 commissioned · 1 done today</span>
+        </div>
+        <div class="srow">
+          <span class="sid">sw-0141</span>
+          <span class="sstat run">running</span>
+          <span class="stitle">Coarse Ca × shell-gland transport</span>
+          <span class="sbar"><i style="width:44%"></i></span>
+          <span class="smeta">132/300 papers · $4.12 of $9.00 cap</span>
+        </div>
+        <div class="srow">
+          <span class="sid">sw-0142</span>
+          <span class="sstat">queued</span>
+          <span class="stitle">Lysine antagonism under low CP — re-check</span>
+          <span class="sbar"></span>
+          <span class="smeta">commissioned 08:56 by ds-118 · est 180 · cap $6.00</span>
+        </div>
+        <div class="srow">
+          <span class="sid">sw-0139</span>
+          <span class="sstat">done 05:12</span>
+          <span class="stitle">Insoluble grit retention claims</span>
+          <span class="sbar"></span>
+          <span class="smeta">214 papers · $5.84 · 11 ev seated</span>
+        </div>
+      </section>
+
+    </div>
+
+    <aside class="colR">
+      <div class="sechead">
+        <span class="lab">Market signals</span>
+        <span class="secmeta push">12 live</span>
+      </div>
+
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Shell eggs, nat'l L white</span><span class="sigval">$2.41 /doz</span><span class="sigd up">▴ 3.4%</span></div>
+        <div class="sigsrc">USDA ERS · Shell Eggs Weekly · Aug 21</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Cage-free, California</span><span class="sigval">$3.12 /doz</span><span class="sigd up">▴ 1.8%</span></div>
+        <div class="sigsrc">USDA AMS · Aug 21</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Retail carton, US avg</span><span class="sigval">$3.09 /doz</span><span class="sigd dn">▾ 0.8%</span></div>
+        <div class="sigsrc">USDA AMS · Aug 19</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Breaking stock, Central</span><span class="sigval">$1.87 /doz</span><span class="sigd up">▴ 1.1%</span></div>
+        <div class="sigsrc">Urner Barry · Aug 21</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Corn, Dec-26</span><span class="sigval">$4.62 /bu</span><span class="sigd dn">▾ 1.2%</span></div>
+        <div class="sigsrc">CME · Aug 22</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Soybeans, Nov-26</span><span class="sigval">$10.84 /bu</span><span class="sigd up">▴ 0.4%</span></div>
+        <div class="sigsrc">CME · Aug 22</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">DL-Methionine, spot</span><span class="sigval">$2.84 /kg</span><span class="sigd up">▴ 0.7%</span></div>
+        <div class="sigsrc">Feedinfo · Aug 20</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">DDGS, Iowa</span><span class="sigval">$148.00 /ton</span><span class="sigd dn">▾ 2.1%</span></div>
+        <div class="sigsrc">USDA AMS · Aug 20</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Pullet placements</span><span class="sigval">24.1 M</span><span class="sigd up">▴ 2.9% yoy</span></div>
+        <div class="sigsrc">USDA NASS · Chickens &amp; Eggs · Jul 26</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Diesel, on-highway</span><span class="sigval">$3.64 /gal</span><span class="sigd dn">▾ 1.5%</span></div>
+        <div class="sigsrc">EIA · Aug 18</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">L-Lysine HCl, spot</span><span class="sigval">$1.32 /kg</span><span class="sigd dn">▾ 4.1%</span></div>
+        <div class="sigsrc">Feedinfo · Lysine Tracker · Aug 20</div>
+      </div>
+      <div class="sig">
+        <div class="sigtop"><span class="signame">Soybean meal, Sep-26</span><span class="sigval">$312.40 /ton</span><span class="sigd up">▴ 0.9%</span></div>
+        <div class="sigsrc">CME · Aug 22</div>
+      </div>
+    </aside>
+
+  </div>
+
+  <footer class="foot">Every claim sourced · every cost computed · every verdict recorded</footer>
+
+</div>
+
+<!-- dock of closed panels, right edge -->
+<div class="dock">
+  <button class="tab on" title="Kinship Map — open">
+    <span class="tlab">Kinship Map</span><span class="tbadge">61</span>
+  </button>
+  <button class="tab" title="Germinating — open">
+    <span class="tlab">Germinating</span><span class="tbadge">7</span>
+  </button>
+  <button class="tab" title="Renewal Bench — open">
+    <span class="tlab">Renewal Bench</span><span class="tbadge">3</span>
+  </button>
+  <button class="tab" title="Sweep Ledger — open">
+    <span class="tlab">Sweep Ledger</span><span class="tbadge">4</span>
+  </button>
+</div>
+
+<!-- kinship map layover, open from the dock -->
+<aside class="panel" aria-label="Kinship Map panel">
+  <div class="phead">
+    <span class="lab">Kinship map</span>
+    <span class="pmeta">layer · dock 1/4</span>
+    <button class="x" title="Close">✕</button>
+  </div>
+
+  <div class="qhead">
+    <span class="qid">q-0173</span>
+    <span class="qmeta">open · 3 records · updated 09:44</span>
+  </div>
+  <p class="q">Does coarse limestone (&gt;2 mm) fed after 14:00 cut cracked-egg rate in flocks past 60 weeks?</p>
+
+  <div class="microlab">Seated evidence</div>
+
+  <div class="ev">
+    <div class="evtop">
+      <span class="evid">ev-8841</span>
+      <span class="stance sup">supports</span>
+      <span class="w">w .34</span>
+      <span class="evcost">$0.041</span>
+    </div>
+    <div class="evclaim">Cracked rate −0.8 pp at 65% coarse Ca; 12 houses, 74 wk</div>
+    <div class="evsrc">Poultry Science 104(6) · 2026 · read Aug 19 · cited in ds-118</div>
+  </div>
+
+  <div class="ev">
+    <div class="evtop">
+      <span class="evid">ev-9412</span>
+      <span class="stance sup">supports</span>
+      <span class="w">w .19</span>
+      <span class="evcost">$0.029</span>
+    </div>
+    <div class="evclaim">PM solubility window aligns with 18:00–02:00 shell calcification</div>
+    <div class="evsrc">J. Appl. Poult. Res. 34(1) · 2026 · seated 09:44 today</div>
+  </div>
+
+  <div class="ev" style="border-bottom:none">
+    <div class="evtop">
+      <span class="evid">ev-9410</span>
+      <span class="stance contra">contradicts</span>
+      <span class="w">w .22</span>
+      <span class="evcost">$0.031</span>
+    </div>
+    <div class="evclaim">No defect shift across 31 midnight-fed flocks</div>
+    <div class="evsrc">Poultry Science 103(11) · 2024 · read 09:37 · cx-023 open</div>
+  </div>
+
+  <div class="kin">
+    <span class="kinlab">Kin</span>
+    <a class="kinchip" href="#">q-0119 · shell-gland transport</a>
+    <a class="kinchip" href="#">q-0084 · pullet Ca priming</a>
+    <a class="kinchip" href="#">q-0141 · heat-stress feeding</a>
+  </div>
+
+  <div class="pfoot">
+    <span>61 questions · 388 kin edges</span>
+    <a class="openmap" href="#">open full map ▸</a>
+  </div>
+</aside>
+
+</body>
+</html>

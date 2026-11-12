@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917;
+  --lift:#211E1B;
+  --ink:#E7E3DA;
+  --muted:#A69D90;
+  --faint:#6E675E;
+  --hair:rgba(231,227,218,0.14);
+  --sage:hsl(158,30%,55%);
+  --clay:hsl(12,42%,58%);
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:'Source Sans 3',-apple-system,'Helvetica Neue',sans-serif;
+  --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  --dotcue:rgba(231,227,218,0.5);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+.page{max-width:1440px;margin:0 auto;padding:0 40px}
+.mono{font-family:var(--mono);font-size:.93em}
+.k{display:block;font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.k2{display:block;margin-top:6px;font-family:var(--mono);font-size:12px;letter-spacing:0;text-transform:none;color:var(--muted)}
+.sep{color:var(--muted)}
+.st{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.sage{color:var(--sage)}
+.clay{color:var(--clay)}
+.money,.drill{border-bottom:1px dotted var(--dotcue);padding-bottom:1px}
+
+header.nav{display:flex;align-items:stretch;gap:34px;height:58px;border-bottom:1px solid var(--hair)}
+.wordmark{align-self:center;font-family:var(--serif);font-size:20px;font-weight:600;letter-spacing:.01em}
+nav.tabs{display:flex;gap:4px}
+.tabs a{display:flex;align-items:center;padding:0 12px;font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.tabs a.cur{color:var(--sage);border-bottom:1px solid var(--sage);margin-bottom:-1px}
+.clock{margin-left:auto;align-self:center;font-size:14px;color:var(--muted)}
+.clock .mono{color:var(--ink)}
+
+.lede{display:flex;justify-content:space-between;align-items:flex-end;gap:48px;padding:30px 0 26px}
+.verdict{font-family:var(--serif);font-size:23px;line-height:1.4;font-weight:400}
+.verdict .ok{color:var(--sage);font-weight:600}
+.verdict .mono{font-size:.8em}
+.lfig{flex:none;text-align:right}
+.lfig .v{display:inline-block;margin-top:7px;font-size:21px;line-height:1.2}
+
+.figure{border-top:1px solid var(--hair);padding:24px 0 12px}
+.fhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.legend{display:flex;gap:22px}
+.lg{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.lg svg{display:block}
+.lg-slip{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--clay)}
+.figure > svg{display:block;width:100%;height:auto}
+
+svg text{fill:currentColor}
+svg line{stroke-width:1}
+svg circle{stroke-width:1}
+.lr{stroke:var(--muted)}
+.lf{stroke:var(--hair)}
+.ls{stroke:var(--sage)}
+.xl{stroke:var(--clay)}
+.cc{fill:var(--ink)}
+.cb{fill:var(--bg);stroke:var(--muted)}
+.cl{fill:var(--sage)}
+.cr{fill:none;stroke:var(--sage)}
+.cm{fill:var(--bg)}
+.fh{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.fid{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.fcl{font-family:var(--mono);font-size:14px;color:var(--ink)}
+.fbk{font-family:var(--mono);font-size:14px;color:var(--muted)}
+.fst{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.13em}
+.mut{color:var(--muted)}
+.fslip{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--clay)}
+.fnow{font-family:var(--mono);font-size:12px;color:var(--sage)}
+.fnext{font-family:var(--mono);font-size:14px;color:var(--sage)}
+
+.band{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px 28px;border-top:1px solid var(--hair);padding:22px 0}
+.bk{padding-top:3px}
+.facts{display:grid;gap:28px}
+.c6{grid-template-columns:repeat(6,1fr)}
+.c5{grid-template-columns:repeat(5,1fr)}
+.c3{grid-template-columns:repeat(3,max-content);column-gap:64px}
+.fact .v{margin-top:6px;font-size:16px}
+.fact .v2{margin-top:3px;font-size:13px;color:var(--muted)}
+.vols .v{margin-top:8px;font-size:30px;line-height:1.15}
+.sum .v{margin-top:7px;font-size:21px;line-height:1.2}
+.proj{color:var(--muted)}
+
+.ledger-table{margin-top:22px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:0 14px 9px 0;font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+th.num{text-align:right;padding-right:0}
+th.pad,td.pad{padding-right:36px}
+td{border-top:1px solid var(--hair);padding:10px 14px 10px 0;font-size:15px;vertical-align:baseline}
+td.num{text-align:right;padding-right:0;white-space:nowrap}
+.stg{font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin-right:7px}
+.off{font-family:var(--mono);font-size:13px;color:var(--ink)}
+.svc{font-weight:600}
+.job{color:var(--muted)}
+td.time{font-family:var(--mono);font-size:14px;white-space:nowrap;color:var(--ink)}
+.what{color:var(--ink)}
+.what .mono,.act .mono{color:var(--ink)}
+.act{color:var(--muted)}
+.lostv{font-size:15px}
+.lostv.clay{font-weight:600}
+tfoot td{padding:12px 14px 0 0;font-size:15px}
+tfoot .k{display:inline;padding:0}
+
+.control-body{display:flex;align-items:center;gap:30px}
+button.suspend{background:var(--lift);border:1px solid var(--muted);color:var(--ink);font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;padding:15px 26px;cursor:pointer}
+.cq{font-size:14px;color:var(--muted)}
+.cq .mono{color:var(--ink)}
+
+footer.foot{border-top:1px solid var(--hair);padding:24px 0 40px;text-align:center;font-family:var(--serif);font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="nav">
+  <div class="wordmark">Palingenesis</div>
+  <nav class="tabs">
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#">Library</a>
+    <a href="#">Portfolio</a>
+    <a href="#">Simulation</a>
+    <a href="#" class="cur" aria-current="page">Engine Room</a>
+  </nav>
+  <div class="clock"><span class="mono">17:26:08</span> <span class="sep">·</span> Fri 22 Aug</div>
+</header>
+
+<main>
+
+<section class="lede">
+  <p class="verdict"><span class="ok">Nominal</span> — ten closed, one struck <span class="sep">·</span> cycle 12 mid-Simulate <span class="sep">·</span> 13 opens <span class="mono">18:00:00</span></p>
+  <div class="lfig">
+    <span class="k">Spent / Cap</span>
+    <a class="v money" href="#ledger">$107.13 / $500.00</a>
+  </div>
+</section>
+
+<section class="figure" id="dayline">
+  <div class="fhead">
+    <span class="k">Day line · 16 cycles</span>
+    <div class="legend">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16"><circle class="cc" cx="8" cy="8" r="5"/></svg>Closed</span>
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16"><circle class="cb" cx="8" cy="8" r="5"/></svg>Booked</span>
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16"><circle class="cr" cx="8" cy="8" r="7"/><circle class="cl" cx="8" cy="8" r="4"/></svg>Live</span>
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16"><circle class="cb" cx="8" cy="8" r="5"/><line class="xl" x1="2.8" y1="2.8" x2="13.2" y2="13.2"/><line class="xl" x1="2.8" y1="13.2" x2="13.2" y2="2.8"/></svg>Struck</span>
+      <span class="lg"><span class="lg-slip">+n</span>Slip</span>
+    </div>
+  </div>
+  <svg viewBox="0 0 1360 266" role="img" aria-label="Day line, 16 cycles, 06:00 to 21:00">
+    <line class="lr" x1="26" y1="72" x2="1021" y2="72" shape-rendering="crispEdges"/>
+    <line class="lf" x1="1021" y1="72" x2="1331" y2="72" shape-rendering="crispEdges"/>
+
+    <text class="fh" x="26" y="36" text-anchor="middle">06:00</text>
+    <circle class="cc" cx="26" cy="72" r="6"/>
+    <text class="fid" x="26" y="102" text-anchor="middle">r-2201</text>
+    <text class="fcl" x="26" y="122" text-anchor="middle">06:41</text>
+
+    <text class="fh" x="113" y="36" text-anchor="middle">07:00</text>
+    <circle class="cc" cx="113" cy="72" r="6"/>
+    <text class="fid" x="113" y="102" text-anchor="middle">r-2202</text>
+    <text class="fcl" x="113" y="122" text-anchor="middle">07:41</text>
+
+    <text class="fh" x="200" y="36" text-anchor="middle">08:00</text>
+    <circle class="cc" cx="200" cy="72" r="6"/>
+    <text class="fid" x="200" y="102" text-anchor="middle">r-2203</text>
+    <text class="fcl" x="200" y="122" text-anchor="middle">08:41</text>
+
+    <text class="fh" x="287" y="36" text-anchor="middle">09:00</text>
+    <circle class="cc" cx="287" cy="72" r="6"/>
+    <text class="fid" x="287" y="102" text-anchor="middle">r-2204</text>
+    <text class="fcl" x="287" y="122" text-anchor="middle">09:41</text>
+
+    <text class="fh" x="374" y="36" text-anchor="middle">10:00</text>
+    <circle class="cc" cx="374" cy="72" r="6"/>
+    <text class="fid" x="374" y="102" text-anchor="middle">r-2205</text>
+    <text class="fcl" x="374" y="122" text-anchor="middle">10:41</text>
+
+    <text class="fh" x="461" y="36" text-anchor="middle">11:00</text>
+    <circle class="cc" cx="461" cy="72" r="6"/>
+    <text class="fid" x="461" y="102" text-anchor="middle">r-2206</text>
+    <text class="fcl" x="461" y="122" text-anchor="middle">11:41</text>
+
+    <text class="fh" x="548" y="36" text-anchor="middle">12:00</text>
+    <circle class="cb" cx="548" cy="72" r="6.5"/>
+    <line class="xl" x1="541" y1="65" x2="555" y2="79"/>
+    <line class="xl" x1="541" y1="79" x2="555" y2="65"/>
+    <text class="fid" x="548" y="102" text-anchor="middle">r-2207</text>
+    <a href="#incidents"><text class="fst clay" x="548" y="122" text-anchor="middle">STRUCK</text></a>
+
+    <text class="fh" x="635" y="36" text-anchor="middle">13:00</text>
+    <circle class="cc" cx="635" cy="72" r="6"/>
+    <text class="fid" x="635" y="102" text-anchor="middle">r-2208</text>
+    <text class="fcl" x="635" y="122" text-anchor="middle">13:41</text>
+
+    <text class="fh" x="722" y="36" text-anchor="middle">14:00</text>
+    <a href="#incidents"><text class="fslip" x="722" y="56" text-anchor="middle">+21</text></a>
+    <circle class="cc" cx="722" cy="72" r="6"/>
+    <text class="fid" x="722" y="102" text-anchor="middle">r-2209</text>
+    <text class="fcl" x="722" y="122" text-anchor="middle">15:02</text>
+
+    <text class="fh" x="809" y="36" text-anchor="middle">15:00</text>
+    <circle class="cc" cx="809" cy="72" r="6"/>
+    <text class="fid" x="809" y="102" text-anchor="middle">r-2210</text>
+    <text class="fcl" x="809" y="122" text-anchor="middle">15:41</text>
+
+    <text class="fh" x="896" y="36" text-anchor="middle">16:00</text>
+    <circle class="cc" cx="896" cy="72" r="6"/>
+    <text class="fid" x="896" y="102" text-anchor="middle">r-2211</text>
+    <text class="fcl" x="896" y="122" text-anchor="middle">16:41</text>
+
+    <text class="fh" x="983" y="36" text-anchor="middle">17:00</text>
+    <circle class="cm" cx="983" cy="72" r="11"/>
+    <circle class="cr" cx="983" cy="72" r="12"/>
+    <circle class="cl" cx="983" cy="72" r="7"/>
+    <text class="fid" x="983" y="102" text-anchor="middle">r-2212</text>
+    <text class="fst sage" x="983" y="122" text-anchor="middle">LIVE</text>
+
+    <text class="fh" x="1070" y="36" text-anchor="middle">18:00</text>
+    <circle class="cb" cx="1070" cy="72" r="6"/>
+    <text class="fid" x="1070" y="102" text-anchor="middle">r-2213</text>
+    <text class="fbk" x="1070" y="122" text-anchor="middle">18:41</text>
+
+    <text class="fh" x="1157" y="36" text-anchor="middle">19:00</text>
+    <circle class="cb" cx="1157" cy="72" r="6"/>
+    <text class="fid" x="1157" y="102" text-anchor="middle">r-2214</text>
+    <text class="fbk" x="1157" y="122" text-anchor="middle">19:41</text>
+
+    <text class="fh" x="1244" y="36" text-anchor="middle">20:00</text>
+    <circle class="cb" cx="1244" cy="72" r="6"/>
+    <text class="fid" x="1244" y="102" text-anchor="middle">r-2215</text>
+    <text class="fbk" x="1244" y="122" text-anchor="middle">20:41</text>
+
+    <text class="fh" x="1331" y="36" text-anchor="middle">21:00</text>
+    <circle class="cb" cx="1331" cy="72" r="6"/>
+    <text class="fid" x="1331" y="102" text-anchor="middle">r-2216</text>
+    <text class="fbk" x="1331" y="122" text-anchor="middle">21:41</text>
+
+    <text class="fnow" x="1027" y="16" text-anchor="start">NOW 17:26:08</text>
+    <line class="ls" x1="1021" y1="22" x2="1021" y2="132" shape-rendering="crispEdges"/>
+
+    <line class="lf" x1="983" y1="130" x2="983" y2="152" shape-rendering="crispEdges"/>
+    <line class="lf" x1="120" y1="152" x2="1240" y2="152" shape-rendering="crispEdges"/>
+    <line class="lf" x1="120" y1="152" x2="120" y2="158" shape-rendering="crispEdges"/>
+    <line class="lf" x1="1240" y1="152" x2="1240" y2="158" shape-rendering="crispEdges"/>
+
+    <text x="120" y="178" text-anchor="start"><tspan class="fst mut">CYCLE 12</tspan><tspan class="fid"> · r-2212 · </tspan><tspan class="fst sage">LIVE</tspan></text>
+
+    <text class="fst mut" x="120" y="206" text-anchor="middle">OPEN</text>
+    <text class="fst mut" x="195" y="206" text-anchor="middle">READ</text>
+    <text class="fst mut" x="344" y="206" text-anchor="middle">DELIBERATE</text>
+    <text class="fst sage" x="531" y="206" text-anchor="middle">SIMULATE</text>
+    <text class="fst mut" x="755" y="206" text-anchor="middle">RECORD</text>
+    <text class="fst mut" x="885" y="206" text-anchor="middle">CLOSE</text>
+    <text class="fst mut" x="1240" y="206" text-anchor="middle">CYCLE 13</text>
+
+    <line class="lr" x1="120" y1="230" x2="605" y2="230" shape-rendering="crispEdges"/>
+    <line class="lf" x1="605" y1="230" x2="1240" y2="230" shape-rendering="crispEdges"/>
+    <line class="ls" x1="605" y1="218" x2="605" y2="242" shape-rendering="crispEdges"/>
+
+    <circle class="cc" cx="120" cy="230" r="6"/>
+    <circle class="cc" cx="195" cy="230" r="6"/>
+    <circle class="cc" cx="344" cy="230" r="6"/>
+    <circle class="cm" cx="531" cy="230" r="10"/>
+    <circle class="cr" cx="531" cy="230" r="11"/>
+    <circle class="cl" cx="531" cy="230" r="6.5"/>
+    <circle class="cb" cx="755" cy="230" r="6"/>
+    <circle class="cb" cx="885" cy="230" r="6"/>
+    <circle class="cb" cx="1240" cy="230" r="6"/>
+
+    <text class="fcl" x="120" y="258" text-anchor="middle">17:00</text>
+    <text class="fcl" x="195" y="258" text-anchor="middle">17:04</text>
+    <text class="fcl" x="344" y="258" text-anchor="middle">17:12</text>
+    <text class="fcl" x="531" y="258" text-anchor="middle">17:22</text>
+    <text class="fbk" x="755" y="258" text-anchor="middle">17:34</text>
+    <text class="fbk" x="885" y="258" text-anchor="middle">17:41</text>
+    <text class="fnext" x="1240" y="258" text-anchor="middle">18:00:00</text>
+  </svg>
+</section>
+
+<section class="band" id="ledger">
+  <div class="bk"><span class="k">Ledger</span></div>
+  <div class="bb">
+    <div class="facts c3 sum">
+      <div class="fact"><span class="k">Spent</span><span class="v money">$107.13</span></div>
+      <div class="fact"><span class="k">Cap</span><span class="v money">$500.00</span></div>
+      <div class="fact"><span class="k">≈ Close</span><span class="v money proj">≈$155.90</span></div>
+    </div>
+    <div class="ledger-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Service</th>
+            <th>Job</th>
+            <th class="num pad">Spent</th>
+            <th class="num pad">Allot</th>
+            <th class="num">≈ Close</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="stg">Open</span><span class="off">+0</span></td>
+            <td class="svc">Scout</td>
+            <td class="job">stocks the docket</td>
+            <td class="num pad"><span class="money">$8.62</span></td>
+            <td class="num pad"><span class="money">$45.00</span></td>
+            <td class="num"><span class="money proj">≈$12.40</span></td>
+          </tr>
+          <tr>
+            <td><span class="stg">Read</span><span class="off">+4</span></td>
+            <td class="svc">Reader</td>
+            <td class="job">reads the stack</td>
+            <td class="num pad"><span class="money">$19.84</span></td>
+            <td class="num pad"><span class="money">$60.00</span></td>
+            <td class="num"><span class="money proj">≈$28.90</span></td>
+          </tr>
+          <tr>
+            <td><span class="stg">Deliberate</span><span class="off">+12</span></td>
+            <td class="svc">Council</td>
+            <td class="job">votes the verdict</td>
+            <td class="num pad"><span class="money">$36.90</span></td>
+            <td class="num pad"><span class="money">$130.00</span></td>
+            <td class="num"><span class="money proj">≈$53.70</span></td>
+          </tr>
+          <tr>
+            <td><span class="stg">Simulate</span><span class="off">+22</span></td>
+            <td class="svc">Simulator</td>
+            <td class="job">runs the trial</td>
+            <td class="num pad"><span class="money">$31.55</span></td>
+            <td class="num pad"><span class="money">$175.00</span></td>
+            <td class="num"><span class="money proj">≈$46.00</span></td>
+          </tr>
+          <tr>
+            <td><span class="stg">Record</span><span class="off">+34</span></td>
+            <td class="svc">Archivist</td>
+            <td class="job">writes lineage</td>
+            <td class="num pad"><span class="money">$5.71</span></td>
+            <td class="num pad"><span class="money">$40.00</span></td>
+            <td class="num"><span class="money proj">≈$8.30</span></td>
+          </tr>
+          <tr>
+            <td><span class="stg">Close</span><span class="off">+41</span></td>
+            <td class="svc">Courier</td>
+            <td class="job">posts and closes</td>
+            <td class="num pad"><span class="money">$4.51</span></td>
+            <td class="num pad"><span class="money">$50.00</span></td>
+            <td class="num"><span class="money proj">≈$6.60</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="volumes">
+  <div class="bk"><span class="k">Volumes</span><span class="k2">to 17:26</span></div>
+  <div class="bb">
+    <div class="facts c6 vols">
+      <div class="fact"><span class="k">Sources scouted</span><span class="v">132</span></div>
+      <div class="fact"><span class="k">Papers read</span><span class="v">64</span></div>
+      <div class="fact"><span class="k">Claims kept</span><span class="v">409</span></div>
+      <div class="fact"><span class="k">Trials run</span><span class="v">11</span></div>
+      <div class="fact"><span class="k">Verdicts recorded</span><span class="v">10</span></div>
+      <div class="fact"><span class="k">Digests posted</span><span class="v">10</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="scheduler">
+  <div class="bk"><span class="k">Scheduler</span></div>
+  <div class="bb">
+    <div class="facts c5">
+      <div class="fact">
+        <span class="k">Cadence</span>
+        <span class="v">one open per hour</span>
+        <span class="v2 mono">06:00–21:00</span>
+      </div>
+      <div class="fact">
+        <span class="k">Late rule</span>
+        <span class="v">struck past <span class="mono">+25</span></span>
+      </div>
+      <div class="fact">
+        <span class="k">Worst today</span>
+        <span class="v"><a class="mono clay drill" href="#incidents">+21</a></span>
+        <span class="v2 mono">r-2209</span>
+      </div>
+      <div class="fact">
+        <span class="k">Next open</span>
+        <span class="v mono">18:00:00</span>
+        <span class="v2">cycle 13 · <a class="mono drill" href="#dayline">r-2213</a></span>
+      </div>
+      <div class="fact">
+        <span class="k">Clock</span>
+        <span class="v">farm local</span>
+        <span class="v2 mono">UTC−05</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="data">
+  <div class="bk"><span class="k">Data</span></div>
+  <div class="bb">
+    <div class="facts c5">
+      <div class="fact">
+        <span class="k">Snapshot</span>
+        <span class="v"><span class="mono">17:15:09</span> · 412 MB</span>
+        <span class="v2 st sage">Verified</span>
+      </div>
+      <div class="fact">
+        <span class="k">Archive</span>
+        <span class="v">1,283 runs · 9.6 GB</span>
+        <span class="v2">to <span class="mono">16:43</span></span>
+      </div>
+      <div class="fact">
+        <span class="k">Backfill</span>
+        <span class="v">0 owed</span>
+      </div>
+      <div class="fact">
+        <span class="k">Last repair</span>
+        <span class="v">Aug 19</span>
+      </div>
+      <div class="fact">
+        <span class="k">Next snap</span>
+        <span class="v mono">18:15:00</span>
+        <span class="v2">hourly at <span class="mono">:15</span></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="incidents">
+  <div class="bk"><span class="k">Incidents</span></div>
+  <div class="bb">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>What</th>
+          <th>Action</th>
+          <th class="num">Min lost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="time">12:01</td>
+          <td class="what">feed empty · <a class="drill" href="#dayline">cycle 07 · <span class="mono">r-2207</span></a></td>
+          <td class="act"><span class="st clay">Struck</span> · kept on book</td>
+          <td class="num lostv">0.0</td>
+        </tr>
+        <tr>
+          <td class="time">14:22</td>
+          <td class="what">simulator queue stall · <a class="drill" href="#dayline">cycle 09 · <span class="mono">r-2209</span></a></td>
+          <td class="act">requeued <span class="mono">14:43</span> · closed <span class="mono">15:02</span></td>
+          <td class="num lostv clay">21.0</td>
+        </tr>
+        <tr>
+          <td class="time">17:15</td>
+          <td class="what">snapshot checksum fail · write 1</td>
+          <td class="act">second write · <span class="st sage">Verified</span> <span class="mono">17:15:09</span></td>
+          <td class="num lostv">0.2</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td></td>
+          <td></td>
+          <td style="text-align:right"><span class="k">Lost today</span></td>
+          <td class="num" style="border-top:1px solid var(--hair)"><span class="lostv">21.2</span> <span class="sep">/</span> <span class="lostv">960</span> <span class="job">booked</span></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</section>
+
+<section class="band" id="control">
+  <div class="bk"><span class="k">Control</span></div>
+  <div class="bb">
+    <div class="control-body">
+      <button type="button" class="suspend">Suspend generation</button>
+      <p class="cq">Cycle 12 runs to <span class="mono">17:41</span> <span class="sep">·</span> 13–16 do not open <span class="sep">·</span> resume reopens next booked hour.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">Every claim sourced · every cost computed · every verdict recorded</footer>
+
+</div>
+</body>
+</html>
