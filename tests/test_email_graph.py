@@ -36,7 +36,7 @@ def row(remote_id="one", **overrides):
     result = {
         "id": remote_id, "parentFolderId": "inbox-id", "subject": "SutiProcure sandbox",
         "receivedDateTime": "2026-10-22T10:00:00Z", "isRead": False,
-        "from": {"emailAddress": {"name": "Support", "address": "droe@sutisoft.com"}},
+        "from": {"emailAddress": {"name": "Support", "address": "support@example.test"}},
         "body": {"contentType": "text", "content": "Your code is 731902. Open https://example.test/login?token=fixture"},
     }
     result.update(overrides)
@@ -63,7 +63,7 @@ class FixtureGraph(GraphMailbox):
                 raise result
             return result
         if raw:
-            return "From: droe@sutisoft.com\r\nSubject: SutiProcure sandbox\r\n\r\nYour code is 731902.\r\n"
+            return "From: support@example.test\r\nSubject: SutiProcure sandbox\r\n\r\nYour code is 731902.\r\n"
         if url.endswith("/mailFolders/inbox"):
             return {"id": "inbox-id", "displayName": "Inbox"}
         if params and "$count" in params:
@@ -236,9 +236,9 @@ class CoverageTests(unittest.TestCase):
                 if command == "link":
                     self.assertEqual(payload["link"], "https://example.test/login?token=fixture")
                 if command == "get":
-                    self.assertIn("From: droe", payload["message"]["raw_source"])
+                    self.assertIn("From: support", payload["message"]["raw_source"])
                 if command == "export":
-                    self.assertIn("From: droe", payload["content"])
+                    self.assertIn("From: support", payload["content"])
 
     def test_get_does_not_cross_account_scope(self):
         source = self.source(FixtureGraph())

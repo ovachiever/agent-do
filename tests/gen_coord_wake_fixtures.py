@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -38,7 +39,9 @@ def main() -> int:
     written: list[str] = []
 
     def write(name: str, payload: dict) -> None:
-        (OUT / f"{name}.json").write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n")
+        # Committed fixtures never carry the generating machine's name.
+        text = json.dumps(payload, indent=2, sort_keys=False).replace(socket.gethostname(), "fixture-host.local")
+        (OUT / f"{name}.json").write_text(text + "\n")
         written.append(name)
 
     with tempfile.TemporaryDirectory() as tmp:

@@ -7,7 +7,7 @@ base_commit: 4010d8a1842224a890298514ba5f84626dc6e580
 scope: 'Harness: email searches live mailboxes — the local Mail index silently misses everything after May for versova.com'
 inputs:
 - 'travel-bank-automation session 2026-10-22: another agent missed a 2026-10-21 SutiProcure email that Graph found'
-binding: sha256:3104f44accb17841cac86259fa36eb864058beb8a517f2bf4a853656c4bbda8b
+binding: sha256:3055ff3e99a7969dc6647656a43deb574287665d73c782795f063f38c2fa89f8
 ---
 
 # Handoff: Harness: email searches live mailboxes — the local Mail index silently misses everything after May for versova.com
@@ -41,11 +41,9 @@ The cause is measured, not guessed:
 
 - `agent-do email` reads Apple Mail's Envelope Index
   (`agent-do email status` -> `"platform": "macOS Mail Envelope Index"`).
-- Mail.app's copy of efritsch@versova.com (EWS account, UUID prefix
-  `42A8C1F6`) stopped syncing after May 2026. That was measured 2026-10-16
+- Mail.app's copy of the work account (the EWS account) stopped syncing after May 2026. That was measured 2026-10-16
   from the Envelope Index: 25,153 messages indexed for May, then one message
-  total for June through October. The three IMAP accounts (rkfrtsch@gmail.com,
-  erik.james.fritsch@gmail.com, theheavenlyalchemist@starrylabs.tech) kept
+  total for June through October. The three IMAP accounts (two Gmail, one custom domain) kept
   syncing.
 - Nothing reports the gap. A search of the stale account returns zero rows,
   and the agent reads that as "the email does not exist".
@@ -74,7 +72,7 @@ read them out of another project's .env, and never print them.
 ## The work
 
 1. **Live search for the work account.** `agent-do email search / latest /
-   get / export / wait / code / link` reach efritsch@versova.com live through
+   get / export / wait / code / link` reach the work account live through
    Microsoft Graph. This is a new provider beside the Envelope Index, not a
    replacement for it. Results carry the same JSON shape plus a `source`
    field (`graph` | `envelope_index` | `imap`).
@@ -120,7 +118,7 @@ Coverage query (from the 2026-10-16 measurement):
 ## Verification
 
 1. `agent-do email search "sutiprocure" --account <versova> --json` returns
-   the 2026-10-21 and 2026-10-22 messages from droe@sutisoft.com with
+   the 2026-10-21 and 2026-10-22 messages from the vendor sender with
    `"source": "graph"`. Before the change it returns none.
 2. With the Graph creds removed, the same search prints the stale-account
    warning instead of a clean empty result.
@@ -165,15 +163,15 @@ Executed verification (2026-10-22):
 
 Live local acceptance at close (read-only, no app launch):
 
-- `agent-do email status --json`: PASS, 5 accounts reported (one EWS, three IMAP, one local). The EWS account `ews://42A8C1F6-7282-43B4-9294-37BDEAC24F4A` has newest indexed receipt `2026-05-14T20:47:34+00:00`; its measured receiving-day cadence is 86,400 seconds from 378 samples. It is reported stale. Graph readiness is false, not inferred from configuration.
-- `agent-do email search sutiprocure --account ews://42A8C1F6-7282-43B4-9294-37BDEAC24F4A --json`: PASS for the missing-provider guard, with `coverage_complete: false`, an explicit stale account, and `served_live: false`. Existing historical hits were not printed or persisted in the receipt.
+- `agent-do email status --json`: PASS, 5 accounts reported (one EWS, three IMAP, one local). The EWS account `ews://<work-account-id>` has newest indexed receipt `2026-05-14T20:47:34+00:00`; its measured receiving-day cadence is 86,400 seconds from 378 samples. It is reported stale. Graph readiness is false, not inferred from configuration.
+- `agent-do email search sutiprocure --account ews://<work-account-id> --json`: PASS for the missing-provider guard, with `coverage_complete: false`, an explicit stale account, and `served_live: false`. Existing historical hits were not printed or persisted in the receipt.
 - The same search without `--json`: PASS for the stderr stale-account warning. No message body or secret was included in these receipts.
 
 Needed next, before completion:
 
 1. Four keys are absent from agent-do creds: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `GRAPH_TARGET_MAILBOX`. Erik must store them with `agent-do creds store <KEY> --stdin`. No other project's .env or token cache was read.
 2. The runtime and repository venv do not contain O365. Approval to add `O365>=2.1,<3` to requirements.txt is pending under AGENTS.md's new-dependency rule. The manifest has not been changed, and no package or app was installed. Runtime provisioning also remains subject to the dispatch's no-installs boundary.
-3. Once those prerequisites are authorized and ready, coordinate the live CLI pass through Coord need `mn-58c9ea-live-acceptance`: the SutiProcure search must return the 2026-10-21 and 2026-10-22 messages from droe@sutisoft.com with `source: graph`; record the real token's roles. Those two checks have not run. Application roles alone do not establish Exchange mailbox-access-policy restrictions.
+3. Once those prerequisites are authorized and ready, coordinate the live CLI pass through Coord need `mn-58c9ea-live-acceptance`: the SutiProcure search must return the 2026-10-21 and 2026-10-22 messages from the vendor sender with `source: graph`; record the real token's roles. Those two checks have not run. Application roles alone do not establish Exchange mailbox-access-policy restrictions.
 4. There is no visual UI acceptance for this CLI change. No installed app launches, installs, screenshots, live session spawning, pushes, or PR creation occurred.
 
 Lessons logged: 3 (new), les-fb049b, les-b9a76b, les-1af24f. Decisions logged: 0 (new). ZPC harvest ran after the lessons.
