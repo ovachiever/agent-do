@@ -71,7 +71,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [incident](#incident) | Read-only, local incident evidence packets from configured GitHub, Kubernetes, and Render sources | mixed | 4 |
 | [ios](#ios) | Control iOS Simulator | mixed | 10 |
 | [jupyter](#jupyter) | Control Jupyter notebooks | mixed | 4 |
-| [k8s](#k8s) | Control Kubernetes clusters | write | 5 |
+| [k8s](#k8s) | Control Kubernetes clusters | write | 7 |
 | [lab](#lab) | JupyterLab management | mixed | 4 |
 | [latex](#latex) | LaTeX document compilation | write | 4 |
 | [learn](#learn) | Learning and pattern improvement | write | 4 |
@@ -2526,11 +2526,14 @@ Concurrency: `write`
 - view logs
 - port forwarding
 - apply manifests
+- collect bounded, redacted deployment incident evidence with an explicit context
 
 **Commands**
 
 - `pods`: List pods
-- `logs`: View pod logs
+- `deployment`: Read deployment revision, images, ReplicaSets, pods, readiness, and restarts as JSON
+- `events`: Read deployment, ReplicaSet, and pod events as JSON
+- `logs`: View pod logs; with an explicit context, emit a bounded and redacted JSON excerpt
 - `exec`: Execute in pod
 - `apply`: Apply manifest
 - `port-forward`: Forward port
@@ -2542,11 +2545,13 @@ Concurrency: `write`
 agent-do k8s pods
 # view logs for api pod
 agent-do k8s logs api
+# gather safe evidence for a failing AKS deployment
+agent-do k8s deployment payments-api --context production-aks --namespace payments --json
 ```
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `logs`, `pods`
+- Read-only (snapshot/verify; safe to parallelize): `deployment`, `events`, `logs`, `pods`
 - Write (connect/interact/save): `apply`, `port-forward`
 - passthrough (arbitrary-payload escape hatch; beat decided by the argument): `exec`
 - long_running (daemon/stream/session; may never return): `port-forward`

@@ -1578,9 +1578,12 @@ tools:
     - view logs
     - port forwarding
     - apply manifests
+    - collect bounded, redacted deployment incident evidence with an explicit context
     commands:
       pods: List pods
-      logs: View pod logs
+      deployment: Read deployment revision, images, ReplicaSets, pods, readiness, and restarts as JSON
+      events: Read deployment, ReplicaSet, and pod events as JSON
+      logs: View pod logs; with an explicit context, emit a bounded and redacted JSON excerpt
       exec: Execute in pod
       apply: Apply manifest
       port-forward: Forward port
@@ -1589,6 +1592,8 @@ tools:
       command: agent-k8s pods
     - intent: view logs for api pod
       command: agent-k8s logs api
+    - intent: gather safe evidence for a failing AKS deployment
+      command: agent-k8s deployment payments-api --context production-aks --namespace payments --json
     routing:
       discover_keywords:
       - kubernetes
@@ -1605,6 +1610,7 @@ tools:
       recommended_entrypoints:
       - agent-do k8s pods
       - agent-do k8s logs <pod>
+      - agent-do k8s deployment <name> --context <context> --namespace <namespace> --json
       - agent-do k8s apply <file>
       default_command: pods
       raw_cli_equivalents:
@@ -1638,6 +1644,8 @@ tools:
       snapshot:
       - pods
       - logs
+      - deployment
+      - events
       interact:
       - apply
       attributes:
