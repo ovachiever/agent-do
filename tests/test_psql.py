@@ -1466,6 +1466,174 @@ mask_connection_string "postgresql://myuser:supersecret@db.render.com:5432/mydb"
 
     check("connect to bad host fails cleanly", test_connect_bad_host)
 
+    # A failed connect must not leave the previous session active: later
+    # commands would silently run against the old database.
+    def seed_previous_session(tmpdir: str) -> Path:
+        session = Path(tmpdir) / ".agent-do" / "psql" / "session.json"
+        session.parent.mkdir(parents=True, exist_ok=True)
+        session.write_text(json.dumps({
+            "host": "previous.invalid", "port": "5432",
+            "database": "previous_db", "user": "u", "sslmode": "prefer",
+        }))
+        return session
+
+    def require_disconnected(env: dict) -> None:
+        r = run_tool("status", env_override=env)
+        data = json.loads(r.stdout)
+        require(data.get("connected") is False,
+                f"previous session still active after failed connect: {data}")
+
+    def test_failed_connect_bad_host_ends_previous_session():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {"HOME": tmpdir}
+            session = seed_previous_session(tmpdir)
+            r = run_tool("connect",
+                         "postgresql://u:p@nonexistent.invalid:5432/db",
+                         env_override=env)
+            require(r.returncode != 0, "connect to nonexistent host should fail")
+            require(json.loads(r.stdout)["ok"] is False, f"should report failure: {r.stdout}")
+            require(not session.exists(), "session file survived a failed connect")
+            require_disconnected(env)
+
+    check("failed connect (bad host) ends the previous session",
+          test_failed_connect_bad_host_ends_previous_session)
+
+    def test_failed_connect_unknown_profile_ends_previous_session():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {"HOME": tmpdir}
+            session = seed_previous_session(tmpdir)
+            r = run_tool("connect", "--profile", "no-such-profile", env_override=env)
+            require(r.returncode != 0, "connect with an unknown profile should fail")
+            require(json.loads(r.stdout)["ok"] is False, f"should report failure: {r.stdout}")
+            require(not session.exists(), "session file survived a failed profile connect")
+            require_disconnected(env)
+
+    check("failed connect (unknown profile) ends the previous session",
+          test_failed_connect_unknown_profile_ends_previous_session)
+
+    def test_failed_connect_no_args_ends_previous_session():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {"HOME": tmpdir}
+            for k in ["PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGPORT"]:
+                env.pop(k, None)
+            session = seed_previous_session(tmpdir)
+            r = run_tool("connect", env_override={**env, "PGHOST": "", "PGDATABASE": ""})
+            require(r.returncode != 0, "connect with no target should fail")
+            require(json.loads(r.stdout)["ok"] is False, f"should report failure: {r.stdout}")
+            require(not session.exists(), "session file survived a connect with no target")
+            require_disconnected(env)
+
+    check("failed connect (no target) ends the previous session",
+          test_failed_connect_no_args_ends_previous_session)
+
+    def test_failed_connect_saved_profile_unreachable_ends_previous_session():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {"HOME": tmpdir}
+            # Passwordless profile: exercises the profile path without Keychain.
+            r = run_tool("profile", "add", "unreachable",
+                         "postgresql://u@nonexistent.invalid:5432/db",
+                         env_override=env)
+            require(r.returncode == 0 and json.loads(r.stdout)["ok"] is True,
+                    f"profile add failed: {r.stdout} {r.stderr}")
+            session = seed_previous_session(tmpdir)
+            r = run_tool("connect", "--profile", "unreachable", env_override=env)
+            require(r.returncode != 0, "connect to an unreachable profile should fail")
+            require(json.loads(r.stdout)["ok"] is False, f"should report failure: {r.stdout}")
+            require(not session.exists(), "session file survived a failed saved-profile connect")
+            require_disconnected(env)
+
+    check("failed connect (saved profile, unreachable) ends the previous session",
+          test_failed_connect_saved_profile_unreachable_ends_previous_session)
+
+    def test_connect_help_keeps_session():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {"HOME": tmpdir}
+            session = seed_previous_session(tmpdir)
+            r = run_tool("connect", "--help", env_override=env)
+            require(r.returncode == 0, f"connect --help failed: {r.stderr}")
+            require(session.exists(), "connect --help must not end the session")
+
+    check("connect --help leaves the session alone", test_connect_help_keeps_session)
+
+    # ---- Never wait on a password prompt; bounded connect time ----
+    RECORDER = r"""#!/bin/sh
+{ printf '%s' "$(basename "$0")"; for a in "$@"; do printf ' [%s]' "$a"; done
+  printf ' PGCONNECT_TIMEOUT=%s\n' "${PGCONNECT_TIMEOUT-unset}"; } >> "$CALL_LOG"
+case "$(basename "$0")" in
+  psql)
+    case " $* " in
+      *" -f "*) echo "DO" ;;
+      *"SELECT version()"*) echo "PostgreSQL 16.0 (fake)" ;;
+      *) printf '?column?\n1\n' ;;
+    esac ;;
+esac
+exit 0
+"""
+
+    def recorder_env(tmpdir: str, with_psql: bool = True) -> tuple[dict, Path]:
+        bin_dir = Path(tmpdir) / "recbin"
+        bin_dir.mkdir()
+        names = ("psql", "pg_dump", "pg_restore") if with_psql else ()
+        for name in names:
+            exe = bin_dir / name
+            exe.write_text(RECORDER)
+            exe.chmod(0o755)
+        log = Path(tmpdir) / "calls.log"
+        log.touch()
+        path = f"{bin_dir}:{os.environ['PATH']}" if with_psql else f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin"
+        env = {"HOME": tmpdir, "PATH": path, "PGPASSWORD": "x", "CALL_LOG": str(log)}
+        env.pop("PGCONNECT_TIMEOUT", None)
+        return env, log
+
+    def seed_fake_session(tmpdir: str) -> None:
+        session = Path(tmpdir) / ".agent-do" / "psql" / "session.json"
+        session.parent.mkdir(parents=True, exist_ok=True)
+        session.write_text(json.dumps({"host": "fake.invalid", "port": "5432", "database": "fakedb",
+                                       "user": "u", "sslmode": "prefer"}))
+
+    def test_every_client_call_never_prompts():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env, log = recorder_env(tmpdir)
+            run_tool("connect", "postgresql://u:p@fake.invalid:5432/db", env_override={**env, "PGCONNECT_TIMEOUT": ""})
+            seed_fake_session(tmpdir)
+            sql = Path(tmpdir) / "x.sql"
+            sql.write_text("select 1;\n")
+            run_tool("query", "select 1", env_override=env)
+            run_tool("exec", str(sql), env_override=env)
+            run_tool("dump", str(Path(tmpdir) / "out.sql"), env_override=env)
+            dumpfile = Path(tmpdir) / "in.dump"
+            dumpfile.write_bytes(b"PGDMP")
+            run_tool("restore", str(dumpfile), env_override=env)
+            calls = [line for line in log.read_text().splitlines() if line.strip()]
+            for tool in ("psql", "pg_dump", "pg_restore"):
+                require(any(c.startswith(tool + " ") for c in calls), f"{tool} never called: {calls}")
+            missing = [c for c in calls if " [-w] " not in c + " "]
+            require(not missing, f"client call without -w (could wait on a password prompt): {missing}")
+
+    check("every psql/pg_dump/pg_restore call carries -w (never prompt)", test_every_client_call_never_prompts)
+
+    def test_connect_timeout_default_and_override():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env, log = recorder_env(tmpdir)
+            seed_fake_session(tmpdir)
+            run_tool("query", "select 1", env_override=env)
+            require("PGCONNECT_TIMEOUT=10" in log.read_text(), f"default connect timeout not applied: {log.read_text()}")
+            log.write_text("")
+            run_tool("query", "select 1", env_override={**env, "PGCONNECT_TIMEOUT": "3"})
+            require("PGCONNECT_TIMEOUT=3" in log.read_text(), f"caller's connect timeout overridden: {log.read_text()}")
+
+    check("connect timeout defaults to 10s; a caller's value wins", test_connect_timeout_default_and_override)
+
+    def test_missing_psql_still_reported():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env, _ = recorder_env(tmpdir, with_psql=False)
+            seed_fake_session(tmpdir)
+            r = run_tool("query", "select 1", env_override=env)
+            require(r.returncode == 2, f"missing psql should exit 2, got {r.returncode}: {r.stdout} {r.stderr}")
+            require("psql binary not found" in r.stdout, f"missing psql not reported: {r.stdout}")
+
+    check("missing psql binary is still reported (exit 2)", test_missing_psql_still_reported)
+
     # ---- Unknown Command ----
     def test_unknown_command():
         r = run_tool("bogus_command_xyz")

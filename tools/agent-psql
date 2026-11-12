@@ -16,6 +16,17 @@ PROFILES_FILE="${PSQL_CONFIG_DIR}/profiles.json"
 source "${SCRIPT_DIR}/../lib/json-output.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/../lib/snapshot.sh" 2>/dev/null || true
 
+# Never wait on an interactive password prompt: when no password reaches the
+# client (e.g. a session whose Keychain entry is gone), psql would otherwise
+# block on /dev/tty forever. -w makes it fail at once with a clear error.
+# Every client call in this file goes through these wrappers.
+psql() { command psql -w "$@"; }
+pg_dump() { command pg_dump -w "$@"; }
+pg_restore() { command pg_restore -w "$@"; }
+# Bound the time to connect (libpq waits indefinitely by default); a caller's
+# own PGCONNECT_TIMEOUT wins.
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
+
 show_help() {
     cat << 'EOF'
 agent-psql - PostgreSQL CLI wrapper for AI agents
@@ -26,6 +37,10 @@ Paste a Render or Supabase connection string and go.
 CONNECTION
   connect <conn_string>      Connect via connection string
   connect --profile <name>   Connect via saved profile
+                             (any connect attempt ends the current session first;
+                             a failed connect leaves you disconnected)
+                             Client calls never wait on a password prompt (-w) and
+                             time out connecting after PGCONNECT_TIMEOUT (default 10s)
   disconnect                 End session
   status                     Show connection status
 
@@ -110,7 +125,7 @@ EOF
 # --- Helpers ---
 
 ensure_psql() {
-    if ! command -v psql &>/dev/null; then
+    if ! type -P psql &>/dev/null; then
         echo '{"ok": false, "error": "psql binary not found. Install PostgreSQL client: brew install postgresql"}'
         exit 2
     fi
@@ -400,6 +415,13 @@ cmd_connect() {
             *) conn_string="$1"; shift ;;
         esac
     done
+
+    # Fail closed: a connect attempt ends the previous session before anything
+    # can fail. Otherwise a failed connect (unknown profile, missing credential,
+    # unreachable host, rejected password) leaves later commands silently
+    # running against the previously connected database. A successful connect
+    # writes a fresh session below.
+    rm -f "$SESSION_FILE"
 
     # From profile
     if [[ -n "$profile_name" ]]; then
@@ -1493,7 +1515,7 @@ cmd_dump() {
         return 1
     fi
 
-    if ! command -v pg_dump &>/dev/null; then
+    if ! type -P pg_dump &>/dev/null; then
         echo '{"ok": false, "error": "pg_dump binary not found", "exit_code": 2}'
         exit 2
     fi
@@ -1587,7 +1609,7 @@ cmd_restore() {
         return $?
     fi
 
-    if ! command -v pg_restore &>/dev/null; then
+    if ! type -P pg_restore &>/dev/null; then
         echo '{"ok": false, "error": "pg_restore binary not found", "exit_code": 2}'
         exit 2
     fi
