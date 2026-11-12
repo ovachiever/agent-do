@@ -1544,6 +1544,33 @@ tools:
         restore:
         - destructive
     concurrency: mixed
+  incident:
+    description: Read-only, local incident evidence packets from configured GitHub, Kubernetes, and Render sources
+    capabilities:
+    - initialize a project-local incident configuration
+    - validate configured evidence sources
+    - collect and atomically publish a bounded evidence packet
+    commands:
+      init: Initialize project-local incident configuration
+      validate: Validate incident configuration
+      trace: Collect a read-only evidence packet
+      show: Show a published evidence packet
+    contracts:
+      connect:
+      - init
+      snapshot:
+      - trace
+      - show
+      verify:
+      - validate
+      save:
+      - trace
+      attributes:
+        init:
+        - own_state
+        trace:
+        - composite
+    concurrency: mixed
   k8s:
     description: Control Kubernetes clusters
     capabilities:
@@ -1551,9 +1578,12 @@ tools:
     - view logs
     - port forwarding
     - apply manifests
+    - collect bounded, redacted deployment incident evidence with an explicit context
     commands:
       pods: List pods
-      logs: View pod logs
+      deployment: Read deployment revision, images, ReplicaSets, pods, readiness, and restarts as JSON
+      events: Read deployment, ReplicaSet, and pod events as JSON
+      logs: View pod logs; with an explicit context, emit a bounded and redacted JSON excerpt
       exec: Execute in pod
       apply: Apply manifest
       port-forward: Forward port
@@ -1562,6 +1592,8 @@ tools:
       command: agent-k8s pods
     - intent: view logs for api pod
       command: agent-k8s logs api
+    - intent: gather safe evidence for a failing AKS deployment
+      command: agent-k8s deployment payments-api --context production-aks --namespace payments --json
     routing:
       discover_keywords:
       - kubernetes
@@ -1578,6 +1610,7 @@ tools:
       recommended_entrypoints:
       - agent-do k8s pods
       - agent-do k8s logs <pod>
+      - agent-do k8s deployment <name> --context <context> --namespace <namespace> --json
       - agent-do k8s apply <file>
       default_command: pods
       raw_cli_equivalents:
@@ -1611,6 +1644,8 @@ tools:
       snapshot:
       - pods
       - logs
+      - deployment
+      - events
       interact:
       - apply
       attributes:
@@ -3235,24 +3270,31 @@ tools:
       - auth org
     concurrency: mixed
   ci:
-    description: Control CI/CD pipelines
+    description: Control CI/CD pipelines and inspect GitHub Actions deployment evidence
     capabilities:
     - trigger builds
     - view status
     - manage pipelines
+    - inspect a workflow run's commit, timing, jobs, and bounded log evidence
     commands:
       trigger: Trigger build
       status: View status
-      logs: View build logs
+      runs: List recent workflow runs for an explicit repository
+      details: Show normalized workflow-run and job facts for tracing
+      logs: View bounded, redacted build-log excerpts
       triage: Classify a failed run and draft a triage summary (dry-run)
     examples:
     - intent: trigger deploy pipeline
       command: agent-ci trigger deploy
     - intent: triage a failed CI run
       command: agent-ci triage 12345 --repo owner/repo
+    - intent: inspect the commit and jobs for a deployment workflow run
+      command: agent-ci details 48201933 --repo owner/repo --json
     contracts:
       snapshot:
       - status
+      - runs
+      - details
       - logs
       - triage
       interact:
@@ -3266,6 +3308,7 @@ tools:
     - create pull requests with committed provenance declarations and a local preview
     - list actionable pull requests across repos
     - inspect pull request details, diffs, checks, and unresolved review threads
+    - correlate a deployed commit with GitHub-declared pull requests and closing issues
     - classify changed files by review-risk tier (critical/elevated/standard)
     - audit PR review risks and generate fix-oriented engineering review replies
     - surface the built-in review doctrine on every review
@@ -3279,6 +3322,7 @@ tools:
       awaiting: Show open PRs likely awaiting your review by broad review heuristics
       prs: Search pull requests
       pr: Show PR details
+      commit: Correlate a commit with GitHub-declared pull requests and closing issues
       pr create: Create a PR with explicit title, body and base; --declare copies every branch commit's provenance, --dry-run previews locally without pushing
       issue create: Create an issue with --title and --body or --body-file, then read it back
       issue list: List all repository issues with exact totals; optional state, assignee, author, label filters and display limit
@@ -3327,6 +3371,8 @@ tools:
       command: agent-gh audit ovachiever/agent-do#3 --reply --probe-deploys
     - intent: review pull request 3 in agent-do
       command: agent-gh review ovachiever/agent-do#3 --summary
+    - intent: find the pull request and linked issues for a deployed commit
+      command: agent-gh commit abc123def --repo owner/repo --json
     - intent: show unresolved GitHub review comments
       command: agent-gh threads ovachiever/agent-do#3
     - intent: approve this GitHub PR
@@ -3387,6 +3433,7 @@ tools:
       - awaiting
       - prs
       - pr
+      - commit
       - issue list
       - diff
       - threads
@@ -5565,6 +5612,7 @@ tools:
     - notification settings and per-service overrides
     - audit log retrieval and maintenance windows
     - structured logs and metrics with filters
+    - bounded, redacted deployment evidence for incident tracing
     - cross-account snapshot
     commands:
       owners: List workspaces (for --owner resolution)
@@ -5572,6 +5620,7 @@ tools:
       audit: Audit log entries
       services: List services
       show: Service details
+      trace: Read-only service, deploy, event, and bounded-log incident evidence
       create: 'Create service: create <web|worker|static|private|cron> <name> [opts]'
       update: Update service settings
       delete: Delete a service (--yes required)
@@ -5644,6 +5693,8 @@ tools:
       command: agent-render show my-api
     - intent: view render service logs
       command: agent-render logs my-api
+    - intent: collect render evidence for an incident
+      command: agent-render trace my-api --since 30m --json
     - intent: set env var on render
       command: agent-render env-set my-api DATABASE_URL postgres://...
     - intent: list render databases
@@ -5667,6 +5718,7 @@ tools:
       recommended_entrypoints:
       - agent-do render services
       - agent-do render logs <service>
+      - agent-do render trace <service> --since 30m --json
       - agent-do render deploy <service>
       default_command: services
       raw_cli_equivalents:
@@ -5692,6 +5744,7 @@ tools:
       - whoami
       - services
       - show
+      - trace
       - events
       - instances
       - autoscaling show

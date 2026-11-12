@@ -56,12 +56,17 @@ agent-ci - CI/CD pipeline management
 Commands:
   status [workflow]          Show workflow status
   runs [workflow]            List recent runs
+  details <run-id>           Show one workflow run and its jobs as trace facts
   trigger <workflow>         Trigger workflow
-  logs <run-id>              View run logs
+  logs <run-id>              View a bounded, redacted run-log excerpt
   cancel <run-id>            Cancel running workflow
   artifacts <run-id>         Download artifacts
   secrets                    List secrets (names only)
   triage <run-id> [--repo R] Classify a failed run and draft a triage summary (dry-run)
+
+Global options (any position):
+  --repo owner/repo          Target another repository instead of the origin remote
+  --json                     Structured output
 
 Supported platforms:
   - GitHub Actions (auto-detected via gh CLI)
@@ -70,10 +75,87 @@ Examples:
   agent-ci status
   agent-ci runs deploy
   agent-ci trigger deploy.yml
+  agent-ci details 12345 --repo owner/repo --json
+  agent-ci logs 12345 --failed --tail 200 --max-bytes 65536 --json
   agent-ci logs 12345
   agent-ci artifacts 12345
   agent-ci triage 12345 --repo owner/repo
+  agent-ci runs --repo owner/other-repo --json
 EOF
+}
+
+# GitHub CLI fields deliberately cover evidence an incident tracker needs to
+# cite: exact deployed source, workflow identity, lifecycle timestamps, and
+# per-job/per-step outcomes. Keeping the list in one place makes the CLI
+# contract explicit and testable.
+DETAIL_FIELDS="databaseId,workflowName,workflowDatabaseId,displayTitle,status,conclusion,headBranch,headSha,event,createdAt,startedAt,updatedAt,url,jobs"
+
+cmd_details() {
+    check_gh
+    local run_id="${1:-}"
+    local repo
+    repo=$(get_repo)
+
+    if [[ -z "$run_id" ]]; then
+        if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+            emit_json_error "Run ID required (usage: agent-ci details <run-id>)" 2
+        else
+            echo "Error: Run ID required"
+            echo "Usage: agent-ci details <run-id>"
+        fi
+        return 2
+    fi
+    if [[ -z "$repo" ]]; then
+        no_repo_error
+        return 1
+    fi
+
+    local out
+    out=$(gh run view "$run_id" --repo "$repo" --json "$DETAIL_FIELDS" 2>&1) || {
+        emit_json_error "$out"
+        return 1
+    }
+    # GitHub deployment records are optional evidence. A caller must be able to
+    # distinguish an empty list from an unavailable API scope, so fetch them
+    # separately and represent failures as degraded rather than failing the
+    # otherwise useful workflow-run receipt.
+    local head_sha deployment_file deployment_error=""
+    head_sha=$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("headSha", ""))') || {
+        emit_json_error "GitHub run details were not valid JSON"
+        return 1
+    }
+    deployment_file=$(mktemp) || {
+        emit_json_error "Unable to create temporary storage for deployment evidence"
+        return 1
+    }
+    if ! gh api --paginate --slurp "repos/$repo/deployments?sha=$head_sha&per_page=100" >"$deployment_file" 2>/dev/null; then
+        rm -f "$deployment_file"
+        deployment_file=""
+        deployment_error="GitHub deployment records unavailable for this repository or credential"
+    fi
+    if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+        local details_args=(normalize-run "$repo")
+        [[ -n "$deployment_file" ]] && details_args+=(--deployments-file "$deployment_file")
+        [[ -n "$deployment_error" ]] && details_args+=(--deployment-error "$deployment_error")
+        printf '%s' "$out" | python3 "$REPO_ROOT/lib/ci_trace.py" "${details_args[@]}"
+        local rc=$?
+        rm -f "$deployment_file"
+        return $rc
+    fi
+    rm -f "$deployment_file"
+    printf '%s' "$out" | python3 -c '
+import json, sys
+run = json.load(sys.stdin)
+print("Run:       {}".format(run.get("databaseId", "unknown")))
+print("Workflow:  {}".format(run.get("workflowName", "unknown")))
+print("Commit:    {}".format(run.get("headSha", "unknown")))
+print("Result:    {} ({})".format(run.get("conclusion") or "pending", run.get("status", "unknown")))
+print("Started:   {}".format(run.get("startedAt") or "not started"))
+print("Updated:   {}".format(run.get("updatedAt") or "not updated"))
+print("URL:       {}".format(run.get("url", "unknown")))
+for job in run.get("jobs") or []:
+    print("- {}: {}".format(job.get("name", "unknown"), job.get("conclusion") or job.get("status", "unknown")))
+'
 }
 
 # Check for gh CLI. In JSON mode, emit a structured error instead of plain text.
@@ -92,6 +174,10 @@ check_gh() {
 # Get repo from git remote. Tolerant of missing remote under set -e/pipefail:
 # a non-GitHub or absent origin yields empty output, never a nonzero exit.
 get_repo() {
+    if [[ -n "${CI_REPO:-}" ]]; then
+        printf '%s\n' "$CI_REPO"
+        return 0
+    fi
     { git remote get-url origin 2>/dev/null || true; } \
         | sed -E 's/.*github.com[:/]([^/]+\/[^.]+)(\.git)?/\1/'
 }
@@ -215,7 +301,25 @@ cmd_trigger() {
 
 cmd_logs() {
     check_gh
-    local run_id="${1:-}"
+    local run_id=""
+    local failed_only=0
+    local tail=200
+    local max_bytes=65536
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --failed|--failed-only) failed_only=1; shift ;;
+            --tail)
+                [[ $# -ge 2 ]] || { emit_json_error "--tail requires a value" 2; return 2; }
+                tail="$2"; shift 2 ;;
+            --max-bytes)
+                [[ $# -ge 2 ]] || { emit_json_error "--max-bytes requires a value" 2; return 2; }
+                max_bytes="$2"; shift 2 ;;
+            -*) emit_json_error "Unknown logs option: $1" 2; return 2 ;;
+            *)
+                [[ -z "$run_id" ]] || { emit_json_error "Only one run ID may be supplied" 2; return 2; }
+                run_id="$1"; shift ;;
+        esac
+    done
     local repo
     repo=$(get_repo)
 
@@ -235,20 +339,50 @@ cmd_logs() {
         fi
     fi
 
+    local log_flag="--log"
+    [[ "$failed_only" -eq 1 ]] && log_flag="--log-failed"
+    local trace_args=(bounded-log "$run_id")
+    [[ "$failed_only" -eq 1 ]] && trace_args+=(--failed-only)
+    trace_args+=(--tail "$tail" --max-bytes "$max_bytes")
+    local trace_file error_file error_message
+    trace_file=$(mktemp) || { emit_json_error "Unable to create temporary log excerpt storage"; return 1; }
+    error_file=$(mktemp) || { rm -f "$trace_file"; emit_json_error "Unable to create temporary log error storage"; return 1; }
+    # Stream the CLI output into a bounded ring in ci_trace.py.  Do not capture
+    # a workflow's complete log in a shell variable before enforcing its cap.
+    set +e
+    gh run view "$run_id" "$log_flag" --repo "$repo" 2>"$error_file" \
+        | python3 "$REPO_ROOT/lib/ci_trace.py" bounded-log-stream "$run_id" "${trace_args[@]:2}" >"$trace_file"
+    local gh_rc=${PIPESTATUS[0]} trace_rc=${PIPESTATUS[1]}
+    set -e
+    if [[ "$trace_rc" -ne 0 ]]; then
+        cat "$trace_file"
+        rm -f "$trace_file" "$error_file"
+        return "$trace_rc"
+    fi
+    if [[ "$gh_rc" -ne 0 ]]; then
+        error_message=$(<"$error_file")
+        rm -f "$trace_file" "$error_file"
+        emit_json_error "${error_message:-Unable to read workflow logs}"
+        return 1
+    fi
+    rm -f "$error_file"
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
-        local out
-        out=$(gh run view "$run_id" --log --repo "$repo" 2>&1) || {
-            emit_json_error "$out"
-            return 1
-        }
-        python3 -c '
-import json, sys
-print(json.dumps({"success": True, "run_id": sys.argv[1], "log": sys.argv[2]}, indent=2))
-' "$run_id" "$out"
+        cat "$trace_file"
+        rm -f "$trace_file"
         return 0
     fi
-
-    gh run view "$run_id" --log --repo "$repo"
+    python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+if not result.get("success"):
+    raise SystemExit(result.get("error", "Unable to read logs"))
+print(result["log"])
+if result["truncated"]["any"]:
+    print("\n[Excerpt truncated: line or byte limit reached]", file=sys.stderr)
+' <"$trace_file"
+    local rc=$?
+    rm -f "$trace_file"
+    return $rc
 }
 
 cmd_cancel() {
@@ -427,16 +561,34 @@ cmd_triage() {
     python3 "${py_args[@]}"
 }
 
-# Strip --json from the argument list (anywhere) so it never leaks to gh, and
-# set OUTPUT_FORMAT. Plain-mode invocations are untouched.
+# Strip --json and --repo <owner/repo> from the argument list (anywhere) so
+# neither leaks to gh as a positional. --json sets OUTPUT_FORMAT; --repo sets
+# CI_REPO, which get_repo() prefers over the origin remote so every verb can
+# target another repository. Plain-mode invocations are untouched.
 ARGS=()
+CI_REPO="${CI_REPO:-}"
+_expect_repo=0
 for arg in "$@"; do
-    if [[ "$arg" == "--json" ]]; then
+    if [[ "$_expect_repo" == "1" ]]; then
+        CI_REPO="$arg"; _expect_repo=0
+    elif [[ "$arg" == "--json" ]]; then
         OUTPUT_FORMAT="json"
+    elif [[ "$arg" == "--repo" ]]; then
+        _expect_repo=1
+    elif [[ "$arg" == --repo=* ]]; then
+        CI_REPO="${arg#--repo=}"
     else
         ARGS+=("$arg")
     fi
 done
+if [[ "$_expect_repo" == "1" ]]; then
+    echo "Error: --repo requires a value (owner/repo)" >&2
+    exit 2
+fi
+if [[ -n "$CI_REPO" && ! "$CI_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "Error: --repo must be owner/repo, got '$CI_REPO'" >&2
+    exit 2
+fi
 set -- ${ARGS[@]+"${ARGS[@]}"}
 
 # Main
@@ -448,6 +600,10 @@ case "${1:-help}" in
     runs|list|ls)
         shift || true
         cmd_runs "$@"
+        ;;
+    details|detail|show)
+        shift
+        cmd_details "$@"
         ;;
     trigger|run|start)
         shift

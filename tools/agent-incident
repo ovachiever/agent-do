@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Read-only incident evidence packets."""
+from __future__ import annotations
+import argparse,json,sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"lib"))
+import incident_tracker as it
+def emit(v,json_mode=False): print(json.dumps(v,indent=2) if json_mode else (v.get("path") or v.get("message") or json.dumps(v)))
+def main():
+ p=argparse.ArgumentParser(); s=p.add_subparsers(dest="cmd",required=True)
+ for name in ("init","validate"): q=s.add_parser(name); q.add_argument("--json",action="store_true"); q.add_argument("--service")
+ t=s.add_parser("trace"); t.add_argument("--service",required=True); t.add_argument("--github-run"); t.add_argument("--since",default="30m"); t.add_argument("--output"); t.add_argument("--json",action="store_true")
+ sh=s.add_parser("show"); sh.add_argument("target"); sh.add_argument("--json",action="store_true")
+ a=p.parse_args(); cwd=Path.cwd()
+ try:
+  if a.cmd=="init":
+   r=it.root(cwd)
+   if r.exists(): raise it.IncidentError("incident configuration already exists")
+   r.mkdir(mode=0o700); (r/"traces").mkdir(); (r/".gitignore").write_text("/traces/\n/.incident-staging-*\n")
+   (r/"config.yaml").write_text("version: 1\nservices:\n  example-service:\n    github:\n      repository: TODO-owner/TODO-repository\n      workflow: TODO-workflow.yml\n")
+   emit({"success":True,"path":str(r),"message":"created incident configuration"},a.json); return 0
+  base,c=it.load_config(cwd)
+  if a.cmd=="validate":
+   names=[a.service] if a.service else list(c["services"])
+   if any(n not in c["services"] for n in names): raise it.IncidentError("unknown service")
+   checks={name:it.validate_service(c["services"][name]) for name in names}
+   ok=all(item["status"]=="available" for service in checks.values() for item in service.values())
+   emit({"success":ok,"services":checks,"message":"validation complete"},a.json); return 0 if ok else 1
+  if a.cmd=="trace": emit(it.trace(base,c,a.service,a.github_run,a.since,a.output),a.json); return 0
+  target=Path(a.target)
+  if not target.is_dir():
+   if target.name != a.target or not __import__('re').fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*",a.target): raise it.IncidentError("trace ID must not contain a path")
+   target=base/"traces"/a.target
+  packet=json.loads((target/"trace.json").read_text()); emit(packet,a.json); return 0
+ except (it.IncidentError,OSError,json.JSONDecodeError) as e:
+  emit({"success":False,"error":str(e)},getattr(a,"json",False)); return 1
+if __name__=="__main__": raise SystemExit(main())

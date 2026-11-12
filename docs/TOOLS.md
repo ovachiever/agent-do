@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (103 tools)
+## Summary (104 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -36,7 +36,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [burp](#burp) | Burp Suite automation | mixed | 4 |
 | [cad](#cad) | CAD file operations | mixed | 4 |
 | [calendar](#calendar) | Control calendar | mixed | 3 |
-| [ci](#ci) | Control CI/CD pipelines | write | 4 |
+| [ci](#ci) | Control CI/CD pipelines and inspect GitHub Actions deployment evidence | write | 6 |
 | [clerk](#clerk) | Clerk authentication platform — users, organizations, sessions, OAuth apps, enterprise SSO, JWT templates, roles | mixed | 14 |
 | [clipboard](#clipboard) | Cross-app clipboard management | mixed | 4 |
 | [cloud](#cloud) | Control cloud providers (AWS, GCP, Azure) | mixed | 3 |
@@ -59,7 +59,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [excel](#excel) | AI-first Excel CLI for workbook automation | mixed | 11 |
 | [figma](#figma) | Control Figma | read | 3 |
 | [gcp](#gcp) | Google Cloud Platform management — REST API for projects, APIs, secrets, service accounts + Console automation for OAuth credentials | mixed | 19 |
-| [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 32 |
+| [gh](#gh) | GitHub issues, pull requests, reviews, and merges | mixed | 33 |
 | [ghidra](#ghidra) | Ghidra reverse engineering automation | read | 4 |
 | [git](#git) | Guarded local Git operations for staged commits, worktrees, snapshots, conflicts, and recovery | mixed | 28 |
 | [handbrake](#handbrake) | Convert ripped video (MKV) to Plex-ready MP4 via HandBrakeCLI — probe a file's titles and streams, list encode presets, transcode single files or whole directories with skip/overwrite handling, and verify .mp4 outputs | mixed | 7 |
@@ -68,9 +68,10 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [homekit](#homekit) | HomeKit/smart home control | mixed | 3 |
 | [ide](#ide) | Control VS Code/Cursor editor | read | 5 |
 | [image](#image) | Image processing | mixed | 3 |
+| [incident](#incident) | Read-only, local incident evidence packets from configured GitHub, Kubernetes, and Render sources | mixed | 4 |
 | [ios](#ios) | Control iOS Simulator | mixed | 10 |
 | [jupyter](#jupyter) | Control Jupyter notebooks | mixed | 4 |
-| [k8s](#k8s) | Control Kubernetes clusters | write | 5 |
+| [k8s](#k8s) | Control Kubernetes clusters | write | 7 |
 | [lab](#lab) | JupyterLab management | mixed | 4 |
 | [latex](#latex) | LaTeX document compilation | write | 4 |
 | [learn](#learn) | Learning and pattern improvement | write | 4 |
@@ -95,7 +96,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [printer](#printer) | Printer control | write | 3 |
 | [prompt](#prompt) | Prompt management and templating | read | 4 |
 | [psql](#psql) | PostgreSQL CLI wrapper for AI agents over the native psql binary | mixed | 24 |
-| [render](#render) | Full-surface Render.com control — services (create/update/delete/lifecycle), deploys (trigger/show/cancel/rollback), one-off jobs, cron runs, env vars + secret files, env groups, postgres lifecycle + creds + recovery, key value, blueprints, custom domains + headers + routes, persistent disks + snapshots, dedicated IPs, registry credentials, projects + environments, webhooks, notifications, maintenance, audit logs, owners, observability (logs + metrics) | write | 46 |
+| [render](#render) | Full-surface Render.com control — services (create/update/delete/lifecycle), deploys (trigger/show/cancel/rollback), one-off jobs, cron runs, env vars + secret files, env groups, postgres lifecycle + creds + recovery, key value, blueprints, custom domains + headers + routes, persistent disks + snapshots, dedicated IPs, registry credentials, projects + environments, webhooks, notifications, maintenance, audit logs, owners, observability (logs + metrics) | write | 47 |
 | [repl](#repl) | Control interactive REPLs (Python, Node, psql, etc.) | mixed | 5 |
 | [resend](#resend) | Resend domain management and DNS verification — exact records, verification state, and public DNS checks | mixed | 7 |
 | [screen](#screen) | Vision-based screen perception and control (macOS) | mixed | 9 |
@@ -794,7 +795,7 @@ agent-do calendar create 'Meeting' --time 15:00
 
 ### ci
 
-Control CI/CD pipelines
+Control CI/CD pipelines and inspect GitHub Actions deployment evidence
 
 Concurrency: `write`
 
@@ -803,12 +804,15 @@ Concurrency: `write`
 - trigger builds
 - view status
 - manage pipelines
+- inspect a workflow run's commit, timing, jobs, and bounded log evidence
 
 **Commands**
 
 - `trigger`: Trigger build
 - `status`: View status
-- `logs`: View build logs
+- `runs`: List recent workflow runs for an explicit repository
+- `details`: Show normalized workflow-run and job facts for tracing
+- `logs`: View bounded, redacted build-log excerpts
 - `triage`: Classify a failed run and draft a triage summary (dry-run)
 
 **Examples**
@@ -818,11 +822,13 @@ Concurrency: `write`
 agent-do ci trigger deploy
 # triage a failed CI run
 agent-do ci triage 12345 --repo owner/repo
+# inspect the commit and jobs for a deployment workflow run
+agent-do ci details 48201933 --repo owner/repo --json
 ```
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `logs`, `status`, `triage`
+- Read-only (snapshot/verify; safe to parallelize): `details`, `logs`, `runs`, `status`, `triage`
 - Write (connect/interact/save): `trigger`
 
 ### clerk
@@ -1936,6 +1942,7 @@ Concurrency: `mixed`
 - create pull requests with committed provenance declarations and a local preview
 - list actionable pull requests across repos
 - inspect pull request details, diffs, checks, and unresolved review threads
+- correlate a deployed commit with GitHub-declared pull requests and closing issues
 - classify changed files by review-risk tier (critical/elevated/standard)
 - audit PR review risks and generate fix-oriented engineering review replies
 - surface the built-in review doctrine on every review
@@ -1951,6 +1958,7 @@ Concurrency: `mixed`
 - `awaiting`: Show open PRs likely awaiting your review by broad review heuristics
 - `prs`: Search pull requests
 - `pr`: Show PR details
+- `commit`: Correlate a commit with GitHub-declared pull requests and closing issues
 - `pr create`: Create a PR with explicit title, body and base; --declare copies every branch commit's provenance, --dry-run previews locally without pushing
 - `issue create`: Create an issue with --title and --body or --body-file, then read it back
 - `issue list`: List all repository issues with exact totals; optional state, assignee, author, label filters and display limit
@@ -2002,6 +2010,8 @@ agent-do gh prs --state open
 agent-do gh audit ovachiever/agent-do#3 --reply --probe-deploys
 # review pull request 3 in agent-do
 agent-do gh review ovachiever/agent-do#3 --summary
+# find the pull request and linked issues for a deployed commit
+agent-do gh commit abc123def --repo owner/repo --json
 # show unresolved GitHub review comments
 agent-do gh threads ovachiever/agent-do#3
 # approve this GitHub PR
@@ -2016,7 +2026,7 @@ agent-do gh edit ovachiever/agent-do#5 --add-reviewer @me --add-label review-nee
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `diff`, `doctrine`, `inbox`, `issue list`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
+- Read-only (snapshot/verify; safe to parallelize): `audit`, `awaiting`, `checks`, `commit`, `diff`, `doctrine`, `inbox`, `issue list`, `portfolio list`, `pr`, `prs`, `repos`, `review`, `threads`, `whoami`
 - Write (connect/interact/save): `approve`, `checkout`, `close`, `comment`, `draft`, `edit`, `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`, `merge`, `portfolio add`, `portfolio remove`, `pr create`, `ready`, `reopen`, `request-changes`, `update-branch`
 - polymorphic (beat decided by payload or flag at call time): `pr create`
 - composite (one call performs several beats internally): `issue assign`, `issue close`, `issue comment`, `issue create`, `issue label`, `issue unassign`
@@ -2392,6 +2402,32 @@ agent-do image resize input.png --size 800x600
 
 - Write (connect/interact/save): `convert`, `crop`, `resize`
 
+### incident
+
+Read-only, local incident evidence packets from configured GitHub, Kubernetes, and Render sources
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- initialize a project-local incident configuration
+- validate configured evidence sources
+- collect and atomically publish a bounded evidence packet
+
+**Commands**
+
+- `init`: Initialize project-local incident configuration
+- `validate`: Validate incident configuration
+- `trace`: Collect a read-only evidence packet
+- `show`: Show a published evidence packet
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `show`, `validate`
+- Write (connect/interact/save): `init`, `trace`
+- composite (one call performs several beats internally): `trace`
+- own_state (writes only its own cache/state; parallel-safe): `init`
+
 ### ios
 
 Control iOS Simulator
@@ -2490,11 +2526,14 @@ Concurrency: `write`
 - view logs
 - port forwarding
 - apply manifests
+- collect bounded, redacted deployment incident evidence with an explicit context
 
 **Commands**
 
 - `pods`: List pods
-- `logs`: View pod logs
+- `deployment`: Read deployment revision, images, ReplicaSets, pods, readiness, and restarts as JSON
+- `events`: Read deployment, ReplicaSet, and pod events as JSON
+- `logs`: View pod logs; with an explicit context, emit a bounded and redacted JSON excerpt
 - `exec`: Execute in pod
 - `apply`: Apply manifest
 - `port-forward`: Forward port
@@ -2506,11 +2545,13 @@ Concurrency: `write`
 agent-do k8s pods
 # view logs for api pod
 agent-do k8s logs api
+# gather safe evidence for a failing AKS deployment
+agent-do k8s deployment payments-api --context production-aks --namespace payments --json
 ```
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `logs`, `pods`
+- Read-only (snapshot/verify; safe to parallelize): `deployment`, `events`, `logs`, `pods`
 - Write (connect/interact/save): `apply`, `port-forward`
 - passthrough (arbitrary-payload escape hatch; beat decided by the argument): `exec`
 - long_running (daemon/stream/session; may never return): `port-forward`
@@ -3646,6 +3687,7 @@ Concurrency: `write`
 - notification settings and per-service overrides
 - audit log retrieval and maintenance windows
 - structured logs and metrics with filters
+- bounded, redacted deployment evidence for incident tracing
 - cross-account snapshot
 
 **Commands**
@@ -3655,6 +3697,7 @@ Concurrency: `write`
 - `audit`: Audit log entries
 - `services`: List services
 - `show`: Service details
+- `trace`: Read-only service, deploy, event, and bounded-log incident evidence
 - `create`: Create service: create \<web|worker|static|private|cron> \<name> [opts]
 - `update`: Update service settings
 - `delete`: Delete a service (--yes required)
@@ -3730,6 +3773,8 @@ agent-do render deploy my-api
 agent-do render show my-api
 # view render service logs
 agent-do render logs my-api
+# collect render evidence for an incident
+agent-do render trace my-api --since 30m --json
 # set env var on render
 agent-do render env-set my-api DATABASE_URL postgres://...
 # list render databases
@@ -3744,7 +3789,7 @@ agent-do render snapshot
 
 **Safety (from contracts)**
 
-- Read-only (snapshot/verify; safe to parallelize): `audit`, `autoscaling show`, `blueprint list`, `blueprint show`, `blueprint syncs`, `blueprint validate`, `dedicated-ip list`, `dedicated-ip show`, `deploys`, `disk list`, `disk show`, `disk snapshots`, `domain`, `domains`, `env`, `env-group get`, `env-group list`, `env-group secret`, `env-group show`, `environment list`, `environment show`, `events`, `header list`, `instances`, `job show`, `jobs`, `kv connect-info`, `kv list`, `kv show`, `logs`, `maintenance list`, `maintenance show`, `metrics`, `notify override`, `notify overrides`, `notify show`, `owners`, `project`, `projects`, `registry list`, `registry show`, `route list`, `secret get`, `secret list`, `services`, `show`, `snapshot`, `webhook events`, `webhook list`, `webhook show`, `whoami`
+- Read-only (snapshot/verify; safe to parallelize): `audit`, `autoscaling show`, `blueprint list`, `blueprint show`, `blueprint syncs`, `blueprint validate`, `dedicated-ip list`, `dedicated-ip show`, `deploys`, `disk list`, `disk show`, `disk snapshots`, `domain`, `domains`, `env`, `env-group get`, `env-group list`, `env-group secret`, `env-group show`, `environment list`, `environment show`, `events`, `header list`, `instances`, `job show`, `jobs`, `kv connect-info`, `kv list`, `kv show`, `logs`, `maintenance list`, `maintenance show`, `metrics`, `notify override`, `notify overrides`, `notify show`, `owners`, `project`, `projects`, `registry list`, `registry show`, `route list`, `secret get`, `secret list`, `services`, `show`, `snapshot`, `trace`, `webhook events`, `webhook list`, `webhook show`, `whoami`
 - Write (connect/interact/save): `autoscaling disable`, `autoscaling enable`, `blueprint delete`, `blueprint update`, `cache-purge`, `create`, `cron cancel`, `cron run`, `db`, `dedicated-ip create`, `dedicated-ip delete`, `delete`, `deploy`, `disk create`, `disk delete`, `disk restore`, `disk update`, `env-del`, `env-group create`, `env-group del-var`, `env-group delete`, `env-group link`, `env-group rename`, `env-group set`, `env-group unlink`, `env-set`, `environment create`, `environment delete`, `environment link`, `environment unlink`, `header add`, `header del`, `job cancel`, `job run`, `kv create`, `kv delete`, `kv resume`, `kv suspend`, `kv update`, `maintenance reschedule`, `maintenance trigger`, `notify update`, `registry add`, `registry delete`, `restart`, `resume`, `rollback`, `route add`, `route del`, `scale`, `secret del`, `secret set`, `suspend`, `update`, `webhook create`, `webhook delete`, `webhook update`
 - destructive (irreversible data loss; confirm before auto-running): `blueprint delete`, `cache-purge`, `dedicated-ip delete`, `delete`, `disk delete`, `env-del`, `env-group del-var`, `env-group delete`, `environment delete`, `header del`, `kv delete`, `registry delete`, `route del`, `secret del`, `webhook delete`
 - sensitive (emits or persists secret material; guard output): `db`, `env-group secret`, `kv connect-info`, `secret get`
