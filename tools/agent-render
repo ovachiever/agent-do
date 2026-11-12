@@ -16,7 +16,7 @@ WORKSPACE
 
 SERVICES (web, worker, static, private, cron)
   services / ls                 List all services
-  show <svc>                    Detailed service info
+  show <svc> [--json]           Detailed service info (incl. rootDir, buildFilter, autoDeployTrigger)
   create <type> <name> [opts]   Create a new service (`create --help` for opts)
   update <svc> [opts]           Update service settings
   delete <svc> --yes            Delete a service (destructive)
@@ -29,7 +29,7 @@ SERVICES (web, worker, static, private, cron)
 
 DEPLOYS
   deploy <svc> [--commit SHA]   Trigger deploy
-  deploys <svc>                 List recent deploys
+  deploys <svc> [--json]        List recent deploys (full commit ids)
   deploy show <svc> <deploy>    Deploy details
   deploy cancel <svc> <deploy>  Cancel in-progress deploy
   rollback <svc> <deploy>       Roll back to a prior deploy
@@ -391,7 +391,7 @@ for item in items:
 cmd_show() {
     local name_or_id="${1:-}"
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render show <service>"
+        echo "Usage: agent-render show <service> [--json]"
         return 1
     fi
 
@@ -399,19 +399,32 @@ cmd_show() {
     sid=$(resolve_service "$name_or_id") || return 1
 
     local result
-    result=$(render_request GET "/services/$sid")
+    result=$(render_request GET "/services/$sid") || return 1
 
+    if [[ "${RENDER_JSON:-0}" == "1" ]]; then printf '%s\n' "$result"; return 0; fi
+
+    # URL before Repo so a first-URL grep finds the service, not GitHub.
+    # rootDir / buildFilter / autoDeployTrigger decide whether a push deploys
+    # at all, so they are always shown.
     echo "$result" | python3 -c "
 import sys, json
 svc = json.load(sys.stdin)
+sd = svc.get('serviceDetails', {}) or {}
+bf = svc.get('buildFilter') or {}
+paths = ', '.join(bf.get('paths') or []) or '(all)'
+ignored = ', '.join(bf.get('ignoredPaths') or []) or '(none)'
 print(f\"ID:       {svc.get('id', '')}\")
 print(f\"Name:     {svc.get('name', '')}\")
 print(f\"Type:     {svc.get('type', '')}\")
+print(f\"URL:      {sd.get('url', '')}\")
 print(f\"Repo:     {svc.get('repo', '')}\")
 print(f\"Branch:   {svc.get('branch', '')}\")
-print(f\"Region:   {svc.get('serviceDetails', {}).get('region', '')}\")
-print(f\"Plan:     {svc.get('serviceDetails', {}).get('plan', '')}\")
-print(f\"URL:      {svc.get('serviceDetails', {}).get('url', '')}\")
+print(f\"Root dir: {svc.get('rootDir', '') or '.'}\")
+print(f\"Auto-deploy: {svc.get('autoDeploy', '')} (trigger: {svc.get('autoDeployTrigger', '')})\")
+print(f\"Build filter paths:   {paths}\")
+print(f\"Build filter ignored: {ignored}\")
+print(f\"Region:   {sd.get('region', '')}\")
+print(f\"Plan:     {sd.get('plan', '')}\")
 print(f\"Suspended: {svc.get('suspended', '')}\")
 print(f\"Created:  {svc.get('createdAt', '')}\")
 print(f\"Updated:  {svc.get('updatedAt', '')}\")
@@ -458,7 +471,7 @@ print(f\"Created:   {d.get('createdAt', '')}\")
 cmd_deploys() {
     local name_or_id="${1:-}"
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render deploys <service>"
+        echo "Usage: agent-render deploys <service> [--json]"
         return 1
     fi
 
@@ -466,8 +479,11 @@ cmd_deploys() {
     sid=$(resolve_service "$name_or_id") || return 1
 
     local result
-    result=$(render_request GET "/services/$sid/deploys?limit=10")
+    result=$(render_request GET "/services/$sid/deploys?limit=10") || return 1
 
+    if [[ "${RENDER_JSON:-0}" == "1" ]]; then printf '%s\n' "$result"; return 0; fi
+
+    # Full commit id: an 8-char prefix cannot prove live-commit equality.
     echo "$result" | python3 -c "
 import sys, json
 items = json.load(sys.stdin)
@@ -476,7 +492,7 @@ if not items:
     sys.exit(0)
 for item in items:
     d = item.get('deploy', item)
-    commit = d.get('commit', {}).get('id', '?')[:8] if d.get('commit') else '?'
+    commit = (d.get('commit') or {}).get('id') or '?'
     status = d.get('status', '?')
     created = d.get('createdAt', '?')
     did = d.get('id', '')
