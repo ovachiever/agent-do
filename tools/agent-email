@@ -22,7 +22,7 @@ Commands:
   get --id <message-id>      Fetch one exact message by id
   export --id <message-id>   Export one message as json, txt, html, eml, or pdf
   mailboxes                  List available mailboxes
-  status                     Show feature and provider hydration readiness
+  status                     Show per-account freshness and live provider readiness
 
 Options:
   --body <text>              Email body
@@ -34,7 +34,7 @@ Options:
   --subject <text>           Subject contains filter
   --contains <text>          Body or subject contains filter
   --unread                   Only consider unread messages
-  --limit <n>                Maximum messages to inspect
+  --limit <n>                Maximum results (search defaults to all matches)
   --account <name>           Limit query to one account
   --mailbox <name>           Limit query to one mailbox
   --all-mailboxes            Search all mailboxes instead of inbox-only defaults
@@ -57,6 +57,12 @@ Environment:
   EMAIL_FROM                 Default from address
   AGENT_EMAIL_FIXTURE        JSON fixture file for tests or offline development
   AGENT_EMAIL_ENVELOPE_INDEX Apple Mail Envelope Index override for tests/debugging
+  AZURE_CLIENT_ID            Graph application id (agent-do creds)
+  AZURE_CLIENT_SECRET        Graph application secret (agent-do creds)
+  AZURE_TENANT_ID            Graph tenant id (agent-do creds)
+  GRAPH_TARGET_MAILBOX       Mailbox address for live Graph reads (agent-do creds)
+  AGENT_EMAIL_GRAPH_ACCOUNT Exact local account name to bind to Graph; otherwise
+                            binds the unique Exchange account, or a separate live account
   AGENT_EMAIL_PROVIDER       Remote hydration provider: imap, gmail, exchange, outlook, office365, ews
   AGENT_EMAIL_IMAP_HOST      IMAP host for metadata-only message hydration
   AGENT_EMAIL_IMAP_PORT      IMAP port (default: 993)
@@ -64,6 +70,14 @@ Environment:
   AGENT_EMAIL_IMAP_PASS      IMAP password or app password
   AGENT_EMAIL_IMAP_MAILBOXES Comma-separated mailboxes to search before fallback candidates
   AGENT_EMAIL_DISABLE_REMOTE_HYDRATION=1 disables provider fallback
+
+Coverage:
+  Local freshness uses the measured median interval between receiving days.
+  Unknown/stale local coverage is reported in stale_accounts and on stderr.
+  Graph follows every search page and reports its documented search ceiling.
+  Message source is graph, envelope_index, or imap; get/export include raw_source
+  for RFC822 content. Graph authentication uses O365; credentials never come
+  from another project's files. Status verifies a live read when configured.
 
 Examples:
   agent-email send user@example.com "Hello" --body "Hi there!"

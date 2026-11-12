@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palingenesis — Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ground:#1B1917;
+    --surface:#211E1B;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --hair:rgba(231,227,218,0.14);
+    --hair-strong:rgba(231,227,218,0.22);
+    --sage:hsl(158,30%,55%);
+    --clay:hsl(12,42%,58%);
+    --sans:'Source Sans 3',sans-serif;
+    --mono:'JetBrains Mono',monospace;
+    --serif:'Source Serif 4',serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--ground);}
+  body{
+    width:1440px;
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  .stage{
+    width:1440px;
+    min-height:1000px;
+    display:flex;
+    flex-direction:column;
+    background:var(--ground);
+  }
+
+  /* ---------- house nav ---------- */
+  .housenav{
+    height:46px;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 28px;
+    border-bottom:1px solid var(--hair);
+  }
+  .wordmark{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:19px;
+    letter-spacing:0.01em;
+    color:var(--ink);
+  }
+  .wordmark em{
+    font-style:normal;
+    color:var(--muted);
+    font-weight:500;
+    font-size:14px;
+    margin-left:9px;
+    font-family:var(--sans);
+    letter-spacing:0.02em;
+  }
+  .rooms{
+    display:flex;
+    gap:26px;
+  }
+  .rooms span{
+    font-size:12px;
+    letter-spacing:0.09em;
+    text-transform:uppercase;
+    color:var(--muted);
+    padding-bottom:15px;
+    border-bottom:2px solid transparent;
+  }
+  .rooms span.active{
+    color:var(--ink);
+    border-bottom-color:var(--ink);
+  }
+
+  /* ---------- status bar ---------- */
+  .statusbar{
+    flex:0 0 auto;
+    border-bottom:1px solid var(--hair);
+    padding:11px 28px;
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+  }
+  .status-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    font-size:13px;
+  }
+  .status-row .sep{color:var(--hair-strong);}
+  .lbl{color:var(--muted);font-weight:400;}
+  .val{font-family:var(--mono);color:var(--ink);font-weight:500;}
+  .badge{
+    font-family:var(--sans);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--ink);
+    border:1px solid var(--hair-strong);
+    padding:3px 8px;
+    border-radius:2px;
+  }
+  .room-tag{
+    font-size:12px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    font-weight:600;
+  }
+  .status-row.row2{justify-content:space-between;}
+  .metrics{display:flex;align-items:center;gap:14px;}
+  .btn-run{
+    font-family:var(--sans);
+    font-size:12px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--ground);
+    background:var(--ink);
+    border:none;
+    padding:7px 16px;
+    height:28px;
+    border-radius:2px;
+    cursor:default;
+    font-weight:600;
+  }
+
+  /* ---------- panes ---------- */
+  .panes{
+    flex:1 1 auto;
+    display:grid;
+    grid-template-columns:258px 1fr 302px;
+  }
+  .pane{
+    padding:20px 24px 24px;
+    border-right:1px solid var(--hair);
+  }
+  .pane:last-child{border-right:none;}
+  .pane-title{
+    font-size:12px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    font-weight:600;
+    padding-bottom:12px;
+    margin-bottom:16px;
+    border-bottom:1px solid var(--hair);
+  }
+  .pane-selected{background:var(--surface);}
+
+  /* ---- runs pane ---- */
+  .runs-group-label{
+    font-size:12px;
+    letter-spacing:0.09em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:18px 0 8px;
+  }
+  .runs-group-label:first-of-type{margin-top:0;}
+  .run-row{
+    display:flex;
+    align-items:flex-start;
+    gap:9px;
+    padding:8px 8px;
+    margin:0 -8px;
+    border-radius:3px;
+  }
+  .run-row.selected{
+    background:rgba(231,227,218,0.05);
+    box-shadow:inset 2px 0 0 var(--ink);
+  }
+  .dot{
+    flex:0 0 auto;
+    width:9px;height:9px;
+    border-radius:50%;
+    margin-top:5px;
+    border:1.4px solid currentColor;
+  }
+  .dot.filled{background:var(--sage);border-color:var(--sage);}
+  .dot.half{
+    background:linear-gradient(90deg,var(--ink) 50%,transparent 50%);
+    border-color:var(--muted);
+  }
+  .dot.empty{border-color:var(--clay);background:transparent;}
+  .run-body{flex:1 1 auto;min-width:0;}
+  .run-time-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    gap:6px;
+  }
+  .run-time{font-family:var(--mono);font-size:13px;color:var(--ink);}
+  .run-id{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .run-status{font-size:12px;color:var(--muted);margin-top:2px;}
+  .run-status.is-complete{color:var(--sage);}
+  .run-status.is-empty{color:var(--clay);}
+
+  /* ---- selected run pane ---- */
+  .selected-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:6px;
+  }
+  .selected-title{font-size:15px;font-weight:600;color:var(--ink);}
+  .selected-id{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .chart-wrap{margin-top:14px;}
+  .legend{
+    display:flex;
+    gap:20px;
+    margin-top:4px;
+    padding-top:12px;
+    border-top:1px solid var(--hair);
+    font-size:12px;
+    color:var(--muted);
+    align-items:center;
+  }
+  .legend-item{display:flex;align-items:center;gap:6px;}
+  .legend-line{width:14px;height:2px;background:var(--ink);display:inline-block;}
+  .legend-line.observed{background:var(--sage);}
+  .legend-swatch{width:11px;height:11px;display:inline-block;border-radius:1px;}
+  .legend .val{font-size:12px;}
+
+  .breakdown{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair);}
+  .breakdown-title{
+    font-size:12px;
+    letter-spacing:0.06em;
+    color:var(--muted);
+    margin-bottom:12px;
+  }
+  .bd-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:6px 0;
+  }
+  .bd-label{width:120px;flex:0 0 auto;font-size:13px;color:var(--ink);}
+  .bd-bar-track{flex:1 1 auto;height:5px;background:rgba(231,227,218,0.06);border-radius:2px;position:relative;overflow:hidden;}
+  .bd-bar{position:absolute;left:0;top:0;bottom:0;background:rgba(231,227,218,0.28);border-radius:2px;}
+  .bd-val{font-family:var(--mono);font-size:13px;color:var(--ink);width:34px;text-align:right;flex:0 0 auto;}
+
+  /* ---- inspector pane ---- */
+  .insp-block{margin-bottom:22px;}
+  .insp-label{
+    font-size:12px;
+    letter-spacing:0.09em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin-bottom:8px;
+  }
+  .insp-result{font-family:var(--mono);font-size:26px;font-weight:500;color:var(--ink);line-height:1;}
+  .insp-range{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:6px;}
+  .insp-line{font-size:13px;color:var(--ink);margin-top:5px;line-height:1.5;}
+  .insp-line .val{font-size:13px;}
+  .insp-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .prov-row{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    padding:6px 0;
+    border-bottom:1px solid var(--hair);
+    font-size:12px;
+  }
+  .prov-row:last-child{border-bottom:none;}
+  .prov-key{color:var(--muted);}
+  .prov-val{font-family:var(--mono);color:var(--ink);text-align:right;}
+
+  /* ---------- hindcast ---------- */
+  .hindcast{
+    flex:0 0 auto;
+    border-top:1px solid var(--hair-strong);
+    padding:20px 28px 8px;
+  }
+  .hindcast-title{
+    font-size:12px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    font-weight:600;
+    margin-bottom:14px;
+  }
+  table.hc-table{
+    width:100%;
+    border-collapse:collapse;
+  }
+  .hc-table th{
+    text-align:left;
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+    font-weight:600;
+    padding:0 12px 10px 0;
+    border-bottom:1px solid var(--hair);
+  }
+  .hc-table th.num, .hc-table td.num{text-align:right;}
+  .hc-table td{
+    padding:9px 12px 9px 0;
+    border-bottom:1px solid var(--hair);
+    font-size:13px;
+    color:var(--ink);
+  }
+  .hc-table td.mono, .hc-table th.mono-col{font-family:var(--mono);}
+  .hc-table td.forecast{font-family:var(--sans);}
+  .hc-table tr:last-child td{border-bottom:1px solid var(--hair);}
+  .covered-yes{color:var(--sage);font-family:var(--mono);}
+  .covered-no{color:var(--clay);font-family:var(--mono);}
+  .sort-icon{display:inline-flex;flex-direction:column;gap:2px;margin-left:6px;vertical-align:middle;}
+  .sort-icon i{display:block;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;}
+  .sort-icon i.up{border-bottom:4px solid var(--muted);}
+  .sort-icon i.down{border-top:4px solid var(--muted);opacity:0.5;}
+
+  /* ---------- footer ---------- */
+  .motto{
+    flex:0 0 auto;
+    text-align:center;
+    padding:22px 0 30px;
+    font-size:12px;
+    letter-spacing:0.05em;
+    color:var(--muted);
+  }
+
+  svg text{font-family:var(--mono);}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <nav class="housenav">
+    <div class="wordmark">Palingenesis<em>simulation room</em></div>
+    <div class="rooms">
+      <span>Overview</span>
+      <span class="active">Simulation</span>
+      <span>Ledger</span>
+      <span>Records</span>
+    </div>
+  </nav>
+
+  <header class="statusbar">
+    <div class="status-row row1">
+      <span class="room-tag">SIMULATION</span>
+      <span class="sep">·</span>
+      <span><span class="lbl">Model:</span> <span class="val">palingenesis-sim v0.9.3</span></span>
+      <span class="sep">·</span>
+      <span class="badge">CALIBRATED</span>
+      <span class="sep">·</span>
+      <span><span class="lbl">Valid through</span> <span class="val">30 Sep</span></span>
+    </div>
+    <div class="status-row row2">
+      <div class="metrics">
+        <span><span class="lbl">Site fit</span> <span class="val">67%</span></span>
+        <span class="sep">·</span>
+        <span><span class="lbl">Hindcast skill</span> <span class="val">0.82</span> <span class="lbl">(baseline 0.61)</span></span>
+        <span class="sep">·</span>
+        <span><span class="lbl">90% coverage:</span> <span class="val">88%</span></span>
+      </div>
+      <button class="btn-run">Run scenario</button>
+    </div>
+  </header>
+
+  <main class="panes">
+
+    <!-- RUNS -->
+    <section class="pane pane-runs">
+      <div class="pane-title">Runs</div>
+
+      <div class="runs-group-label">Today</div>
+
+      <div class="run-row">
+        <span class="dot filled"></span>
+        <div class="run-body">
+          <div class="run-time-row"><span class="run-time">17:22</span><span class="run-id">sim-4473</span></div>
+          <div class="run-status is-complete">Completed</div>
+        </div>
+      </div>
+
+      <div class="run-row selected">
+        <span class="dot half"></span>
+        <div class="run-body">
+          <div class="run-time-row"><span class="run-time">14:43</span><span class="run-id">sim-4471</span></div>
+          <div class="run-status">Boundary</div>
+        </div>
+      </div>
+
+      <div class="run-row">
+        <span class="dot empty"></span>
+        <div class="run-body">
+          <div class="run-time-row"><span class="run-time">12:04</span><span class="run-id">sim-4474</span></div>
+          <div class="run-status is-empty">No estimate</div>
+        </div>
+      </div>
+
+      <div class="runs-group-label">Yesterday</div>
+
+      <div class="run-row">
+        <span class="dot empty"></span>
+        <div class="run-body">
+          <div class="run-time-row"><span class="run-time">16:20</span><span class="run-id">sim-4475</span></div>
+        </div>
+      </div>
+
+      <div class="run-row">
+        <span class="dot empty"></span>
+        <div class="run-body">
+          <div class="run-time-row"><span class="run-time">14:03</span><span class="run-id">sim-4472</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SELECTED RUN -->
+    <section class="pane pane-selected">
+      <div class="pane-title">Selected run</div>
+
+      <div class="selected-head">
+        <span class="selected-title">Litter moisture</span>
+        <span class="selected-id">sim-4471</span>
+      </div>
+
+      <div class="chart-wrap">
+        <svg viewBox="0 0 660 260" width="100%" height="240" preserveAspectRatio="xMinYMin meet">
+          <!-- gridlines -->
+          <g stroke="rgba(231,227,218,0.10)" stroke-width="1">
+            <line x1="70" y1="24" x2="610" y2="24"/>
+            <line x1="70" y1="86" x2="610" y2="86"/>
+            <line x1="70" y1="148" x2="610" y2="148"/>
+            <line x1="70" y1="210" x2="610" y2="210"/>
+          </g>
+          <!-- y labels -->
+          <g fill="#A69D90" font-size="12">
+            <text x="54" y="28" text-anchor="end">−4</text>
+            <text x="54" y="90" text-anchor="end">−8</text>
+            <text x="54" y="152" text-anchor="end">−12</text>
+            <text x="54" y="214" text-anchor="end">−16</text>
+          </g>
+          <text x="54" y="14" fill="#A69D90" font-size="12" text-anchor="end">%</text>
+
+          <!-- x axis line -->
+          <line x1="70" y1="210" x2="610" y2="210" stroke="rgba(231,227,218,0.22)" stroke-width="1"/>
+          <!-- x labels -->
+          <g fill="#A69D90" font-size="12">
+            <text x="70" y="230" text-anchor="middle">08:00</text>
+            <text x="310" y="230" text-anchor="middle">12:00</text>
+            <text x="550" y="230" text-anchor="middle">16:00</text>
+          </g>
+
+          <!-- observed/projection boundary -->
+          <line x1="473" y1="24" x2="473" y2="210" stroke="rgba(231,227,218,0.20)" stroke-width="1" stroke-dasharray="2 4"/>
+
+          <!-- uncertainty envelope bracket -->
+          <g stroke="#A69D90" stroke-width="1" fill="none">
+            <path d="M473,50 L473,45 L610,45 L610,50"/>
+          </g>
+          <text x="541" y="37" fill="#A69D90" font-size="12" text-anchor="middle" letter-spacing="0.3">uncertainty envelope</text>
+
+          <!-- 90% band -->
+          <path d="M473,101.5 L550,98.6 L610,86 L610,179 L550,150.9 Z" fill="#E7E3DA" opacity="0.10"/>
+          <!-- 50% band -->
+          <path d="M473,101.5 L550,111.7 L610,109.25 L610,155.75 L550,137.8 Z" fill="#E7E3DA" opacity="0.20"/>
+
+          <!-- median line -->
+          <polyline points="473,101.5 520,113 550,120 610,132.5" fill="none" stroke="#E7E3DA" stroke-width="2"/>
+
+          <!-- observed line -->
+          <polyline points="70,24 160,47.25 250,62.75 340,78.25 430,93.75 473,101.5" fill="none" stroke="hsl(158,30%,55%)" stroke-width="2.2"/>
+          <circle cx="473" cy="101.5" r="3" fill="hsl(158,30%,55%)"/>
+        </svg>
+
+        <div class="legend">
+          <span class="legend-item"><span class="legend-line observed"></span><span class="lbl">Observed</span></span>
+          <span class="legend-item"><span class="legend-line"></span><span class="lbl">Median</span></span>
+          <span class="legend-item"><span class="legend-swatch" style="background:rgba(231,227,218,0.20)"></span><span class="lbl">50%</span></span>
+          <span class="legend-item"><span class="legend-swatch" style="background:rgba(231,227,218,0.10)"></span><span class="lbl">90%</span></span>
+        </div>
+      </div>
+
+      <div class="breakdown">
+        <div class="breakdown-title">Quantity breakdown / component effects</div>
+        <div class="bd-row">
+          <span class="bd-label">bedding char</span>
+          <span class="bd-bar-track"><span class="bd-bar" style="width:70%"></span></span>
+          <span class="bd-val">−7</span>
+        </div>
+        <div class="bd-row">
+          <span class="bd-label">ventilation</span>
+          <span class="bd-bar-track"><span class="bd-bar" style="width:30%"></span></span>
+          <span class="bd-val">−3</span>
+        </div>
+        <div class="bd-row">
+          <span class="bd-label">ambient RH</span>
+          <span class="bd-bar-track"><span class="bd-bar" style="width:10%"></span></span>
+          <span class="bd-val">−1</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- RUN INSPECTOR -->
+    <section class="pane pane-inspector">
+      <div class="pane-title">Run inspector</div>
+
+      <div class="insp-block">
+        <div class="insp-label">Result</div>
+        <div class="insp-result">−11%</div>
+        <div class="insp-range">−14 … −8</div>
+      </div>
+
+      <div class="insp-block">
+        <div class="insp-label">Domain</div>
+        <div class="insp-line">Near boundary</div>
+        <div class="insp-line">Litter core <span class="val">T1</span></div>
+        <div class="insp-sub">calibration pending <span class="val" style="font-size:12px">30 Sep</span></div>
+      </div>
+
+      <div class="insp-block">
+        <div class="insp-label">Provenance</div>
+        <div class="prov-row"><span class="prov-key">Input snapshot</span><span class="prov-val">2026-08-22 14:43</span></div>
+        <div class="prov-row"><span class="prov-key">Sensor cutoff</span><span class="prov-val">14:40</span></div>
+        <div class="prov-row"><span class="prov-key">Model version</span><span class="prov-val">v0.9.3</span></div>
+        <div class="prov-row"><span class="prov-key">Parameter set</span><span class="prov-val">67% site / 33% published</span></div>
+      </div>
+    </section>
+
+  </main>
+
+  <section class="hindcast">
+    <div class="hindcast-title">Hindcast</div>
+    <table class="hc-table">
+      <thead>
+        <tr>
+          <th class="mono-col">Issued<span class="sort-icon"><i class="up"></i><i class="down"></i></span></th>
+          <th>Forecast</th>
+          <th class="num mono-col">Interval</th>
+          <th class="num mono-col">Actual</th>
+          <th class="num">Covered</th>
+          <th class="num mono-col">vs baseline</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono">2026-07-01</td>
+          <td class="forecast">lay rate wk 48</td>
+          <td class="mono num">91.2–93.8%</td>
+          <td class="mono num">92.9</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.84 vs 0.61</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-07-01</td>
+          <td class="forecast">feed intake g/hen/d</td>
+          <td class="mono num">108–114</td>
+          <td class="mono num">111</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.79</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-07-15</td>
+          <td class="forecast">egg mass g/hen/d</td>
+          <td class="mono num">57.1–60.4</td>
+          <td class="mono num">60.9</td>
+          <td class="num covered-no">✗ +0.5</td>
+          <td class="mono num">0.71</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-07-15</td>
+          <td class="forecast">barn RH %</td>
+          <td class="mono num">61–69</td>
+          <td class="mono num">66</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.88</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-08-01</td>
+          <td class="forecast">mortality cum %</td>
+          <td class="mono num">0.9–1.4</td>
+          <td class="mono num">1.1</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.83</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-08-01</td>
+          <td class="forecast">shell thickness µm</td>
+          <td class="mono num">372–388</td>
+          <td class="mono num">381</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.80</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-08-15</td>
+          <td class="forecast">margin $/dozen</td>
+          <td class="mono num">0.41–0.58</td>
+          <td class="mono num">0.52</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.77</td>
+        </tr>
+        <tr>
+          <td class="mono">2026-08-15</td>
+          <td class="forecast">water intake L/hen/d</td>
+          <td class="mono num">0.19–0.23</td>
+          <td class="mono num">0.21</td>
+          <td class="num covered-yes">✓</td>
+          <td class="mono num">0.86</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="motto">Every claim sourced · every cost computed · every verdict recorded</footer>
+
+</div>
+</body>
+</html>

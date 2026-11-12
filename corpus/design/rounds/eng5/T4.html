@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Engine Room — Palingenesis</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#1B1917; --ink:#E7E3DA; --mut:#A69D90; --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14); --sage:#94A784; --clay:#C4886B;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  html,body{background:var(--bg);color:var(--ink)}
+  body{font-family:var(--sans);min-width:1440px;font-variant-numeric:tabular-nums}
+  .wrap{width:1384px;margin:0 auto;padding:0}
+  .mono,.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .drill{border-bottom:1px dotted rgba(231,227,218,0.38)}
+  .clay{color:var(--clay)} .sage{color:var(--sage)} .mut{color:var(--mut)} .ink{color:var(--ink)}
+
+  /* ---- nav ---- */
+  nav{display:flex;align-items:baseline;justify-content:space-between;padding:16px 0 14px;border-bottom:1px solid var(--hair)}
+  .wordmark{font-family:var(--serif);font-size:18px;letter-spacing:.04em;color:var(--ink)}
+  .wordmark span{color:var(--mut)}
+  nav ul{list-style:none;display:flex;gap:26px}
+  nav li{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut)}
+  nav li.active{color:var(--ink);border-bottom:2px solid var(--sage);padding-bottom:4px}
+
+  /* ---- lede ---- */
+  .kicker{margin-top:20px;font-size:12px;text-transform:uppercase;letter-spacing:.16em;color:var(--mut)}
+  .kicker .m{text-transform:none;letter-spacing:0}
+  .lede{margin-top:10px;font-family:var(--serif);font-size:21px;line-height:1.5;color:var(--ink);max-width:1290px}
+  .lede strong{font-weight:700}
+  .lede .m{font-size:17px;color:var(--ink)}
+  .lede .mm{font-size:17px;font-family:var(--mono);color:var(--mut)}
+
+  /* ---- sections ---- */
+  .sec{margin-top:26px}
+  .sechead{display:flex;align-items:baseline;gap:14px}
+  .sechead h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:var(--mut);white-space:nowrap}
+  .sechead .rule{flex:1;height:1px;background:var(--hair)}
+  .legend{display:flex;gap:18px;align-items:center;font-size:12px;color:var(--mut);white-space:nowrap}
+  .sw{display:inline-block;width:20px;height:0;vertical-align:middle;margin-right:6px}
+  .sw-bk{border-top:1px solid var(--fnt)}
+  .sw-ac{border-top:2px solid var(--ink)}
+
+  /* ---- services ---- */
+  .services{display:grid;grid-template-columns:repeat(6,1fr);margin-top:12px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+  .svc{padding:12px 14px 12px 0;margin-left:14px;border-left:1px solid var(--hair);padding-left:14px}
+  .svc:first-child{border-left:none;margin-left:0;padding-left:0}
+  .svc h3{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink)}
+  .svc .state{font-family:var(--mono);font-size:12px;margin-top:3px;color:var(--mut)}
+  .svc .state.live{color:var(--sage)}
+  .svc .job{font-size:12px;line-height:1.45;color:var(--mut);margin-top:6px;min-height:35px}
+  .svc .foot{font-family:var(--mono);font-size:12px;color:var(--ink);margin-top:6px}
+  .svc .foot .bk{color:var(--mut)}
+
+  /* ---- graph ---- */
+  .chart{display:block;margin-top:8px}
+  .caption{font-size:12px;color:var(--mut);line-height:1.5;margin-top:2px;max-width:1290px}
+  .caption b{color:var(--ink);font-weight:600}
+
+  /* ---- cycles table ---- */
+  table.cyc{border-collapse:collapse;table-layout:fixed;width:1376px;margin-top:12px;font-family:var(--mono);font-size:12px}
+  table.cyc col.lbl{width:112px}
+  table.cyc col.livecol{background:rgba(148,167,132,0.08)}
+  table.cyc td,table.cyc th{padding:4px 2px;text-align:center;border-top:1px solid var(--hair);color:var(--ink);font-weight:400}
+  table.cyc tr:first-child td,table.cyc tr:first-child th{border-top:none}
+  table.cyc th[scope=row]{font-family:var(--sans);font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);text-align:right;padding-right:12px}
+  table.cyc .b{color:var(--mut)}
+  .striplegend{font-size:12px;color:var(--mut);margin-top:8px;font-family:var(--mono)}
+
+  /* ---- ledger ---- */
+  .ledger{display:flex;gap:34px;margin-top:14px;align-items:flex-start}
+  .lspent{flex:0 0 300px}
+  .lspent .lab{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut)}
+  .lspent .big{font-family:var(--mono);font-size:30px;color:var(--ink);margin-top:4px}
+  .lspent .sub{font-size:12px;color:var(--mut);margin-top:3px}
+  .lspent .pace{font-family:var(--mono);font-size:12px;color:var(--ink);margin-top:8px;line-height:1.6}
+  .lspent .pace span{color:var(--mut)}
+  .lbar{flex:1;padding-top:26px}
+  .barbox{position:relative;height:14px;border:1px solid var(--hair)}
+  .fill{position:absolute;left:0;top:0;bottom:0;width:51.08%;background:var(--ink)}
+  .proj{position:absolute;left:51.08%;top:0;bottom:0;width:29.32%;background:rgba(231,227,218,0.14)}
+  .tick{position:absolute;top:-5px;bottom:-5px;width:1px}
+  .tick.booked{left:55.16%;background:var(--mut)}
+  .tick.projected{left:80.4%;background:var(--ink)}
+  .tick.halt{left:94%;background:var(--clay)}
+  .barlab{position:absolute;font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .barlab.above{top:-22px}
+  .barscale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:8px}
+  .lright{flex:0 0 360px}
+  .lright .row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--hair)}
+  .lright .row:last-child{border-bottom:none}
+  .lright .k{color:var(--mut)}
+  .lright .v{font-family:var(--mono);color:var(--ink)}
+
+  /* ---- three columns ---- */
+  .cols{display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:0;margin-top:26px;border-top:1px solid var(--hair)}
+  .col{padding:14px 22px 4px 0}
+  .col + .col{border-left:1px solid var(--hair);padding-left:22px}
+  .col h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:var(--mut)}
+  .drow{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--hair);font-size:12px}
+  .drow:last-child{border-bottom:none}
+  .drow .k{color:var(--ink);white-space:nowrap}
+  .drow .v{font-family:var(--mono);color:var(--mut);text-align:right}
+  .inc{display:flex;gap:14px;padding:8px 0;border-bottom:1px solid var(--hair)}
+  .inc:last-child{border-bottom:none}
+  .istamp{font-family:var(--mono);font-size:12px;color:var(--clay);flex:0 0 44px;padding-top:1px}
+  .inc .body{font-size:13px;line-height:1.5;color:var(--mut)}
+  .inc .body b{color:var(--ink);font-weight:600}
+  .inc .act{color:var(--ink);font-weight:600;text-transform:uppercase;font-size:12px;letter-spacing:.06em}
+  .inc .ref{font-family:var(--mono);font-size:12px;color:var(--mut)}
+
+  /* ---- control ---- */
+  .control{display:flex;gap:36px;align-items:center;margin-top:14px}
+  .suspend{border:1.5px solid var(--clay);padding:20px 36px;text-align:center;flex:0 0 auto}
+  .suspend .btn{font-family:var(--serif);font-size:25px;color:var(--clay);letter-spacing:.01em}
+  .suspend .how{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);margin-top:8px}
+  .consequence{font-size:14px;line-height:1.6;color:var(--mut);max-width:820px}
+  .consequence b{color:var(--ink);font-weight:600}
+  .consequence .m{color:var(--ink)}
+
+  /* ---- drill law ---- */
+  .drill-law{display:flex;gap:24px;align-items:baseline;margin-top:26px;padding:14px 0;border-top:1px solid var(--hair)}
+  .drill-law .lab{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:var(--ink);white-space:nowrap}
+  .drill-law p{font-size:14px;line-height:1.55;color:var(--mut);max-width:960px}
+  .drill-law p b{color:var(--ink);font-weight:600}
+  .drill-law .refs{font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap;margin-left:auto;padding-top:2px}
+
+  /* ---- footer ---- */
+  footer{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--hair);margin-top:26px;padding:14px 0 22px}
+  footer .motto{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--mut)}
+  footer .stamp{font-family:var(--mono);font-size:14px;color:var(--fnt)}
+
+  /* ---- svg text ---- */
+  svg text{font-family:var(--mono);font-size:12px;fill:var(--mut)}
+  svg text.stg{font-family:var(--sans);font-weight:600;letter-spacing:.08em;fill:var(--ink)}
+  svg text.svcl{font-family:var(--sans);fill:var(--mut)}
+  svg text.tclay{fill:var(--clay)}
+  svg text.tsage{fill:var(--sage)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <div class="wordmark">Palingenesis <span>· Engine Room</span></div>
+    <ul>
+      <li>Today</li><li>Pipeline</li><li>Library</li><li>Portfolio</li><li>Simulation</li><li class="active">Engine Room</li>
+    </ul>
+  </nav>
+
+  <div class="kicker">Owner's view — Friday 22 August 2026 — rendered <span class="m">15:23</span> — every operator truth on one page</div>
+  <p class="lede"><strong>Steady, and under plan.</strong> Eight of nine closed cycles landed inside three minutes of booked; the ninth, cycle 09, paid <span class="m">+21′</span> to a simulate retry, and cycle 05 was killed clean at <span class="m">06:04</span> against an empty journals feed for <span class="m">$0.31</span>. Spend stands at <span class="m drill">$255.38</span> of the <span class="m">$500.00</span> daily cap — <span class="m">$20.40</span> under booked pace — projecting <span class="m">$402.00</span> at close. Cycle 11 is deliberating now; cycle 12 opens <span class="m">16:30</span>.</p>
+
+  <div class="sec">
+    <div class="sechead"><h2>The six services — job · state · cost today</h2><div class="rule"></div></div>
+    <div class="services">
+      <div class="svc">
+        <h3>Reader</h3>
+        <div class="state">idle · next 16:30</div>
+        <div class="job">Pulls the night's papers, patents, and field-trial results into intake.</div>
+        <div class="foot drill">11 runs · 1 cut · $21.22</div>
+        <div class="foot bk mut">bk $2.10/run</div>
+      </div>
+      <div class="svc">
+        <h3>Scout</h3>
+        <div class="state">idle · next 16:36</div>
+        <div class="job">Walks intake and grades what could move a crop or a margin.</div>
+        <div class="foot drill">10 runs · $64.28</div>
+        <div class="foot bk mut">bk $6.40/run</div>
+      </div>
+      <div class="svc">
+        <h3>Council</h3>
+        <div class="state live">live · cycle 11 · since 15:19</div>
+        <div class="job">Argues each graded lead to a keep-or-kill verdict, on the record.</div>
+        <div class="foot drill">run 10 live · $56.78</div>
+        <div class="foot bk mut">bk $5.90/run</div>
+      </div>
+      <div class="svc">
+        <h3>Simulator</h3>
+        <div class="state">armed · due ≈15:27</div>
+        <div class="job">Runs kept leads against soil, weather, and yield models.</div>
+        <div class="foot drill">9 runs · $87.44</div>
+        <div class="foot bk mut">bk $9.10/run · <span class="clay">09 retried ×2 +$5.37</span></div>
+      </div>
+      <div class="svc">
+        <h3>Archivist</h3>
+        <div class="state">idle · due ≈15:41</div>
+        <div class="job">Files verdict, evidence, and cost into the library, cross-linked.</div>
+        <div class="foot drill">9 runs · 9 filings · $7.13</div>
+        <div class="foot bk mut">bk $0.80/run</div>
+      </div>
+      <div class="svc">
+        <h3>Courier</h3>
+        <div class="state">idle · due ≈15:45</div>
+        <div class="job">Writes the brief and puts it on the owner's desk.</div>
+        <div class="foot drill">9 runs · 9 briefs · $18.53</div>
+        <div class="foot bk mut">bk $2.10/run</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sechead">
+      <h2>The day as a train graph — 16 cycles × 6 stages</h2><div class="rule"></div>
+      <div class="legend">
+        <span><span class="sw sw-bk"></span>booked</span>
+        <span><span class="sw sw-ac"></span>actual</span>
+        <span><span class="clay">✕</span>&nbsp;cancelled</span>
+        <span><span class="sage">●</span>&nbsp;running now</span>
+      </div>
+    </div>
+
+    <svg class="chart" width="1384" height="444" viewBox="0 0 1384 444" role="img" aria-label="Time-distance diagram: 16 cycles descending through six pipeline stages across the 24-hour day">
+      <!-- 3-hour gridlines -->
+      <path d="M112 44V414M270 44V414M428 44V414M586 44V414M744 44V414M902 44V414M1060 44V414M1218 44V414M1376 44V414" stroke="rgba(231,227,218,0.14)" fill="none"/>
+      <!-- hourly ticks -->
+      <path d="M112 30v8M164.7 30v8M217.3 30v8M270 30v8M322.7 30v8M375.3 30v8M428 30v8M480.7 30v8M533.3 30v8M586 30v8M638.7 30v8M691.3 30v8M744 30v8M796.7 30v8M849.3 30v8M902 30v8M954.7 30v8M1007.3 30v8M1060 30v8M1112.7 30v8M1165.3 30v8M1218 30v8M1270.7 30v8M1323.3 30v8M1376 30v8" stroke="#6E675E" fill="none"/>
+      <!-- hour labels every 3h -->
+      <text x="112" y="20" text-anchor="middle">00:00</text>
+      <text x="270" y="20" text-anchor="middle">03:00</text>
+      <text x="428" y="20" text-anchor="middle">06:00</text>
+      <text x="586" y="20" text-anchor="middle">09:00</text>
+      <text x="744" y="20" text-anchor="middle">12:00</text>
+      <text x="902" y="20" text-anchor="middle">15:00</text>
+      <text x="1060" y="20" text-anchor="middle">18:00</text>
+      <text x="1218" y="20" text-anchor="middle">21:00</text>
+      <text x="1380" y="20" text-anchor="end">24:00</text>
+      <!-- stage rows -->
+      <path d="M112 64H1376M112 124H1376M112 184H1376M112 244H1376M112 304H1376M112 364H1376M112 414H1376" stroke="rgba(231,227,218,0.14)" fill="none"/>
+      <!-- stage + service labels -->
+      <text class="stg" x="100" y="60" text-anchor="end">READ</text><text class="svcl" x="100" y="76" text-anchor="end">Reader</text>
+      <text class="stg" x="100" y="120" text-anchor="end">SCOUT</text><text class="svcl" x="100" y="136" text-anchor="end">Scout</text>
+      <text class="stg" x="100" y="180" text-anchor="end">DELIBERATE</text><text class="svcl" x="100" y="196" text-anchor="end">Council</text>
+      <text class="stg" x="100" y="240" text-anchor="end">SIMULATE</text><text class="svcl" x="100" y="256" text-anchor="end">Simulator</text>
+      <text class="stg" x="100" y="300" text-anchor="end">ARCHIVE</text><text class="svcl" x="100" y="316" text-anchor="end">Archivist</text>
+      <text class="stg" x="100" y="360" text-anchor="end">DELIVER</text><text class="svcl" x="100" y="376" text-anchor="end">Courier</text>
+      <text class="svcl" x="100" y="418" text-anchor="end">CLOSE</text>
+
+      <!-- booked strings: read 6' scout 12' deliberate 9' simulate 14' archive 4' deliver 3' = 48' -->
+      <defs>
+        <path id="bk" d="M112 64L117.3 124L127.8 184L135.7 244L148 304L151.5 364L154.1 414" fill="none" stroke="#6E675E" stroke-width="1"/>
+      </defs>
+      <use href="#bk" x="0"/><use href="#bk" x="79"/><use href="#bk" x="158"/><use href="#bk" x="237"/>
+      <use href="#bk" x="316"/><use href="#bk" x="395"/><use href="#bk" x="474"/><use href="#bk" x="553"/>
+      <use href="#bk" x="632"/><use href="#bk" x="711"/><use href="#bk" x="790"/><use href="#bk" x="869"/>
+      <use href="#bk" x="948"/><use href="#bk" x="1027"/><use href="#bk" x="1106"/><use href="#bk" x="1185"/>
+
+      <!-- actual strings -->
+      <g fill="none" stroke="#E7E3DA" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M112 64L117.3 124L126.9 184L134.8 244L147.1 304L150.6 364L153.3 414"/>
+        <path d="M191 64L196.3 124L206.8 184L215.6 244L227.9 304L231.4 364L234 414"/>
+        <path d="M270 64L276.1 124L285.8 184L293.7 244L305.1 304L308.6 364L311.3 414"/>
+        <path d="M349 64L354.3 124L365.7 184L374.5 244L386.7 304L390.3 364L392.9 414"/>
+        <path d="M507 64L512.3 124L522.8 184L532.5 244L544.7 304L548.3 364L551.8 414"/>
+        <path d="M586 64L590.4 124L600 184L607.9 244L620.2 304L623.7 364L626.4 414"/>
+        <path d="M665 64L670.3 124L680.8 184L688.7 244L700.1 304L703.6 364L706.3 414"/>
+        <path d="M744 64L749.3 124L759.8 184L767.7 244L798.4 304L801.9 364L804.6 414"/>
+        <path d="M823 64L828.3 124L838.8 184L847.6 244L859.9 304L863.4 364L866 414"/>
+        <path d="M902 64L908.1 124L918.7 184L922.2 184"/>
+      </g>
+
+      <!-- cycle 05: struck stub, killed 06:04 during read -->
+      <path d="M428 64L431.5 104" fill="none" stroke="#C4886B" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M425 96L436.5 76" fill="none" stroke="#C4886B" stroke-width="1.5"/>
+      <text class="tclay" x="437" y="112">✕ 06:04</text>
+
+      <!-- cycle 09: late simulate, +21 -->
+      <text class="tclay" x="803" y="286">+21′</text>
+
+      <!-- now line + dot on the live stage (Deliberate) -->
+      <path d="M922.2 30V414" stroke="#94A784" stroke-width="1" fill="none"/>
+      <circle cx="922.2" cy="184" r="4.5" fill="#94A784" stroke="#1B1917" stroke-width="1.5"/>
+      <text class="tsage" x="922" y="434" text-anchor="middle">NOW 15:23</text>
+
+      <!-- cycle numbers at each string's open -->
+      <text x="113.5" y="57">01</text><text x="192.5" y="57">02</text><text x="271.5" y="57">03</text>
+      <text x="350.5" y="57">04</text><text class="tclay" x="429.5" y="57">05</text><text x="508.5" y="57">06</text>
+      <text x="587.5" y="57">07</text><text x="666.5" y="57">08</text><text x="745.5" y="57">09</text>
+      <text x="824.5" y="57">10</text><text class="tsage" x="903.5" y="57">11</text><text x="982.5" y="57">12</text>
+      <text x="1061.5" y="57">13</text><text x="1140.5" y="57">14</text><text x="1219.5" y="57">15</text>
+      <text x="1298.5" y="57">16</text>
+    </svg>
+    <p class="caption">Read it like a railway chart: a string touches a stage line at the minute that stage begins, and the slope of each leg is that stage's runtime — <b>flatter is slower</b>. Booked legs run 6′ read · 12′ scout · 9′ deliberate · 14′ simulate · 4′ archive · 3′ deliver (48′ end to end), one string every 90′. Cycle 09's shallow simulate leg is the <b>+21′</b>; cycle 05 dies four minutes into read; the sage dot is cycle 11 holding in Deliberate at 15:23.</p>
+  </div>
+
+  <div class="sec">
+    <div class="sechead"><h2>The 16 cycles — booked vs actual</h2><div class="rule"></div></div>
+    <table class="cyc">
+      <colgroup><col class="lbl"><col span="10"><col class="livecol"><col span="5"></colgroup>
+      <tr><th scope="row">Cycle</th>
+        <td class="drill">01</td><td class="drill">02</td><td class="drill">03</td><td class="drill">04</td><td class="drill clay">05</td><td class="drill">06</td><td class="drill">07</td><td class="drill">08</td><td class="drill">09</td><td class="drill">10</td><td class="drill sage">11</td><td class="drill">12</td><td class="drill">13</td><td class="drill">14</td><td class="drill">15</td><td class="drill">16</td></tr>
+      <tr><th scope="row">Open</th>
+        <td>00:00</td><td>01:30</td><td>03:00</td><td>04:30</td><td>06:00</td><td>07:30</td><td>09:00</td><td>10:30</td><td>12:00</td><td>13:30</td><td>15:00</td><td>16:30</td><td>18:00</td><td>19:30</td><td>21:00</td><td>22:30</td></tr>
+      <tr><th scope="row">Close bk</th>
+        <td class="b">00:48</td><td class="b">02:18</td><td class="b">03:48</td><td class="b">05:18</td><td class="b">06:48</td><td class="b">08:18</td><td class="b">09:48</td><td class="b">11:18</td><td class="b">12:48</td><td class="b">14:18</td><td class="b">15:48</td><td class="b">17:18</td><td class="b">18:48</td><td class="b">20:18</td><td class="b">21:48</td><td class="b">23:18</td></tr>
+      <tr><th scope="row">Close ac</th>
+        <td>00:47</td><td>02:19</td><td>03:47</td><td>05:20</td><td class="clay">✕06:04</td><td>08:21</td><td>09:46</td><td>11:17</td><td>13:09</td><td>14:19</td><td class="sage">live</td><td class="b">—</td><td class="b">—</td><td class="b">—</td><td class="b">—</td><td class="b">—</td></tr>
+      <tr><th scope="row">Δ close</th>
+        <td class="b">−1</td><td class="b">+1</td><td class="b">−1</td><td class="b">+2</td><td class="clay">✕</td><td class="b">+3</td><td class="b">−2</td><td class="b">−1</td><td class="clay">+21</td><td class="b">+1</td><td class="sage">●</td><td class="b">—</td><td class="b">—</td><td class="b">—</td><td class="b">—</td><td class="b">—</td></tr>
+      <tr><th scope="row">Cost $</th>
+        <td>26.12</td><td>26.55</td><td>25.98</td><td>26.71</td><td>0.31</td><td>27.02</td><td>26.18</td><td>26.34</td><td>31.77</td><td>26.49</td><td class="sage">11.91+</td><td class="b">(26.40)</td><td class="b">(26.40)</td><td class="b">(26.40)</td><td class="b">(26.40)</td><td class="b">(26.40)</td></tr>
+    </table>
+    <div class="striplegend">Δ in minutes vs booked close · opens fire on the tick, so drift lives in close times · ( ) = booked cost, cycle not yet run · ✕ killed · ● running, cost still accruing</div>
+  </div>
+
+  <div class="sec">
+    <div class="sechead"><h2>Ledger — spend against the $500 cap</h2><div class="rule"></div></div>
+    <div class="ledger">
+      <div class="lspent">
+        <div class="lab">Spent, 00:00–15:23</div>
+        <div class="big drill">$255.38</div>
+        <div class="sub">of $500.00 cap · 51.1% used · 64.1% of day elapsed</div>
+        <div class="pace">−$20.40 vs booked <span>= kill −$26.09 · retries +$5.37 · drift +$0.32</span></div>
+      </div>
+      <div class="lbar">
+        <div class="barbox">
+          <div class="fill"></div>
+          <div class="proj"></div>
+          <div class="tick booked"></div>
+          <div class="tick projected"></div>
+          <div class="tick halt"></div>
+          <div class="barlab above" style="left:55.16%;color:var(--mut)">booked $275.78</div>
+          <div class="barlab above" style="left:80.4%;transform:translateX(-100%);color:var(--ink)">projected $402.00&nbsp;</div>
+          <div class="barlab above" style="left:94%;transform:translateX(-100%);color:var(--clay)">halt $470&nbsp;</div>
+        </div>
+        <div class="barscale"><span>$0</span><span>solid = spent · shaded = remaining booked $146.62 · clay tick = scheduler halt line</span><span>$500.00 cap</span></div>
+      </div>
+      <div class="lright">
+        <div class="row"><span class="k">projected close</span><span class="v drill">$402.00 · 80.4% of cap</span></div>
+        <div class="row"><span class="k">headroom at close</span><span class="v">$98.00</span></div>
+        <div class="row"><span class="k">mean full cycle</span><span class="v">$27.02 vs $26.40 bk · +2.3%</span></div>
+        <div class="row"><span class="k">largest line</span><span class="v">Simulator $87.44 · 34.2% of spend</span></div>
+        <div class="row"><span class="k">cap rule</span><span class="v">resets 00:00 · unspent does not roll</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h2>Scheduler</h2>
+      <div style="margin-top:8px">
+        <div class="drow"><span class="k">Cadence</span><span class="v">16 cycles/day · every 90′ · anchor 00:00</span></div>
+        <div class="drow"><span class="k">Booked cycle</span><span class="v">48′ = 6+12+9+14+4+3</span></div>
+        <div class="drow"><span class="k">Opens</span><span class="v">on the tick ±0′ · drift lives in stages</span></div>
+        <div class="drow"><span class="k">Next opens</span><span class="v">16:30 · 18:00 · 19:30 · 21:00 · 22:30</span></div>
+        <div class="drow"><span class="k">Last close</span><span class="v">23:18 bk · day seals 24:00</span></div>
+        <div class="drow"><span class="k">Cap governor</span><span class="v">no open past $470.00 · <span class="ink">untriggered</span></span></div>
+        <div class="drow"><span class="k">Retry law</span><span class="v">max ×2 per stage, then files incomplete</span></div>
+        <div class="drow"><span class="k">Killed slots</span><span class="v">forfeited · no makeup runs, ever</span></div>
+      </div>
+    </div>
+    <div class="col">
+      <h2>Data</h2>
+      <div style="margin-top:8px">
+        <div class="drow"><span class="k">Journals API</span><span class="v">pull 15:00 · 41 docs · ok</span></div>
+        <div class="drow"><span class="k">Patent drop</span><span class="v">pull 14:30 · 12 filings · ok</span></div>
+        <div class="drow"><span class="k">Field-trial mesh</span><span class="v">sync 15:15 · 208 readings · ok</span></div>
+        <div class="drow"><span class="k">Weather grid</span><span class="v"><span class="clay">stale 42′ · throttled 14:41</span> · fallback 06:00 grid</span></div>
+        <div class="drow"><span class="k">Library</span><span class="v drill">12,406 items · +9 today · integrity ✓ 03:10</span></div>
+        <div class="drow"><span class="k">Models</span><span class="v">soil-moisture v14 (08/19) · yield v9 (08/17)</span></div>
+        <div class="drow"><span class="k">Portfolio book</span><span class="v">34 live positions · marked 15:00</span></div>
+      </div>
+    </div>
+    <div class="col">
+      <h2>Incidents — with actions taken</h2>
+      <div style="margin-top:8px">
+        <div class="inc">
+          <div class="istamp">06:04</div>
+          <div class="body"><b>Cycle 05 killed</b> — journals feed returned zero new docs (upstream maintenance window). <span class="act">Action:</span> Reader re-probed 06:19 ok; spend held to $0.31; slot forfeited by rule, no makeup. <span class="ref drill">inc/0822-A</span></div>
+        </div>
+        <div class="inc">
+          <div class="istamp">12:41</div>
+          <div class="body"><b>Simulate non-convergence</b> — lead #2214, soil-moisture edge case; retried ×2, converged 13:02. <span class="act">Action:</span> +21′ and +$5.37 booked to cycle 09; edge case filed SIM-118 to the model queue. <span class="ref drill">inc/0822-B</span></div>
+        </div>
+        <div class="inc">
+          <div class="istamp">14:41</div>
+          <div class="body"><b>Weather grid throttled</b> — provider returning 429s. <span class="act">Action:</span> Simulator pinned to the 06:00 grid; note attached to the next brief; recheck 15:41. <span class="ref drill">inc/0822-C</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sechead"><h2>Control</h2><div class="rule"></div></div>
+    <div class="control">
+      <div class="suspend">
+        <div class="btn">Suspend generation</div>
+        <div class="how">hold 3 s · confirm within 10 s · this desk only</div>
+      </div>
+      <p class="consequence">Pressing it halts the scheduler at the next stage boundary: <b>cycle 11 finishes its argument and files</b>, cycles 12–16 never open, all six services stand down, and spend stops inside <span class="m">90</span> seconds — leaving <span class="m">$244.62</span> of today's cap unspent. <b>Nothing resumes on its own.</b> Restart is a hand on this desk, and the gap in the day is filed as an incident, not smoothed over.</p>
+    </div>
+  </div>
+
+  <div class="drill-law">
+    <div class="lab">Drill law</div>
+    <p>Every figure in this room is a door, and the <b>dotted underline is its handle</b>: a cycle number opens its run log, a dollar opens its ledger rows, a feed opens its pull history, an incident opens its file. A number that cannot produce its receipt does not appear on this page.</p>
+    <div class="refs">log/cy-0822-01…16 · ledger/2026-08-22 · feeds/4 · inc/0822-A·B·C · models/SIM-118</div>
+  </div>
+
+  <footer>
+    <div class="motto">Born again each morning — better by nightfall.</div>
+    <div class="stamp">engine room · truth rendered 15:23:07 · 2026-08-22</div>
+  </footer>
+
+</div>
+</body>
+</html>
