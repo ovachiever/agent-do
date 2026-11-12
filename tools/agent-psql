@@ -48,6 +48,8 @@ SCHEMA EXPLORATION
 DATA
   query "<sql>"              Execute SQL, return JSON
   query "<sql>" --limit N    Add/override LIMIT (default: 200 for SELECT)
+                             (NULL → JSON null; a result cut by the added LIMIT
+                             reports "truncated": true and "limit": N)
   sample <table> [n]         Sample n rows (default: 5)
   count <table>              Row count
   exec <file.sql>            Execute a SQL file
@@ -374,10 +376,12 @@ run_psql_raw() {
 }
 
 # Execute psql with full output (headers + footers, for human or query results)
+# Optional extra arguments after the SQL are passed to psql (e.g. -P null=TOKEN).
 run_psql_full() {
     local sql="$1"
+    shift
     PGPASSWORD="$_PG_PASSWORD" psql \
-        -X -A --csv \
+        -X -A --csv "$@" \
         -v ON_ERROR_STOP=1 \
         -h "$_PG_HOST" \
         -p "$_PG_PORT" \
@@ -481,17 +485,8 @@ print(json.dumps({'ok': False, 'error': 'Connection failed: ' + sys.argv[1]}))
         masked="postgresql://${_PG_USER}:@${_PG_HOST}:${_PG_PORT}/${_PG_DATABASE}"
     fi
 
-    # Snapshot the connection event
-    if type snapshot_begin &>/dev/null; then
-        snapshot_begin "psql-connect"
-        snapshot_field "host" "$_PG_HOST"
-        snapshot_field "port" "$_PG_PORT"
-        snapshot_field "database" "$_PG_DATABASE"
-        snapshot_field "user" "$_PG_USER"
-        snapshot_field "sslmode" "$_PG_SSLMODE"
-        snapshot_field "masked_uri" "$masked"
-        snapshot_end
-    fi
+    # One JSON document per call: the result below already carries host, port,
+    # database, user, sslmode and the masked URI, so no separate header is printed.
 
     python3 -c "
 import json, sys
@@ -1070,13 +1065,9 @@ cmd_query() {
         return 1
     fi
 
-    # Snapshot the query
-    if type snapshot_begin &>/dev/null; then
-        snapshot_begin "psql-query"
-        snapshot_field "database" "$_PG_DATABASE"
-        snapshot_field "sql" "$sql"
-        snapshot_end
-    fi
+    # One JSON document per call: the result carries the database and the SQL
+    # as given (before any EXPLAIN or added LIMIT) instead of a separate header.
+    local requested_sql="$sql"
 
     # Add EXPLAIN ANALYZE if requested
     if [[ "$explain" == "true" ]]; then
@@ -1096,16 +1087,32 @@ cmd_query() {
         echo '{"ok": false, "error": "Limit must be a positive integer"}'
         return 1
     fi
+    # When the tool adds the LIMIT, fetch one extra row so a cut result is
+    # reported as truncated instead of looking complete.
+    local applied_limit=""
     if [[ -n "$limit" ]] && ! echo "$sql" | grep -qi 'LIMIT'; then
-        sql="$sql LIMIT $limit"
+        applied_limit="$limit"
+        sql="$sql LIMIT $((limit + 1))"
     fi
+
+    # psql's CSV prints NULL and empty text identically; a random per-call
+    # marker lets the parser tell them apart without colliding with real data.
+    local null_token
+    null_token="__agent_psql_null_$(python3 -c 'import secrets; print(secrets.token_hex(8))')__"
 
     local start_ms
     start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
 
-    local result
-    result=$(run_psql_full "$sql" 2>&1)
-    local exit_code=$?
+    # Capture without tripping set -e (so the error branch below runs) and
+    # frame the output so command substitution cannot drop trailing blank rows.
+    local result exit_code=0
+    result=$(
+        run_psql_full "$sql" -P "null=$null_token" 2>&1
+        rc=$?
+        printf '\037'
+        exit "$rc"
+    ) || exit_code=$?
+    result="${result%$'\037'}"
 
     local end_ms
     end_ms=$(python3 -c "import time; print(int(time.time()*1000))")
@@ -1117,37 +1124,51 @@ import json, sys
 print(json.dumps({
     'ok': False,
     'error': sys.argv[1].strip(),
-    'exit_code': 4
+    'exit_code': 4,
+    'database': sys.argv[2],
+    'sql': sys.argv[3]
 }, indent=2))
-" "$result"
-        return 1
+" "$result" "$_PG_DATABASE" "$requested_sql"
+        return 4
     fi
 
-    # Parse CSV output into JSON
-    python3 -c "
+    # Parse CSV output into JSON. Rows are never stripped: an all-NULL or
+    # empty-text row is still a row. NULL becomes JSON null; empty text stays "".
+    printf '%s' "$result" | python3 -c "
 import csv, json, sys, io
-from datetime import datetime, date
-raw = sys.stdin.read().strip()
+raw = sys.stdin.read()
 elapsed = int(sys.argv[1])
-if not raw:
-    print(json.dumps({'ok': True, 'columns': [], 'rows': [], 'row_count': 0, 'execution_time_ms': elapsed}, indent=2))
+null_token = sys.argv[2]
+applied_limit = int(sys.argv[3]) if sys.argv[3] else None
+database, requested_sql = sys.argv[4], sys.argv[5]
+if not raw.strip():
+    print(json.dumps({'ok': True, 'database': database, 'sql': requested_sql,
+                      'columns': [], 'rows': [], 'row_count': 0,
+                      'truncated': False, 'limit': applied_limit,
+                      'execution_time_ms': elapsed}, indent=2))
     sys.exit(0)
 reader = csv.reader(io.StringIO(raw))
+columns = next(reader)
 rows_out = []
-columns = []
-for i, row in enumerate(reader):
-    if i == 0:
-        columns = row
-    else:
-        rows_out.append(row)
+for row in reader:
+    if not row and len(columns) == 1:
+        row = ['']  # a single empty-text value prints as a blank line
+    rows_out.append([None if cell == null_token else cell for cell in row])
+truncated = applied_limit is not None and len(rows_out) > applied_limit
+if truncated:
+    rows_out = rows_out[:applied_limit]
 print(json.dumps({
     'ok': True,
+    'database': database,
+    'sql': requested_sql,
     'columns': columns,
     'rows': rows_out,
     'row_count': len(rows_out),
+    'truncated': truncated,
+    'limit': applied_limit,
     'execution_time_ms': elapsed
 }, indent=2))
-" "$elapsed" <<< "$result"
+" "$elapsed" "$null_token" "$applied_limit" "$_PG_DATABASE" "$requested_sql"
 }
 
 cmd_sample() {
@@ -1263,23 +1284,17 @@ cmd_exec() {
         exit 6
     fi
 
-    # Snapshot the file execution
-    if type snapshot_begin &>/dev/null; then
-        snapshot_begin "psql-exec"
-        snapshot_field "database" "$_PG_DATABASE"
-        snapshot_field "file" "$file"
-        snapshot_end
-    fi
+    # One JSON document per call: the result carries the database and file
+    # instead of a separate header.
 
     local start_ms
     start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
 
-    local result
+    local result exit_code=0
     result=$(PGPASSWORD="$_PG_PASSWORD" psql \
         -X -v ON_ERROR_STOP=1 \
         -h "$_PG_HOST" -p "$_PG_PORT" -U "$_PG_USER" -d "$_PG_DATABASE" \
-        -f "$file" 2>&1)
-    local exit_code=$?
+        -f "$file" 2>&1) || exit_code=$?
 
     local end_ms
     end_ms=$(python3 -c "import time; print(int(time.time()*1000))")
@@ -1291,6 +1306,7 @@ ok = int(sys.argv[1]) == 0
 output = sys.stdin.read().strip()
 data = {
     'ok': ok,
+    'database': sys.argv[4],
     'file': sys.argv[2],
     'execution_time_ms': int(sys.argv[3]),
     'output': output[:2000] if output else ''
@@ -1299,7 +1315,8 @@ if not ok:
     data['error'] = output[:500]
     data['exit_code'] = 4
 print(json.dumps(data, indent=2))
-" "$exit_code" "$file" "$elapsed" <<< "$result"
+" "$exit_code" "$file" "$elapsed" "$_PG_DATABASE" <<< "$result"
+    [[ $exit_code -eq 0 ]] || return 4
 }
 
 # --- Administration Commands ---
@@ -1517,9 +1534,8 @@ cmd_dump() {
 
     dump_args+=(-f "$outfile")
 
-    local result
-    result=$(PGPASSWORD="$_PG_PASSWORD" pg_dump "${dump_args[@]}" 2>&1)
-    local exit_code=$?
+    local result exit_code=0
+    result=$(PGPASSWORD="$_PG_PASSWORD" pg_dump "${dump_args[@]}" 2>&1) || exit_code=$?
 
     if [[ $exit_code -eq 0 ]]; then
         local size="?"
@@ -1597,9 +1613,8 @@ cmd_restore() {
     if [[ "$schema_only" == "true" ]]; then restore_args+=(--schema-only); fi
     restore_args+=("$infile")
 
-    local result
-    result=$(PGPASSWORD="$_PG_PASSWORD" pg_restore "${restore_args[@]}" 2>&1)
-    local exit_code=$?
+    local result exit_code=0
+    result=$(PGPASSWORD="$_PG_PASSWORD" pg_restore "${restore_args[@]}" 2>&1) || exit_code=$?
 
     python3 -c "
 import json, sys
@@ -1613,6 +1628,7 @@ else:
     data['exit_code'] = 7
 print(json.dumps(data, indent=2))
 " "$exit_code" "$infile" <<< "$result"
+    [[ $exit_code -eq 0 ]] || return 7
 }
 
 # --- Main Dispatcher ---

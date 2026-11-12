@@ -1519,6 +1519,196 @@ mask_connection_string "postgresql://myuser:supersecret@db.render.com:5432/mydb"
 
     check("describe without connection", test_describe_no_connection)
 
+    # ---- Query fidelity: errors, NULLs, blank rows, truncation (fake binaries) ----
+    FAKE_PSQL = r"""#!/usr/bin/env python3
+import re, sys
+args = sys.argv[1:]
+null = ""
+sql = None
+sql_file = None
+for i, a in enumerate(args):
+    if a == "-P" and args[i + 1].startswith("null="):
+        null = args[i + 1][len("null="):]
+    if a == "-c":
+        sql = args[i + 1]
+    if a == "-f":
+        sql_file = args[i + 1]
+if sql_file is not None:
+    body = open(sql_file).read()
+    if "RAISE" in body:
+        sys.stderr.write("psql:" + sql_file + ":3: ERROR:  guard refused\n")
+        sys.exit(3)
+    print("DO")
+    sys.exit(0)
+if "no_such_col" in sql:
+    sys.stderr.write('ERROR:  column "no_such_col" does not exist\nLINE 1: select no_such_col\n')
+    sys.exit(1)
+if "null_vs_empty" in sql:
+    sys.stdout.write("a,b,c\n" + null + ",,x\n")
+elif "all_null" in sql:
+    sys.stdout.write("x\n" + (null + "\n") * 3)
+elif "empty_text" in sql:
+    sys.stdout.write("e\n" + "\n" * 3)
+elif "multiline" in sql:
+    sys.stdout.write('m,n\n"line one\nline two",' + null + '\n')
+elif "series" in sql:
+    m = re.search(r"LIMIT (\d+)\s*$", sql)
+    total = int(re.search(r"series_(\d+)", sql).group(1))
+    n = min(total, int(m.group(1))) if m else total
+    sys.stdout.write("g\n" + "".join(f"{i}\n" for i in range(1, n + 1)))
+else:
+    sys.stdout.write("?column?\n1\n")
+"""
+    FAKE_FAIL = "#!/bin/sh\necho \"$(basename \"$0\"): error: connection to server failed\" >&2\nexit 1\n"
+
+    def fake_env(tmpdir: str) -> dict:
+        bin_dir = Path(tmpdir) / "fakebin"
+        bin_dir.mkdir()
+        for name, body in (("psql", FAKE_PSQL), ("pg_dump", FAKE_FAIL), ("pg_restore", FAKE_FAIL)):
+            exe = bin_dir / name
+            exe.write_text(body)
+            exe.chmod(0o755)
+        session = Path(tmpdir) / ".agent-do" / "psql" / "session.json"
+        session.parent.mkdir(parents=True, exist_ok=True)
+        session.write_text(json.dumps({"host": "fake.invalid", "port": "5432", "database": "fakedb",
+                                       "user": "u", "sslmode": "prefer"}))
+        return {"HOME": tmpdir, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PGPASSWORD": "x"}
+
+    def last_json(stdout: str) -> dict:
+        dec = json.JSONDecoder()
+        i, out = 0, None
+        while i < len(stdout):
+            while i < len(stdout) and stdout[i].isspace():
+                i += 1
+            if i >= len(stdout):
+                break
+            out, i = dec.raw_decode(stdout, i)
+        require(isinstance(out, dict), f"no JSON result object: {stdout!r}")
+        return out
+
+    def test_query_error_surfaces():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            r = run_tool("query", "select no_such_col from t", env_override=fake_env(tmpdir))
+            require(r.returncode == 4, f"query error exit should be 4 (documented 'Query error'), got {r.returncode}")
+            data = last_json(r.stdout)
+            require(data.get("ok") is False, f"query error not reported: {data}")
+            require("no_such_col" in data.get("error", ""), f"psql's message missing: {data}")
+
+    check("query: SQL error returns ok:false with psql's message, exit 4", test_query_error_surfaces)
+
+    def test_query_null_vs_empty():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = last_json(run_tool("query", "select null_vs_empty", env_override=fake_env(tmpdir)).stdout)
+            require(data["rows"] == [[None, "", "x"]], f"NULL and empty text not distinguished: {data}")
+
+    check("query: NULL is JSON null, empty text stays empty", test_query_null_vs_empty)
+
+    def test_query_all_null_rows_counted():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = last_json(run_tool("query", "select all_null", env_override=fake_env(tmpdir)).stdout)
+            require(data["row_count"] == 3 and data["rows"] == [[None]] * 3, f"all-NULL rows dropped: {data}")
+
+    check("query: all-NULL rows are kept and counted", test_query_all_null_rows_counted)
+
+    def test_query_trailing_empty_text_rows_kept():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = last_json(run_tool("query", "select empty_text", env_override=fake_env(tmpdir)).stdout)
+            require(data["row_count"] == 3 and data["rows"] == [[""]] * 3, f"blank rows dropped: {data}")
+
+    check("query: trailing single-column empty-text rows are kept", test_query_trailing_empty_text_rows_kept)
+
+    def test_query_multiline_value_is_one_cell():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = last_json(run_tool("query", "select multiline", env_override=fake_env(tmpdir)).stdout)
+            require(data.get("rows") == [["line one\nline two", None]] and data.get("row_count") == 1,
+                    f"quoted multi-line value split or mis-parsed: {data}")
+
+    check("query: a quoted multi-line value stays one cell", test_query_multiline_value_is_one_cell)
+
+    def test_query_truncation_reported():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = fake_env(tmpdir)
+            cut = last_json(run_tool("query", "select series_300", env_override=env).stdout)
+            require(cut.get("row_count") == 200 and cut.get("truncated") is True and cut.get("limit") == 200,
+                    f"default limit cut rows silently: {cut}")
+            exact = last_json(run_tool("query", "select series_200", env_override=env).stdout)
+            require(exact.get("row_count") == 200 and exact.get("truncated") is False,
+                    f"exactly-the-limit result wrongly marked truncated: {exact}")
+            own = last_json(run_tool("query", "select series_300", "--limit", "5", env_override=env).stdout)
+            require(own.get("row_count") == 5 and own.get("truncated") is True and own.get("limit") == 5,
+                    f"--limit truncation not reported: {own}")
+
+    check("query: a cut result reports truncated and the limit", test_query_truncation_reported)
+
+    def test_exec_error_surfaces():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sql = Path(tmpdir) / "guard.sql"
+            sql.write_text("DO $$ BEGIN\n  RAISE EXCEPTION 'guard refused';\nEND $$;\n")
+            r = run_tool("exec", str(sql), env_override=fake_env(tmpdir))
+            require(r.returncode == 4, f"exec error exit should be 4, got {r.returncode}")
+            data = last_json(r.stdout)
+            require(data.get("ok") is False and "guard refused" in data.get("error", ""), f"exec error not reported: {data}")
+
+    check("exec: SQL error returns ok:false with psql's message, exit 4", test_exec_error_surfaces)
+
+    def test_dump_and_restore_errors_surface():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = fake_env(tmpdir)
+            r = run_tool("dump", str(Path(tmpdir) / "out.sql"), env_override=env)
+            require(r.returncode == 7, f"dump error exit should be 7, got {r.returncode}")
+            require("connection to server failed" in last_json(r.stdout).get("error", ""), f"dump error missing: {r.stdout}")
+            dumpfile = Path(tmpdir) / "in.dump"
+            dumpfile.write_bytes(b"PGDMP")
+            r = run_tool("restore", str(dumpfile), env_override=env)
+            require(r.returncode == 7, f"restore error exit should be 7, got {r.returncode}")
+            require("connection to server failed" in last_json(r.stdout).get("error", ""), f"restore error missing: {r.stdout}")
+
+    check("dump/restore: failures return ok:false with the tool's message, exit 7", test_dump_and_restore_errors_surface)
+
+    # ---- One JSON document per call (no separate request header) ----
+    def single_doc(stdout: str) -> dict:
+        try:
+            data = json.loads(stdout)
+        except ValueError as exc:
+            raise AssertionError(f"stdout is not exactly one JSON document ({exc}): {stdout!r}")
+        require(isinstance(data, dict), f"expected one JSON object: {stdout!r}")
+        return data
+
+    def test_query_is_one_document():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = fake_env(tmpdir)
+            ok = single_doc(run_tool("query", "select null_vs_empty", env_override=env).stdout)
+            require(ok.get("ok") is True and ok.get("database") == "fakedb" and ok.get("sql") == "select null_vs_empty",
+                    f"query result must name the database and the SQL as given: {ok}")
+            err = single_doc(run_tool("query", "select no_such_col from t", env_override=env).stdout)
+            require(err.get("ok") is False and err.get("database") == "fakedb" and err.get("sql") == "select no_such_col from t",
+                    f"query error must name the database and the SQL as given: {err}")
+
+    check("query: stdout is one JSON document naming database and sql", test_query_is_one_document)
+
+    def test_exec_is_one_document():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = fake_env(tmpdir)
+            good = Path(tmpdir) / "good.sql"
+            good.write_text("select 1;\n")
+            bad = Path(tmpdir) / "bad.sql"
+            bad.write_text("DO $$ BEGIN RAISE EXCEPTION 'x'; END $$;\n")
+            for f, expect_ok in ((good, True), (bad, False)):
+                data = single_doc(run_tool("exec", str(f), env_override=env).stdout)
+                require(data.get("ok") is expect_ok and data.get("database") == "fakedb" and data.get("file") == str(f),
+                        f"exec result must name the database and file: {data}")
+
+    check("exec: stdout is one JSON document naming database and file", test_exec_is_one_document)
+
+    def test_connect_is_one_document():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = fake_env(tmpdir)
+            r = run_tool("connect", "postgresql://u@fake.invalid:5432/conndb", env_override=env)
+            data = single_doc(r.stdout)
+            require(data.get("ok") is True and data.get("database") == "conndb", f"connect result: {data}")
+
+    check("connect: stdout is one JSON document", test_connect_is_one_document)
+
     # ---- Summary ----
     print(f"\npsql tests: {failures} failures")
     return 1 if failures else 0
