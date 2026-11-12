@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* dark institution */
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --ink-mid:#B7B2A6;
+    --ink-dim:#948F81;
+    --rule:rgba(231,227,218,0.35);
+    --rule-soft:rgba(231,227,218,0.14);
+    --sage:#9CB08C;
+    --sage-deep:#2e6b3f;
+    /* the single paper inset */
+    --paper:#F8F7F5;
+    --paper-ink:#262019;
+    --paper-muted:#6f6557;
+    --paper-hair:#dcd3c0;
+    /* type: five sizes on the page, 8px baseline */
+    --t-xs:12px; --lh-xs:16px;
+    --t-sm:14px; --lh-sm:24px;
+    --t-md:18px; --lh-md:24px;
+    --t-lg:28px; --lh-lg:32px;
+    --t-xl:56px; --lh-xl:64px;
+    --serif:'Source Serif 4',Georgia,serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    /* grid: 12 × 88 with 24 gutters = 1320; page padding 60; column starts every 112 from x=60 */
+    --col:88px; --gut:24px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink)}
+  body{
+    width:1440px;margin:0 auto;
+    font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{padding:0 60px}
+  .g12{display:grid;grid-template-columns:repeat(12,var(--col));column-gap:var(--gut)}
+  .g6{display:grid;grid-template-columns:repeat(6,200px);column-gap:var(--gut)}
+  .lbl{display:block;font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:500}
+  .mono{font-family:var(--mono)}
+  .sage{color:var(--sage)}
+
+  /* ---------- nav strip ---------- */
+  .nav{display:flex;align-items:center;height:64px;border-bottom:1px solid var(--rule-soft)}
+  .brand{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);font-weight:600;letter-spacing:.02em;width:200px}
+  .rooms{display:flex;gap:32px;margin-left:24px}
+  .rooms a{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim)}
+  .rooms a:hover{color:var(--ink)}
+  .acts{margin-left:auto;display:flex;align-items:center;gap:32px}
+  .acts a{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}
+  .acts a.btn{border:1px solid var(--sage);color:var(--sage);padding:7px 15px}
+  .acts a:hover{color:var(--ink)}
+
+  /* ---------- record strip ---------- */
+  .record{height:56px;align-items:center;border-bottom:1px solid var(--rule-soft);font-family:var(--mono)}
+  .record .lbl{grid-column:1 / span 2;color:var(--ink)}
+  .record .fig{font-size:var(--t-xs);line-height:var(--lh-md);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);white-space:nowrap}
+  .record .fig b{font-size:var(--t-md);line-height:var(--lh-md);letter-spacing:0;font-weight:500;color:var(--ink);margin-left:12px}
+  .record .f1{grid-column:3 / span 2}
+  .record .f2{grid-column:5 / span 2}
+  .record .f3{grid-column:7 / span 2}
+  .record .f4{grid-column:9 / span 2}
+
+  /* ---------- the promise ---------- */
+  .promise{padding-top:80px}
+  .promise .lbl{grid-column:1 / span 12;margin-bottom:40px}
+  .promise .text{grid-column:1 / span 8}
+  .promise h1{font-size:var(--t-xl);line-height:var(--lh-xl);font-weight:400;letter-spacing:-.012em;text-wrap:balance}
+  .promise .essential{margin-top:32px;font-style:italic;font-size:var(--t-md);line-height:32px;color:var(--ink-mid);max-width:60ch}
+
+  /* the one paper inset: the Today edition */
+  .paper{grid-column:10 / span 3;align-self:start;background:var(--paper);color:var(--paper-ink);padding:24px 24px 24px;text-align:center}
+  .paper .mast{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);letter-spacing:.18em;text-indent:.18em;text-transform:uppercase}
+  .paper .rule{margin-top:16px;border-top:2px solid var(--paper-ink)}
+  .paper .rule::after{content:"";display:block;margin-top:2px;border-top:1px solid var(--paper-ink)}
+  .paper .ed{margin-top:16px;font-family:var(--serif);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.14em;text-indent:.14em;text-transform:uppercase;color:var(--paper-muted)}
+  .paper p{margin-top:8px;font-size:var(--t-sm);line-height:var(--lh-sm);color:var(--paper-ink);border-bottom:1px solid var(--paper-hair);padding-bottom:16px}
+  .paper .act{display:inline-block;margin-top:16px;font-family:var(--serif);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:var(--sage-deep);border-bottom:1px solid rgba(46,107,63,.35)}
+
+  /* ---------- the river ---------- */
+  .how{margin-top:96px;border-top:1px solid var(--rule-soft);padding-top:64px}
+  .how > .lbl{margin-bottom:40px}
+  .step .n{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim)}
+  .step .name{font-family:var(--mono);font-size:var(--t-lg);line-height:var(--lh-lg);font-weight:700;color:var(--ink)}
+  .axis{display:block;width:1320px;height:24px;margin:16px 0}
+  .count{font-family:var(--mono);font-size:var(--t-sm);line-height:var(--lh-sm);color:var(--ink)}
+  .count span{display:block}
+
+  .rooms-lbl{margin-top:48px;margin-bottom:24px}
+  .room{display:flex;flex-direction:column}
+  .room .rn{font-family:var(--serif);font-size:var(--t-md);line-height:var(--lh-md);font-weight:600;color:var(--ink)}
+  .room .rd{margin-top:8px;font-family:var(--serif);font-size:var(--t-sm);line-height:var(--lh-sm);color:var(--ink-mid)}
+  .room .door{margin-top:auto;padding-top:16px;font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--sage)}
+  .room .door:hover{color:var(--ink)}
+
+  /* ---------- the owner: catalogue note ---------- */
+  .owner{margin-top:96px;border-top:1px solid var(--rule-soft);padding-top:64px;padding-bottom:96px}
+  .owner .lbl{grid-column:1 / span 12;margin-bottom:40px}
+  .owner .note{grid-column:1 / span 8}
+  .owner .note .lead{font-size:var(--t-lg);line-height:40px;font-weight:400;letter-spacing:-.005em;text-wrap:balance}
+  .owner .note .rest{margin-top:32px;font-size:var(--t-md);line-height:32px;color:var(--ink-mid);max-width:60ch}
+  .owner .note .rest + .rest{margin-top:8px}
+  .owner .ops{grid-column:10 / span 3;display:flex;flex-direction:column;gap:16px;align-self:start}
+  .owner .ops a{display:block;text-align:center;font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.16em;text-transform:uppercase;font-weight:700;padding:15px 16px}
+  .owner .ops a.pri{background:var(--sage);color:var(--bg);border:1px solid var(--sage)}
+  .owner .ops a.sec{border:1px solid var(--rule);color:var(--ink-mid)}
+  .owner .ops a.sec:hover{color:var(--ink);border-color:var(--ink-mid)}
+
+  /* ---------- foot ---------- */
+  .foot{border-top:1px solid var(--rule-soft);height:64px;display:flex;align-items:center}
+  .foot span{font-family:var(--mono);font-size:var(--t-xs);line-height:var(--lh-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim)}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <nav class="nav">
+    <a class="brand" href="#">Palingenesis</a>
+    <div class="rooms">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#">Engine Room</a>
+    </div>
+    <div class="acts">
+      <a href="#">Sign in</a>
+      <a class="btn" href="#">Open Today</a>
+    </div>
+  </nav>
+
+  <div class="record g12">
+    <span class="lbl">THE RECORD</span>
+    <span class="fig f1">Papers read<b>212</b></span>
+    <span class="fig f2">Claims scored<b>41</b></span>
+    <span class="fig f3">Interval coverage<b>84%</b></span>
+    <span class="fig f4">Positions<b>9</b></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- THE PROMISE -->
+  <section class="promise g12">
+    <span class="lbl">THE PROMISE</span>
+    <div class="text">
+      <h1>An autonomous engine for agricultural innovation — reading continuously, judged adversarially, ruled by one human.</h1>
+      <p class="essential">It reads the literature, breeds candidate innovations, argues about them in a council, simulates the winners, and carries them into the field.</p>
+    </div>
+    <aside class="paper">
+      <div class="mast">Palingenesis</div>
+      <div class="rule" aria-hidden="true"></div>
+      <div class="ed">Today</div>
+      <p>The morning edition: what needs a ruling, and the machine's record of the night.</p>
+      <a class="act" href="#">Open Today →</a>
+    </aside>
+  </section>
+
+  <!-- HOW IT WORKS: the river -->
+  <section class="how">
+    <span class="lbl">HOW IT WORKS</span>
+
+    <div class="g6">
+      <div class="step"><div class="n">Step 1</div><div class="name">Reads</div></div>
+      <div class="step"><div class="n">Step 2</div><div class="name">Breeds</div></div>
+      <div class="step"><div class="n">Step 3</div><div class="name">Judges</div></div>
+      <div class="step"><div class="n">Step 4</div><div class="name">Simulates</div></div>
+      <div class="step"><div class="n">Step 5</div><div class="name">Proves</div></div>
+      <div class="step"><div class="n">Step 6</div><div class="name">Accounts</div></div>
+    </div>
+
+    <svg class="axis" viewBox="0 0 1320 24" role="img" aria-label="Lifecycle river: six steps on one axis">
+      <line x1="0" y1="12" x2="1320" y2="12" stroke="var(--ink-mid)" stroke-width="1"/>
+      <circle cx="5" cy="12" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="229" cy="12" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="453" cy="12" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="677" cy="12" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="901" cy="12" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+      <circle cx="1125" cy="12" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+    </svg>
+
+    <div class="g6">
+      <div class="count"><span>212 papers</span><span>45 findings</span><span>3 evidence clusters</span></div>
+      <div class="count"><span>Generation 12</span><span>40 items</span><span>best fitness 0.91</span></div>
+      <div class="count"><span>Council 5 of 6</span><span class="sage">GREENLIGHT</span><span>fitness 87.4</span></div>
+      <div class="count"><span>Hindcast skill 0.82</span><span>90% coverage 88%</span></div>
+      <div class="count"><span>41 claims scored</span><span>29 on or above</span><span>coverage 84%</span></div>
+      <div class="count"><span>6 wheels</span><span>every order logged on the clock</span></div>
+    </div>
+
+    <div class="lbl rooms-lbl">THE ROOMS</div>
+
+    <div class="g6">
+      <div class="room">
+        <div class="rn">Library</div>
+        <p class="rd">What the machine has read and knows. Every claim extracted verbatim, with its source.</p>
+        <a class="door" href="#">Open ▸</a>
+      </div>
+      <div class="room">
+        <div class="rn">Pipeline</div>
+        <p class="rd">The living population moving through one river, one candidate enlarged for judgment.</p>
+        <a class="door" href="#">Open ▸</a>
+      </div>
+      <div class="room">
+        <div class="rn">Dossier</div>
+        <p class="rd">One innovation, the whole case: mechanism, economics, each judge's reason, the decision.</p>
+        <a class="door" href="#">Open ▸</a>
+      </div>
+      <div class="room">
+        <div class="rn">Simulation</div>
+        <p class="rd">A calibrated simulator scored against what actually happened.</p>
+        <a class="door" href="#">Open ▸</a>
+      </div>
+      <div class="room">
+        <div class="rn">Portfolio</div>
+        <p class="rd">The book of bets that made it, thesis beside reality.</p>
+        <a class="door" href="#">Open ▸</a>
+      </div>
+      <div class="room">
+        <div class="rn">Engine Room</div>
+        <p class="rd">The machine accounts for itself; the owner steers it.</p>
+        <a class="door" href="#">Open ▸</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE OWNER: catalogue note -->
+  <section class="owner g12">
+    <span class="lbl">THE OWNER</span>
+    <div class="note">
+      <p class="lead">The owner does not operate the machine. The owner reviews winners, believes or challenges the receipts, and decides.</p>
+      <p class="rest">Every claim carries its source. Every verdict is recorded with its reason. Nothing is deleted.</p>
+      <p class="rest">Built for commercial poultry first. The engine is general.</p>
+    </div>
+    <div class="ops">
+      <a class="pri" href="#">Open Today</a>
+      <a class="sec" href="#">Sign in</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <div class="foot"><span>Palingenesis</span></div>
+</footer>
+
+</body>
+</html>

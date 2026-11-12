@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Palingenesis — Engine Room</title>
+<style>
+  :root{
+    --bg:#1B1917; --ink:#E7E3DA; --mut:#A69D90; --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --sage:#8AA37B; --clay:#C08262;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{
+    color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    font-size:12px; line-height:1.45;
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+    min-height:900px;
+  }
+  .mono, .b, .a, .fig, .tm{
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    font-variant-numeric:tabular-nums;
+  }
+  .wrap{width:1440px;margin:0 auto;padding:0 36px}
+
+  /* ---------- nav ---------- */
+  nav{display:flex;align-items:center;justify-content:space-between;height:50px;border-bottom:1px solid var(--hair)}
+  .brand{font-family:Georgia,"Times New Roman",serif;font-size:18px;color:var(--ink);letter-spacing:0.01em}
+  .links{display:flex;gap:24px}
+  .links span{font-size:12px;text-transform:uppercase;letter-spacing:0.14em;color:var(--mut)}
+  .links span.act{color:var(--ink);border-bottom:2px solid var(--sage);padding-bottom:4px}
+
+  /* ---------- verdict lede + suspend ---------- */
+  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:48px;padding:18px 0 14px}
+  .lede{font-family:Georgia,"Times New Roman",serif;font-size:23px;line-height:1.38;max-width:930px;color:var(--ink)}
+  .lede strong{font-weight:700}
+  .lede .fig{font-size:19px;color:var(--ink)}
+  .pulse{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--sage);margin-right:9px;vertical-align:2px}
+  .sub{margin-top:8px;font-size:12px;color:var(--mut)}
+  .sub .tm{color:var(--mut)}
+  .suspend{width:400px;flex:none;padding-top:4px}
+  .susp{
+    display:block;height:40px;min-height:24px;padding:0 20px;width:100%;
+    background:transparent;border:1px solid rgba(231,227,218,0.45);border-radius:2px;
+    color:var(--ink);font-size:12px;text-transform:uppercase;letter-spacing:0.14em;
+    font-family:inherit;cursor:pointer;
+  }
+  .susp:hover{background:rgba(231,227,218,0.06)}
+  .conseq{margin-top:8px;font-size:12px;color:var(--mut);line-height:1.5}
+
+  /* ---------- grid title / legend ---------- */
+  .gt{display:flex;justify-content:space-between;align-items:baseline;padding:6px 0 8px}
+  .lbl{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.14em;color:var(--mut)}
+  .legend{font-size:12px;color:var(--mut)}
+  .legend .tm{color:var(--mut)}
+  .legend .ac{color:var(--ink)}
+  .legend .lt{color:var(--clay)}
+  .legend .sc{text-decoration:line-through}
+  .legend .nw{color:var(--sage)}
+  .legend i{font-style:normal;margin:0 5px;color:var(--fnt)}
+
+  /* ---------- timetable ---------- */
+  .grid{display:grid;grid-template-columns:260px repeat(16,1fr);border-bottom:1px solid var(--hair)}
+  .hd{border-top:1px solid var(--hair);padding:6px 2px 7px;text-align:center;display:flex;flex-direction:column;justify-content:center;gap:1px}
+  .hd .cy{font-size:12px;color:var(--mut)}
+  .hd .tm{font-size:12px;color:var(--ink)}
+  .hd0{border-top:1px solid var(--hair);display:flex;align-items:center;padding:6px 14px;position:relative}
+  .hd.n{border-top:3px solid var(--sage);padding-top:4px}
+  .hd.n .cy{color:var(--sage)}
+  .c{border-top:1px solid var(--hair);border-left:1px solid var(--hair);padding:8px 2px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;min-height:76px}
+  .hd.t{border-left:1px solid var(--hair)}
+  .n{background:rgba(138,163,123,0.07)}
+  .b{display:block;font-size:12px;color:var(--mut)}
+  .a{display:block;font-size:12px;color:var(--ink)}
+  .a.late{color:var(--clay)}
+  .a.live{color:var(--sage)}
+  .x{text-decoration:line-through}
+  .scr{display:block;font-size:12px;color:var(--clay)}
+  .nb{font-size:12px;color:var(--mut)}
+
+  /* ---------- station row heads ---------- */
+  .st{border-top:1px solid var(--hair);padding:9px 14px 12px;position:relative;display:flex;flex-direction:column;gap:2px}
+  .r1{display:flex;align-items:baseline;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--mut);flex:none;align-self:center}
+  .dot.on{background:var(--sage);border-color:var(--sage)}
+  .nm{font-size:14px;font-weight:620;color:var(--ink)}
+  .id{font-size:12px;color:var(--mut)}
+  .usd{margin-left:auto;font-size:13px;color:var(--ink)}
+  .job{font-size:12px;color:var(--mut)}
+  .stt{font-size:12px;color:var(--ink)}
+  .stt .m{color:var(--mut)}
+  .tot{font-size:12px;color:var(--mut)}
+  .tot b{font-weight:600;color:var(--ink)}
+  .flow{position:absolute;left:14px;bottom:-9px;z-index:3;background:var(--bg);padding-right:9px;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);white-space:nowrap}
+  .flow b{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-weight:600;color:var(--ink)}
+  .hd0 .flow{left:14px}
+
+  /* ---------- drill law ---------- */
+  .drill{display:flex;align-items:baseline;gap:14px;padding:9px 0;border-bottom:1px solid var(--hair)}
+  .drill .lbl{color:var(--sage);flex:none}
+  .drill p{font-size:12px;color:var(--mut)}
+  .drill .rt{margin-left:auto;font-size:12px;color:var(--mut);white-space:nowrap}
+
+  /* ---------- footer panels ---------- */
+  .panels{display:grid;grid-template-columns:320px 252px 292px 1fr;gap:30px;padding:12px 0 10px}
+  .p h3{margin-bottom:7px}
+  .row{display:flex;justify-content:space-between;gap:10px;font-size:12px;line-height:1.62}
+  .row .k{color:var(--mut)}
+  .row .v{color:var(--ink);text-align:right;white-space:nowrap}
+  .capline{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+  .capline .big{font-size:20px;color:var(--ink);font-weight:600}
+  .capline .of{font-size:14px;color:var(--fnt)}
+  .capline .pct{margin-left:auto;font-size:12px;color:var(--mut)}
+  .meter{position:relative;height:6px;background:rgba(231,227,218,0.10);margin:2px 0 7px}
+  .meter .fill{position:absolute;left:0;top:0;bottom:0;width:65.4%;background:var(--sage)}
+  .meter .tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);left:92.2%}
+  .meter .guard{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--clay);left:96%}
+  .cap-notes{font-size:12px;color:var(--mut);line-height:1.6}
+  .cap-notes .ok{color:var(--sage)}
+  .inc{font-size:12px;color:var(--mut);line-height:1.55;display:flex;gap:9px;margin-bottom:5px}
+  .inc .tm{color:var(--ink);flex:none}
+  .inc .sv{color:var(--ink);flex:none}
+  .inc .tx b{color:var(--ink);font-weight:600}
+  .inc .chip{flex:none;align-self:flex-start;border:1px solid var(--hair);border-radius:2px;padding:0 6px;color:var(--mut);white-space:nowrap}
+
+  /* ---------- motto ---------- */
+  .motto{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--hair);padding:10px 0 14px}
+  .motto .m{font-family:Georgia,"Times New Roman",serif;font-style:italic;font-size:14px;color:var(--fnt)}
+  .motto .tm{font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <div class="brand">Palingenesis</div>
+    <div class="links">
+      <span>Today</span><span>Pipeline</span><span>Library</span><span>Portfolio</span><span>Simulation</span><span class="act">Engine Room</span>
+    </div>
+  </nav>
+
+  <div class="top">
+    <div>
+      <p class="lede"><span class="pulse"></span><strong>Running.</strong> Cycle <span class="fig">09</span> of <span class="fig">16</span> is on the clock — Simulate live, on time. <span class="fig">$327.18</span> of the <span class="fig">$500.00</span> August cap is spent, <span class="fig">$21.05</span> of it today; the next cycle books at <span class="fig">15:00:00</span>.</p>
+      <p class="sub">written <span class="tm">14:32:07</span> · c09 began <span class="tm">14:00:00</span> · stage 4 of 6 · 8 cycles done · 1 live · 7 booked ahead</p>
+    </div>
+    <div class="suspend">
+      <button class="susp">Suspend generation</button>
+      <p class="conseq">Finishes the live trial (~<span class="tm">14:40</span>), then holds every later cycle — c10 through c16 stay booked, unrun. Nothing is deleted; the ledger and the library stay readable. Resume rebooks at the next hour.</p>
+    </div>
+  </div>
+
+  <div class="gt">
+    <span class="lbl">Timetable — Fri 22 Aug 2026 · booked over actual · all times Central</span>
+    <span class="legend"><span class="tm">06:00</span> booked<i>·</i><span class="ac tm">06:00</span> actual<i>·</i><span class="lt tm">09:09 +9</span> late<i>·</i><span class="sc">scrubbed</span> cancelled<i>·</i><span class="tm">—</span> not booked<i>·</i><span class="nw tm">c09 ●</span> now</span>
+  </div>
+
+  <div class="grid">
+    <!-- header row -->
+    <div class="hd0"><span class="lbl">Stations ▾ · Cycles ▸</span>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>142</b> papers in</span>
+    </div>
+    <div class="hd t"><span class="cy">c01</span><span class="tm">06:00</span></div>
+    <div class="hd t"><span class="cy">c02</span><span class="tm">07:00</span></div>
+    <div class="hd t"><span class="cy">c03</span><span class="tm">08:00</span></div>
+    <div class="hd t"><span class="cy">c04</span><span class="tm">09:00</span></div>
+    <div class="hd t"><span class="cy">c05</span><span class="tm">10:00</span></div>
+    <div class="hd t"><span class="cy">c06</span><span class="tm">11:00</span></div>
+    <div class="hd t"><span class="cy">c07</span><span class="tm">12:00</span></div>
+    <div class="hd t"><span class="cy">c08</span><span class="tm">13:00</span></div>
+    <div class="hd t n"><span class="cy">c09 · now</span><span class="tm">14:00</span></div>
+    <div class="hd t"><span class="cy">c10</span><span class="tm">15:00</span></div>
+    <div class="hd t"><span class="cy">c11</span><span class="tm">16:00</span></div>
+    <div class="hd t"><span class="cy">c12</span><span class="tm">17:00</span></div>
+    <div class="hd t"><span class="cy">c13</span><span class="tm">18:00</span></div>
+    <div class="hd t"><span class="cy">c14</span><span class="tm">19:00</span></div>
+    <div class="hd t"><span class="cy">c15</span><span class="tm">20:00</span></div>
+    <div class="hd t"><span class="cy">c16</span><span class="tm">21:00</span></div>
+
+    <!-- READ -->
+    <div class="st">
+      <div class="r1"><span class="dot"></span><span class="nm">Read</span><span class="id">reader-1</span><span class="usd">$1.94</span></div>
+      <div class="job">pulls sourced claims from the feeds</div>
+      <div class="stt">idle since <span class="tm">14:06</span> <span class="m">· last: 9 papers, 31 claims</span></div>
+      <div class="tot">today <b>142</b> papers → <b>517</b> claims</div>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>517</b> claims</span>
+    </div>
+    <div class="c"><span class="b">06:00</span><span class="a">06:00</span></div>
+    <div class="c"><span class="b">07:00</span><span class="a">07:00</span></div>
+    <div class="c"><span class="b">08:00</span><span class="a">08:00</span></div>
+    <div class="c"><span class="b">09:00</span><span class="a late">09:09 +9</span></div>
+    <div class="c"><span class="b">10:00</span><span class="a">10:00</span></div>
+    <div class="c"><span class="b">11:00</span><span class="a">11:00</span></div>
+    <div class="c"><span class="b">12:00</span><span class="a">12:00</span></div>
+    <div class="c"><span class="b">13:00</span><span class="a">13:00</span></div>
+    <div class="c n"><span class="b">14:00</span><span class="a">14:00</span></div>
+    <div class="c"><span class="b">15:00</span></div>
+    <div class="c"><span class="b">16:00</span></div>
+    <div class="c"><span class="b">17:00</span></div>
+    <div class="c"><span class="b">18:00</span></div>
+    <div class="c"><span class="b">19:00</span></div>
+    <div class="c"><span class="b">20:00</span></div>
+    <div class="c"><span class="b">21:00</span></div>
+
+    <!-- SCOUT -->
+    <div class="st">
+      <div class="r1"><span class="dot"></span><span class="nm">Scout</span><span class="id">scout-1</span><span class="usd">$2.61</span></div>
+      <div class="job">sifts claims for workable leads</div>
+      <div class="stt">idle since <span class="tm">14:14</span> <span class="m">· last: 3 candidates (c09)</span></div>
+      <div class="tot">today <b>517</b> claims → <b>38</b> candidates</div>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>38</b> candidates</span>
+    </div>
+    <div class="c"><span class="b">06:08</span><span class="a">06:08</span></div>
+    <div class="c"><span class="b">07:08</span><span class="a">07:08</span></div>
+    <div class="c"><span class="b">08:08</span><span class="a">08:08</span></div>
+    <div class="c"><span class="b">09:08</span><span class="a late">09:17 +9</span></div>
+    <div class="c"><span class="b">10:08</span><span class="a">10:08</span></div>
+    <div class="c"><span class="b">11:08</span><span class="a">11:08</span></div>
+    <div class="c"><span class="b">12:08</span><span class="a">12:08</span></div>
+    <div class="c"><span class="b">13:08</span><span class="a">13:08</span></div>
+    <div class="c n"><span class="b">14:08</span><span class="a">14:08</span></div>
+    <div class="c"><span class="b">15:08</span></div>
+    <div class="c"><span class="b">16:08</span></div>
+    <div class="c"><span class="b">17:08</span></div>
+    <div class="c"><span class="b">18:08</span></div>
+    <div class="c"><span class="b">19:08</span></div>
+    <div class="c"><span class="b">20:08</span></div>
+    <div class="c"><span class="b">21:08</span></div>
+
+    <!-- DELIBERATE -->
+    <div class="st">
+      <div class="r1"><span class="dot"></span><span class="nm">Deliberate</span><span class="id">council-1</span><span class="usd">$6.88</span></div>
+      <div class="job">scores each candidate; keeps or kills</div>
+      <div class="stt">idle since <span class="tm">14:24</span> <span class="m">· last: 4 verdicts, 1 kept</span></div>
+      <div class="tot">today <b>38</b> in · <b>31</b> verdicts · <b>9</b> advanced</div>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>9</b> advanced</span>
+    </div>
+    <div class="c"><span class="b">06:16</span><span class="a">06:16</span></div>
+    <div class="c"><span class="b">07:16</span><span class="a">07:16</span></div>
+    <div class="c"><span class="b">08:16</span><span class="a">08:16</span></div>
+    <div class="c"><span class="b">09:16</span><span class="a late">09:24 +8</span></div>
+    <div class="c"><span class="b">10:16</span><span class="a">10:16</span></div>
+    <div class="c"><span class="b">11:16</span><span class="a">11:16</span></div>
+    <div class="c"><span class="b">12:16</span><span class="a late">12:20 +4</span></div>
+    <div class="c"><span class="b">13:16</span><span class="a">13:16</span></div>
+    <div class="c n"><span class="b">14:16</span><span class="a">14:16</span></div>
+    <div class="c"><span class="b">15:16</span></div>
+    <div class="c"><span class="b">16:16</span></div>
+    <div class="c"><span class="b">17:16</span></div>
+    <div class="c"><span class="b">18:16</span></div>
+    <div class="c"><span class="b">19:16</span></div>
+    <div class="c"><span class="b">20:16</span></div>
+    <div class="c"><span class="b">21:16</span></div>
+
+    <!-- SIMULATE -->
+    <div class="st">
+      <div class="r1"><span class="dot on"></span><span class="nm">Simulate</span><span class="id">simulator-1</span><span class="usd">$9.12</span></div>
+      <div class="job">runs kept ideas as coded field trials</div>
+      <div class="stt">running since <span class="tm">14:26</span> <span class="m">· trial 8 of 9</span></div>
+      <div class="tot">today <b>7</b> done · <b>1</b> live · <b>1</b> queued</div>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>31</b> verdicts + <b>7</b> results</span>
+    </div>
+    <div class="c"><span class="b">06:26</span><span class="a">06:26</span></div>
+    <div class="c"><span class="b">07:26</span><span class="a">07:26</span></div>
+    <div class="c"><span class="b">08:26</span><span class="a">08:26</span></div>
+    <div class="c"><span class="b">09:26</span><span class="a late">09:31 +5</span></div>
+    <div class="c"><span class="b x">10:26</span><span class="scr">scrubbed</span></div>
+    <div class="c"><span class="b">11:26</span><span class="a">11:26</span></div>
+    <div class="c"><span class="b">12:26</span><span class="a late">12:28 +2</span></div>
+    <div class="c"><span class="b">13:26</span><span class="a">13:26</span></div>
+    <div class="c n"><span class="b">14:26</span><span class="a live">14:26 ●</span></div>
+    <div class="c"><span class="b">15:26</span></div>
+    <div class="c"><span class="b">16:26</span></div>
+    <div class="c"><span class="b">17:26</span></div>
+    <div class="c"><span class="b">18:26</span></div>
+    <div class="c"><span class="b">19:26</span></div>
+    <div class="c"><span class="b">20:26</span></div>
+    <div class="c"><span class="b">21:26</span></div>
+
+    <!-- ARCHIVE -->
+    <div class="st">
+      <div class="r1"><span class="dot"></span><span class="nm">Archive</span><span class="id">archivist-1</span><span class="usd">$0.41</span></div>
+      <div class="job">files every verdict with its sources</div>
+      <div class="stt">idle since <span class="tm">13:43</span> <span class="m">· last: 5 records (c08)</span></div>
+      <div class="tot">today <b>38</b> records · <b>0</b> unsourced</div>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>38</b> records</span>
+    </div>
+    <div class="c"><span class="b">06:40</span><span class="a">06:40</span></div>
+    <div class="c"><span class="b">07:40</span><span class="a">07:40</span></div>
+    <div class="c"><span class="b">08:40</span><span class="a">08:40</span></div>
+    <div class="c"><span class="b">09:40</span><span class="a late">09:43 +3</span></div>
+    <div class="c"><span class="b">10:40</span><span class="a">10:40</span></div>
+    <div class="c"><span class="b">11:40</span><span class="a">11:40</span></div>
+    <div class="c"><span class="b">12:40</span><span class="a">12:40</span></div>
+    <div class="c"><span class="b">13:40</span><span class="a">13:40</span></div>
+    <div class="c n"><span class="b">14:40</span></div>
+    <div class="c"><span class="b">15:40</span></div>
+    <div class="c"><span class="b">16:40</span></div>
+    <div class="c"><span class="b">17:40</span></div>
+    <div class="c"><span class="b">18:40</span></div>
+    <div class="c"><span class="b">19:40</span></div>
+    <div class="c"><span class="b">20:40</span></div>
+    <div class="c"><span class="b">21:40</span></div>
+
+    <!-- DISPATCH -->
+    <div class="st">
+      <div class="r1"><span class="dot"></span><span class="nm">Dispatch</span><span class="id">courier-1</span><span class="usd">$0.09</span></div>
+      <div class="job">sends the owner's brief; nothing else</div>
+      <div class="stt">idle since <span class="tm">13:52</span> <span class="m">· last: midday brief, as link</span></div>
+      <div class="tot">today <b>2</b> of <b>3</b> briefs sent · next <b>18:46</b></div>
+      <span class="flow"><svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M5 1v8M1.5 6.5 5 10l3.5-3.5" stroke="#8AA37B" stroke-width="1.4"/></svg><b>2</b> briefs → owner</span>
+    </div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="b">07:46</span><span class="a">07:46</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="b">13:46</span><span class="a late">13:52 +6</span></div>
+    <div class="c n"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="b">18:46</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+    <div class="c"><span class="nb">—</span></div>
+  </div>
+
+  <div class="drill">
+    <span class="lbl">Drill law</span>
+    <p>Every figure on this board opens to the run that made it — prompt, sources, seconds, cents. A number that cannot show its floor does not ship.</p>
+    <span class="rt"><span class="tm">2,113</span> calls on today's log</span>
+  </div>
+
+  <div class="panels">
+    <div class="p">
+      <h3 class="lbl">Ledger — August cap</h3>
+      <div class="capline"><span class="big mono">$327.18</span><span class="of">of <span class="mono">$500.00</span></span><span class="pct mono">65.4%</span></div>
+      <div class="meter"><span class="fill"></span><span class="tick"></span><span class="guard"></span></div>
+      <p class="cap-notes">today <span class="mono">$21.05</span> · avg <span class="mono">$14.87</span>/day · 22 days in, 9 left<br>
+      projected close 31 Aug <span class="mono">$461.03</span> — <span class="ok">clears the cap by <span class="mono">$38.97</span></span><br>
+      guard halts new cycles at <span class="mono">$480.00</span> (96%)</p>
+    </div>
+    <div class="p">
+      <h3 class="lbl">Scheduler</h3>
+      <div class="row"><span class="k">cadence</span><span class="v">hourly · 06:00–21:00 · 16/day</span></div>
+      <div class="row"><span class="k">next cycle</span><span class="v">c10 at 15:00:00</span></div>
+      <div class="row"><span class="k">briefs</span><span class="v">07:46 · 13:46 · 18:46</span></div>
+      <div class="row"><span class="k">quiet hours</span><span class="v">22:00–05:30 Central</span></div>
+      <div class="row"><span class="k">on failure</span><span class="v">retry ×3, then flag</span></div>
+    </div>
+    <div class="p">
+      <h3 class="lbl">Data — freshness</h3>
+      <div class="row"><span class="k">journal feeds (12)</span><span class="v">14:02 · 96 papers</span></div>
+      <div class="row"><span class="k">preprint wire</span><span class="v">13:58 · 41</span></div>
+      <div class="row"><span class="k">extension bulletins</span><span class="v">13:11 · 5</span></div>
+      <div class="row"><span class="k">USDA crop tables</span><span class="v">13:45</span></div>
+      <div class="row"><span class="k">NOAA weather</span><span class="v">12:20</span></div>
+      <div class="row"><span class="k">trial corpus v2.3</span><span class="v">local · 19,240 rows</span></div>
+      <div class="row"><span class="k">claims with sources</span><span class="v">517 of 517</span></div>
+    </div>
+    <div class="p">
+      <h3 class="lbl">Incidents — 4 today · 0 open</h3>
+      <div class="inc"><span class="tm">09:04</span><span class="sv">reader-1</span><span class="tx">feed API timed out ×3 → <b>retried; clear 09:13</b>, c04 ran +9m</span><span class="chip">resolved</span></div>
+      <div class="inc"><span class="tm">10:24</span><span class="sv">simulator-1</span><span class="tx">no candidate ≥ 0.60 → <b>c05 trial scrubbed</b>, $0.00 spent</span><span class="chip">closed</span></div>
+      <div class="inc"><span class="tm">12:16</span><span class="sv">council-1</span><span class="tx">judge quorum 2 of 3 → <b>third opinion re-asked</b>; verdict held 4m</span><span class="chip">resolved</span></div>
+      <div class="inc"><span class="tm">13:47</span><span class="sv">courier-1</span><span class="tx">brief bounced at 12.4 MB → <b>re-sent as link 13:52</b>; delivered</span><span class="chip">resolved</span></div>
+    </div>
+  </div>
+
+  <div class="motto">
+    <span class="m">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="tm">page written 14:32:07 · Fri 22 Aug 2026</span>
+  </div>
+
+</div>
+</body>
+</html>

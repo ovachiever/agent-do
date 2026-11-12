@@ -18,11 +18,13 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::federation;
 use crate::issue::{Issue, IssueStatus, IssueType};
 use crate::reconcile::manna_trailer_ids;
 use crate::store::MannaStore;
+use crate::track::{is_paired, track_children};
 
 pub const DEFAULT_DECISION_MARKERS: &[&str] = &["[DECISION]", "[HUMAN]", "[OWNER]"];
 const ATTENTION_ORDER: &[&str] = &[
@@ -36,6 +38,8 @@ const ATTENTION_ORDER: &[&str] = &[
     "gone",
 ];
 const LIVE_OWNERS: &[&str] = &["active", "idle"];
+const PRESENTATION_SUMMARY_MAX_CHARS: usize = 450;
+const PRESENTATION_SUMMARY_MAX_WORDS: usize = 65;
 
 #[derive(Debug, Clone)]
 pub struct StateOptions {
@@ -231,6 +235,179 @@ fn modified_at(path: &Path) -> Option<String> {
         .ok()
         .map(DateTime::<Utc>::from)
         .map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true))
+}
+
+fn agent_do_home() -> Option<PathBuf> {
+    std::env::var_os("AGENT_DO_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".agent-do"))
+        })
+}
+
+fn safe_cache_slug(slug: &str) -> String {
+    let mut safe = String::new();
+    let mut replacing = false;
+    for character in slug.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+            safe.push(character);
+            replacing = false;
+        } else if !replacing {
+            safe.push('_');
+            replacing = true;
+        }
+    }
+    if safe.is_empty() {
+        "board".to_string()
+    } else {
+        safe
+    }
+}
+
+/// Resolve presentation state through the serve registry. `manna state`
+/// never registers a board, creates a cache directory, or invokes a model.
+/// A board with no matching registry row therefore pays only a failed local
+/// file read and emits the same row shape it did before presentation caching.
+fn presentation_cache_at(home: &Path, root: &Path) -> HashMap<String, Value> {
+    let registry_path = home.join("manna/serve/boards.json");
+    let Ok(registry_text) = fs::read_to_string(registry_path) else {
+        return HashMap::new();
+    };
+    let Ok(registry) = serde_json::from_str::<Value>(&registry_text) else {
+        return HashMap::new();
+    };
+    let Some(boards) = registry.get("boards").and_then(Value::as_object) else {
+        return HashMap::new();
+    };
+    let Some(slug) = boards.iter().find_map(|(slug, entry)| {
+        let registered = entry.get("path").and_then(Value::as_str)?;
+        (Path::new(registered) == root).then_some(slug.as_str())
+    }) else {
+        return HashMap::new();
+    };
+    let cache_path = home
+        .join("manna/serve/digests")
+        .join(format!("{}.json", safe_cache_slug(slug)));
+    let Ok(cache_text) = fs::read_to_string(cache_path) else {
+        return HashMap::new();
+    };
+    let Ok(cache) = serde_json::from_str::<Value>(&cache_text) else {
+        return HashMap::new();
+    };
+    cache
+        .get("digests")
+        .and_then(Value::as_object)
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|(id, entry)| (id.clone(), entry.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn presentation_cache(root: &Path) -> HashMap<String, Value> {
+    agent_do_home()
+        .map(|home| presentation_cache_at(&home, root))
+        .unwrap_or_default()
+}
+
+/// Python's digest writer uses json.dumps(..., sort_keys=True), including
+/// ensure_ascii escaping. Keep that byte contract here so existing cache
+/// hashes remain valid across the Python writer and Rust reader.
+fn python_json_string(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            '\u{08}' => encoded.push_str("\\b"),
+            '\u{0c}' => encoded.push_str("\\f"),
+            '\n' => encoded.push_str("\\n"),
+            '\r' => encoded.push_str("\\r"),
+            '\t' => encoded.push_str("\\t"),
+            character if character.is_ascii() && !character.is_control() => {
+                encoded.push(character);
+            }
+            character => {
+                let scalar = character as u32;
+                if scalar <= 0xffff {
+                    encoded.push_str(&format!("\\u{scalar:04x}"));
+                } else {
+                    let value = scalar - 0x1_0000;
+                    let high = 0xd800 + (value >> 10);
+                    let low = 0xdc00 + (value & 0x3ff);
+                    encoded.push_str(&format!("\\u{high:04x}\\u{low:04x}"));
+                }
+            }
+        }
+    }
+    encoded.push('"');
+    encoded
+}
+
+fn presentation_content_hash(row: &Map<String, Value>) -> String {
+    let title = row.get("title").and_then(Value::as_str).unwrap_or("");
+    let description = row
+        .get("description")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let kind = row
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("item");
+    let material = format!(
+        "{{\"d\": {}, \"k\": {}, \"t\": {}}}",
+        python_json_string(description),
+        python_json_string(kind),
+        python_json_string(title)
+    );
+    let digest = format!("{:x}", Sha256::digest(material.as_bytes()));
+    digest[..16].to_string()
+}
+
+fn attach_cached_presentation(row: &mut Map<String, Value>, cache: &HashMap<String, Value>) {
+    let Some(id) = row.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(entry) = cache.get(id).and_then(Value::as_object) else {
+        return;
+    };
+    let content_hash = presentation_content_hash(row);
+    if entry.get("hash").and_then(Value::as_str) != Some(content_hash.as_str()) {
+        return;
+    }
+
+    let is_track = row.get("type").and_then(Value::as_str) == Some("track");
+    if !is_track {
+        if let Some(digest) = entry
+            .get("digest")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            row.insert("digest".to_string(), Value::String(digest.to_string()));
+        }
+    }
+
+    let expected_summary_hash = format!(
+        "{}:{}:{}",
+        content_hash, PRESENTATION_SUMMARY_MAX_CHARS, PRESENTATION_SUMMARY_MAX_WORDS
+    );
+    if entry.get("summary_hash").and_then(Value::as_str) == Some(expected_summary_hash.as_str()) {
+        if let Some(summary) = entry
+            .get("summary")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            row.insert("summary".to_string(), Value::String(summary.to_string()));
+        }
+    }
 }
 
 fn yaml_object(path: &Path) -> Map<String, Value> {
@@ -597,7 +774,7 @@ fn leading_tags(title: &str) -> Vec<String> {
     tags
 }
 
-fn is_decision(title: &str, markers: &[String]) -> bool {
+pub(crate) fn is_decision(title: &str, markers: &[String]) -> bool {
     let tags: HashSet<String> = leading_tags(title).into_iter().collect();
     markers
         .iter()
@@ -858,6 +1035,43 @@ fn now_cmp(left: &Value, right: &Value) -> Ordering {
         .then_with(|| order_cmp(left, right))
 }
 
+/// Managed-lifecycle summary per item, from the sidecar beside the board.
+/// Null for an unmanaged item; a human window renders what a coordinator
+/// still owes rather than guessing from status alone.
+fn managed_summaries(root: &Path, issues: &[Issue]) -> HashMap<String, Value> {
+    let store = crate::managed::ManagedStore::new(root);
+    let managed = match store.load_managed() {
+        Ok(file) => file,
+        Err(_) => return HashMap::new(),
+    };
+    let mut out = HashMap::new();
+    for issue in issues {
+        let Some(record) = managed.items.get(&issue.id) else {
+            continue;
+        };
+        let blockers = crate::managed::closure_blockers(issue, record);
+        out.insert(
+            issue.id.clone(),
+            json!({
+                "attempt": record.attempt,
+                "grant": record.grant,
+                "required": record.required,
+                "accepted": record.accepted_checks().iter().map(|a| a.check.clone()).collect::<Vec<_>>(),
+                "outstanding": record.outstanding_checks(),
+                "submission": record.current_submission().map(|s| json!({
+                    "by": s.by, "at": s.at, "status": s.status, "revision": s.revision,
+                })),
+                "target": record.target.as_ref().map(|t| json!({
+                    "reference": t.reference, "sha": t.sha, "kind": t.kind,
+                })),
+                "closable": issue.status != IssueStatus::Done && blockers.is_empty(),
+                "blockers": blockers,
+            }),
+        );
+    }
+    out
+}
+
 fn public_issue(issue: &Issue) -> Result<Map<String, Value>, String> {
     let mut value = serde_json::to_value(issue).map_err(|error| error.to_string())?;
     let row = value
@@ -880,6 +1094,7 @@ struct DeriveInputs<'a> {
     drift: Value,
     federation: Value,
     relations: &'a HashMap<String, Vec<Value>>,
+    presentation: &'a HashMap<String, Value>,
 }
 
 fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
@@ -895,6 +1110,7 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
         drift,
         federation,
         relations,
+        presentation,
     } = inputs;
     let board_dir = root.join(".manna");
     let workflow = yaml_object(&board_dir.join("workflow.yaml"));
@@ -919,6 +1135,7 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
         .map(|issue| (issue.id.as_str(), issue.title.as_str()))
         .collect();
 
+    let managed_rows = managed_summaries(root, issues);
     let mut rows = Vec::new();
     for issue in issues {
         let blockers: Vec<Value> = issue
@@ -937,15 +1154,27 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
         let peer = matching_peer(issue.claimed_by.as_deref(), &peers);
         let decision = issue.status != IssueStatus::Done && is_decision(&issue.title, markers);
         let kind = issue.issue_type.to_string();
+        // A track that carries a sealed handoff is a dispatchable assignment
+        // and follows the item lifecycle; it is "ready" only while the board
+        // offers an item to claim (or every item is done and the track can
+        // close), and "waiting" while all remaining work is held elsewhere,
+        // cycled, missing a dependency, or a human's to rule on. A track
+        // without a handoff stays an organizational container.
+        let children = (issue.issue_type == IssueType::Track)
+            .then(|| track_children(issues, issue, order, markers));
+        let dispatch_waits = children.as_ref().is_some_and(|summary| {
+            summary.next.is_none() && (summary.open > 0 || summary.total == 0)
+        });
         let effective = match issue.issue_type {
-            IssueType::Track => "track",
+            IssueType::Track if !is_paired(issue) => "track",
             IssueType::Dream if issue.status != IssueStatus::Done => "dream",
             IssueType::Dream => "done",
-            IssueType::Item if issue.status == IssueStatus::Done => "done",
-            IssueType::Item if issue.status == IssueStatus::InProgress => "active",
-            IssueType::Item if !blockers.is_empty() => "waiting",
-            IssueType::Item if decision => "decision",
-            IssueType::Item => "ready",
+            _ if issue.status == IssueStatus::Done => "done",
+            _ if issue.status == IssueStatus::InProgress => "active",
+            _ if !blockers.is_empty() => "waiting",
+            _ if decision => "decision",
+            IssueType::Track if dispatch_waits => "waiting",
+            _ => "ready",
         };
         let claimant = issue.claimed_by.as_ref().map(|claimed_by| {
             json!({
@@ -959,6 +1188,13 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
             })
         });
         let mut row = public_issue(issue)?;
+        row.insert(
+            "managed".to_string(),
+            managed_rows
+                .get(issue.id.as_str())
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
         row.insert("kind".to_string(), Value::String(kind));
         row.insert(
             "title_plain".to_string(),
@@ -989,6 +1225,13 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
                 .unwrap_or(Value::Null),
         );
         row.insert("blockers".to_string(), Value::Array(blockers));
+        if let Some(summary) = children {
+            row.insert(
+                "children".to_string(),
+                serde_json::to_value(summary)
+                    .map_err(|error| format!("failed to serialize track children: {}", error))?,
+            );
+        }
         row.insert("dependents".to_string(), json!([]));
         row.insert("decision".to_string(), Value::Bool(decision));
         row.insert("claimant".to_string(), claimant.unwrap_or(Value::Null));
@@ -1004,6 +1247,7 @@ fn derive(inputs: DeriveInputs<'_>) -> Result<Value, String> {
             "effective".to_string(),
             Value::String(effective.to_string()),
         );
+        attach_cached_presentation(&mut row, presentation);
         rows.push(Value::Object(row));
     }
 
@@ -1263,33 +1507,45 @@ pub fn derive_board_state(root: &Path, options: &StateOptions) -> Result<Value, 
         .get("is_repo")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let (trailers, peers, coord, drift, federation, relations) = thread::scope(|scope| {
-        let trailer_job = scope.spawn(|| git_trailers(&root, is_repo));
-        let presence_job = scope.spawn(|| {
-            if let Some(overlay) = coord_overlay(options) {
-                return overlay;
-            }
-            let peers = collect_peers(&root, options.agent_do.as_deref());
-            let coord = collect_coord(&root, options.agent_do.as_deref(), &peers);
-            (peers, coord)
-        });
-        let drift_job = scope.spawn(|| drift_state(&root, &board_dir, options));
-        let federation_job = scope.spawn(|| federation_state(&root, &issues));
-        let trailers = trailer_job.join().unwrap_or_default();
-        let (peers, coord) = presence_job
-            .join()
-            .unwrap_or_else(|_| (Vec::new(), empty_coord()));
-        let drift = drift_job
-            .join()
-            .unwrap_or_else(|_| drift_parts(&board_dir).0);
-        let (federation, relations) = federation_job.join().unwrap_or_else(|_| {
+    let (trailers, peers, coord, drift, federation, relations, presentation) = thread::scope(
+        |scope| {
+            let trailer_job = scope.spawn(|| git_trailers(&root, is_repo));
+            let presence_job = scope.spawn(|| {
+                if let Some(overlay) = coord_overlay(options) {
+                    return overlay;
+                }
+                let peers = collect_peers(&root, options.agent_do.as_deref());
+                let coord = collect_coord(&root, options.agent_do.as_deref(), &peers);
+                (peers, coord)
+            });
+            let drift_job = scope.spawn(|| drift_state(&root, &board_dir, options));
+            let federation_job = scope.spawn(|| federation_state(&root, &issues));
+            let presentation_job = scope.spawn(|| presentation_cache(&root));
+            let trailers = trailer_job.join().unwrap_or_default();
+            let (peers, coord) = presence_job
+                .join()
+                .unwrap_or_else(|_| (Vec::new(), empty_coord()));
+            let drift = drift_job
+                .join()
+                .unwrap_or_else(|_| drift_parts(&board_dir).0);
+            let (federation, relations) = federation_job.join().unwrap_or_else(|_| {
             (
                 json!({"enabled": false, "board_id": null, "relations": [], "error": "state federation worker failed"}),
                 HashMap::new(),
             )
         });
-        (trailers, peers, coord, drift, federation, relations)
-    });
+            let presentation = presentation_job.join().unwrap_or_default();
+            (
+                trailers,
+                peers,
+                coord,
+                drift,
+                federation,
+                relations,
+                presentation,
+            )
+        },
+    );
     derive(DeriveInputs {
         root: &root,
         issues: &issues,
@@ -1302,6 +1558,7 @@ pub fn derive_board_state(root: &Path, options: &StateOptions) -> Result<Value, 
         drift,
         federation,
         relations: &relations,
+        presentation: &presentation,
     })
 }
 
@@ -1455,6 +1712,106 @@ mod tests {
         }
         assert!(!contains_key(&state, "claim_token_hash"));
         assert!(!contains_key(&state, "legacy_migration"));
+    }
+
+    #[test]
+    fn presentation_hash_matches_the_python_cache_writer() {
+        let row = json!({
+            "title": "Ship “Résumé” — compass 🧭",
+            "description": "Line one\nLine two\u{7f}",
+            "type": "item",
+        });
+        assert_eq!(
+            presentation_content_hash(row.as_object().unwrap()),
+            "6843e053b291818f"
+        );
+    }
+
+    #[test]
+    fn presentation_cache_is_hash_gated_and_leaves_misses_absent() {
+        let mut row = json!({
+            "id": "mn-cache1",
+            "title": "Cached item",
+            "description": "Show one human-facing explanation.",
+            "type": "item",
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let hash = presentation_content_hash(&row);
+        let cache = HashMap::from([(
+            "mn-cache1".to_string(),
+            json!({
+                "hash": hash,
+                "digest": "Show the shared cached line",
+                "summary": "This explanation came from the shared presentation cache.",
+                "summary_hash": format!(
+                    "{}:{}:{}",
+                    hash, PRESENTATION_SUMMARY_MAX_CHARS, PRESENTATION_SUMMARY_MAX_WORDS
+                ),
+            }),
+        )]);
+
+        attach_cached_presentation(&mut row, &cache);
+        assert_eq!(row["digest"], "Show the shared cached line");
+        assert_eq!(
+            row["summary"],
+            "This explanation came from the shared presentation cache."
+        );
+
+        let mut changed = row.clone();
+        changed.remove("digest");
+        changed.remove("summary");
+        changed.insert(
+            "description".to_string(),
+            Value::String("The board row changed.".to_string()),
+        );
+        attach_cached_presentation(&mut changed, &cache);
+        assert!(!changed.contains_key("digest"));
+        assert!(!changed.contains_key("summary"));
+
+        let mut missing = json!({
+            "id": "mn-miss01",
+            "title": "No cache entry",
+            "type": "item",
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let original = missing.clone();
+        attach_cached_presentation(&mut missing, &cache);
+        assert_eq!(missing, original);
+    }
+
+    #[test]
+    fn presentation_cache_follows_the_registered_board_without_writing() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let root = temp.path().join("project");
+        let serve = home.join("manna/serve");
+        let digests = serve.join("digests");
+        fs::create_dir_all(&digests).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            serve.join("boards.json"),
+            serde_json::to_vec(&json!({
+                "version": 1,
+                "boards": {"Project Board": {"path": root}},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let cache_path = digests.join("Project_Board.json");
+        let cache_bytes = serde_json::to_vec(&json!({
+            "version": 1,
+            "digests": {"mn-cache1": {"hash": "abc", "digest": "Cached"}},
+        }))
+        .unwrap();
+        fs::write(&cache_path, &cache_bytes).unwrap();
+
+        let cache = presentation_cache_at(&home, &root);
+        assert_eq!(cache["mn-cache1"]["digest"], "Cached");
+        assert_eq!(fs::read(cache_path).unwrap(), cache_bytes);
     }
 
     #[test]
