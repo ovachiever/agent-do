@@ -97,6 +97,49 @@ def test_commit_guards(root: Path, env: dict[str, str]) -> None:
     require(events.is_file() and "git_secret_scan_bypass" in events.read_text(encoding="utf-8"), "bypass was not logged")
 
 
+def test_provider_key_boundaries(root: Path, env: dict[str, str]) -> None:
+    repo = init_repo(root, "provider-boundary-repo")
+    fixture = repo / "board.txt"
+    slug = ".handoff/74-mn-480f8e-field-check-ask-chat-in-the-installed-holy-one-real-turn-return-s.md"
+    provider_keys = [
+        "sk-" + "fixture-only-abcdefghijklmnopqrstuvwxyz",
+        "AKIA" + "0123456789ABCDEF",
+        *["gh" + kind + "_" + "fixture_only_abcdefghijklmnopqrstuvwxyz" for kind in "opusr"],
+    ]
+    harmless = [slug.replace("ask-", word + "-") for word in ("ask", "task", "risk", "disk", "desk")]
+    harmless += [prefix + key for key in provider_keys for prefix in ("a", "Z", "7")]
+    fixture.write_text("\n".join(harmless) + "\n", encoding="utf-8")
+    (repo / "unstaged.txt").write_text("leave unstaged\n", encoding="utf-8")
+    git(repo, "add", fixture.name)
+    before = git(repo, "rev-parse", "HEAD").stdout.strip()
+    accepted = agent(repo, "commit", "test: harmless board slugs", "--json", env=env)
+    require(accepted.returncode == 0, f"scan blocked harmless slugs: {accepted.stderr or accepted.stdout}")
+    payload = json_payload(accepted)
+    require(payload["blocked"] is False and payload["findings"] == [], "harmless slugs produced findings")
+    committed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    require(committed != before and payload["commit"] == committed, "harmless staged slugs were not committed")
+    require(git(repo, "show", "HEAD:board.txt").stdout == fixture.read_text(), "commit changed staged content")
+    require(git(repo, "ls-files", "unstaged.txt").stdout == "", "commit swept in an unstaged file")
+
+    # Each case must be blocked on its own, including punctuation boundaries.
+    for key in provider_keys:
+        for prefix in ("", " ", "value=", '"', "'", "_", "-"):
+            fixture.write_text(prefix + key + "\n", encoding="utf-8")
+            git(repo, "add", fixture.name)
+            staged = git(repo, "write-tree").stdout
+            blocked = agent(repo, "commit", "test: reject synthetic provider key", "--json", env=env)
+            require(blocked.returncode != 0, f"scan allowed provider key after {prefix!r}")
+            payload = json_payload(blocked)
+            require(payload["blocked"] is True, "provider key was not blocked")
+            require(
+                any(item["detector"] == "provider-key-shape" for item in payload["findings"]),
+                "provider key was not caught by its shape detector",
+            )
+            require(key not in blocked.stdout + blocked.stderr, "scan exposed the synthetic matched value")
+            require(git(repo, "rev-parse", "HEAD").stdout.strip() == committed, "blocked scan changed HEAD")
+            require(git(repo, "write-tree").stdout == staged, "blocked scan changed the index")
+
+
 def test_worktrees(root: Path, env: dict[str, str]) -> None:
     repo = init_repo(root, "worktree-repo")
     (repo / ".gitignore").write_text(".env*\nCLAUDE.local.md\ncustom.local\n", encoding="utf-8")
@@ -290,6 +333,7 @@ def main() -> None:
         env = os.environ.copy()
         env["AGENT_DO_HOME"] = str(root / "agent-do-home")
         test_commit_guards(root, env)
+        test_provider_key_boundaries(root, env)
         test_worktrees(root, env)
         test_snapshots_and_conflicts(root, env)
         test_recover_read_only(root, env)
