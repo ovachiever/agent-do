@@ -113,6 +113,16 @@ def test_issue_links_degrade_without_hiding_pr_evidence() -> None:
     require("forbidden" not in result["issues"].get("reason", ""), f"raw provider error leaked: {result}")
 
 
+def test_missing_graphql_issue_connection_is_degraded() -> None:
+    for payload in ({"repository": None}, {"repository": {"pullRequest": None}},
+                    {"repository": {"pullRequest": {"closingIssuesReferences": None}}}):
+        with patch.object(gh, "gh_json", side_effect=[COMMIT, [PR]]), \
+                patch.object(gh, "run_graphql", return_value=payload):
+            result = gh.commit_correlation("o/r", "a" * 40)
+        require(result["pull_requests"]["count"] == 1, f"PR evidence vanished: {result}")
+        require(result["issues"]["status"] == "degraded", f"missing data reported as empty: {result}")
+
+
 def test_bad_sha_and_json_error_are_structured() -> None:
     try:
         gh.commit_correlation("o/r", "not-a-sha")
