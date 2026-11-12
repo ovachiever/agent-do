@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PG-1847 · The Descent Lattice — Palingenesis</title>
+<style>
+  :root{
+    --ground:#1f1c18;
+    --ink:#eae3d5;
+    --ink-2:#b7ad9c;
+    --ink-3:#847b6c;
+    --hair:rgba(234,227,213,.15);
+    --hair-faint:rgba(234,227,213,.08);
+    --hair-strong:rgba(234,227,213,.30);
+    --accent:#afcb8c;
+    --accent-dim:rgba(175,203,140,.45);
+    --serif:'Iowan Old Style',Palatino,'Book Antiqua',Charter,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Helvetica Neue','Segoe UI',Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--ground);color:var(--ink)}
+  body{font-family:var(--serif);font-size:18px;line-height:1.62;-webkit-font-smoothing:antialiased}
+  ::selection{background:var(--accent);color:var(--ground)}
+  a{color:inherit;text-decoration:none}
+
+  .wrap{max-width:1220px;margin:0 auto;padding:0 72px}
+
+  .caps{font-family:var(--sans);text-transform:uppercase;letter-spacing:.2em;font-size:11px;font-weight:600}
+  .num{font-family:var(--sans);font-variant-numeric:tabular-nums}
+
+  /* ————— masthead ————— */
+  .masthead{border-bottom:1px solid var(--hair)}
+  .masthead .wrap{display:flex;justify-content:space-between;align-items:baseline;padding-top:28px;padding-bottom:24px}
+  .wordmark{font-family:var(--serif);font-size:16px;letter-spacing:.34em;text-transform:uppercase;color:var(--ink)}
+  .wordmark span{color:var(--accent)}
+  .nav{display:flex;gap:40px}
+  .nav a{font-family:var(--sans);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);transition:color .15s}
+  .nav a:hover{color:var(--ink)}
+  .nav a[aria-current]{color:var(--ink)}
+  .nav a[aria-current]::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--accent);margin-right:9px;vertical-align:2px}
+
+  /* ————— the lot ————— */
+  .lot{padding:78px 0 0}
+  .lot-grid{display:grid;grid-template-columns:1fr 320px;gap:0 72px}
+  .eyebrow{font-family:var(--sans);font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-3)}
+  .eyebrow strong{color:var(--ink);font-weight:600}
+  h1{font-size:74px;line-height:1.02;font-weight:400;letter-spacing:-.012em;margin:22px 0 26px}
+  .essential{font-style:italic;font-size:21.5px;line-height:1.5;color:var(--ink-2);max-width:58ch}
+  .lineage-line{margin-top:30px;font-family:var(--sans);font-size:12.5px;letter-spacing:.04em;color:var(--ink-3)}
+  .lineage-line b{color:var(--ink-2);font-weight:500}
+  .lineage-line i{font-style:normal;color:var(--hair-strong);padding:0 7px}
+
+  .verdict-block{border-left:1px solid var(--hair);padding-left:44px;padding-top:10px;align-self:start}
+  .verdict-block .caps{color:var(--ink-3)}
+  .verdict-word{font-family:var(--serif);font-size:29px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin:14px 0 18px}
+  .verdict-meta{font-family:var(--sans);font-size:12px;line-height:1.8;color:var(--ink-3)}
+  .verdict-meta b{color:var(--ink-2);font-weight:500}
+
+  /* ————— fitness strip ————— */
+  .strip{margin-top:66px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);display:grid;grid-template-columns:repeat(6,1fr)}
+  .dim{padding:24px 26px 22px;border-left:1px solid var(--hair-faint)}
+  .dim:first-child{border-left:none;padding-left:0}
+  .dim .score{font-family:var(--sans);font-weight:300;font-size:35px;font-variant-numeric:tabular-nums;color:var(--ink);line-height:1}
+  .dim .label{margin-top:10px;font-family:var(--sans);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);font-weight:600}
+  .dim .src{margin-top:6px;font-family:var(--sans);font-size:10.5px;letter-spacing:.03em;color:var(--ink-3)}
+
+  /* ————— sections ————— */
+  section{border-top:1px solid var(--hair);padding:76px 0;display:grid;grid-template-columns:198px 1fr;gap:0 68px}
+  section:first-of-type{border-top:none}
+  .rail-inner{position:sticky;top:44px}
+  .rail-n{font-family:var(--serif);font-size:21px;color:var(--ink-2)}
+  .rail-term{margin-top:8px;font-family:var(--sans);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+  .rail-gloss{margin-top:14px;font-style:italic;font-size:13.5px;line-height:1.55;color:var(--ink-3);max-width:20ch}
+  h2{font-size:31px;font-weight:400;letter-spacing:-.005em;line-height:1.15}
+  .sub{margin-top:10px;font-style:italic;font-size:15.5px;color:var(--ink-3)}
+  .section-head{margin-bottom:44px}
+
+  /* ————— mechanism ————— */
+  .note-row{display:grid;grid-template-columns:minmax(0,1fr) 244px;gap:0 60px;margin-bottom:30px}
+  .note-row:last-child{margin-bottom:0}
+  .note-row p{font-size:18.5px;line-height:1.68;color:var(--ink);max-width:64ch}
+  .claim{text-decoration:underline dotted var(--accent-dim);text-underline-offset:5px;text-decoration-thickness:1px}
+  sup.src-mark{font-family:var(--sans);font-size:11px;color:var(--accent);margin-left:2px;letter-spacing:0}
+  .sidenote{align-self:start;border-top:1px solid var(--hair);padding-top:12px;margin-top:8px;font-family:var(--sans);font-size:12px;line-height:1.65;color:var(--ink-3)}
+  .sidenote b{color:var(--accent);font-weight:600;margin-right:6px}
+
+  /* ————— provenance ————— */
+  .prov-block{margin-bottom:46px}
+  .prov-block:last-child{margin-bottom:0}
+  .prov-label{font-family:var(--sans);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-3);font-weight:600;margin-bottom:6px}
+  .prov-row{display:grid;grid-template-columns:128px 1fr auto;gap:0 28px;padding:15px 0;border-top:1px solid var(--hair-faint);align-items:baseline}
+  .prov-row .when{font-family:var(--sans);font-size:12px;letter-spacing:.05em;color:var(--ink-3)}
+  .prov-row .what{font-size:16.5px;line-height:1.55;color:var(--ink-2)}
+  .prov-row .what b{color:var(--ink);font-weight:500}
+  .prov-row .id{font-family:var(--sans);font-size:11.5px;letter-spacing:.1em;color:var(--ink-3);white-space:nowrap}
+  .prov-row.pending .when{color:var(--accent)}
+  .prov-row.pending .what{font-style:italic;color:var(--ink)}
+  .prov-row.pending .id{color:var(--accent)}
+
+  /* ————— condition report ————— */
+  .judge{display:grid;grid-template-columns:236px 190px 1fr;gap:0 36px;padding:26px 0;border-top:1px solid var(--hair-faint);align-items:start}
+  .judge:first-of-type{border-top:none}
+  .judge .role{font-style:italic;font-size:18px;color:var(--ink)}
+  .judge .seat{margin-top:7px;font-family:var(--sans);font-size:11px;letter-spacing:.06em;color:var(--ink-3);font-style:normal}
+  .judge .word{font-family:var(--sans);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:600;padding-top:5px}
+  .judge .opinion{font-size:17px;line-height:1.6;color:var(--ink-2)}
+  .gates{margin-top:44px;border-top:1px solid var(--hair);padding-top:24px}
+  .gates .prov-label{margin-bottom:14px}
+  .gate{display:grid;grid-template-columns:64px 1fr;gap:0 28px;padding:9px 0;align-items:baseline}
+  .gate .id{font-family:var(--sans);font-size:11.5px;letter-spacing:.1em;color:var(--ink-2)}
+  .gate .txt{font-size:15.5px;color:var(--ink-2)}
+
+  /* ————— estimate ————— */
+  .est-banner{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--hair);padding-bottom:26px;margin-bottom:34px}
+  .est-banner .caps{color:var(--ink-3)}
+  .est-range{text-align:right}
+  .est-range .big{font-family:var(--sans);font-weight:300;font-size:36px;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .est-range .basis{margin-top:8px;font-family:var(--sans);font-size:12px;color:var(--ink-3)}
+  .est-range .basis b{color:var(--accent);font-weight:500}
+  table{width:100%;border-collapse:collapse}
+  th{font-family:var(--sans);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);font-weight:600;text-align:left;padding:0 0 12px;border-bottom:1px solid var(--hair)}
+  th.val{text-align:right}
+  td{padding:12px 0;border-bottom:1px solid var(--hair-faint);vertical-align:baseline}
+  td.in{font-size:16px;color:var(--ink-2);padding-right:32px}
+  td.val{font-family:var(--sans);font-size:14.5px;font-variant-numeric:tabular-nums;color:var(--ink);text-align:right;white-space:nowrap;padding-right:44px}
+  td.prov{font-family:var(--sans);font-size:12px;color:var(--ink-3);width:31%}
+  .formula{border-top:1px solid var(--hair-strong);margin-top:-1px;padding:24px 0 6px}
+  .formula .caps{color:var(--ink-3)}
+  .formula .line{margin-top:12px;font-family:var(--sans);font-size:14px;line-height:1.9;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  .formula .line b{color:var(--ink);font-weight:500}
+  .landing{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--hair);margin-top:26px;padding-top:26px}
+  .landing .caps{color:var(--ink-3)}
+  .landing .fig{font-family:var(--sans);font-weight:300;font-size:42px;font-variant-numeric:tabular-nums;color:var(--accent)}
+  .landing .fig small{font-family:var(--sans);font-weight:400;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-left:14px}
+  .est-notes{margin-top:26px;font-size:14.5px;line-height:1.7;color:var(--ink-3);font-style:italic;max-width:72ch}
+  .est-notes .num{font-style:normal}
+
+  /* ————— decision ————— */
+  .decision-lead{font-size:20.5px;line-height:1.6;color:var(--ink);max-width:56ch}
+  .actions{margin-top:44px;display:flex;align-items:flex-start;gap:56px}
+  button{font-family:var(--sans);cursor:pointer}
+  .advance{background:var(--accent);color:var(--ground);border:none;padding:18px 34px;font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
+  .advance:hover{filter:brightness(1.07)}
+  .action-sub{margin-top:12px;font-family:var(--sans);font-size:11.5px;line-height:1.7;color:var(--ink-3)}
+  .divider-v{width:1px;align-self:stretch;background:var(--hair)}
+  .kill{background:transparent;color:var(--ink-2);border:1px solid var(--hair);padding:17px 30px;font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+  .kill:hover{color:var(--ink);border-color:var(--hair-strong)}
+  .reason{margin-top:22px}
+  .reason label{display:block;font-family:var(--sans);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);font-weight:600;margin-bottom:4px}
+  .reason input{width:380px;background:transparent;border:none;border-bottom:1px solid var(--hair);color:var(--ink);font-family:var(--serif);font-style:italic;font-size:16px;padding:9px 2px}
+  .reason input::placeholder{color:var(--ink-3);opacity:.8}
+  .reason input:focus{outline:none;border-bottom-color:var(--accent-dim)}
+  .becomes{margin-top:52px;font-style:italic;font-size:19px;color:var(--accent)}
+  .closes{margin-top:14px;font-family:var(--sans);font-size:12px;line-height:1.8;color:var(--ink-3);max-width:74ch}
+
+  /* ————— footer ————— */
+  footer{border-top:1px solid var(--hair)}
+  footer .wrap{display:flex;justify-content:space-between;align-items:baseline;padding-top:30px;padding-bottom:44px}
+  .motto{font-family:var(--sans);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-3)}
+  .colophon{font-family:var(--sans);font-size:11px;letter-spacing:.08em;color:var(--ink-3)}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="wordmark" href="#">Palin<span>genesis</span></a>
+    <nav class="nav">
+      <a href="#">Today</a>
+      <a href="#" aria-current="page">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Engine Room</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ————— the lot: number, name, essential line ————— -->
+  <div class="lot">
+    <div class="lot-grid">
+      <div>
+        <p class="eyebrow"><strong>Candidate PG-1847</strong> &nbsp;·&nbsp; Aviary Structures &nbsp;·&nbsp; Dossier 47 of Cycle 26.08</p>
+        <h1>The Descent Lattice</h1>
+        <p class="essential">A retrofit lattice of intermediate rails that converts aviary flight into stepped descent, engineered to the biomechanics of the laying hen&rsquo;s keel.</p>
+        <p class="lineage-line">
+          <b>Generation 12</b><i>·</i>bred from <b>PG-0893 &times; PG-1466</b><i>·</i>recombination R-2681, 02 Aug 2026<i>·</i>evaluated by council 19 Aug 2026, session E-471
+        </p>
+      </div>
+      <div class="verdict-block">
+        <p class="caps">Council verdict · E-471</p>
+        <p class="verdict-word">Greenlight</p>
+        <p class="verdict-meta">
+          3–0 · <b>one reservation recorded</b><br>
+          Composite fitness <b>86.4</b> · advance threshold 75.0<br>
+          Weights per charter v3.1, welfare-major
+        </p>
+      </div>
+    </div>
+
+    <div class="strip">
+      <div class="dim"><div class="score">87.4</div><div class="label">Technical</div><div class="src">biomech v14 · S-9917</div></div>
+      <div class="dim"><div class="score">82.1</div><div class="label">Economic</div><div class="src">ledger L-77 basis</div></div>
+      <div class="dim"><div class="score">94.0</div><div class="label">Welfare</div><div class="src">&Delta;fracture 18 pp · B-334</div></div>
+      <div class="dim"><div class="score">71.3</div><div class="label">Ecological</div><div class="src">LCA-203, steel mass</div></div>
+      <div class="dim"><div class="score">88.2</div><div class="label">Social</div><div class="src">retailer panel RP-12</div></div>
+      <div class="dim"><div class="score">90.5</div><div class="label">Ethical</div><div class="src">charter audit CH-9</div></div>
+    </div>
+  </div>
+
+  <!-- ————— I · catalogue note ————— -->
+  <section>
+    <div class="rail"><div class="rail-inner">
+      <div class="rail-n">I</div>
+      <div class="rail-term">Catalogue note</div>
+      <div class="rail-gloss">The house&rsquo;s argument for the lot.</div>
+    </div></div>
+    <div>
+      <div class="section-head">
+        <h2>Mechanism</h2>
+        <p class="sub">Underlined claims carry their sources in the margin.</p>
+      </div>
+
+      <div class="note-row">
+        <p>A laying hen descending from the top tier of a modern aviary drops as much as 170&nbsp;centimetres in a single flight, and she absorbs the landing through a keel that evolution shaped for perching, not for impact. The Descent Lattice interposes staggered rails between tiers — spaced so that no transition in the house exceeds a 45-centimetre hop, angled along the 40-degree descent lines inherited from PG-0893, and sleeved in the micro-grip texture PG-1466 carried through pilot. Given the option, the birds take the stairs: <span class="claim">offered landings within 45&nbsp;centimetres, hens elect stepped descent over flight in 91&nbsp;percent of transitions</span><sup class="src-mark">1</sup>.</p>
+        <aside class="sidenote"><b>1</b>Stratmann et&nbsp;al., <i>Appl. Anim. Behav. Sci.</i> 205 (2018) 34–42; replicated in-house, behaviour probe B-334, n&nbsp;=&nbsp;1,880 transitions.</aside>
+      </div>
+
+      <div class="note-row">
+        <p>The fracture arithmetic is an energy budget. <span class="claim">Force-plate work places 78&nbsp;percent of fresh keel fractures above the 25-joule impact band</span><sup class="src-mark">2</sup> — energies a hen reaches only in free flight between tiers. Capping descent height caps kinetic energy at landing to roughly a third of the unmitigated case; biomechanics model v14 carries that cap through a full 80-week cycle and returns fracture prevalence of 29&nbsp;percent against the audited 47&nbsp;percent baseline (S-9917, CI&nbsp;24–33). Nothing in the lattice asks the hen to change. It re-prices the choices she already makes.</p>
+        <aside class="sidenote"><b>2</b>Toscano lab force-plate series (2020), impact energetics of keel contact; internal fit in biomech model v14 §3.</aside>
+      </div>
+
+      <div class="note-row">
+        <p>The welfare case and the economic case are the same case. <span class="claim">A hen carrying a keel fracture lays about 14 fewer saleable eggs across a cycle</span><sup class="src-mark">3</sup> and sheds part of her lay into the checked grade; at 100,000 hens housed, an 18-point drop in prevalence returns the annual lay of roughly eight hundred uninjured birds without adding a bird to the house. The estimate below prices only that recovery — lay, grade, and survival — and deliberately prices the welfare premium at zero.</p>
+        <aside class="sidenote"><b>3</b>Rufener et&nbsp;al., <i>Poult. Sci.</i> 98 (2019); corroborated in partner grading logs F-102.</aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ————— II · provenance ————— -->
+  <section>
+    <div class="rail"><div class="rail-inner">
+      <div class="rail-n">II</div>
+      <div class="rail-term">Provenance</div>
+      <div class="rail-gloss">The chain is the argument.</div>
+    </div></div>
+    <div>
+      <div class="section-head">
+        <h2>The chain</h2>
+        <p class="sub">Unbroken from first ancestor to the decision at the foot of this page.</p>
+      </div>
+
+      <div class="prov-block">
+        <p class="prov-label">Lineage</p>
+        <div class="prov-row">
+          <span class="when">14 Feb 2026</span>
+          <span class="what"><b>Cant-Rail Revision</b> (Gen 9) — perch approach-angle geometry; advanced through simulation, retired at council on economics (58.0). Contributed the 40&deg; descent-line constraint.</span>
+          <span class="id">PG-0893</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">09 Apr 2026</span>
+          <span class="what"><b>Micro-Grip Rail Texture</b> (Gen 11) — knurled polymer sleeve; balance-failure rate &minus;34% in S-8102; live at pilot, Farm 7. Contributed the grip surface.</span>
+          <span class="id">PG-1466</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">02 Aug 2026</span>
+          <span class="what">Recombination under welfare-major selection, charter v3.1 — 212 siblings generated, four survived triage; this candidate ranked first.</span>
+          <span class="id">R-2681</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">19 Aug 2026</span>
+          <span class="what">Adversarial council, three seats — verdict <b>Greenlight</b>, 3–0, one reservation held to the record.</span>
+          <span class="id">E-471</span>
+        </div>
+        <div class="prov-row pending">
+          <span class="when">22 Aug 2026</span>
+          <span class="what">The human decision — pending. This entry is written by the panel at the foot of the page.</span>
+          <span class="id">H-____</span>
+        </div>
+      </div>
+
+      <div class="prov-block">
+        <p class="prov-label">Literature</p>
+        <div class="prov-row">
+          <span class="when">2018</span>
+          <span class="what">Stratmann et&nbsp;al. — ramp access halves keel-fracture incidence in commercial aviaries. Anchor for claim&nbsp;1.</span>
+          <span class="id">Appl. Anim. Behav. Sci. 205</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">2019</span>
+          <span class="what">Rufener et&nbsp;al. — fracture severity depresses laying rate through the cycle. Anchor for estimate input&nbsp;4.</span>
+          <span class="id">Poult. Sci. 98</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">2020</span>
+          <span class="what">Toscano lab — force-plate energetics of keel impact; the 25-joule fracture band. Anchor for claim&nbsp;2.</span>
+          <span class="id">force-plate series</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">2023</span>
+          <span class="what">EFSA AHAW Panel — scientific opinion on laying-hen welfare; descent-height hazard curve adopted by biomech v14.</span>
+          <span class="id">EFSA-2023-AHAW</span>
+        </div>
+      </div>
+
+      <div class="prov-block">
+        <p class="prov-label">Simulation record</p>
+        <div class="prov-row">
+          <span class="when">11–15 Aug 2026</span>
+          <span class="what">2,400 simulated flocks &times; 80 weeks, biomech v14 — fracture prevalence 47% &rarr; <b>29%</b> (CI 24–33).</span>
+          <span class="id">S-9917</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">15 Aug 2026</span>
+          <span class="what">Mortality &amp; production coupling — late-cycle mortality 5.9% &rarr; <b>5.1%</b>.</span>
+          <span class="id">S-9919</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">16 Aug 2026</span>
+          <span class="what">Displacement probe — no dust-bathing or nest-box displacement detected across 800 simulated flocks.</span>
+          <span class="id">S-9921</span>
+        </div>
+        <div class="prov-row">
+          <span class="when">17 Aug 2026</span>
+          <span class="what">Adversarial load — lattice fails safe to 4.2&times; design load; manure accumulation on low rails flagged to the condition report.</span>
+          <span class="id">S-9924</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ————— III · condition report ————— -->
+  <section>
+    <div class="rail"><div class="rail-inner">
+      <div class="rail-n">III</div>
+      <div class="rail-term">Condition report</div>
+      <div class="rail-gloss">Unsparing, therefore credible.</div>
+    </div></div>
+    <div>
+      <div class="section-head">
+        <h2>Council findings, unabridged</h2>
+        <p class="sub">Three adversarial seats. The reservations ride with the verdict.</p>
+      </div>
+
+      <div class="judge">
+        <div><div class="role">The Adversary</div><div class="seat">red-team engineering · seat A-1 · transcript T-471.2</div></div>
+        <div class="word">Advance</div>
+        <p class="opinion">&ldquo;I could not construct a structural failure below 4.2&times; design load. My one unbroken objection — manure accumulation on the low rails — is now pilot gate G-1, and I will be reading the eight-week measurement.&rdquo;</p>
+      </div>
+      <div class="judge">
+        <div><div class="role">The Steward</div><div class="seat">welfare &amp; ethics · seat W-1 · transcript T-471.3</div></div>
+        <div class="word">Advance</div>
+        <p class="opinion">&ldquo;Four generations of candidates treated the keel as a casualty; this one treats it as a constraint. The fracture arithmetic is conservative, and the displacement probe came back clean.&rdquo;</p>
+      </div>
+      <div class="judge">
+        <div><div class="role">The Underwriter</div><div class="seat">economics · seat U-1 · transcript T-471.4</div></div>
+        <div class="word">Advance with reservation</div>
+        <p class="opinion">&ldquo;The case clears breakeven at one-third of the modeled effect, which satisfies me. But I price welfare-premium capture at zero until a retailer signs, and I hold the estimate to that conservative basis.&rdquo;</p>
+      </div>
+
+      <div class="gates">
+        <p class="prov-label">Open conditions — attached to any advance</p>
+        <div class="gate"><span class="id">G-1</span><span class="txt">Manure accumulation on rails below tier 2, quantified at weeks 4 and 8 of pilot. <span class="num" style="font-size:11.5px;color:var(--ink-3)">— the Adversary</span></span></div>
+        <div class="gate"><span class="id">G-2</span><span class="txt">Checked-egg relief confirmed at &ge; half of model by the week-30 grading audit. <span class="num" style="font-size:11.5px;color:var(--ink-3)">— the Underwriter</span></span></div>
+        <div class="gate"><span class="id">G-3</span><span class="txt">Ecological score 71.3 is the lot&rsquo;s weakest figure: galvanized-steel offset plan filed before any fleet-scale order. <span class="num" style="font-size:11.5px;color:var(--ink-3)">— ecology desk, LCA-203</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ————— IV · estimate ————— -->
+  <section>
+    <div class="rail"><div class="rail-inner">
+      <div class="rail-n">IV</div>
+      <div class="rail-term">Estimate</div>
+      <div class="rail-gloss">A number, with its basis attached.</div>
+    </div></div>
+    <div>
+      <div class="section-head">
+        <h2>Computed economics</h2>
+        <p class="sub">Conservative basis, per the Underwriter: welfare-premium capture excluded.</p>
+      </div>
+
+      <div class="est-banner">
+        <p class="caps">Estimate — NPV&#8321;&#8320; per 100,000-hen house</p>
+        <div class="est-range">
+          <div class="big">$197,000 – $410,000</div>
+          <p class="basis">central case <b>$292,000</b> · IRR 46% · payback 2.1 flock-years · range is the S-9917 confidence interval carried through the arithmetic below</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Input</th><th class="val" style="padding-right:44px">Value</th><th>Provenance</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="in">Lattice retrofit, fabricated and installed</td><td class="val">$1.35 / hen&nbsp;&nbsp;($135,000 / house)</td><td class="prov">Quote Q-0441, two fabricators, Jul 2026 steel index</td></tr>
+          <tr><td class="in">Keel-fracture prevalence at 60 wk, baseline</td><td class="val">47%</td><td class="prov">Palpation audit F-118, n = 3,120, three partner farms</td></tr>
+          <tr><td class="in">Prevalence with lattice, modeled</td><td class="val">29%&nbsp;&nbsp;(CI 24–33)</td><td class="prov">Simulation S-9917</td></tr>
+          <tr><td class="in">Saleable-lay penalty per fractured hen</td><td class="val">14 eggs / cycle</td><td class="prov">Rufener et al. 2019; replicated in F-102</td></tr>
+          <tr><td class="in">Checked-egg rate attributable to fracture</td><td class="val">2.9% &rarr; 1.7% of lay</td><td class="prov">Grading logs F-102 &times; S-9917 elasticity</td></tr>
+          <tr><td class="in">Carton–breaker spread</td><td class="val">$0.94 / doz</td><td class="prov">USDA AMS shell-egg report, wk of 10 Aug 2026</td></tr>
+          <tr><td class="in">Marginal egg value, net of feed</td><td class="val">$0.118 / egg</td><td class="prov">Ledger L-77, 2025–26 cycle</td></tr>
+          <tr><td class="in">Late-cycle mortality</td><td class="val">5.9% &rarr; 5.1%</td><td class="prov">Simulation S-9919</td></tr>
+          <tr><td class="in">Mid-lay hen value</td><td class="val">$6.20</td><td class="prov">Ledger L-77: pullet $5.05 + foregone margin</td></tr>
+          <tr><td class="in">Hen-year lay</td><td class="val">25.6 doz&nbsp;&nbsp;(307 eggs)</td><td class="prov">Partner-farm mean F-091, 2025 cycle</td></tr>
+        </tbody>
+      </table>
+
+      <div class="formula">
+        <p class="caps">Formula — benefit per hen-year = recovered lay + grade relief + survival</p>
+        <p class="line">= (18 pp &times; 14 eggs &times; $0.118) &nbsp;+&nbsp; (1.2 pp of lay &times; 25.6 doz &times; $0.94) &nbsp;+&nbsp; (0.8 pp &times; $6.20)<br>
+        = $0.297 + $0.289 + $0.050 &nbsp;=&nbsp; <b>$0.636 per hen-year</b> &nbsp;&rarr;&nbsp; <b>$63,600 per house-year</b></p>
+      </div>
+
+      <div class="landing">
+        <p class="caps">Net present value, 10 yr @ 8% discount, less $135,000 install</p>
+        <p class="fig">$292,000<small>central case, per house</small></p>
+      </div>
+
+      <p class="est-notes">Breakeven sits at a <span class="num">6&nbsp;pp</span> prevalence reduction — one-third of the modeled <span class="num">18&nbsp;pp</span> (CI&nbsp;14–23). Nothing else in the range was moved. Display figures are rounded; ledger L-77 holds full precision. Every figure above resolves to a receipt: challenge any number, and the ledger answers.</p>
+    </div>
+  </section>
+
+  <!-- ————— V · decision ————— -->
+  <section>
+    <div class="rail"><div class="rail-inner">
+      <div class="rail-n">V</div>
+      <div class="rail-term">Decision</div>
+      <div class="rail-gloss">One reader.</div>
+    </div></div>
+    <div>
+      <div class="section-head">
+        <h2>The record waits for you</h2>
+      </div>
+      <p class="decision-lead">The council recommends; it cannot advance its own work. That authority belongs to the single reader of this page.</p>
+
+      <div class="actions">
+        <div>
+          <button class="advance" type="button">Advance to pilot — Farm 7</button>
+          <p class="action-sub">Carries gates G-1 – G-3 into the pilot order.<br>Writes: <span class="num">22 Aug 2026 · advanced by the reader · H-____</span></p>
+        </div>
+        <div class="divider-v"></div>
+        <div>
+          <button class="kill" type="button">Kill this line</button>
+          <div class="reason">
+            <label for="kill-reason">Reason — required, recorded verbatim</label>
+            <input id="kill-reason" type="text" placeholder="entered beside R-2681, readable by every future generation">
+          </div>
+        </div>
+      </div>
+
+      <p class="becomes">Your decision becomes part of the lineage.</p>
+      <p class="closes">Advance seeds the pilot at Farm 7 and holds the estimate to its conservative basis. Kill retires PG-1847 and files your reason in the chain, where the engine reads it before breeding Generation 13. Either way, the entry above marked <span class="num">H-____</span> closes signed.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="motto">Every claim sourced &nbsp;·&nbsp; every cost computed &nbsp;·&nbsp; every verdict recorded</p>
+    <p class="colophon">Palingenesis · dossier PG-1847 · rendered 22 Aug 2026 · charter v3.1</p>
+  </div>
+</footer>
+
+</body>
+</html>

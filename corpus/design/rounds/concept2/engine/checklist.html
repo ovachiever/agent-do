@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Engine Room</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hair-soft:rgba(231,227,218,0.08);
+    --wash:rgba(231,227,218,0.025);
+    --sage:hsl(158,30%,55%);
+    --sage-dim:hsla(158,30%,55%,0.12);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{background:var(--ground);}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font:14px/1.55 var(--sans);
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1328px;margin:0 auto;padding:0 40px;}
+
+  /* ---------- labels, glyphs, shared ---------- */
+  .lab{
+    font-family:var(--sans);font-size:12px;font-weight:600;
+    letter-spacing:.09em;text-transform:uppercase;color:var(--muted);line-height:1.5;
+  }
+  .lab.faint{color:var(--faint);}
+  .lab.sage{color:var(--sage);}
+  .lab.ink{color:var(--ink);}
+  .prov{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.01em;}
+  .mono{font-family:var(--mono);}
+  .dot,.ring{
+    display:inline-block;width:9px;height:9px;border-radius:50%;
+    vertical-align:baseline;position:relative;top:0.5px;
+  }
+  .dot{background:var(--sage);}
+  .ring{border:1.5px solid var(--ink);background:transparent;}
+  a{color:inherit;}
+  button{font-family:var(--sans);}
+  :focus-visible{outline:1px solid var(--sage);outline-offset:2px;}
+
+  /* ---------- top nav ---------- */
+  .top{border-bottom:1px solid var(--hair);}
+  .nav{display:flex;align-items:center;height:64px;gap:36px;}
+  .wordmark{font-family:var(--serif);font-size:20px;color:var(--ink);letter-spacing:.01em;text-decoration:none;}
+  .navlinks{display:flex;gap:8px;flex:1;}
+  .navlinks a{
+    display:inline-block;text-decoration:none;
+    font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--muted);padding:24px 12px 22px;border-bottom:2px solid transparent;
+  }
+  .navlinks a:hover{color:var(--ink);}
+  .navlinks a.active{color:var(--sage);border-bottom-color:var(--sage);}
+  .clock{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.02em;}
+
+  /* ---------- dispatch banner ---------- */
+  .banner{display:grid;grid-template-columns:1fr 292px;gap:48px;padding:38px 0 6px;align-items:start;}
+  .crumb{margin-bottom:14px;}
+  .verdict{font-family:var(--serif);font-weight:400;font-size:33px;line-height:1.22;color:var(--ink);letter-spacing:.002em;}
+  .verdict-sub{font-family:var(--serif);font-size:15px;line-height:1.6;color:var(--muted);margin-top:12px;max-width:62ch;}
+  .legend{display:flex;gap:28px;margin-top:18px;align-items:center;flex-wrap:wrap;}
+  .legend .lab{display:inline-flex;align-items:center;gap:8px;}
+  .plate{
+    border:1px solid var(--sage);background:hsla(158,30%,55%,0.07);
+    padding:20px 24px 18px;margin-top:4px;
+  }
+  .plate .lab{margin-bottom:6px;}
+  .plate-verdict{font-family:var(--serif);font-size:27px;color:var(--sage);letter-spacing:.02em;line-height:1.1;}
+  .plate-sub{font-size:13px;color:var(--muted);margin-top:7px;line-height:1.5;}
+  .plate-prov{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:12px;padding-top:10px;border-top:1px solid var(--hair);line-height:1.6;}
+  .honesty{
+    font-family:var(--serif);font-style:italic;font-size:14px;line-height:1.65;
+    color:var(--muted);max-width:96ch;padding:18px 0 26px;
+  }
+  .honesty .mono{font-style:normal;font-size:12.5px;color:var(--muted);}
+
+  /* ---------- checklist ---------- */
+  .row{
+    display:grid;
+    grid-template-columns:64px 216px minmax(0,1fr) minmax(0,1.18fr) 184px;
+    column-gap:28px;align-items:start;
+  }
+  .colhead{padding:12px 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);}
+  .seclab{padding:30px 0 12px;display:flex;align-items:baseline;gap:14px;}
+  .seclab .count{font-family:var(--mono);font-size:12px;color:var(--faint);}
+  .item{border-top:1px solid var(--hair-soft);padding:20px 0 22px;}
+  .item:first-of-type{border-top:none;}
+  .num{font-family:var(--mono);font-size:13px;color:var(--faint);padding-top:5px;}
+  .iname{font-family:var(--serif);font-size:17px;color:var(--ink);line-height:1.3;}
+  .irole{margin-top:5px;}
+  .req{font-size:13px;line-height:1.6;color:var(--muted);padding-top:3px;}
+  .obs-main{font-size:14px;line-height:1.6;color:var(--ink);}
+  .obs-prov{margin-top:7px;}
+  .disp{padding-top:3px;}
+  .dstat{display:flex;align-items:center;gap:9px;}
+  .dstat .lab{letter-spacing:.08em;}
+  .dsub{margin-top:6px;font-family:var(--mono);font-size:12px;color:var(--faint);line-height:1.6;}
+
+  /* sub-panels hang from an item, indented to the name column */
+  .sub{
+    margin:14px 0 2px 64px;
+    border:1px solid var(--hair);background:var(--wash);
+    padding:16px 22px 17px;
+  }
+  .sub.relief{border-left:2px solid var(--sage);}
+  .relief-head{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:9px;}
+  .relief-prose{font-family:var(--serif);font-size:15px;line-height:1.65;color:var(--ink);max-width:100ch;}
+  .relief-sig{margin-top:11px;padding-top:9px;border-top:1px solid var(--hair-soft);}
+
+  /* ledger */
+  .meter-line{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px;}
+  .meter-big{font-size:15px;color:var(--ink);}
+  .meter-big strong{font-weight:600;}
+  .track{position:relative;height:8px;background:var(--hair-soft);margin:4px 0 6px;}
+  .fill{position:absolute;left:0;top:0;bottom:0;background:var(--sage);}
+  .markline{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--muted);}
+  .track-ends{display:flex;justify-content:space-between;margin-bottom:4px;}
+  .mark-note{font-family:var(--mono);font-size:12px;color:var(--faint);margin:2px 0 16px;}
+  .lhead,.lrow{
+    display:grid;grid-template-columns:200px minmax(0,1fr) 250px 120px;
+    column-gap:24px;align-items:baseline;
+  }
+  .lhead{padding:8px 0 7px;border-bottom:1px solid var(--hair);}
+  .lrow{padding:8px 0;border-bottom:1px solid var(--hair-soft);}
+  .lrow .svc{font-size:14px;color:var(--ink);}
+  .lrow .cnt,.lrow .unit{font-size:13px;color:var(--muted);}
+  .lrow .amt,.lhead .amt{text-align:right;}
+  .lrow .amt{font-size:14px;color:var(--ink);}
+  .lrow.total{border-bottom:none;padding-top:10px;border-top:1px solid var(--hair);}
+  .lrow.total .svc{font-weight:600;}
+  .lrow.total .amt{font-weight:600;}
+  .subnote{font-size:12px;color:var(--faint);margin-top:12px;line-height:1.6;}
+
+  /* scheduler */
+  .authority{display:flex;gap:12px;align-items:center;margin:14px 0 10px;flex-wrap:wrap;}
+  .btn{
+    display:inline-block;background:transparent;border:1px solid var(--sage);color:var(--sage);
+    font-size:13px;font-weight:600;letter-spacing:.02em;
+    padding:8px 18px;border-radius:3px;cursor:pointer;min-height:34px;
+  }
+  .btn:hover{background:var(--sage-dim);}
+  .btn.neutral{border-color:rgba(231,227,218,0.35);color:var(--ink);}
+  .btn.neutral:hover{background:var(--hair-soft);}
+  .btn.inert{border-color:var(--hair);color:var(--faint);cursor:default;}
+  .btn.inert:hover{background:transparent;}
+  .cycrow{
+    display:grid;grid-template-columns:64px minmax(0,1fr) 130px;
+    column-gap:24px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--hair-soft);
+  }
+  .cycrow:last-of-type{border-bottom:none;}
+  .cycrow .cid{font-family:var(--mono);font-size:13px;color:var(--muted);}
+  .cycrow .cwhat{font-size:13px;color:var(--muted);}
+  .cycrow .camt{font-size:13px;color:var(--ink);text-align:right;}
+
+  /* sweeps */
+  .swrow{
+    display:grid;grid-template-columns:64px minmax(0,1fr) 240px 150px 90px;
+    column-gap:24px;align-items:center;padding:9px 0;border-bottom:1px solid var(--hair-soft);
+  }
+  .swrow:last-of-type{border-bottom:none;}
+  .swid{font-family:var(--mono);font-size:13px;color:var(--ink);}
+  .swname{font-size:14px;color:var(--ink);}
+  .swname .lab{display:block;margin-top:3px;}
+  .swprog{display:flex;align-items:center;gap:12px;}
+  .swtrack{position:relative;height:5px;background:var(--hair-soft);flex:1;}
+  .swfill{position:absolute;left:0;top:0;bottom:0;background:rgba(231,227,218,0.38);}
+  .swpct{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:78px;text-align:right;}
+  .swheard{font-family:var(--mono);font-size:12px;color:var(--faint);}
+  .swcost{font-size:13px;color:var(--ink);text-align:right;}
+
+  /* ---------- abnormal procedures ---------- */
+  .abn{margin-top:44px;}
+  .abn-rule{border-top:1px solid var(--hair);padding-top:28px;}
+  .abn-intro{font-family:var(--serif);font-size:15px;line-height:1.65;color:var(--muted);max-width:86ch;margin:10px 0 22px;}
+  .abnpanel{border:1px solid var(--hair);background:var(--wash);padding:20px 26px 18px;margin-bottom:16px;}
+  .abnhead{display:flex;justify-content:space-between;align-items:baseline;gap:24px;flex-wrap:wrap;margin-bottom:4px;}
+  .abnid{font-family:var(--mono);font-size:13px;color:var(--muted);margin-right:14px;}
+  .abntitle{font-family:var(--serif);font-size:18px;color:var(--ink);}
+  .abnclosed{display:flex;align-items:center;gap:8px;}
+  .check{color:var(--sage);font-size:14px;line-height:1;}
+  .steps{margin:14px 0 4px;border-top:1px solid var(--hair-soft);}
+  .step{
+    display:grid;grid-template-columns:100px 92px minmax(0,1fr) 26px;
+    column-gap:20px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--hair-soft);
+  }
+  .step .t{font-family:var(--mono);font-size:12px;color:var(--faint);}
+  .step .who{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);}
+  .step .what{font-size:13.5px;line-height:1.55;color:var(--ink);}
+  .step .ok{text-align:right;}
+  .abnclose{font-family:var(--serif);font-size:14px;line-height:1.65;color:var(--muted);margin-top:12px;max-width:100ch;}
+
+  /* ---------- end of checklist ---------- */
+  .endblock{margin:52px 0 0;border-top:1px solid var(--hair);padding:40px 0 8px;text-align:center;}
+  .end-title{font-family:var(--serif);font-size:23px;color:var(--ink);}
+  .end-prose{font-family:var(--serif);font-size:15px;line-height:1.7;color:var(--muted);max-width:66ch;margin:12px auto 0;}
+  .end-tally{margin-top:20px;font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.04em;}
+  .end-tally .sagey{color:var(--sage);}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:46px;border-top:1px solid var(--hair);padding:26px 0 44px;text-align:center;}
+  .foot-main{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+  .foot-sub{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:10px;line-height:1.6;}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap nav">
+    <a class="wordmark" href="#">Palingenesis</a>
+    <nav class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#" class="active">Engine&nbsp;Room</a>
+    </nav>
+    <span class="clock">SAT 22 AUG 2026 · 14:47:22 CT</span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ dispatch determination ============ -->
+  <section class="banner">
+    <div>
+      <div class="crumb lab faint">Engine Room · Dispatch checklist for Cycle 220 · read top to bottom, in order</div>
+      <h1 class="verdict">Tonight&rsquo;s cycle is cleared to dispatch.</h1>
+      <p class="verdict-sub">Twelve items decide whether the machine runs. All twelve were read at the 14:45 recompute:
+      ten stand within limits, two dispatch under signed relief, and none grounds. Cycle&nbsp;220 holds the 02:00 window.</p>
+      <div class="legend">
+        <span class="lab"><span class="dot"></span>10 within limits</span>
+        <span class="lab"><span class="ring"></span>2 deferred under signed relief</span>
+        <span class="lab faint">0 grounding</span>
+      </div>
+    </div>
+    <div class="plate">
+      <div class="lab faint">Determination</div>
+      <div class="plate-verdict">Dispatch</div>
+      <div class="plate-sub">with two deferrals carried, each signed, each expiring</div>
+      <div class="plate-prov">recomputed 14:45:07<br>next recompute 15:00:00<br>cycle 220 · window 02:00–05:00</div>
+    </div>
+  </section>
+
+  <p class="honesty">This determination is computed from the meters below, never asserted, and it refuses on its own: it has read
+  <span class="mono">DO&nbsp;NOT&nbsp;DISPATCH</span> twice in 219 cycles &mdash; 14&nbsp;June, when the day&rsquo;s spend would have
+  crossed the cap mid-cycle, and 3&nbsp;July, when no verified snapshot existed. Both nights the machine stayed down and said why.</p>
+
+  <!-- ============ the checklist ============ -->
+  <section class="checklist">
+
+    <div class="colhead row">
+      <span class="lab faint">No.</span>
+      <span class="lab faint">Item</span>
+      <span class="lab faint">Required condition</span>
+      <span class="lab faint">Observed state</span>
+      <span class="lab faint">Disposition</span>
+    </div>
+
+    <!-- ——— systems ——— -->
+    <div class="seclab"><span class="lab ink">Systems</span><span class="count">items 01–06</span></div>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">01</div>
+        <div>
+          <div class="iname">Reader</div>
+          <div class="irole lab faint">Service · Ingest</div>
+        </div>
+        <div class="req">Running with heartbeat inside 90&nbsp;seconds; all five source feeds answering; cached corpus no older than fourteen days.</div>
+        <div>
+          <div class="obs-main">Running since 10&nbsp;Aug (12&nbsp;d&nbsp;4&nbsp;h); heartbeat 6&nbsp;seconds ago. Four of five feeds answering &mdash; the AgriRxiv feed has returned errors since 06:20 today. 1,204 papers fetched since midnight from the four live feeds.</div>
+          <div class="obs-prov prov">probed 14:47:18 · uptime from supervisor · feed states from the 14:45 sweep</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="ring"></span><span class="lab ink">Deferred</span></div>
+          <div class="dsub">under relief M-06<br>recomputed 14:45:07</div>
+        </div>
+      </div>
+      <div class="sub relief">
+        <div class="relief-head">
+          <span class="lab sage">Relief M-06 · signed</span>
+          <span class="lab faint">expires Tue 25 Aug 06:00 · in 2 d 15 h</span>
+        </div>
+        <p class="relief-prose">The Reader may dispatch with the AgriRxiv feed inoperative. Compensating: tonight&rsquo;s cycle draws
+        AgriRxiv material from the cached corpus &mdash; eleven days old, inside the fourteen-day staleness limit &mdash; Council marks
+        every brief that leans on cached material, and Courier files a re-fetch at 06:00 after the cycle. This relief lapses of itself
+        at expiry, or the moment the feed answers, whichever comes first.</p>
+        <div class="relief-sig prov">signed R. Halvorsen, operator · today 07:12 &mdash; re-verified by the machine at every recompute, last 14:45:07</div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">02</div>
+        <div>
+          <div class="iname">Council</div>
+          <div class="irole lab faint">Service · Deliberation</div>
+        </div>
+        <div class="req">Running; a quorum of all three models reachable; deliberation p95 inside 4&nbsp;minutes over the trailing day.</div>
+        <div>
+          <div class="obs-main">Running since 12&nbsp;Jul (41&nbsp;d); all three models answered the 14:47 ping. Thirty-seven deliberations since midnight; p95 stands at 2&nbsp;m&nbsp;41&nbsp;s.</div>
+          <div class="obs-prov prov">probed 14:47:18 · p95 over trailing 24 h, computed at recompute</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">03</div>
+        <div>
+          <div class="iname">Simulator</div>
+          <div class="irole lab faint">Service · Agronomy models</div>
+        </div>
+        <div class="req">Running; three scenario workers up; the full batch of twelve scenarios per cycle.</div>
+        <div>
+          <div class="obs-main">Running since 12&nbsp;Jul (41&nbsp;d). Two of three workers up &mdash; worker-c was withdrawn 19&nbsp;Aug on repeating disk errors. 216 scenario-runs completed since midnight on the remaining pair.</div>
+          <div class="obs-prov prov">probed 14:47:18 · worker states from supervisor · run count from Archivist ledger</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="ring"></span><span class="lab ink">Deferred</span></div>
+          <div class="dsub">under relief M-07<br>recomputed 14:45:07</div>
+        </div>
+      </div>
+      <div class="sub relief">
+        <div class="relief-head">
+          <span class="lab sage">Relief M-07 · signed</span>
+          <span class="lab faint">expires Sun 30 Aug 06:00 · in 7 d 15 h</span>
+        </div>
+        <p class="relief-prose">The Simulator may dispatch on two workers of three. Compensating: the scenario batch is trimmed from
+        twelve to eight, Council double-samples uncertainty on every trimmed batch, and each brief states when it rode one. The
+        replacement host arrives 28&nbsp;Aug; this relief expires 30&nbsp;Aug at 06:00 regardless of the repair.</p>
+        <div class="relief-sig prov">signed R. Halvorsen, operator · 19 Aug 17:26 &mdash; re-verified by the machine at every recompute, last 14:45:07</div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">04</div>
+        <div>
+          <div class="iname">Assayer</div>
+          <div class="irole lab faint">Service · Evidence grading</div>
+        </div>
+        <div class="req">Running; grading backlog inside 25 claims; calibration drift inside 2% against the reference set.</div>
+        <div>
+          <div class="obs-main">Running since 27&nbsp;Jul (26&nbsp;d); backlog stands at 9 claims. Calibration ran after this morning&rsquo;s cycle at 04:20: drift 0.8% against the 60-claim reference set.</div>
+          <div class="obs-prov prov">probed 14:47:18 · backlog counted 14:45 · calibration record 04:20:31</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">05</div>
+        <div>
+          <div class="iname">Archivist</div>
+          <div class="irole lab faint">Service · Storage</div>
+        </div>
+        <div class="req">Running; write latency p95 inside 300&nbsp;ms; zero failed writes on the day.</div>
+        <div>
+          <div class="obs-main">Running since 12&nbsp;Jul (41&nbsp;d). Write p95 stands at 121&nbsp;ms; 8,912 writes since midnight, none failed.</div>
+          <div class="obs-prov prov">probed 14:47:18 · latency over trailing 24 h · write tally from its own ledger</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">06</div>
+        <div>
+          <div class="iname">Courier</div>
+          <div class="irole lab faint">Service · Delivery</div>
+        </div>
+        <div class="req">Running; every delivery on the trailing day landed; the owner channel verified inside seven days.</div>
+        <div>
+          <div class="obs-main">Running since 12&nbsp;Jul (41&nbsp;d); 19 of 19 deliveries landed since midnight. The owner channel was last verified 18&nbsp;Aug, four days ago.</div>
+          <div class="obs-prov prov">probed 14:47:18 · delivery receipts from provider callbacks</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ——— ledger ——— -->
+    <div class="seclab"><span class="lab ink">Ledger</span><span class="count">item 07</span></div>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">07</div>
+        <div>
+          <div class="iname">The day&rsquo;s spend</div>
+          <div class="irole lab faint">Meter · Spend</div>
+        </div>
+        <div class="req">Committed spend inside the $500.00 daily cap, set 12&nbsp;May&nbsp;2026; no single service past its sub-meter; the meter reconciled against provider invoices inside the hour.</div>
+        <div>
+          <div class="obs-main">$212.47 committed as of 14:47 &mdash; 42.5% of cap. At the trailing-3-hour rate the day projects to close near $351, well inside. Yesterday closed at $402.11.</div>
+          <div class="obs-prov prov">metered by Archivist · reconciled against invoices hourly, last 14:00</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="meter-line">
+          <span class="meter-big"><strong>$212.47</strong> committed of the <strong>$500.00</strong> cap</span>
+          <span class="lab faint">42.5% · projected close ≈ $351</span>
+        </div>
+        <div class="track">
+          <div class="fill" style="width:42.5%"></div>
+          <div class="markline" style="left:70.2%"></div>
+        </div>
+        <div class="track-ends"><span class="prov">$0</span><span class="prov">$500.00 cap</span></div>
+        <div class="mark-note">projection mark at $351 = trailing-3 h rate $15.03/h × 9 h 13 m remaining</div>
+
+        <div class="lhead">
+          <span class="lab faint">Metered by service</span>
+          <span class="lab faint">Entries today</span>
+          <span class="lab faint">Cost per entry</span>
+          <span class="lab faint amt">Committed</span>
+        </div>
+        <div class="lrow">
+          <span class="svc">Council</span><span class="cnt">37 deliberations</span><span class="unit">$3.206 per deliberation</span><span class="amt">$118.62</span>
+        </div>
+        <div class="lrow">
+          <span class="svc">Simulator</span><span class="cnt">216 scenario-runs</span><span class="unit">$0.204 per run</span><span class="amt">$44.03</span>
+        </div>
+        <div class="lrow">
+          <span class="svc">Reader</span><span class="cnt">1,204 source fetches</span><span class="unit">$0.0259 per fetch</span><span class="amt">$31.18</span>
+        </div>
+        <div class="lrow">
+          <span class="svc">Assayer</span><span class="cnt">141 gradings</span><span class="unit">$0.0667 per grading</span><span class="amt">$9.41</span>
+        </div>
+        <div class="lrow">
+          <span class="svc">Archivist</span><span class="cnt">8,912 writes</span><span class="unit">$0.774 per 1,000 writes</span><span class="amt">$6.90</span>
+        </div>
+        <div class="lrow">
+          <span class="svc">Courier</span><span class="cnt">19 deliveries</span><span class="unit">$0.123 per delivery</span><span class="amt">$2.33</span>
+        </div>
+        <div class="lrow total">
+          <span class="svc">Committed today</span><span class="cnt"></span><span class="unit"></span><span class="amt">$212.47</span>
+        </div>
+        <p class="subnote">Six sub-meters sum to the day&rsquo;s figure to the cent; a discrepancy against the provider invoice would
+        ground dispatch at the next recompute and appear on this line with its size.</p>
+      </div>
+    </article>
+
+    <!-- ——— scheduler ——— -->
+    <div class="seclab"><span class="lab ink">Scheduler</span><span class="count">item 08</span></div>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">08</div>
+        <div>
+          <div class="iname">Cadence &amp; the next cycle</div>
+          <div class="irole lab faint">Authority · Cadence</div>
+        </div>
+        <div class="req">Cycle&nbsp;220 scheduled inside the 01:00&ndash;05:00 window; no hold standing; the operator&rsquo;s authority current.</div>
+        <div>
+          <div class="obs-main">Cycle&nbsp;220 holds 02:00 tonight, estimated 02:00&ndash;04:30 from the trailing five cycles. Cadence has been nightly since 12&nbsp;May. No hold stands; the last hold was placed and released 16&nbsp;Aug for owner review.</div>
+          <div class="obs-prov prov">schedule read 14:47:18 · authority verified 18 Aug</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="lab faint">Pause / resume authority</div>
+        <div class="authority">
+          <button class="btn" type="button">Hold Cycle 220</button>
+          <button class="btn neutral" type="button">Change cadence&hellip;</button>
+          <button class="btn inert" type="button">Release hold — none standing</button>
+        </div>
+        <p class="subnote">A hold placed here stands until you release it. The machine never lifts a hold on its own, and a standing
+        hold turns the determination above to <span class="mono">HELD BY OWNER</span> at the next recompute.</p>
+        <div style="margin-top:16px" class="lab faint">Last cycles</div>
+        <div class="cycrow"><span class="cid">219</span><span class="cwhat">ran 02:00&ndash;04:14 this morning · 3 briefs published · verdicts recorded to the Library</span><span class="camt">$61.20</span></div>
+        <div class="cycrow"><span class="cid">218</span><span class="cwhat">ran 02:00&ndash;03:58 yesterday · 2 briefs published · verdicts recorded to the Library</span><span class="camt">$48.77</span></div>
+        <p class="subnote">Cycle costs are views over the same meters as item 07, not additional spend.</p>
+      </div>
+    </article>
+
+    <!-- ——— research operations ——— -->
+    <div class="seclab"><span class="lab ink">Research operations</span><span class="count">items 09–10</span></div>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">09</div>
+        <div>
+          <div class="iname">Active sweeps</div>
+          <div class="irole lab faint">Operation · Research</div>
+        </div>
+        <div class="req">Each running sweep inside its scope ceiling and heard from inside 30&nbsp;minutes; staged sweeps hold until the cycle completes.</div>
+        <div>
+          <div class="obs-main">Two sweeps running, one staged. Both runners reported inside the last twenty minutes and sit inside their 5,000-paper ceilings.</div>
+          <div class="obs-prov prov">sweep heartbeats from the 14:45 sweep of sweeps</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="swrow">
+          <span class="swid">S-118</span>
+          <span class="swname">Drought-tolerant rootstocks for the northern blocks</span>
+          <span class="swprog"><span class="swtrack"><span class="swfill" style="width:61%"></span></span><span class="swpct">2,513 / 4,120</span></span>
+          <span class="swheard">heard 14:31</span>
+          <span class="swcost">$9.84</span>
+        </div>
+        <div class="swrow">
+          <span class="swid">S-121</span>
+          <span class="swname">Nitrogen-fixing cover crops between rotations</span>
+          <span class="swprog"><span class="swtrack"><span class="swfill" style="width:24%"></span></span><span class="swpct">691 / 2,880</span></span>
+          <span class="swheard">heard 14:40</span>
+          <span class="swcost">$4.12</span>
+        </div>
+        <div class="swrow">
+          <span class="swid">S-122</span>
+          <span class="swname">Low-chill stone fruit for the shifting frost line</span>
+          <span class="swprog"><span class="swtrack"></span><span class="swpct">staged</span></span>
+          <span class="swheard">starts 04:30</span>
+          <span class="swcost">$0.00</span>
+        </div>
+        <p class="subnote">Sweep costs are views over the item-07 meters, not additional spend. Papers read / papers in scope, counted from each sweep&rsquo;s own manifest.</p>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">10</div>
+        <div>
+          <div class="iname">Question queue</div>
+          <div class="irole lab faint">Buffer · Research</div>
+        </div>
+        <div class="req">Queue depth inside 40 briefs; the oldest question inside fourteen days.</div>
+        <div>
+          <div class="obs-main">17 questions queued. The oldest was filed 16&nbsp;Aug, six days ago; median wait runs 2.4 days.</div>
+          <div class="obs-prov prov">counted from the queue table 14:45:02</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ——— data ——— -->
+    <div class="seclab"><span class="lab ink">Data</span><span class="count">items 11–12</span></div>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">11</div>
+        <div>
+          <div class="iname">Snapshot &amp; recovery</div>
+          <div class="irole lab faint">Safeguard · Data</div>
+        </div>
+        <div class="req">The 05:30 snapshot inside 24&nbsp;hours and checksum-verified; a restore drill passed inside thirty days.</div>
+        <div>
+          <div class="obs-main">Snapshot taken 05:31 this morning, 2.31&nbsp;GB, checksum verified 05:33. The last restore drill ran 18&nbsp;Aug and rebuilt the full library in 11&nbsp;m&nbsp;40&nbsp;s.</div>
+          <div class="obs-prov prov">sha-256 a41f92… · drill record 18 Aug 06:12</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="row">
+        <div class="num">12</div>
+        <div>
+          <div class="iname">Backfills</div>
+          <div class="irole lab faint">Operation · Data</div>
+        </div>
+        <div class="req">No backfill contending with generation or the snapshot hour; the recovery ledger empty or scheduled.</div>
+        <div>
+          <div class="obs-main">One backfill running: weather history 2019&ndash;2021, 779 of 1,096 station-days done (71%). It runs only 06:30&ndash;00:30, yielding the night to the cycle and the snapshot. The recovery ledger is empty.</div>
+          <div class="obs-prov prov">backfill manifest read 14:47:18 · recovery ledger read 14:45</div>
+        </div>
+        <div class="disp">
+          <div class="dstat"><span class="dot"></span><span class="lab sage">Within limits</span></div>
+          <div class="dsub">recomputed 14:45:07</div>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ============ abnormal procedures ============ -->
+  <section class="abn">
+    <div class="abn-rule">
+      <div class="seclab" style="padding-top:0"><span class="lab ink">Abnormal procedures</span><span class="count">incident record · trailing 30 days</span></div>
+      <p class="abn-intro">Nothing is open. Two abnormals closed in the trailing thirty days; each stands below as a completed
+      procedure &mdash; what broke, when, and every step taken, in order. An abnormal never edits the checklist above: it earns its
+      own block here, and the block stays.</p>
+    </div>
+
+    <article class="abnpanel">
+      <div class="abnhead">
+        <div><span class="abnid">A-19</span><span class="abntitle">Council deadlock on scenario batch 214-C</span></div>
+        <div class="abnclosed"><span class="check">✓</span><span class="lab faint">opened 20 Aug 04:31 · closed 21 Aug 09:12</span></div>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="t">20 Aug 04:31</span><span class="who">Machine</span><span class="what">Cycle 217 halted at the verify gate: council-1 and council-3 returned contradictory verdicts on batch 214-C past the retry ceiling of three.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">04:31</span><span class="who">Machine</span><span class="what">Batch quarantined. Nothing from it entered the Library.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">04:32</span><span class="who">Machine</span><span class="what">Courier paged the operator; the page was acknowledged at 04:39.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">05:10</span><span class="who">Operator</span><span class="what">Re-run authorized with a fourth model empaneled as tie-breaker.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">05:47</span><span class="who">Machine</span><span class="what">Verdicts converged three to one; the batch was released to the Archivist and the cycle completed.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">21 Aug 09:12</span><span class="who">Operator</span><span class="what">Root cause filed: a stale prompt cache on council-1. The cache is now pinned to cycle id; the guard shipped and was verified against a replay of the batch.</span><span class="ok check">✓</span></div>
+      </div>
+      <p class="abnclose">Closed 21&nbsp;Aug 09:12. Cycle&nbsp;217 completed 52 minutes past its window, and every brief it produced
+      carries the re-run in its provenance. The abnormal cost $8.12, metered to the 20&nbsp;August ledger, which closed at $431.40
+      of $500.00.</p>
+    </article>
+
+    <article class="abnpanel">
+      <div class="abnhead">
+        <div><span class="abnid">A-18</span><span class="abntitle">Snapshot checksum mismatch at morning verification</span></div>
+        <div class="abnclosed"><span class="check">✓</span><span class="lab faint">opened 9 Aug 05:44 · closed 9 Aug 06:31</span></div>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="t">9 Aug 05:44</span><span class="who">Machine</span><span class="what">Checksum verification failed on the 05:30 snapshot. The snapshot was quarantined and never offered for restore.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">05:45</span><span class="who">Machine</span><span class="what">A second snapshot was taken 05:45&ndash;05:56 and its checksum verified.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">06:02</span><span class="who">Machine</span><span class="what">Trace complete: a host patch window had interrupted the first write.</span><span class="ok check">✓</span></div>
+        <div class="step"><span class="t">06:31</span><span class="who">Operator</span><span class="what">Patch window moved to 14:00, clear of the snapshot hour. The Archivist now refuses to snapshot while a patch flag is up.</span><span class="ok check">✓</span></div>
+      </div>
+      <p class="abnclose">Closed 9&nbsp;Aug 06:31. No cycle ran on the bad snapshot. The abnormal cost $0.41.</p>
+    </article>
+  </section>
+
+  <!-- ============ end of checklist ============ -->
+  <section class="endblock">
+    <div class="end-title">End of checklist.</div>
+    <p class="end-prose">Twelve items and two closed abnormals are the whole of it. The Engine Room keeps no second page: whatever
+    could ground the machine is here, or it does not exist. Read to here, you know what the machine knows.</p>
+    <div class="end-tally">12 OF 12 ITEMS READ · DETERMINATION <span class="sagey">DISPATCH</span> · CYCLE 220 HOLDS 02:00</div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-main">Every claim sourced · every cost computed · every verdict recorded</div>
+    <div class="foot-sub">Palingenesis Engine Room · assembled 14:47:22 CT from live meters — nothing here is older than fifteen minutes, except where its timestamp says so.</div>
+  </div>
+</footer>
+
+</body>
+</html>

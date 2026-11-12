@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Today</title>
+<style>
+  :root{
+    --ground:#1b1714;
+    --ink:#ece5d6;
+    --ink-2:rgba(236,229,214,.64);
+    --ink-3:rgba(236,229,214,.42);
+    --hair:rgba(236,229,214,.13);
+    --hair-2:rgba(236,229,214,.26);
+    --accent:#a3c57d;
+    --serif:'Iowan Old Style',Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{height:100%}
+  body{
+    min-height:100%;
+    background:
+      radial-gradient(1100px 480px at 50% -8%, rgba(236,229,214,.045), rgba(236,229,214,0) 70%),
+      var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  a{color:inherit}
+  ::selection{background:rgba(163,197,125,.28)}
+
+  .page{
+    max-width:1288px;
+    min-height:100vh;
+    margin:0 auto;
+    padding:34px 84px 0;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding-bottom:16px;
+  }
+  .wordmark{
+    font-family:var(--serif);
+    font-size:19px;
+    font-weight:400;
+    letter-spacing:.34em;
+    text-transform:uppercase;
+  }
+  nav{display:flex;gap:34px;font-size:13px;letter-spacing:.02em}
+  nav a{color:var(--ink-3);text-decoration:none;transition:color .15s ease}
+  nav a:hover{color:var(--ink)}
+  nav a.now{color:var(--ink);position:relative}
+  nav a.now::after{
+    content:"";
+    position:absolute;left:0;right:0;bottom:-7px;
+    height:1px;background:var(--accent);
+  }
+
+  .rule-double{
+    height:4px;
+    border-top:1px solid var(--hair-2);
+    border-bottom:1px solid var(--hair-2);
+  }
+
+  .folio{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding:9px 2px 10px;
+    border-bottom:1px solid var(--hair);
+    font-size:11.5px;
+    letter-spacing:.05em;
+    color:var(--ink-3);
+    font-variant-numeric:tabular-nums;
+  }
+  .folio .mid{
+    font-family:var(--serif);
+    font-style:italic;
+    font-size:13px;
+    letter-spacing:.01em;
+    color:var(--ink-2);
+  }
+
+  /* ---------- status pulse ---------- */
+  .pulse{
+    display:flex;
+    justify-content:space-between;
+    gap:40px;
+    padding:17px 2px 19px;
+    border-bottom:1px solid var(--hair);
+  }
+  .p-item{font-variant-numeric:tabular-nums}
+  .p-item.mid{text-align:center}
+  .p-item.end{text-align:right}
+  .p-big{
+    display:flex;align-items:center;gap:10px;
+    font-size:15.5px;font-weight:500;letter-spacing:.01em;
+  }
+  .p-item.mid .p-big{justify-content:center}
+  .p-item.end .p-big{justify-content:flex-end}
+  .p-sub{margin-top:6px;font-size:11.5px;letter-spacing:.02em;color:var(--ink-3)}
+  .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 0 0 0 rgba(163,197,125,.4);
+    animation:beat 2.8s ease-out infinite;
+  }
+  @keyframes beat{
+    0%{box-shadow:0 0 0 0 rgba(163,197,125,.4)}
+    70%{box-shadow:0 0 0 10px rgba(163,197,125,0)}
+    100%{box-shadow:0 0 0 0 rgba(163,197,125,0)}
+  }
+  @media (prefers-reduced-motion: reduce){.dot{animation:none}}
+
+  /* ---------- main ---------- */
+  main{
+    flex:1;
+    display:grid;
+    grid-template-columns:1fr 396px;
+  }
+  .decisions{padding:30px 56px 34px 2px}
+  .feed{padding:30px 2px 34px 48px;border-left:1px solid var(--hair)}
+
+  .lbl{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    font-size:11px;
+    letter-spacing:.24em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  .lbl .count{color:var(--accent);letter-spacing:.12em;font-size:12px}
+  .lbl .note{font-size:11px;letter-spacing:.05em;text-transform:none;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .dek{
+    margin-top:11px;
+    font-family:var(--serif);
+    font-style:italic;
+    font-size:14px;
+    line-height:1.5;
+    color:var(--ink-2);
+    max-width:58ch;
+  }
+
+  /* candidates */
+  .cand{
+    display:grid;
+    grid-template-columns:44px 1fr;
+    padding:26px 0 30px;
+    border-top:1px solid var(--hair);
+    margin-top:0;
+  }
+  .cand.first{margin-top:22px}
+  .n{
+    font-family:var(--serif);
+    font-style:italic;
+    font-size:15px;
+    color:var(--ink-3);
+    padding-top:7px;
+  }
+  .thesis{
+    font-family:var(--serif);
+    font-weight:400;
+    font-size:27px;
+    line-height:1.28;
+    letter-spacing:.002em;
+    text-wrap:balance;
+    max-width:26em;
+  }
+  .vline{
+    margin-top:13px;
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .verdict{
+    color:var(--accent);
+    font-size:12px;
+    font-weight:650;
+    letter-spacing:.2em;
+    text-transform:uppercase;
+  }
+  .sep{color:var(--ink-3)}
+  .fit{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+  .fit .of{color:var(--ink-3);font-weight:400}
+  .prov{font-size:12px;color:var(--ink-3)}
+  .abs{
+    margin-top:14px;
+    font-family:var(--serif);
+    font-size:15.5px;
+    line-height:1.58;
+    color:var(--ink-2);
+    max-width:62ch;
+    text-wrap:pretty;
+  }
+  .dissent{
+    margin-top:12px;
+    padding-left:12px;
+    border-left:1px solid var(--hair-2);
+    font-size:12px;
+    line-height:1.5;
+    color:var(--ink-3);
+    max-width:68ch;
+  }
+  .meta{
+    margin-top:16px;
+    font-size:12px;
+    line-height:1.7;
+    color:var(--ink-3);
+    font-variant-numeric:tabular-nums;
+    max-width:72ch;
+  }
+  .meta .v{color:var(--ink-2)}
+  .act{margin-top:13px;font-size:13px}
+  .act a{
+    text-decoration:none;
+    border-bottom:1px solid var(--hair-2);
+    padding-bottom:2px;
+    transition:color .15s ease,border-color .15s ease;
+  }
+  .act a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+  .soon{
+    margin-top:4px;
+    padding-top:16px;
+    border-top:1px solid var(--hair);
+    font-family:var(--serif);
+    font-style:italic;
+    font-size:13px;
+    line-height:1.55;
+    color:var(--ink-3);
+    max-width:60ch;
+  }
+
+  /* feed */
+  .ev{
+    display:grid;
+    grid-template-columns:50px 1fr;
+    column-gap:14px;
+    padding:16px 0;
+    border-top:1px solid var(--hair);
+  }
+  .ev.first{margin-top:20px}
+  .ev time{
+    font-size:12px;
+    color:var(--ink-3);
+    font-variant-numeric:tabular-nums;
+    padding-top:2px;
+  }
+  .ev h3{font-size:13.5px;font-weight:600;letter-spacing:.01em}
+  .ev p{
+    margin-top:5px;
+    font-size:12.5px;
+    line-height:1.55;
+    color:var(--ink-2);
+    font-variant-numeric:tabular-nums;
+    text-wrap:pretty;
+  }
+  .jrnl{margin-top:18px;font-size:12px}
+  .jrnl a{
+    color:var(--ink-3);
+    text-decoration:none;
+    border-bottom:1px solid var(--hair);
+    padding-bottom:2px;
+    transition:color .15s ease,border-color .15s ease;
+  }
+  .jrnl a:hover{color:var(--ink);border-bottom-color:var(--hair-2)}
+
+  /* footer */
+  footer{
+    margin-top:auto;
+    border-top:1px solid var(--hair-2);
+    padding:20px 2px 26px;
+    text-align:center;
+  }
+  .motto{
+    font-family:var(--serif);
+    font-style:italic;
+    font-size:13.5px;
+    letter-spacing:.02em;
+    color:var(--ink-2);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="masthead">
+      <div class="wordmark">Palingenesis</div>
+      <nav>
+        <a class="now" href="#">Today</a>
+        <a href="#">Pipeline</a>
+        <a href="#">Library</a>
+        <a href="#">Engine&nbsp;Room</a>
+      </nav>
+    </div>
+
+    <div class="rule-double"></div>
+
+    <div class="folio">
+      <span>Saturday, August 22, 2026 · 17:23 Central</span>
+      <span class="mid">An autonomous engine for agricultural innovation</span>
+      <span>Day 204 · first light 31 Jan 2026 · 141 generations bred</span>
+    </div>
+
+    <div class="pulse">
+      <div class="p-item">
+        <div class="p-big"><span class="dot"></span>All systems running</div>
+        <div class="p-sub">12 processes · 0 faults · 41 d since restart (Jul 12)</div>
+      </div>
+      <div class="p-item mid">
+        <div class="p-big">$412.87 spent today</div>
+        <div class="p-sub">metered — API $389.51 · simulation $21.33 · storage $2.03</div>
+      </div>
+      <div class="p-item end">
+        <div class="p-big">Generation 142 in 3 h 41 m</div>
+        <div class="p-sub">opens 21:04 CT · mean cycle 34.7 h over 141 generations</div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="decisions">
+      <div class="lbl"><span>Awaiting your ruling &nbsp;·&nbsp; <span class="count">2</span></span></div>
+      <p class="dek">Both cleared the adversarial council. Your ruling commissions a pilot or records a kill — either enters the permanent record.</p>
+
+      <article class="cand first">
+        <div class="n">I</div>
+        <div>
+          <h2 class="thesis">Fungal-network-inspired ammonia reduction for cage-free layer houses</h2>
+          <div class="vline">
+            <span class="verdict">Greenlight</span>
+            <span class="sep">·</span>
+            <span class="fit">Fitness 8.2 <span class="of">/ 10</span></span>
+            <span class="prov">— council mean of five adversarial judges, re-scored after S-2291; one dissent held</span>
+          </div>
+          <p class="abs">Borrows the branching gas-exchange geometry of mycelial mats for a passive baffle lattice that draws ammonia off the litter bed before it reaches bird height. Held NH₃ −38% at bird level (median across 1,240 simulated house-years, ledger S-2291) with no added fan load.</p>
+          <p class="dissent">Dissent held — Judge C-4: substrate durability beyond 18 months unproven. Sweep L-119 commissioned against it at 17:02.</p>
+          <p class="meta">Gen 141 &nbsp;·&nbsp; on your desk <span class="v">42 min</span> (since 16:41) &nbsp;·&nbsp; <span class="v">27 sources</span> cited &nbsp;·&nbsp; pilot <span class="v">$18,400</span> — three vendor quotes, Aug basis &nbsp;·&nbsp; dossier PX-0447</p>
+          <p class="act"><a href="#">Open the dossier →</a></p>
+        </div>
+      </article>
+
+      <article class="cand">
+        <div class="n">II</div>
+        <div>
+          <h2 class="thesis">Compost-core heat recovery for winter ventilation in aviary pullet houses</h2>
+          <div class="vline">
+            <span class="verdict">Greenlight</span>
+            <span class="sep">·</span>
+            <span class="fit">Fitness 7.6 <span class="of">/ 10</span></span>
+            <span class="prov">— council mean, five judges, unanimous 5–0</span>
+          </div>
+          <p class="abs">Routes winter intake air through sealed coils buried in the litter-compost core, recovering microbial heat the house already makes. Modeled −22% propane draw (720 simulated house-winters, ledger S-2214); capital recovered in 2.6 heating seasons (quote basis F-77).</p>
+          <p class="meta">Gen 140 &nbsp;·&nbsp; waiting <span class="v">20 h 11 m</span> (since 21:12 Fri) &nbsp;·&nbsp; <span class="v">19 sources</span> cited &nbsp;·&nbsp; capex <span class="v">$31,200</span> — two fabricator quotes, Jul basis &nbsp;·&nbsp; dossier PX-0389</p>
+          <p class="act"><a href="#">Open the dossier →</a></p>
+        </div>
+      </article>
+
+      <p class="soon">A third candidate may land tonight: PX-0455, misting-cycle water reuse, is 68% through simulation S-2292 — estimated finish 18:42.</p>
+    </section>
+
+    <aside class="feed">
+      <div class="lbl"><span>The machine’s day</span><span class="note">5 of 47 events</span></div>
+
+      <article class="ev first">
+        <time>17:02</time>
+        <div>
+          <h3>Literature sweep commissioned</h3>
+          <p>“Litter chemistry × ammonia volatilization, 2019–2026.” 412 papers queued across three indexes, est. $6.20 (rate card R-9). Raised against the held dissent on PX-0447.</p>
+        </div>
+      </article>
+
+      <article class="ev">
+        <time>16:41</time>
+        <div>
+          <h3>Simulation finished</h3>
+          <p>S-2291, PX-0447 plume-and-thermal model: 1,240 house-years over six climates in 14 min, compute $9.84 (ledger S-2291). Council re-score 7.9 → 8.2; sent to your desk.</p>
+        </div>
+      </article>
+
+      <article class="ev">
+        <time>15:58</time>
+        <div>
+          <h3>Council veto — PX-0451</h3>
+          <p>“Probiotic mist for early-lay gut priming.” Reason: the sole supporting efficacy trial was retracted in 2024; challenge sustained 4–1. Lineage archived, no further spend.</p>
+        </div>
+      </article>
+
+      <article class="ev">
+        <time>14:37</time>
+        <div>
+          <h3>Corpus grew by 186 papers</h3>
+          <p>Sweep L-118 ingested — litter amendments and ventilation. 9 flagged novel-method, 2 contradictions logged against library claims. Corpus now 31,408 papers.</p>
+        </div>
+      </article>
+
+      <article class="ev">
+        <time>13:04</time>
+        <div>
+          <h3>Generation 141 closed</h3>
+          <p>14 candidates bred: 11 killed in council, 2 sent to simulation, 1 killed at the cost gate (charter §4). Generation cost $148.12 (ledger G-141).</p>
+        </div>
+      </article>
+
+      <p class="jrnl"><a href="#">Open the full journal — 47 events today →</a></p>
+    </aside>
+  </main>
+
+  <footer>
+    <p class="motto">Every claim sourced&nbsp; · &nbsp;every cost computed&nbsp; · &nbsp;every verdict recorded</p>
+  </footer>
+
+</div>
+</body>
+</html>
