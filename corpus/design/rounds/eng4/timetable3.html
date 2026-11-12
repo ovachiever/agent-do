@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Engine Room</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#1B1917;
+  --ink:#E7E3DA;
+  --mut:#A69D90;
+  --hair:rgba(231,227,218,0.14);
+  --hair2:rgba(231,227,218,0.28);
+  --u:rgba(231,227,218,0.30);
+  --sage:hsl(158,30%,55%);
+  --clay:hsl(12,42%,58%);
+  --tint:rgba(106,175,149,0.08);
+  --track:rgba(231,227,218,0.10);
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --serif:Georgia,"Times New Roman",serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+html,body{background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1440px;margin:0 auto;padding:0 48px}
+a{color:inherit;text-decoration:none}
+a:focus-visible{outline:1px solid var(--sage);outline-offset:2px}
+.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);font-weight:500}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.dr{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--u)}
+.dr:hover{text-decoration-color:var(--ink)}
+
+/* nav */
+nav{border-bottom:1px solid var(--hair)}
+.nav-i{display:flex;align-items:baseline;justify-content:space-between;padding-top:16px;padding-bottom:14px}
+.brand{font-family:var(--serif);font-size:18px;color:var(--ink)}
+.links{display:flex;gap:26px}
+.links a{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);padding:8px 1px 5px}
+.links a:hover{color:var(--ink)}
+.links a.active{color:var(--ink);border-bottom:2px solid var(--sage)}
+
+/* lede */
+.lede{margin-top:30px;font-family:var(--serif);font-weight:400;font-size:28px;line-height:1.4;max-width:1220px}
+.lede .mono{font-size:24px}
+.meta{margin-top:12px;letter-spacing:.12em}
+
+/* ledger */
+.ledger{margin-top:24px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:14px 0 18px}
+.sechead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+table.led{width:100%;border-collapse:collapse;table-layout:fixed}
+.led col.c-svc{width:130px}
+.led col.c-runs{width:70px}
+.led col.c-avg{width:90px}
+.led col.c-spend{width:110px}
+.led col.c-share{width:180px}
+.led thead th{padding:4px 0 7px;border-bottom:1px solid var(--hair);text-align:right}
+.led thead th.th-l{text-align:left}
+.led tbody td{padding:6px 0;border-top:1px solid var(--hair);vertical-align:baseline}
+.led tbody tr:first-child td{border-top:none}
+.svc{font-size:14px;font-weight:500}
+.job{font-size:13px;color:var(--mut);padding-left:2px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;text-align:right;color:var(--mut)}
+.num.sp{color:var(--ink)}
+.share{text-align:right}
+.share-i{display:flex;align-items:center;justify-content:flex-end;gap:10px}
+.bar{display:inline-block;width:110px;height:3px;background:var(--track);position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:rgba(231,227,218,0.45)}
+.pc{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;color:var(--mut)}
+tr.trow td{border-top:1px solid var(--hair2) !important;padding-top:9px}
+tr.trow .num.sp{font-weight:600}
+tr.trow .pc{color:var(--ink)}
+.ofcap{font-size:13px;color:var(--mut)}
+.meter{position:relative;height:6px;background:var(--track);margin-top:16px}
+.meter .fill{position:absolute;left:0;top:0;bottom:0;width:59.38%;background:var(--sage)}
+.meter .tick{position:absolute;top:-4px;bottom:-4px;width:1px}
+.meter .tick.pace{left:65.43%;background:var(--ink)}
+.meter .tick.proj{left:93.76%;background:var(--mut)}
+.mlab{position:relative;height:16px;margin-top:7px;font-size:12px;color:var(--mut)}
+.mlab .lp{position:absolute;left:65.43%;transform:translateX(-50%);white-space:nowrap}
+.mlab .lj{position:absolute;right:0;white-space:nowrap}
+.mlab .mono{font-size:12px;color:var(--ink)}
+
+/* timetable */
+.timetable{margin-top:26px}
+table.tt{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px}
+.tt col.cs{width:150px}
+.tt col.cur{background:var(--tint)}
+.tt thead th{padding:6px 0;border-bottom:1px solid var(--hair2);font-weight:500}
+.tt thead th.corner{text-align:right;padding-right:14px}
+.tt thead th.cn{text-align:center}
+.tt thead th.cn a{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
+.tt thead th.cn a:hover{color:var(--ink)}
+.tt thead th.hcur a{color:var(--sage);text-decoration-color:rgba(106,175,149,0.55)}
+.tt tbody th.stage{text-align:left;border-top:1px solid var(--hair);vertical-align:middle;padding:6px 8px 6px 0;font-weight:400}
+.sname{display:block;font-size:13px;color:var(--ink)}
+.ssvc{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.10em;color:var(--mut);margin-top:2px}
+.tt tbody td{border-top:1px solid var(--hair);text-align:center;vertical-align:top;padding:0}
+.tt tbody td a{display:block;min-height:44px;padding:6px 2px 7px}
+.tt tbody td a:hover{background:rgba(231,227,218,0.045)}
+.b{display:block;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;line-height:1.4;color:var(--mut)}
+.a{display:block;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;line-height:1.4;margin-top:1px;color:var(--ink);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--u)}
+.tt td a:hover .a{text-decoration-color:var(--ink)}
+a.fo .b{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--u)}
+.tt td a.fo:hover .b{text-decoration-color:var(--ink)}
+td.x .b{text-decoration:line-through;text-decoration-color:rgba(166,157,144,0.75)}
+.d{font-style:normal;font-size:12px;color:var(--mut);padding-left:3px}
+.now{font-style:normal;font-size:12px;color:var(--sage);padding-left:3px}
+tr.strow th{border-top:1px solid var(--hair)}
+tr.strow td{border-top:1px solid var(--hair);padding:6px 1px 8px;font-size:12px;color:var(--mut);white-space:nowrap;text-align:center}
+.can{color:var(--clay)}
+.prog{color:var(--sage)}
+.legend{font-size:12px;letter-spacing:.02em;color:var(--mut)}
+.legend .lg-b{font-family:var(--mono);color:var(--mut)}
+.legend .lg-a{font-family:var(--mono);color:var(--ink)}
+.legend .lg-x{color:var(--clay)}
+.legend .lg-n{color:var(--sage)}
+.legend .sep{color:var(--mut);padding:0 5px}
+
+/* band */
+.band{margin-top:26px;border-top:1px solid var(--hair);padding-top:14px;display:grid;grid-template-columns:220px 230px 1fr 250px;gap:36px}
+.band h3{margin-bottom:6px}
+.fact{display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--hair)}
+.fact .k{font-size:13px;color:var(--mut)}
+.fact .v{font-size:13px;color:var(--ink)}
+.inc{display:flex;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid var(--hair)}
+.inc .t{font-size:12px;color:var(--ink);flex:none}
+.inc .w{font-size:13px;color:var(--mut);flex:1}
+.inc .l{font-size:12px;color:var(--ink);flex:none}
+.ctrl{padding-top:2px}
+.btn{display:inline-block;border:1px solid rgba(231,227,218,0.38);padding:10px 18px;font-size:13px;letter-spacing:.02em;color:var(--ink);background:transparent}
+.btn:hover{border-color:var(--ink)}
+.cons{display:block;margin-top:9px;font-size:12px;color:var(--mut);line-height:1.5;max-width:220px}
+
+/* footer */
+footer{margin-top:30px;border-top:1px solid var(--hair)}
+footer .lbl{display:block;padding:16px 0 34px;letter-spacing:.16em}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap nav-i">
+  <span class="brand">Palingenesis</span>
+  <div class="links">
+    <a href="#today">Today</a>
+    <a href="#pipeline">Pipeline</a>
+    <a href="#library">Library</a>
+    <a href="#portfolio">Portfolio</a>
+    <a href="#simulation">Simulation</a>
+    <a class="active" href="#engine-room">Engine Room</a>
+  </div>
+</div></nav>
+
+<main class="wrap">
+
+  <h1 class="lede">Running to schedule — <a class="mono dr" href="#lin-spend">$296.88</a> of the <span class="mono">$500</span> day spent, cycle <a class="mono dr" href="#lin-cycle">11 of 16</a> underway, next opens at <a class="mono dr" href="#lin-next">16:30</a>.</h1>
+  <p class="meta lbl">observed <span class="mono">15:42:07</span> · sat 22 aug 2026 · cadence 90 min</p>
+
+  <section class="ledger" aria-label="The day's ledger">
+    <div class="sechead">
+      <span class="lbl">The Day&rsquo;s Ledger</span>
+      <span class="lbl">hard cap <span class="mono">$500.00</span></span>
+    </div>
+    <table class="led">
+      <colgroup><col class="c-svc"><col><col class="c-runs"><col class="c-avg"><col class="c-spend"><col class="c-share"></colgroup>
+      <thead><tr><th class="lbl th-l">service</th><th></th><th class="lbl">runs</th><th class="lbl">avg</th><th class="lbl">spend</th><th class="lbl">share</th></tr></thead>
+      <tbody>
+        <tr><td class="svc">Reader</td><td class="job">reads and extracts claims</td><td class="num"><a class="dr" href="#lin-reader-runs">10</a></td><td class="num"><a class="dr" href="#lin-reader-avg">$8.41</a></td><td class="num sp"><a class="dr" href="#lin-reader-spend">$84.10</a></td><td class="share"><span class="share-i"><span class="bar"><i style="width:28.3%"></i></span><a class="pc dr" href="#lin-reader-share">28.3%</a></span></td></tr>
+        <tr><td class="svc">Scout</td><td class="job">finds new sources</td><td class="num"><a class="dr" href="#lin-scout-runs">10</a></td><td class="num"><a class="dr" href="#lin-scout-avg">$3.18</a></td><td class="num sp"><a class="dr" href="#lin-scout-spend">$31.75</a></td><td class="share"><span class="share-i"><span class="bar"><i style="width:10.7%"></i></span><a class="pc dr" href="#lin-scout-share">10.7%</a></span></td></tr>
+        <tr><td class="svc">Council</td><td class="job">weighs candidate ideas</td><td class="num"><a class="dr" href="#lin-council-runs">10</a></td><td class="num"><a class="dr" href="#lin-council-avg">$5.82</a></td><td class="num sp"><a class="dr" href="#lin-council-spend">$58.20</a></td><td class="share"><span class="share-i"><span class="bar"><i style="width:19.6%"></i></span><a class="pc dr" href="#lin-council-share">19.6%</a></span></td></tr>
+        <tr><td class="svc">Simulator</td><td class="job">tests ideas in models</td><td class="num"><a class="dr" href="#lin-simulator-runs">9</a></td><td class="num"><a class="dr" href="#lin-simulator-avg">$10.71</a></td><td class="num sp"><a class="dr" href="#lin-simulator-spend">$96.40</a></td><td class="share"><span class="share-i"><span class="bar"><i style="width:32.5%"></i></span><a class="pc dr" href="#lin-simulator-share">32.5%</a></span></td></tr>
+        <tr><td class="svc">Archivist</td><td class="job">files verdicts and lineage</td><td class="num"><a class="dr" href="#lin-archivist-runs">9</a></td><td class="num"><a class="dr" href="#lin-archivist-avg">$1.39</a></td><td class="num sp"><a class="dr" href="#lin-archivist-spend">$12.55</a></td><td class="share"><span class="share-i"><span class="bar"><i style="width:4.2%"></i></span><a class="pc dr" href="#lin-archivist-share">4.2%</a></span></td></tr>
+        <tr><td class="svc">Courier</td><td class="job">delivers the digest</td><td class="num"><a class="dr" href="#lin-courier-runs">9</a></td><td class="num"><a class="dr" href="#lin-courier-avg">$1.54</a></td><td class="num sp"><a class="dr" href="#lin-courier-spend">$13.88</a></td><td class="share"><span class="share-i"><span class="bar"><i style="width:4.7%"></i></span><a class="pc dr" href="#lin-courier-share">4.7%</a></span></td></tr>
+        <tr class="trow"><td class="lbl">total</td><td></td><td class="num"><a class="dr" href="#lin-total-runs">57</a></td><td class="num"><a class="dr" href="#lin-total-avg">$5.21</a></td><td class="num sp"><a class="dr" href="#lin-total-spend">$296.88</a></td><td class="share"><span class="ofcap"><a class="pc dr" href="#lin-total-share">59.4%</a> of cap</span></td></tr>
+      </tbody>
+    </table>
+    <div class="meter"><span class="fill"></span><span class="tick pace"></span><span class="tick proj"></span></div>
+    <div class="mlab">
+      <span class="lp">day pace <a class="mono dr" href="#lin-pace">65.4%</a></span>
+      <span class="lj">projected close <a class="mono dr" href="#lin-projected">$468.80</a></span>
+    </div>
+  </section>
+
+  <section class="timetable" aria-label="The timetable">
+    <div class="sechead">
+      <span class="lbl">The Timetable</span>
+      <span class="legend"><span class="lg-b">booked</span><span class="sep">·</span><span class="lg-a">actual</span><span class="sep">·</span><span>late</span><span class="sep">·</span><span class="lg-x">cancelled</span><span class="sep">·</span><span class="lg-n">now</span></span>
+    </div>
+    <table class="tt">
+      <colgroup><col class="cs"><col span="10"><col class="cur"><col span="5"></colgroup>
+      <thead>
+        <tr>
+          <th class="corner lbl">cycle</th>
+          <th class="cn"><a class="dr" href="#lin-c01">01</a></th>
+          <th class="cn"><a class="dr" href="#lin-c02">02</a></th>
+          <th class="cn"><a class="dr" href="#lin-c03">03</a></th>
+          <th class="cn"><a class="dr" href="#lin-c04">04</a></th>
+          <th class="cn"><a class="dr" href="#lin-c05">05</a></th>
+          <th class="cn"><a class="dr" href="#lin-c06">06</a></th>
+          <th class="cn"><a class="dr" href="#lin-c07">07</a></th>
+          <th class="cn"><a class="dr" href="#lin-c08">08</a></th>
+          <th class="cn"><a class="dr" href="#lin-c09">09</a></th>
+          <th class="cn"><a class="dr" href="#lin-c10">10</a></th>
+          <th class="cn hcur"><a class="dr" href="#lin-c11">11</a></th>
+          <th class="cn"><a class="dr" href="#lin-c12">12</a></th>
+          <th class="cn"><a class="dr" href="#lin-c13">13</a></th>
+          <th class="cn"><a class="dr" href="#lin-c14">14</a></th>
+          <th class="cn"><a class="dr" href="#lin-c15">15</a></th>
+          <th class="cn"><a class="dr" href="#lin-c16">16</a></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th class="stage"><span class="sname">open</span><span class="ssvc">Scout</span></th>
+          <td><a href="#lin-c01-open"><span class="b">00:00</span><span class="a">00:00</span></a></td>
+          <td><a href="#lin-c02-open"><span class="b">01:30</span><span class="a">01:30</span></a></td>
+          <td><a href="#lin-c03-open"><span class="b">03:00</span><span class="a">03:00</span></a></td>
+          <td><a href="#lin-c04-open"><span class="b">04:30</span><span class="a">04:30</span></a></td>
+          <td class="x"><a href="#lin-c05-open"><span class="b">06:00</span></a></td>
+          <td><a href="#lin-c06-open"><span class="b">07:30</span><span class="a">07:30</span></a></td>
+          <td><a href="#lin-c07-open"><span class="b">09:00</span><span class="a">09:00</span></a></td>
+          <td><a href="#lin-c08-open"><span class="b">10:30</span><span class="a">10:30</span></a></td>
+          <td><a href="#lin-c09-open"><span class="b">12:00</span><span class="a">12:00</span></a></td>
+          <td><a href="#lin-c10-open"><span class="b">13:30</span><span class="a">13:30</span></a></td>
+          <td><a href="#lin-c11-open"><span class="b">15:00</span><span class="a">15:00</span></a></td>
+          <td><a class="fo" href="#lin-c12-open"><span class="b">16:30</span></a></td>
+          <td><a class="fo" href="#lin-c13-open"><span class="b">18:00</span></a></td>
+          <td><a class="fo" href="#lin-c14-open"><span class="b">19:30</span></a></td>
+          <td><a class="fo" href="#lin-c15-open"><span class="b">21:00</span></a></td>
+          <td><a class="fo" href="#lin-c16-open"><span class="b">22:30</span></a></td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sname">read</span><span class="ssvc">Reader</span></th>
+          <td><a href="#lin-c01-read"><span class="b">00:04</span><span class="a">00:04</span></a></td>
+          <td><a href="#lin-c02-read"><span class="b">01:34</span><span class="a">01:34</span></a></td>
+          <td><a href="#lin-c03-read"><span class="b">03:04</span><span class="a">03:05</span></a></td>
+          <td><a href="#lin-c04-read"><span class="b">04:34</span><span class="a">04:34</span></a></td>
+          <td class="x"><a href="#lin-c05-read"><span class="b">06:04</span></a></td>
+          <td><a href="#lin-c06-read"><span class="b">07:34</span><span class="a">07:34</span></a></td>
+          <td><a href="#lin-c07-read"><span class="b">09:04</span><span class="a">09:04</span></a></td>
+          <td><a href="#lin-c08-read"><span class="b">10:34</span><span class="a">10:34</span></a></td>
+          <td><a href="#lin-c09-read"><span class="b">12:04</span><span class="a">12:04</span></a></td>
+          <td><a href="#lin-c10-read"><span class="b">13:34</span><span class="a">13:34</span></a></td>
+          <td><a href="#lin-c11-read"><span class="b">15:04</span><span class="a">15:04</span></a></td>
+          <td><a class="fo" href="#lin-c12-read"><span class="b">16:34</span></a></td>
+          <td><a class="fo" href="#lin-c13-read"><span class="b">18:04</span></a></td>
+          <td><a class="fo" href="#lin-c14-read"><span class="b">19:34</span></a></td>
+          <td><a class="fo" href="#lin-c15-read"><span class="b">21:04</span></a></td>
+          <td><a class="fo" href="#lin-c16-read"><span class="b">22:34</span></a></td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sname">deliberate</span><span class="ssvc">Council</span></th>
+          <td><a href="#lin-c01-deliberate"><span class="b">00:31</span><span class="a">00:32</span></a></td>
+          <td><a href="#lin-c02-deliberate"><span class="b">02:01</span><span class="a">02:02</span></a></td>
+          <td><a href="#lin-c03-deliberate"><span class="b">03:31</span><span class="a">03:31</span></a></td>
+          <td><a href="#lin-c04-deliberate"><span class="b">05:01</span><span class="a">05:02</span></a></td>
+          <td class="x"><a href="#lin-c05-deliberate"><span class="b">06:31</span></a></td>
+          <td><a href="#lin-c06-deliberate"><span class="b">08:01</span><span class="a">08:02</span></a></td>
+          <td><a href="#lin-c07-deliberate"><span class="b">09:31</span><span class="a">09:32</span></a></td>
+          <td><a href="#lin-c08-deliberate"><span class="b">11:01</span><span class="a">11:01</span></a></td>
+          <td><a href="#lin-c09-deliberate"><span class="b">12:31</span><span class="a">12:32</span></a></td>
+          <td><a href="#lin-c10-deliberate"><span class="b">14:01</span><span class="a">14:02</span></a></td>
+          <td><a href="#lin-c11-deliberate"><span class="b">15:31</span><span class="a">15:32<em class="now">now</em></span></a></td>
+          <td><a class="fo" href="#lin-c12-deliberate"><span class="b">17:01</span></a></td>
+          <td><a class="fo" href="#lin-c13-deliberate"><span class="b">18:31</span></a></td>
+          <td><a class="fo" href="#lin-c14-deliberate"><span class="b">20:01</span></a></td>
+          <td><a class="fo" href="#lin-c15-deliberate"><span class="b">21:31</span></a></td>
+          <td><a class="fo" href="#lin-c16-deliberate"><span class="b">23:01</span></a></td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sname">simulate</span><span class="ssvc">Simulator</span></th>
+          <td><a href="#lin-c01-simulate"><span class="b">00:52</span><span class="a">00:53</span></a></td>
+          <td><a href="#lin-c02-simulate"><span class="b">02:22</span><span class="a">02:23</span></a></td>
+          <td><a href="#lin-c03-simulate"><span class="b">03:52</span><span class="a">03:52</span></a></td>
+          <td><a href="#lin-c04-simulate"><span class="b">05:22</span><span class="a">05:23</span></a></td>
+          <td class="x"><a href="#lin-c05-simulate"><span class="b">06:52</span></a></td>
+          <td><a href="#lin-c06-simulate"><span class="b">08:22</span><span class="a">08:23</span></a></td>
+          <td><a href="#lin-c07-simulate"><span class="b">09:52</span><span class="a">09:53</span></a></td>
+          <td><a href="#lin-c08-simulate"><span class="b">11:22</span><span class="a">11:43<em class="d">+21</em></span></a></td>
+          <td><a href="#lin-c09-simulate"><span class="b">12:52</span><span class="a">12:53</span></a></td>
+          <td><a href="#lin-c10-simulate"><span class="b">14:22</span><span class="a">14:22</span></a></td>
+          <td><a class="fo" href="#lin-c11-simulate"><span class="b">15:52</span></a></td>
+          <td><a class="fo" href="#lin-c12-simulate"><span class="b">17:22</span></a></td>
+          <td><a class="fo" href="#lin-c13-simulate"><span class="b">18:52</span></a></td>
+          <td><a class="fo" href="#lin-c14-simulate"><span class="b">20:22</span></a></td>
+          <td><a class="fo" href="#lin-c15-simulate"><span class="b">21:52</span></a></td>
+          <td><a class="fo" href="#lin-c16-simulate"><span class="b">23:22</span></a></td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sname">record</span><span class="ssvc">Archivist</span></th>
+          <td><a href="#lin-c01-record"><span class="b">01:14</span><span class="a">01:14</span></a></td>
+          <td><a href="#lin-c02-record"><span class="b">02:44</span><span class="a">02:45</span></a></td>
+          <td><a href="#lin-c03-record"><span class="b">04:14</span><span class="a">04:15</span></a></td>
+          <td><a href="#lin-c04-record"><span class="b">05:44</span><span class="a">05:44</span></a></td>
+          <td class="x"><a href="#lin-c05-record"><span class="b">07:14</span></a></td>
+          <td><a href="#lin-c06-record"><span class="b">08:44</span><span class="a">08:44</span></a></td>
+          <td><a href="#lin-c07-record"><span class="b">10:14</span><span class="a">10:15</span></a></td>
+          <td><a href="#lin-c08-record"><span class="b">11:44</span><span class="a">12:05<em class="d">+21</em></span></a></td>
+          <td><a href="#lin-c09-record"><span class="b">13:14</span><span class="a">13:14</span></a></td>
+          <td><a href="#lin-c10-record"><span class="b">14:44</span><span class="a">14:45</span></a></td>
+          <td><a class="fo" href="#lin-c11-record"><span class="b">16:14</span></a></td>
+          <td><a class="fo" href="#lin-c12-record"><span class="b">17:44</span></a></td>
+          <td><a class="fo" href="#lin-c13-record"><span class="b">19:14</span></a></td>
+          <td><a class="fo" href="#lin-c14-record"><span class="b">20:44</span></a></td>
+          <td><a class="fo" href="#lin-c15-record"><span class="b">22:14</span></a></td>
+          <td><a class="fo" href="#lin-c16-record"><span class="b">23:44</span></a></td>
+        </tr>
+        <tr>
+          <th class="stage"><span class="sname">close</span><span class="ssvc">Courier</span></th>
+          <td><a href="#lin-c01-close"><span class="b">01:26</span><span class="a">01:25</span></a></td>
+          <td><a href="#lin-c02-close"><span class="b">02:56</span><span class="a">02:57</span></a></td>
+          <td><a href="#lin-c03-close"><span class="b">04:26</span><span class="a">04:26</span></a></td>
+          <td><a href="#lin-c04-close"><span class="b">05:56</span><span class="a">05:55</span></a></td>
+          <td class="x"><a href="#lin-c05-close"><span class="b">07:26</span></a></td>
+          <td><a href="#lin-c06-close"><span class="b">08:56</span><span class="a">08:56</span></a></td>
+          <td><a href="#lin-c07-close"><span class="b">10:26</span><span class="a">10:27</span></a></td>
+          <td><a href="#lin-c08-close"><span class="b">11:56</span><span class="a">12:17<em class="d">+21</em></span></a></td>
+          <td><a href="#lin-c09-close"><span class="b">13:26</span><span class="a">13:26</span></a></td>
+          <td><a href="#lin-c10-close"><span class="b">14:56</span><span class="a">14:56</span></a></td>
+          <td><a class="fo" href="#lin-c11-close"><span class="b">16:26</span></a></td>
+          <td><a class="fo" href="#lin-c12-close"><span class="b">17:56</span></a></td>
+          <td><a class="fo" href="#lin-c13-close"><span class="b">19:26</span></a></td>
+          <td><a class="fo" href="#lin-c14-close"><span class="b">20:56</span></a></td>
+          <td><a class="fo" href="#lin-c15-close"><span class="b">22:26</span></a></td>
+          <td><a class="fo" href="#lin-c16-close"><span class="b">23:56</span></a></td>
+        </tr>
+        <tr class="strow">
+          <th></th>
+          <td>on time</td>
+          <td>on time</td>
+          <td>on time</td>
+          <td>on time</td>
+          <td><span class="can">cancelled</span></td>
+          <td>on time</td>
+          <td>on time</td>
+          <td><a class="dr" href="#lin-c08-delay">+21 late</a></td>
+          <td>on time</td>
+          <td>on time</td>
+          <td><span class="prog">in progress</span></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="band" aria-label="Scheduler, data, incidents">
+    <div>
+      <h3 class="lbl">Scheduler</h3>
+      <div class="fact"><span class="k">cycle</span><a class="v mono dr" href="#lin-sched-cycle">11 of 16</a></div>
+      <div class="fact"><span class="k">next opens</span><a class="v mono dr" href="#lin-sched-next">16:30</a></div>
+      <div class="fact"><span class="k">drift</span><a class="v mono dr" href="#lin-sched-drift">+1 min</a></div>
+    </div>
+    <div>
+      <h3 class="lbl">Data</h3>
+      <div class="fact"><span class="k">snapshot</span><a class="v mono dr" href="#lin-data-snapshot">15:42:07</a></div>
+      <div class="fact"><span class="k">archive</span><a class="v mono dr" href="#lin-data-archive">4,218 records</a></div>
+      <div class="fact"><span class="k">backfill</span><a class="v mono dr" href="#lin-data-backfill">none queued</a></div>
+    </div>
+    <div>
+      <h3 class="lbl">Incidents</h3>
+      <div class="inc"><a class="t mono dr" href="#lin-inc-0604">06:04</a><span class="w">source feed down · cycle 5 cancelled</span><a class="l mono dr" href="#lin-inc-0604-lost">86 min lost</a></div>
+      <div class="inc"><a class="t mono dr" href="#lin-inc-1122">11:22</a><span class="w">simulator queue full · cycle 8 held</span><a class="l mono dr" href="#lin-inc-1122-lost">21 min lost</a></div>
+      <div class="inc"><a class="t mono dr" href="#lin-inc-1314">13:14</a><span class="w">archive write slow · retried, verified</span><a class="l mono dr" href="#lin-inc-1314-lost">0 min lost</a></div>
+    </div>
+    <div class="ctrl">
+      <a class="btn" href="#lin-suspend">Suspend generation</a>
+      <span class="cons">finishes the open cycle, then holds.</span>
+    </div>
+  </section>
+
+</main>
+
+<footer><div class="wrap">
+  <span class="lbl">Every claim sourced · every cost computed · every verdict recorded</span>
+</div></footer>
+
+</body>
+</html>
