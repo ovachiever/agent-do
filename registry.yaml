@@ -1,4 +1,90 @@
 tools:
+  audiobook:
+    description: Audible audiobook library and verified archives, using Libation as
+      the first provider
+    capabilities:
+    - connect isolated Audible account profiles using native browser login
+    - refresh libraries explicitly and inspect cached metadata locally
+    - archive explicitly selected books or batches with staged output and resume
+    - verify audio containers, durations, chapters, and optional full decoding
+    - save hashed non-secret receipts and reconcile missing or incomplete archives
+    commands:
+      doctor: Probe engine version, dependencies and credential presence without account
+        access
+      connect: 'Register dedicated native state: --account <alias> --marketplace <locale>
+        --libation-files <dir> --output <dir> [--login --email <id>] [--format m4b|mp3]'
+      accounts: List configured account aliases and cached readiness locally
+      snapshot: 'Read cached library: [--account <alias>]; or --export <path> for a
+        native JSON export'
+      sync: 'Refresh one Audible library and cache metadata: [--account <alias>]'
+      download: 'Archive explicit book IDs: <book-id> [...] [--account <alias>] [--resume]'
+      verify: 'Inspect archived audio: <book-id> [--account <alias>] [--deep] [--save-receipt]'
+      reconcile: 'Report missing, failed, incomplete and unverifiable archives locally:
+        [--account <alias>]'
+    examples:
+    - intent: check audiobook engine readiness
+      command: agent-audiobook doctor --json
+    - intent: inspect an exported audiobook library locally
+      command: agent-audiobook snapshot --export library.json --json
+    - intent: archive and verify one selected audiobook
+      command: agent-audiobook download B012345678 --account home --json
+    - intent: refresh the Audible library
+      command: agent-audiobook sync --account home --json
+    routing:
+      discover_keywords:
+      - audiobook
+      - audible
+      - libation
+      recommended_entrypoints:
+      - agent-do audiobook doctor --json
+      default_command: doctor
+    credentials:
+      optional:
+      - LIBATION_MASTER_KEY
+    concurrency: mixed
+    contracts:
+      connect:
+      - connect
+      - sync
+      snapshot:
+      - doctor
+      - accounts
+      - snapshot
+      - reconcile
+      interact:
+      - sync
+      - download
+      verify:
+      - doctor
+      - download
+      - verify
+      - reconcile
+      save:
+      - connect
+      - sync
+      - download
+      - verify
+      attributes:
+        doctor:
+        - composite
+        connect:
+        - sensitive
+        - composite
+        - long_running
+        sync:
+        - sensitive
+        - composite
+        - long_running
+        download:
+        - sensitive
+        - composite
+        - long_running
+        verify:
+        - polymorphic
+        - composite
+        - long_running
+        reconcile:
+        - composite
   design:
     description: Image-first design workflow with approved copy and measured browser polish
     capabilities:

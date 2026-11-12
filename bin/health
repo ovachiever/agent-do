@@ -184,6 +184,13 @@ check_tool() {
         local note=""
 
         case "$name" in
+            audiobook)
+                if "$tool_path" doctor --json 2>/dev/null | python3 -c 'import json,sys; p=json.load(sys.stdin); sys.exit(0 if p.get("success") and p.get("dependencies", {}).get("ffprobe") else 1)' >/dev/null 2>&1; then
+                    status="OK"; note="supported Libation and ffprobe available (sessions not checked)"
+                else
+                    status="WARN"; note="run: agent-do audiobook doctor --json"
+                fi
+                ;;
             browse|unbrowse)
                 if ! command -v node &>/dev/null; then
                     status="WARN"; note="node not found"

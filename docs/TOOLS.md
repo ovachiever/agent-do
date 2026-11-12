@@ -18,7 +18,7 @@ commands. Per-verb truth lives in each tool's safety note, derived
 from its `contracts:` block: verbs touching only the snapshot and
 verify beats are read-only; connect, interact, and save verbs write.
 
-## Summary (103 tools)
+## Summary (104 tools)
 
 | Tool | Description | Concurrency | Commands |
 |------|-------------|-------------|----------|
@@ -28,6 +28,7 @@ verify beats are read-only; connect, interact, and save verbs write.
 | [api](#api) | API testing plus canonical API integration templates for agents | mixed | 13 |
 | [appleevents](#appleevents) | Control scriptable macOS apps through AppleEvents, AppleScript, and JXA | mixed | 9 |
 | [audio](#audio) | Audio processing | mixed | 3 |
+| [audiobook](#audiobook) | Audible audiobook library and verified archives, using Libation as the first provider | mixed | 8 |
 | [auth](#auth) | Site-level authentication orchestration over encrypted session bundles, browser import, and secure credentials | mixed | 13 |
 | [betterstack](#betterstack) | Better Stack Uptime monitoring, incidents, heartbeats, status pages, and on-call | mixed | 14 |
 | [bluetooth](#bluetooth) | Bluetooth control | mixed | 3 |
@@ -372,6 +373,57 @@ agent-do audio transcribe recording.mp3
 - Write (connect/interact/save): `convert`, `transcribe`, `trim`
 - long_running (daemon/stream/session; may never return): `transcribe`
 - composite (one call performs several beats internally): `transcribe`
+
+### audiobook
+
+Audible audiobook library and verified archives, using Libation as the first provider
+
+Concurrency: `mixed`
+
+**Capabilities**
+
+- connect isolated Audible account profiles using native browser login
+- refresh libraries explicitly and inspect cached metadata locally
+- archive explicitly selected books or batches with staged output and resume
+- verify audio containers, durations, chapters, and optional full decoding
+- save hashed non-secret receipts and reconcile missing or incomplete archives
+
+**Commands**
+
+- `doctor`: Probe engine version, dependencies and credential presence without account access
+- `connect`: Register dedicated native state: --account \<alias> --marketplace \<locale> --libation-files \<dir> --output \<dir> [--login --email \<id>] [--format m4b|mp3]
+- `accounts`: List configured account aliases and cached readiness locally
+- `snapshot`: Read cached library: [--account \<alias>]; or --export \<path> for a native JSON export
+- `sync`: Refresh one Audible library and cache metadata: [--account \<alias>]
+- `download`: Archive explicit book IDs: \<book-id> [...] [--account \<alias>] [--resume]
+- `verify`: Inspect archived audio: \<book-id> [--account \<alias>] [--deep] [--save-receipt]
+- `reconcile`: Report missing, failed, incomplete and unverifiable archives locally: [--account \<alias>]
+
+**Examples**
+
+```bash
+# check audiobook engine readiness
+agent-do audiobook doctor --json
+# inspect an exported audiobook library locally
+agent-do audiobook snapshot --export library.json --json
+# archive and verify one selected audiobook
+agent-do audiobook download B012345678 --account home --json
+# refresh the Audible library
+agent-do audiobook sync --account home --json
+```
+
+**Credentials**
+
+- Optional: `LIBATION_MASTER_KEY`
+
+**Safety (from contracts)**
+
+- Read-only (snapshot/verify; safe to parallelize): `accounts`, `doctor`, `reconcile`, `snapshot`
+- Write (connect/interact/save): `connect`, `download`, `sync`, `verify`
+- sensitive (emits or persists secret material; guard output): `connect`, `download`, `sync`
+- long_running (daemon/stream/session; may never return): `connect`, `download`, `sync`, `verify`
+- polymorphic (beat decided by payload or flag at call time): `verify`
+- composite (one call performs several beats internally): `connect`, `doctor`, `download`, `reconcile`, `sync`, `verify`
 
 ### auth
 

@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Local audiobook inspection; Libation is the first provider."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import signal
+
+from service import Adapter, Error, program
+
+PINNED_VERSION = "14.2.2"
+
+
+class Failure(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+def engine_path():
+    override = os.environ.get("AGENT_LIBATION_BIN")
+    if override:
+        return shutil.which(override)
+    for name in ("LibationCli", "libationcli", "LibationCli.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    mac = Path("/Applications/Libation.app/Contents/MacOS/LibationCli")
+    return str(mac) if os.access(mac, os.X_OK) else None
+
+
+def doctor():
+    engine = engine_path()
+    version = None
+    status = "missing_engine"
+    if engine:
+        # --help bypasses Setup.Initialize (migrations/logging/account state).
+        # The `version` verb does not, so it is unsuitable for a local read.
+        try:
+            result = subprocess.run([engine, "--help"], stdin=subprocess.DEVNULL,
+                                    capture_output=True, timeout=10)
+            match = re.search(rb"(?m)^LibationCli v(\d+\.\d+\.\d+)\s*$",
+                              result.stdout + result.stderr)
+            if result.returncode:
+                status = "engine_probe_failed"
+            elif not match:
+                status = "unrecognized_engine"
+            else:
+                version = match[1].decode("ascii")
+                status = "ready" if version == PINNED_VERSION else "unsupported_version"
+        except (OSError, subprocess.TimeoutExpired):
+            status = "engine_probe_failed"
+    return {
+        "success": status == "ready", "provider": "libation", "status": status,
+        "version": version, "supported_version": PINNED_VERSION,
+        "dependencies": {"ffprobe": bool(program("AGENT_FFPROBE_BIN", "ffprobe"))},
+        "credentials": {
+            "master_key_present": bool(os.environ.get("LIBATION_MASTER_KEY")),
+            "master_key_validated": False,
+            "session_readiness": "not_checked",
+            "session_storage": "libation_native",
+            "encryption_at_rest": "not_checked",
+        },
+        "features": {"local_export_snapshot": True, "sync": True,
+                     "connect": True, "download": True, "verify": True,
+                     "reconcile": True, "accounts": True, "explicit_batch": True},
+    }
+
+
+def snapshot(export, account, marketplace):
+    if not export:
+        raise Failure("library_unavailable")
+    try:
+        records = json.loads(Path(export).read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        raise Failure("library_unavailable")
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise Failure("invalid_export")
+    if not isinstance(records, list):
+        raise Failure("invalid_export")
+    entries = []
+    seen = set()
+    for row in records:
+        # Whitelist public ExportDto fields. Never echo arbitrary provider keys.
+        if not isinstance(row, dict):
+            raise Failure("invalid_export")
+        required = ("Account", "Locale", "AudibleProductId", "Title")
+        if any(not isinstance(row.get(key), str) or not row[key].strip()
+               for key in required):
+            raise Failure("invalid_export")
+        identity = (row["Account"], row["Locale"], row["AudibleProductId"])
+        if identity in seen:
+            raise Failure("ambiguous_identity")
+        seen.add(identity)
+        if account is not None and row["Account"] != account:
+            continue
+        if marketplace is not None and row["Locale"] != marketplace:
+            continue
+        entries.append({
+            "provider": "libation", "account": row["Account"],
+            "marketplace": row["Locale"], "book_id": row["AudibleProductId"],
+            "title": row["Title"], "archive_state": "unverified",
+        })
+    return {"success": True, "provider": "libation", "source": "local_export",
+            "freshness": "unknown", "total": len(entries), "entries": entries,
+            "verification": "not_performed"}
+
+
+class JsonParser(argparse.ArgumentParser):
+    def error(self, message):
+        if "--json" in sys.argv:
+            print(json.dumps({"success": False, "provider": "libation", "error": "invalid_arguments"}))
+            self.exit(2)
+        super().error(message)
+
+
+def interrupted(signum, frame):
+    raise KeyboardInterrupt()
+
+
+def main():
+    signal.signal(signal.SIGTERM, interrupted)
+    parser = JsonParser(description="Audiobook library and verified archives using Libation 14.2.2")
+    parser.add_argument("--json", action="store_true", help="Emit one JSON document (also the default)")
+    commands = parser.add_subparsers(dest="command", required=True)
+    doc = commands.add_parser("doctor", help="Probe engine and dependency readiness without account access")
+    connect = commands.add_parser("connect", help="Register dedicated Libation state, optionally sign in interactively")
+    connect.add_argument("--account", required=True, help="Non-secret local account alias")
+    connect.add_argument("--marketplace", required=True, help="Native locale name, e.g. us, uk, germany")
+    connect.add_argument("--libation-files", required=True, help="Dedicated GUI-initialized Libation state directory")
+    connect.add_argument("--output", required=True, help="Archive directory dedicated to this account")
+    connect.add_argument("--format", choices=("m4b", "mp3"), default="m4b")
+    connect.add_argument("--login", action="store_true", help="Use native browser login through a private interactive terminal")
+    connect.add_argument("--email", help="Audible login id for --login (never a password)")
+    accounts = commands.add_parser("accounts", help="List account aliases and cached readiness locally")
+    snap = commands.add_parser("snapshot", help="Read cached library or an explicit native JSON export locally")
+    snap.add_argument("--export", help="Optional existing Libation JSON library export")
+    sync = commands.add_parser("sync", help="Refresh one account library from Audible and atomically cache metadata")
+    download = commands.add_parser("download", help="Archive explicit book IDs; verify audio and save receipts")
+    download.add_argument("book_ids", nargs="+", help="Explicit provider book IDs (no implicit whole-library batch)")
+    download.add_argument("--resume", action="store_true", help="Reuse this book's prior staging and native in-progress data")
+    download.add_argument("--allow-no-chapters", action="store_true", help="Explicitly waive chapter presence and record unavailable check")
+    verify = commands.add_parser("verify", help="Inspect one archived book; optional deep decode and receipt save")
+    verify.add_argument("book_id")
+    verify.add_argument("--deep", action="store_true", help="Decode all audio frames with ffmpeg")
+    verify.add_argument("--save-receipt", action="store_true", help="Save verification evidence (default is read-only)")
+    verify.add_argument("--allow-no-chapters", action="store_true")
+    reconcile = commands.add_parser("reconcile", help="Report missing, incomplete, failed or unverifiable archives locally")
+    for command_parser in (snap, sync, download, verify, reconcile):
+        command_parser.add_argument("--account", help="Configured account alias; optional when exactly one exists")
+        command_parser.add_argument("--marketplace", help="Require this native marketplace")
+    for command_parser in (doc, connect, accounts, snap, sync, download, verify, reconcile):
+        command_parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+        command_parser.add_argument("--timeout", type=float, help="Explicit subprocess time budget in seconds")
+    args = parser.parse_args()
+    if args.timeout is not None and args.timeout <= 0:
+        parser.error("--timeout must be positive")
+    adapter = Adapter(engine_path(), args.timeout)
+    try:
+        if args.command == "doctor":
+            payload = doctor()
+        elif args.command == "connect":
+            payload = adapter.connect(args)
+        elif args.command == "accounts":
+            payload = adapter.accounts()
+        elif args.command == "snapshot" and args.export:
+            payload = snapshot(args.export, args.account, args.marketplace)
+        else:
+            if args.command == "snapshot" and not adapter.profiles():
+                raise Error("library_unavailable")
+            profile = adapter.profile(args.account, args.marketplace)
+            if args.command == "snapshot":
+                payload = adapter.snapshot(profile)
+            elif args.command == "sync":
+                payload = adapter.sync(profile)
+            elif args.command == "reconcile":
+                payload = adapter.reconcile(profile)
+            elif args.command == "verify":
+                payload = adapter.verify(profile, args.book_id, args.save_receipt, args.allow_no_chapters, args.deep)
+            else:
+                results = []
+                book_ids = list(dict.fromkeys(args.book_ids))
+                stopped = None
+                for index, book_id in enumerate(book_ids):
+                    try:
+                        results.append(adapter.download_one(profile, book_id, args.resume, args.allow_no_chapters))
+                    except Error as exc:
+                        results.append({"success": False, "book_id": book_id, "error": exc.code, **exc.details})
+                    except (KeyboardInterrupt, subprocess.TimeoutExpired) as exc:
+                        stopped = "operation_timeout" if isinstance(exc, subprocess.TimeoutExpired) else "interrupted"
+                        results.append({"success": False, "book_id": book_id, "error": stopped})
+                        results.extend({"success": False, "book_id": pending, "error": "not_attempted"} for pending in book_ids[index + 1:])
+                        break
+                payload = {"success": all(r["success"] for r in results), "results": results,
+                           "partial_failure": any(r["success"] for r in results) and not all(r["success"] for r in results)}
+                if stopped:
+                    payload["error"] = stopped
+    except Failure as exc:
+        payload = {"success": False, "error": exc.code}
+    except Error as exc:
+        payload = {"success": False, "error": exc.code, **exc.details}
+    except KeyboardInterrupt:
+        payload = {"success": False, "error": "interrupted"}
+    except subprocess.TimeoutExpired:
+        payload = {"success": False, "error": "operation_timeout"}
+    except (OSError, ValueError, TypeError, KeyError):
+        # Exceptions may embed provider output, paths, or authentication data.
+        payload = {"success": False, "error": "operation_failed"}
+    payload.setdefault("provider", "libation")
+    print(json.dumps(payload, ensure_ascii=False))
+    return 0 if payload["success"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
