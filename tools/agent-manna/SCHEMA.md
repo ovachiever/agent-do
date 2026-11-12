@@ -125,8 +125,14 @@ identity instead of inferring mode from missing files.
 `create` generates the item handoff and writes its path into `prompt`; neither
 side is optional for an active item. Structured frontmatter binds workflow
 version, item, track, source, base commit, scope, inputs, and the SHA-256 of
-the canonical document with its self-referential binding field normalized. The same digest is stored in `handoff_digest`. Tracks
-and dreams do not carry handoffs. A strict pointer cannot be repointed or
+the canonical document with its self-referential binding field normalized. The same digest is stored in `handoff_digest`. Dreams
+never carry handoffs. A track carries one optionally, both fields or neither:
+`create --type track` pairs it with a dispatch work order (the protocol one
+agent follows through the track's items in dependency order) and
+`handoff attach <track-id>` supplies one to an older container track
+idempotently, adopting a document already at the canonical path. A paired
+track enters `handoff-order.yaml` and the generated index exactly like an
+item. A strict pointer cannot be repointed or
 cleared through `update`; after editing the document, run
 `manna handoff seal <id>` to update the binding deliberately.
 
@@ -254,6 +260,14 @@ and a machine-local key outside the repository. Plain shells and scripted lanes
 provide both `MANNA_SESSION_ID` and `MANNA_SESSION_TOKEN`. `update --status` is
 rejected; lifecycle state moves only through the named lifecycle verbs.
 
+A track's `done` has one more precondition, checked under the same lock on
+every close path: every `type: item` row whose `track` edge names it is
+`done`. Submitted-but-unaccepted managed items are open; an empty track never
+closes. `show <track>` derives a `children` block (eligible items in dispatch
+order, next, held, waiting with missing and cycle flags, decisions, dreams,
+added_since_claim, stall) from the board at read time; nothing about it is
+stored.
+
 Strict pair create, delete, seal, attach, detach, and presentation rename write an HMAC-authenticated
 transaction intent before touching either side. The key lives outside the
 worktree. Atomic no-clobber installation prevents concurrent intent overwrite;
@@ -313,6 +327,43 @@ Each line is a session event (append-only log).
 | `release` | Issue unclaimed (abandoned) | `session_id`, `event`, `timestamp`, `issue_id` |
 | `done` | Issue completed | `session_id`, `event`, `timestamp`, `issue_id` |
 | `end` | Session ends | `session_id`, `event`, `timestamp`, `context` |
+
+## coordinators.json, managed.json, lifecycle.jsonl
+
+Sidecars for the managed lifecycle, beside the board and written under the
+board lock. They never change an `issues.jsonl` row, so older binaries read
+the board unchanged and an unmanaged board never has them.
+
+- `coordinators.json`: `{version, grants: [{id, coordinator_id, coordinator_proof,
+  scope: {items, tracks}, reason, granted_at, granted_by, revoked?}]}`. The proof
+  is the same `sha256:` token digest claims store; a label alone is nothing.
+- `managed.json`: `{version, items: {<mn-id>: {id, attempt, required, grant,
+  managed_at, managed_by, target?: {reference, sha, kind, pinned_at, pinned_by},
+  submission?: {id, attempt, by, at, revision?, report, status, correction?},
+  acceptances: [{check, attempt, submission, target_sha, by, authority, at, evidence}],
+  releases: [{attempt, by, at, reason, worker?, worker_liveness, basis, isolation?,
+  isolation_toplevel?, claim_release}], history: [superseded submissions]}}}`.
+  `acceptances[].submission` is the id of the submission the verdict was given
+  on; an acceptance counts only while that submission is the current one.
+  `releases[].claim_release` is `pending` between the sidecar write and the
+  row's claim release, `released` after; a `pending` entry whose worker still
+  holds the claim is an interrupted release.
+- `lifecycle.jsonl`: one JSON object per line, append-only: `{txn, at, action,
+  issue_id, actor, authority, attempt?, reason?, evidence?, detail?}` with
+  actions `grant`, `revoke`, `require`, `claim`, `submit`, `correct`, `accept`,
+  `release`, `release_resume`, `abandon`, `close`. `txn` names the transaction
+  the line belongs to (empty for claim notes, which are not transactions).
+- `managed-intent.json` (transient, ignored by Git, absent at rest):
+  `{version, intents: [{txn, issue_id, action, started_at, actor, actor_proof,
+  record_after?, grants_after?, event}]}`. An intent is written before a
+  transaction's state and audit writes and removed after both landed; one
+  left behind means those writes did not both land, the item refuses every
+  mutation, and `managed recover <id>` applies the recorded outcome, having
+  decided under the board lock, against the grants and intents on disk at
+  that moment, that the caller may finish exactly those transactions. An
+  intent with `issue_id: board` (a grant or revocation) holds every managed
+  item and every grant change until the operator runs `managed recover
+  board`.
 
 ## drift.yaml
 

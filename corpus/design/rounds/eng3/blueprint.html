@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Engine Room — Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --sheet:#1F1C19;
+    --panel:#211E1B;
+    --block:#282320;
+    --cream:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --line:rgba(231,227,218,0.32);
+    --sage:hsl(158,30%,55%);
+    --sage-bright:hsl(158,34%,64%);
+    --clay:hsl(12,42%,58%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg);color:var(--cream);font-family:var(--sans)}
+  a{text-decoration:none;color:inherit}
+  a:focus-visible{outline:1px solid var(--sage);outline-offset:2px}
+  .wrap{width:1376px;margin:0 auto}
+
+  /* ---------- top nav ---------- */
+  nav{display:flex;align-items:center;justify-content:space-between;height:48px;border-bottom:1px solid var(--hair)}
+  .wordmark{font-family:var(--serif);font-size:17px;color:var(--cream);letter-spacing:.2px}
+  .navlinks{display:flex;gap:26px}
+  .navlinks a{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);padding:16px 2px 14px;border-bottom:2px solid transparent}
+  .navlinks a:hover{color:var(--cream)}
+  .navlinks a.on{color:var(--cream);border-bottom-color:var(--sage)}
+
+  /* ---------- lede ---------- */
+  .lede{padding:14px 0 10px}
+  .lab{font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+  .lede-top{display:flex;justify-content:space-between;align-items:baseline}
+  .lede h1{font-family:var(--serif);font-weight:400;font-size:25px;line-height:1.25;color:var(--cream);margin:8px 0 8px}
+  .lede-meta{display:flex;gap:10px;align-items:baseline;font-size:13px;color:var(--muted)}
+  .lede-meta .sep{color:var(--faint);font-size:14px}
+  .lede-meta .num{font-family:var(--mono);font-size:13px;color:var(--cream)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sage);margin-right:7px;position:relative;top:-1px}
+  .lede-meta a{color:var(--muted);border-bottom:1px solid var(--hair);padding:4px 0}
+  .lede-meta a:hover{color:var(--cream);border-bottom-color:var(--sage)}
+  .lede-meta a .go{color:var(--sage)}
+
+  /* ---------- the sheet (SVG) ---------- */
+  .sheet{display:block;margin:2px 0 12px}
+  svg{display:block}
+  svg a{cursor:pointer;outline:none}
+  .fr{fill:none;stroke:var(--line);stroke-width:1.25}
+  .fri{fill:none;stroke:var(--line);stroke-width:1}
+  .tick{stroke:rgba(231,227,218,.10);stroke-width:1}
+  .gref{font:500 12px var(--mono);fill:#948B7E}
+  .run{stroke:rgba(231,227,218,.36);stroke-width:1.1;fill:none}
+  .ctl{stroke:rgba(231,227,218,.20);stroke-width:1;fill:none;stroke-dasharray:3 4}
+  .lead{stroke:rgba(231,227,218,.30);stroke-width:1;fill:none}
+  .bx{fill:var(--block);stroke:var(--line);stroke-width:1.1}
+  .bx2{fill:var(--panel);stroke:rgba(231,227,218,.20);stroke-width:1}
+  .bx3{fill:none;stroke:rgba(231,227,218,.20);stroke-width:1}
+  .tb{fill:none;stroke:rgba(231,227,218,.36);stroke-width:1.2}
+  .hl{stroke:var(--hair);stroke-width:1}
+  .tl{font:600 12px var(--sans);letter-spacing:1.1px;fill:var(--muted)}
+  .tname{font:600 13px var(--sans);letter-spacing:1.3px;fill:var(--cream)}
+  .tc{font:500 13px var(--mono);fill:var(--cream)}
+  .tm{font:400 12px var(--mono);fill:var(--muted)}
+  .ts{font:400 12px var(--sans);fill:var(--muted)}
+  .tsc{font:400 12px var(--sans);fill:var(--cream)}
+  .serifname{font:400 17px var(--serif);fill:var(--cream);letter-spacing:.3px}
+  .sig{font:italic 400 15px var(--serif);fill:var(--cream)}
+  .go{font:600 12px var(--sans);fill:var(--sage)}
+  .dmd{fill:var(--clay)}
+  .tclay{font:600 12px var(--mono);letter-spacing:.5px;fill:var(--clay)}
+  .dot-run{fill:var(--sage);stroke:none}
+  .dot-stby{fill:none;stroke:var(--muted);stroke-width:1.3}
+  .cyl{fill:none;stroke:rgba(231,227,218,.34);stroke-width:1.1}
+  svg a:hover .bx{stroke:rgba(231,227,218,.58)}
+  svg a:hover .bx2{stroke:rgba(231,227,218,.44)}
+  svg a:hover .go{fill:var(--sage-bright)}
+  svg a:focus-visible .bx,svg a:focus-visible .bx2{stroke:var(--sage)}
+
+  /* ---------- ledger strip ---------- */
+  .ledger{border-top:1px solid var(--hair);padding-top:9px}
+  .ledger-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+  .ledger-head a{color:var(--muted);padding:4px 0}
+  .ledger-head a:hover{color:var(--cream)}
+  .ledger-head a .go{color:var(--sage)}
+  .cells{display:flex;border:1px solid var(--hair);background:var(--sheet)}
+  .cell{flex:1 1 0;padding:10px 14px 12px;border-left:1px solid var(--hair);display:block;min-width:0}
+  .cell:first-child{border-left:none}
+  .cell.total{flex:2.3 1 0;background:var(--panel)}
+  a.cell:hover{background:#252119}
+  a.cell:hover .c-go{color:var(--sage-bright)}
+  .c-top{display:flex;justify-content:space-between;align-items:baseline}
+  .c-name{font-size:12px;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted)}
+  .c-go{font-size:12px;color:var(--sage)}
+  .c-val{display:block;font-family:var(--mono);font-size:15px;color:var(--cream);margin:5px 0 7px}
+  .c-val .of{font-family:var(--sans);font-size:12px;color:var(--muted)}
+  .c-bar{display:block;height:3px;background:rgba(231,227,218,.10)}
+  .c-bar i{display:block;height:3px;background:var(--muted)}
+  .cell.total .c-bar{height:5px}
+  .cell.total .c-bar i{height:5px;background:var(--sage)}
+  .c-sub{display:block;margin-top:6px;font-size:12px;color:var(--muted)}
+  .c-sub .ok{color:var(--sage)}
+
+  /* ---------- footer ---------- */
+  footer{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--hair);margin-top:12px;padding:11px 0 14px}
+  footer .credo{font-size:13px;color:var(--muted)}
+  footer .stamp{font-family:var(--mono);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <span class="wordmark">Palingenesis</span>
+    <div class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a class="on" href="#" aria-current="page">Engine Room</a>
+    </div>
+  </nav>
+
+  <header class="lede">
+    <div class="lede-top">
+      <span class="lab">Engine Room · the machine, drawn live</span>
+      <span class="lab">As of 13:07 EDT · 22 Aug 2026</span>
+    </div>
+    <h1>Running clean — $191.65 of the $500 day, next cycle fires at 13:32.</h1>
+    <div class="lede-meta">
+      <span><i class="dot"></i>1 running · 5 standing by</span>
+      <span class="sep">·</span>
+      <span><span class="num">38%</span> of cap · on pace ≈<span class="num">$333</span> by midnight</span>
+      <span class="sep">·</span>
+      <span>cycle <span class="num">9 of 16</span> · simulation stage</span>
+      <span class="sep">·</span>
+      <a href="#sheet">2 incidents today · both resolved · notes <span class="go">›</span></a>
+    </div>
+  </header>
+
+  <!-- ================= THE ENGINEERING DRAWING ================= -->
+  <svg id="sheet" class="sheet" width="1376" height="604" viewBox="0 0 1376 604" xmlns="http://www.w3.org/2000/svg">
+    <title>Palingenesis system schematic — six services, their flows, today's counts</title>
+    <defs>
+      <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L8 4 L0 8 Z" fill="rgba(231,227,218,.62)"/>
+      </marker>
+      <marker id="arrc" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 L8 4 L0 8 Z" fill="rgba(231,227,218,.30)"/>
+      </marker>
+    </defs>
+
+    <!-- sheet ground -->
+    <rect x="0" y="0" width="1376" height="604" fill="#1F1C19"/>
+
+    <!-- drawing frame: outer + inner border -->
+    <rect x="1" y="1" width="1374" height="602" class="fr"/>
+    <rect x="20" y="20" width="1336" height="564" class="fri"/>
+
+    <!-- grid reference ticks + coordinates -->
+    <g>
+      <line x1="187" y1="1" x2="187" y2="20" class="tick"/><line x1="354" y1="1" x2="354" y2="20" class="tick"/><line x1="521" y1="1" x2="521" y2="20" class="tick"/><line x1="688" y1="1" x2="688" y2="20" class="tick"/><line x1="855" y1="1" x2="855" y2="20" class="tick"/><line x1="1022" y1="1" x2="1022" y2="20" class="tick"/><line x1="1189" y1="1" x2="1189" y2="20" class="tick"/>
+      <line x1="187" y1="584" x2="187" y2="603" class="tick"/><line x1="354" y1="584" x2="354" y2="603" class="tick"/><line x1="521" y1="584" x2="521" y2="603" class="tick"/><line x1="688" y1="584" x2="688" y2="603" class="tick"/><line x1="855" y1="584" x2="855" y2="603" class="tick"/><line x1="1022" y1="584" x2="1022" y2="603" class="tick"/><line x1="1189" y1="584" x2="1189" y2="603" class="tick"/>
+      <line x1="1" y1="161" x2="20" y2="161" class="tick"/><line x1="1" y1="302" x2="20" y2="302" class="tick"/><line x1="1" y1="443" x2="20" y2="443" class="tick"/>
+      <line x1="1356" y1="161" x2="1375" y2="161" class="tick"/><line x1="1356" y1="302" x2="1375" y2="302" class="tick"/><line x1="1356" y1="443" x2="1375" y2="443" class="tick"/>
+      <text x="103" y="15" text-anchor="middle" class="gref">1</text><text x="270" y="15" text-anchor="middle" class="gref">2</text><text x="437" y="15" text-anchor="middle" class="gref">3</text><text x="604" y="15" text-anchor="middle" class="gref">4</text><text x="771" y="15" text-anchor="middle" class="gref">5</text><text x="938" y="15" text-anchor="middle" class="gref">6</text><text x="1105" y="15" text-anchor="middle" class="gref">7</text><text x="1272" y="15" text-anchor="middle" class="gref">8</text>
+      <text x="103" y="598" text-anchor="middle" class="gref">1</text><text x="270" y="598" text-anchor="middle" class="gref">2</text><text x="437" y="598" text-anchor="middle" class="gref">3</text><text x="604" y="598" text-anchor="middle" class="gref">4</text><text x="771" y="598" text-anchor="middle" class="gref">5</text><text x="938" y="598" text-anchor="middle" class="gref">6</text><text x="1105" y="598" text-anchor="middle" class="gref">7</text><text x="1272" y="598" text-anchor="middle" class="gref">8</text>
+      <text x="10" y="95" text-anchor="middle" class="gref">A</text><text x="10" y="236" text-anchor="middle" class="gref">B</text><text x="10" y="377" text-anchor="middle" class="gref">C</text><text x="10" y="518" text-anchor="middle" class="gref">D</text>
+      <text x="1366" y="95" text-anchor="middle" class="gref">A</text><text x="1366" y="236" text-anchor="middle" class="gref">B</text><text x="1366" y="377" text-anchor="middle" class="gref">C</text><text x="1366" y="518" text-anchor="middle" class="gref">D</text>
+    </g>
+
+    <!-- ============ flow runs (solid, arrowed, labeled with today's counts) ============ -->
+    <!-- papers in -->
+    <path d="M36 106 H88 L100 117 L88 128 H36 Z" class="fri"/>
+    <text x="36" y="98" class="tl">PAPERS IN</text>
+    <text x="36" y="148" class="tc">132 today</text>
+    <path d="M100 117 H116" class="run" marker-end="url(#arr)"/>
+    <!-- reader -> scout : evidence -->
+    <path d="M350 117 H466" class="run" marker-end="url(#arr)"/>
+    <text x="410" y="105" text-anchor="middle" class="tl">EVIDENCE</text>
+    <text x="410" y="139" text-anchor="middle" class="tc">517 today</text>
+    <!-- scout -> council : candidates -->
+    <path d="M700 117 H816" class="run" marker-end="url(#arr)"/>
+    <text x="760" y="105" text-anchor="middle" class="tl">CANDIDATES</text>
+    <text x="760" y="139" text-anchor="middle" class="tc">23 today</text>
+    <!-- council -> simulator : verdicts (trunk down the right side) -->
+    <path d="M1050 117 H1180 V357 H1144" class="run" marker-end="url(#arr)"/>
+    <text x="1192" y="226" class="tl">VERDICTS</text>
+    <text x="1192" y="246" class="tc">14 today</text>
+    <text x="1192" y="264" class="ts">9 advanced · 5 rejected</text>
+    <!-- simulator -> archivist : results -->
+    <path d="M910 357 H754" class="run" marker-end="url(#arr)"/>
+    <text x="830" y="345" text-anchor="middle" class="tl">RESULTS</text>
+    <text x="830" y="377" text-anchor="middle" class="tc">12 today <tspan class="tm">· 2 queued</tspan></text>
+    <!-- archivist -> courier : records -->
+    <path d="M520 357 H364" class="run" marker-end="url(#arr)"/>
+    <text x="440" y="345" text-anchor="middle" class="tl">RECORDS</text>
+    <text x="440" y="377" text-anchor="middle" class="tc">178 today</text>
+    <!-- courier -> owner : brief out -->
+    <path d="M130 357 H106" class="run" marker-end="url(#arr)"/>
+    <path d="M44 346 H100 V368 H44 L32 357 Z" class="fri"/>
+    <text x="36" y="336" class="tl">BRIEF OUT</text>
+    <text x="36" y="388" class="tm">1 sent</text>
+    <text x="36" y="404" class="tm">next 18:00</text>
+
+    <!-- ============ control lines from the cycle clock (dashed) ============ -->
+    <path d="M590 230 H400 V192 H235 V180" class="ctl" marker-end="url(#arrc)"/>
+    <path d="M610 212 V196 H585 V180" class="ctl" marker-end="url(#arrc)"/>
+    <path d="M750 212 V198 H935 V180" class="ctl" marker-end="url(#arrc)"/>
+    <path d="M600 278 V288 H245 V294" class="ctl" marker-end="url(#arrc)"/>
+    <path d="M635 278 V294" class="ctl" marker-end="url(#arrc)"/>
+    <path d="M780 278 V288 H1025 V294" class="ctl" marker-end="url(#arrc)"/>
+    <!-- archivist -> archive store (solid, down into sheet 3 panel) -->
+    <path d="M635 416 V436 H488 V452" class="run" marker-end="url(#arr)"/>
+
+    <!-- ============ equipment blocks : the six services ============ -->
+    <!-- READER -->
+    <a href="#svc-reader" aria-label="Reader — open service detail">
+      <g>
+        <title>Reader — reads papers, extracts evidence · open detail</title>
+        <rect x="120" y="58" width="230" height="118" class="bx"/>
+        <text x="136" y="84"><tspan class="tm">SVC-01</tspan><tspan dx="10" class="tname">READER</tspan></text>
+        <path d="M310 74.5 L314.5 79 L310 83.5 L305.5 79 Z" class="dmd"/>
+        <circle cx="330" cy="79" r="4" class="dot-stby"/>
+        <text x="136" y="104" class="ts">reads papers, extracts evidence</text>
+        <text x="136" y="122" class="ts">standby since 12:29 · 9 cycles</text>
+        <text x="136" y="140" class="tsc">last: 61 evidence from 18 papers</text>
+        <line x1="136" y1="151" x2="334" y2="151" class="hl"/>
+        <text x="136" y="168" class="tc">$31.44 today</text>
+        <text x="334" y="168" text-anchor="end" class="go">detail ›</text>
+      </g>
+    </a>
+    <!-- SCOUT -->
+    <a href="#svc-scout" aria-label="Scout — open service detail">
+      <g>
+        <title>Scout — ranks evidence into candidates · open detail</title>
+        <rect x="470" y="58" width="230" height="118" class="bx"/>
+        <text x="486" y="84"><tspan class="tm">SVC-02</tspan><tspan dx="10" class="tname">SCOUT</tspan></text>
+        <circle cx="680" cy="79" r="4" class="dot-stby"/>
+        <text x="486" y="104" class="ts">ranks evidence into candidates</text>
+        <text x="486" y="122" class="ts">standby since 12:33 · 9 cycles</text>
+        <text x="486" y="140" class="tsc">last: kept 3 of 61 as candidates</text>
+        <line x1="486" y1="151" x2="684" y2="151" class="hl"/>
+        <text x="486" y="168" class="tc">$12.08 today</text>
+        <text x="684" y="168" text-anchor="end" class="go">detail ›</text>
+      </g>
+    </a>
+    <!-- COUNCIL -->
+    <a href="#svc-council" aria-label="Council — open service detail">
+      <g>
+        <title>Council — argues candidates to verdicts · open detail</title>
+        <rect x="820" y="58" width="230" height="118" class="bx"/>
+        <text x="836" y="84"><tspan class="tm">SVC-03</tspan><tspan dx="10" class="tname">COUNCIL</tspan></text>
+        <circle cx="1030" cy="79" r="4" class="dot-stby"/>
+        <text x="836" y="104" class="ts">argues candidates to verdicts</text>
+        <text x="836" y="122" class="ts">standby since 12:41 · 9 cycles</text>
+        <text x="836" y="140" class="tsc">last: 2 advanced · 1 rejected</text>
+        <line x1="836" y1="151" x2="1034" y2="151" class="hl"/>
+        <text x="836" y="168" class="tc">$58.70 today</text>
+        <text x="1034" y="168" text-anchor="end" class="go">detail ›</text>
+      </g>
+    </a>
+    <!-- SIMULATOR -->
+    <a href="#svc-simulator" aria-label="Simulator — open service detail">
+      <g>
+        <title>Simulator — test-grows ideas in simulation · open detail</title>
+        <rect x="910" y="298" width="230" height="118" class="bx"/>
+        <text x="926" y="324"><tspan class="tm">SVC-04</tspan><tspan dx="10" class="tname">SIMULATOR</tspan></text>
+        <path d="M1100 314.5 L1104.5 319 L1100 323.5 L1095.5 319 Z" class="dmd"/>
+        <circle cx="1120" cy="319" r="4" class="dot-run"/>
+        <text x="926" y="344" class="ts">test-grows ideas in simulation</text>
+        <text x="926" y="362" class="ts">running since 12:44</text>
+        <text x="926" y="380" class="tsc">now: nitrogen run · batch 4 of 5</text>
+        <line x1="926" y1="391" x2="1124" y2="391" class="hl"/>
+        <text x="926" y="408" class="tc">$71.02 today</text>
+        <text x="1124" y="408" text-anchor="end" class="go">detail ›</text>
+      </g>
+    </a>
+    <!-- ARCHIVIST -->
+    <a href="#svc-archivist" aria-label="Archivist — open service detail">
+      <g>
+        <title>Archivist — files every result with sources · open detail</title>
+        <rect x="520" y="298" width="230" height="118" class="bx"/>
+        <text x="536" y="324"><tspan class="tm">SVC-05</tspan><tspan dx="10" class="tname">ARCHIVIST</tspan></text>
+        <circle cx="730" cy="319" r="4" class="dot-stby"/>
+        <text x="536" y="344" class="ts">files every result with sources</text>
+        <text x="536" y="362" class="ts">standby since 12:58 · 9 cycles</text>
+        <text x="536" y="380" class="tsc">last: 21 records sealed · verified</text>
+        <line x1="536" y1="391" x2="734" y2="391" class="hl"/>
+        <text x="536" y="408" class="tc">$6.13 today</text>
+        <text x="734" y="408" text-anchor="end" class="go">detail ›</text>
+      </g>
+    </a>
+    <!-- COURIER -->
+    <a href="#svc-courier" aria-label="Courier — open service detail">
+      <g>
+        <title>Courier — assembles the owner's brief · open detail</title>
+        <rect x="130" y="298" width="230" height="118" class="bx"/>
+        <text x="146" y="324"><tspan class="tm">SVC-06</tspan><tspan dx="10" class="tname">COURIER</tspan></text>
+        <circle cx="340" cy="319" r="4" class="dot-stby"/>
+        <text x="146" y="344" class="ts">assembles the owner's brief</text>
+        <text x="146" y="362" class="ts">waiting since 06:04 · next 18:00</text>
+        <text x="146" y="380" class="tsc">last: morning brief · 9 items</text>
+        <line x1="146" y1="391" x2="344" y2="391" class="hl"/>
+        <text x="146" y="408" class="tc">$2.87 today</text>
+        <text x="344" y="408" text-anchor="end" class="go">detail ›</text>
+      </g>
+    </a>
+
+    <!-- ============ cycle clock (scheduler) ============ -->
+    <a href="#sh-2" aria-label="Cycle clock — open schedule detail">
+      <g>
+        <title>Cycle clock — one full pass every 90 minutes</title>
+        <rect x="590" y="212" width="200" height="66" class="bx2"/>
+        <text x="690" y="233" text-anchor="middle" class="tl">CYCLE CLOCK</text>
+        <text x="690" y="251" text-anchor="middle" class="ts">one full pass every 90 min</text>
+        <text x="690" y="268" text-anchor="middle" class="tsc">next 13:32 · cycle 10 of 16</text>
+      </g>
+    </a>
+
+    <!-- ============ annotation callouts : the day's two incidents ============ -->
+    <a href="#sheet" aria-label="Incident note 1 — open incident log">
+      <g>
+        <title>Incident 07:36 — resolved · open incident log (sheet 4)</title>
+        <line x1="180" y1="208" x2="180" y2="176" class="lead"/>
+        <circle cx="180" cy="176" r="2.2" fill="rgba(231,227,218,.55)"/>
+        <rect x="56" y="208" width="324" height="74" class="bx2"/>
+        <path d="M74 219 L78.5 223.5 L74 228 L69.5 223.5 Z" class="dmd"/>
+        <text x="88" y="228"><tspan class="tm">NOTE 1 · 07:36 · </tspan><tspan class="tclay">INCIDENT</tspan></text>
+        <text x="364" y="228" text-anchor="end" class="go">SH-4 ›</text>
+        <text x="72" y="250" class="tsc">arXiv rate-limited the reader (429)</text>
+        <text x="72" y="268" class="ts">action · fetch rate halved — resumed 07:47</text>
+      </g>
+    </a>
+    <a href="#sheet" aria-label="Incident note 2 — open incident log">
+      <g>
+        <title>Incident 11:47 — resolved · open incident log (sheet 4)</title>
+        <line x1="980" y1="282" x2="980" y2="298" class="lead"/>
+        <circle cx="980" cy="298" r="2.2" fill="rgba(231,227,218,.55)"/>
+        <rect x="830" y="208" width="300" height="74" class="bx2"/>
+        <path d="M848 219 L852.5 223.5 L848 228 L843.5 223.5 Z" class="dmd"/>
+        <text x="862" y="228"><tspan class="tm">NOTE 2 · 11:47 · </tspan><tspan class="tclay">INCIDENT</tspan></text>
+        <text x="1114" y="228" text-anchor="end" class="go">SH-4 ›</text>
+        <text x="846" y="250" class="tsc">sim run S-2841 diverged (step too large)</text>
+        <text x="846" y="268" class="ts">action · step halved — re-run passed 11:58</text>
+      </g>
+    </a>
+
+    <!-- ============ bottom band : legend · archive · title block ============ -->
+    <!-- legend -->
+    <g>
+      <rect x="36" y="456" width="384" height="112" class="bx3"/>
+      <text x="52" y="481" class="tl">LEGEND</text>
+      <line x1="52" y1="501" x2="88" y2="501" class="run" marker-end="url(#arr)"/>
+      <text x="100" y="505" class="ts">data flow · count = today</text>
+      <circle cx="268" cy="501" r="4" class="dot-run"/>
+      <text x="280" y="505" class="ts">running now</text>
+      <line x1="52" y1="525" x2="88" y2="525" class="ctl"/>
+      <text x="100" y="529" class="ts">control · cycle clock</text>
+      <circle cx="268" cy="525" r="4" class="dot-stby"/>
+      <text x="280" y="529" class="ts">standby / waiting</text>
+      <path d="M70 544.5 L74.5 549 L70 553.5 L65.5 549 Z" class="dmd"/>
+      <text x="100" y="553" class="ts">incident note · resolved</text>
+      <text x="262" y="553" class="go">›</text>
+      <text x="280" y="553" class="ts">opens detail sheet</text>
+    </g>
+
+    <!-- archive / data panel (sheet 3 preview) -->
+    <a href="#sh-2" aria-label="The archive — open data detail">
+      <g>
+        <title>The archive — everything kept, with sources · open sheet 3</title>
+        <rect x="448" y="456" width="424" height="112" class="bx2"/>
+        <ellipse cx="488" cy="496" rx="20" ry="7" class="cyl"/>
+        <path d="M468 496 V540 M508 496 V540" class="cyl"/>
+        <path d="M468 540 A20 7 0 0 0 508 540" class="cyl"/>
+        <text x="524" y="481" class="tl">SH-3 · THE ARCHIVE — EVERYTHING KEPT</text>
+        <text x="856" y="481" text-anchor="end" class="go">›</text>
+        <text x="524" y="505" class="tc">41,208 records · snapshot 12:58 ok</text>
+        <text x="524" y="529" class="ts">backfill 2014–2019 · 78% done</text>
+        <rect x="524" y="536" width="180" height="4" fill="rgba(231,227,218,.10)"/>
+        <rect x="524" y="536" width="140" height="4" fill="hsl(158,30%,55%)"/>
+        <text x="524" y="560" class="ts">nightly window 02:00–04:00 · 3.2 GB on disk</text>
+      </g>
+    </a>
+
+    <!-- title block -->
+    <g>
+      <rect x="900" y="456" width="440" height="112" class="tb"/>
+      <text x="916" y="484" class="serifname">PALINGENESIS · SYSTEM SCHEMATIC</text>
+      <line x1="900" y1="494" x2="1340" y2="494" class="hl"/>
+      <line x1="900" y1="531" x2="1340" y2="531" class="hl"/>
+      <line x1="1046" y1="494" x2="1046" y2="568" class="hl"/>
+      <line x1="1216" y1="494" x2="1216" y2="568" class="hl"/>
+      <text x="916" y="510" class="tl">SHEET</text>
+      <text x="916" y="526" class="tc">1 OF 4</text>
+      <text x="1062" y="510" class="tl">REVISION</text>
+      <text x="1062" y="526" class="tc">41 · 22 AUG 2026</text>
+      <text x="1232" y="510" class="tl">ENGINE</text>
+      <text x="1232" y="526" class="tc">v3.2.1</text>
+      <text x="916" y="547" class="tl">CHECKSUM</text>
+      <text x="916" y="563" class="tc">9f3c·d81a</text>
+      <text x="1062" y="547" class="tl">DRAWN BY</text>
+      <text x="1062" y="563" class="tc">the machine</text>
+      <text x="1232" y="547" class="tl">COUNTERSIGNED</text>
+      <text x="1232" y="563" class="sig">E. V.</text>
+    </g>
+  </svg>
+
+  <!-- ================= TODAY'S LEDGER (sheet 2) ================= -->
+  <section class="ledger" id="sh-2">
+    <div class="ledger-head">
+      <span class="lab">Sheet 2 · today's ledger — what each service spent · resets at midnight</span>
+      <span class="lab">bar = share of today &nbsp;·&nbsp; <a href="#sheet">sheet 3 data <span class="go">›</span></a> &nbsp;·&nbsp; <a href="#sheet">sheet 4 incidents <span class="go">›</span></a></span>
+    </div>
+    <div class="cells">
+      <a class="cell" href="#svc-reader" title="Reader — 16% of today's spend">
+        <span class="c-top"><span class="c-name">Reader</span><span class="c-go">›</span></span>
+        <span class="c-val">$31.44</span>
+        <span class="c-bar"><i style="width:16.4%"></i></span>
+      </a>
+      <a class="cell" href="#svc-scout" title="Scout — 6% of today's spend">
+        <span class="c-top"><span class="c-name">Scout</span><span class="c-go">›</span></span>
+        <span class="c-val">$12.08</span>
+        <span class="c-bar"><i style="width:6.3%"></i></span>
+      </a>
+      <a class="cell" href="#svc-council" title="Council — 31% of today's spend">
+        <span class="c-top"><span class="c-name">Council</span><span class="c-go">›</span></span>
+        <span class="c-val">$58.70</span>
+        <span class="c-bar"><i style="width:30.6%"></i></span>
+      </a>
+      <a class="cell" href="#svc-simulator" title="Simulator — 37% of today's spend">
+        <span class="c-top"><span class="c-name">Simulator</span><span class="c-go">›</span></span>
+        <span class="c-val">$71.02</span>
+        <span class="c-bar"><i style="width:37.1%"></i></span>
+      </a>
+      <a class="cell" href="#svc-archivist" title="Archivist — 3% of today's spend">
+        <span class="c-top"><span class="c-name">Archivist</span><span class="c-go">›</span></span>
+        <span class="c-val">$6.13</span>
+        <span class="c-bar"><i style="width:3.2%"></i></span>
+      </a>
+      <a class="cell" href="#svc-courier" title="Courier — 1.5% of today's spend">
+        <span class="c-top"><span class="c-name">Courier</span><span class="c-go">›</span></span>
+        <span class="c-val">$2.87</span>
+        <span class="c-bar"><i style="width:1.5%"></i></span>
+      </a>
+      <a class="cell" href="#sheet" title="Overhead — feeds and storage, 5% of today's spend">
+        <span class="c-top"><span class="c-name">Overhead</span><span class="c-go">›</span></span>
+        <span class="c-val">$9.41</span>
+        <span class="c-bar"><i style="width:4.9%"></i></span>
+      </a>
+      <div class="cell total">
+        <span class="c-top"><span class="c-name">Total · daily cap $500</span></span>
+        <span class="c-val">$191.65 <span class="of">of $500.00</span></span>
+        <span class="c-bar"><i style="width:38.3%"></i></span>
+        <span class="c-sub">38% of cap · ≈$333 by midnight · <span class="ok">under cap</span></span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span class="credo">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="stamp">ENGINE v3.2.1 · SH-1 REV 41 · 9f3c·d81a</span>
+  </footer>
+
+</div>
+</body>
+</html>

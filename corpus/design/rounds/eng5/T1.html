@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Engine Room — Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --quiet:#C6BFB2;
+    --hair:rgba(231,227,218,0.14);
+    --hair2:rgba(231,227,218,0.28);
+    --sage:hsl(158,30%,55%);
+    --sagebg:hsla(158,30%,55%,0.07);
+    --clay:hsl(16,34%,62%);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{
+    color:var(--ink);
+    font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono,.b,.a,.hn,.hr,.fv,.iv,.imin{
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-variant-numeric:tabular-nums;
+    font-size:12px;
+  }
+  .page{width:1440px;margin:0 auto;padding:0 36px 0}
+  .lab{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .drill{text-decoration:underline dotted rgba(231,227,218,.45);text-underline-offset:3px;text-decoration-thickness:1px}
+
+  /* ── nav ─────────────────────────────── */
+  nav{display:flex;align-items:stretch;border-bottom:1px solid var(--hair);height:52px}
+  .brand{font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:17px;letter-spacing:.02em;color:var(--ink);display:flex;align-items:center;margin-right:44px}
+  .links{display:flex;gap:26px;align-items:stretch}
+  .links a{display:flex;align-items:center;text-decoration:none;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);border-bottom:2px solid transparent;padding-top:2px}
+  .links a.on{color:var(--ink);border-bottom-color:var(--sage)}
+  .clock{margin-left:auto;display:flex;align-items:center;color:var(--mut)}
+
+  /* ── lede ────────────────────────────── */
+  .lede{margin-top:18px}
+  .lede .lab{display:block;margin-bottom:6px}
+  .lede p{
+    font-family:Georgia,'Iowan Old Style','Times New Roman',serif;
+    font-size:20px;line-height:1.35;color:var(--ink);max-width:1180px;
+  }
+  .lede .mono{font-size:17px}
+
+  /* ── section heads ───────────────────── */
+  section{margin-top:20px}
+  .shead{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--hair);padding-bottom:7px;margin-bottom:0}
+  .shead .note{color:var(--mut);font-size:12px}
+  .shead .note .mono{color:var(--ink)}
+
+  /* ── day's ledger ────────────────────── */
+  .lg{display:grid;grid-template-columns:repeat(6,1fr)}
+  .lg>div{padding:10px 14px 12px;border-left:1px solid var(--hair)}
+  .lg>div:first-child{border-left:none;padding-left:0}
+  .svc{display:flex;justify-content:space-between;align-items:baseline}
+  .svc .nm{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink)}
+  .svc .amt{color:var(--ink)}
+  .svc .cap{color:var(--mut)}
+  .job{color:var(--mut);margin-top:3px}
+  .meter{height:3px;background:var(--hair);margin-top:8px}
+  .meter i{display:block;height:3px;background:var(--sage)}
+  .proj{color:var(--mut);margin-top:7px}
+  .proj .mono{color:var(--quiet)}
+
+  /* ── timetable ───────────────────────── */
+  .tt{display:grid;grid-template-columns:176px repeat(16,1fr);border-top:1px solid var(--hair);border-left:1px solid var(--hair);margin-top:0}
+  .tt>div{border-right:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:5px 7px;min-height:44px}
+  .h{background:rgba(231,227,218,0.03);display:flex;flex-direction:column;gap:1px}
+  .hn{color:var(--ink)}
+  .hr{color:var(--mut)}
+  .h0 .k1{color:var(--mut);font-size:12px}
+  .h0 .k2{color:var(--ink);font-size:12px}
+  .st .sn{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink)}
+  .st .sv{display:block;color:var(--mut);margin-top:2px}
+  .c{display:flex;flex-direction:column;gap:1px}
+  .b{display:block;color:var(--mut)}
+  .a{display:block;color:var(--quiet)}
+  .cur{background:var(--sagebg)}
+  .cur .a{color:var(--ink)}
+  .h.cur .hn{color:var(--sage)}
+  .now{outline:1px solid var(--sage);outline-offset:-1px}
+  .nowtag{font-style:normal;color:var(--sage);letter-spacing:.08em;text-transform:uppercase;font-size:12px}
+  .late{font-style:normal;color:var(--clay);font-size:12px}
+  .cx .b{color:var(--clay);text-decoration:line-through;text-decoration-thickness:1px}
+  .cxn{color:var(--clay);text-decoration:line-through;text-decoration-thickness:1px}
+  .cxt{color:var(--clay);font-size:12px;letter-spacing:.04em}
+  .tleg{display:flex;justify-content:space-between;color:var(--mut);padding-top:8px}
+  .tleg .clay{color:var(--clay)}
+  .tleg .sage{color:var(--sage)}
+  .tleg s{text-decoration-thickness:1px}
+
+  /* ── facts band ──────────────────────── */
+  .band{display:grid;grid-template-columns:322px 278px 1fr 236px;gap:28px}
+  .fr{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair)}
+  .fl{color:var(--mut)}
+  .fv{color:var(--ink);text-align:right}
+  .inc .ir{display:grid;grid-template-columns:40px 1.05fr 1.05fr 36px;gap:10px;padding:6px 0;border-bottom:1px solid var(--hair)}
+  .inc .it{color:var(--ink);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  .inc .iw{color:var(--quiet)}
+  .inc .ia{color:var(--mut)}
+  .imin{color:var(--mut);text-align:right}
+  .imin.clay{color:var(--clay)}
+  .isum{display:flex;justify-content:flex-end;gap:8px;padding-top:7px;color:var(--mut)}
+  .isum .mono{color:var(--ink)}
+  .suspend{display:inline-block;border:1px solid var(--hair2);color:var(--ink);background:transparent;
+    font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    letter-spacing:.08em;text-transform:uppercase;padding:9px 18px;margin-top:2px;cursor:pointer}
+  .conseq{color:var(--mut);margin-top:9px;line-height:1.5}
+  .conseq .mono{color:var(--quiet)}
+  .band .shead{margin-bottom:4px}
+
+  /* ── footer ──────────────────────────── */
+  footer{margin-top:22px;border-top:1px solid var(--hair);padding:13px 0 16px;text-align:center;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav>
+    <span class="brand">Palingenesis</span>
+    <span class="links">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#" class="on">Engine&nbsp;Room</a>
+    </span>
+    <span class="clock mono">17:26:08 · Fri 22 Aug</span>
+  </nav>
+
+  <header class="lede">
+    <span class="lab">Engine Room · Friday 22 August 2026</span>
+    <p>Nominal — ten cycles closed and one cancelled, <span class="mono drill">$107.13</span> of the <span class="mono">$500.00</span> day cap spent; cycle&nbsp;12 is mid-simulate and cycle&nbsp;13 opens <span class="mono">18:00:00</span>.</p>
+  </header>
+
+  <section>
+    <div class="shead">
+      <span class="lab">Day's Ledger</span>
+      <span class="note">spent <span class="mono drill">$107.13</span> · caps allot <span class="mono">$500.00</span> · projected close <span class="mono drill">$155.90</span></span>
+    </div>
+    <div class="lg">
+      <div>
+        <div class="svc"><span class="nm">Reader</span><span class="mono"><span class="amt drill">$19.84</span> <span class="cap">of $60</span></span></div>
+        <div class="job">reads the day's papers and field notes</div>
+        <div class="meter"><i style="width:33.1%"></i></div>
+        <div class="proj">close ≈ <span class="mono">$28.90</span></div>
+      </div>
+      <div>
+        <div class="svc"><span class="nm">Scout</span><span class="mono"><span class="amt drill">$8.62</span> <span class="cap">of $45</span></span></div>
+        <div class="job">finds new sources worth reading</div>
+        <div class="meter"><i style="width:19.2%"></i></div>
+        <div class="proj">close ≈ <span class="mono">$12.40</span></div>
+      </div>
+      <div>
+        <div class="svc"><span class="nm">Council</span><span class="mono"><span class="amt drill">$36.90</span> <span class="cap">of $130</span></span></div>
+        <div class="job">weighs each idea, votes the verdict</div>
+        <div class="meter"><i style="width:28.4%"></i></div>
+        <div class="proj">close ≈ <span class="mono">$53.70</span></div>
+      </div>
+      <div>
+        <div class="svc"><span class="nm">Simulator</span><span class="mono"><span class="amt drill">$31.55</span> <span class="cap">of $175</span></span></div>
+        <div class="job">runs each idea through modeled seasons</div>
+        <div class="meter"><i style="width:18.0%"></i></div>
+        <div class="proj">close ≈ <span class="mono">$46.00</span></div>
+      </div>
+      <div>
+        <div class="svc"><span class="nm">Archivist</span><span class="mono"><span class="amt drill">$5.71</span> <span class="cap">of $40</span></span></div>
+        <div class="job">writes verdicts and their lineage down</div>
+        <div class="meter"><i style="width:14.3%"></i></div>
+        <div class="proj">close ≈ <span class="mono">$8.30</span></div>
+      </div>
+      <div>
+        <div class="svc"><span class="nm">Courier</span><span class="mono"><span class="amt drill">$4.51</span> <span class="cap">of $50</span></span></div>
+        <div class="job">delivers digests, closes the cycle</div>
+        <div class="meter"><i style="width:9.0%"></i></div>
+        <div class="proj">close ≈ <span class="mono">$6.60</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="shead">
+      <span class="lab">Generation Timetable</span>
+      <span class="note">cycle <span class="mono">12</span> running · <span class="mono">4</span> booked ahead · worst slip <span class="mono">+21</span></span>
+    </div>
+    <div class="tt">
+      <!-- header row -->
+      <div class="h h0"><span class="k1 mono">booked</span><span class="k2 mono">actual</span></div>
+      <div class="h"><span class="hn">01</span><span class="hr drill">r-2201</span></div>
+      <div class="h"><span class="hn">02</span><span class="hr drill">r-2202</span></div>
+      <div class="h"><span class="hn">03</span><span class="hr drill">r-2203</span></div>
+      <div class="h"><span class="hn">04</span><span class="hr drill">r-2204</span></div>
+      <div class="h"><span class="hn">05</span><span class="hr drill">r-2205</span></div>
+      <div class="h"><span class="hn">06</span><span class="hr drill">r-2206</span></div>
+      <div class="h"><span class="hn cxn">07</span><span class="cxt">cancelled</span></div>
+      <div class="h"><span class="hn">08</span><span class="hr drill">r-2208</span></div>
+      <div class="h"><span class="hn">09</span><span class="hr drill">r-2209</span></div>
+      <div class="h"><span class="hn">10</span><span class="hr drill">r-2210</span></div>
+      <div class="h"><span class="hn">11</span><span class="hr drill">r-2211</span></div>
+      <div class="h cur"><span class="hn">12</span><span class="hr drill">r-2212</span></div>
+      <div class="h"><span class="hn">13</span><span class="hr drill">r-2213</span></div>
+      <div class="h"><span class="hn">14</span><span class="hr drill">r-2214</span></div>
+      <div class="h"><span class="hn">15</span><span class="hr drill">r-2215</span></div>
+      <div class="h"><span class="hn">16</span><span class="hr drill">r-2216</span></div>
+
+      <!-- open -->
+      <div class="st"><span class="sn">Open</span><span class="sv">Scout · stocks the docket</span></div>
+      <div class="c"><span class="b">06:00</span><span class="a">06:00</span></div>
+      <div class="c"><span class="b">07:00</span><span class="a">07:00</span></div>
+      <div class="c"><span class="b">08:00</span><span class="a">08:00</span></div>
+      <div class="c"><span class="b">09:00</span><span class="a">09:00</span></div>
+      <div class="c"><span class="b">10:00</span><span class="a">10:00</span></div>
+      <div class="c"><span class="b">11:00</span><span class="a">11:00</span></div>
+      <div class="c cx"><span class="b">12:00</span></div>
+      <div class="c"><span class="b">13:00</span><span class="a">13:00</span></div>
+      <div class="c"><span class="b">14:00</span><span class="a">14:00</span></div>
+      <div class="c"><span class="b">15:00</span><span class="a">15:00</span></div>
+      <div class="c"><span class="b">16:00</span><span class="a">16:00</span></div>
+      <div class="c cur"><span class="b">17:00</span><span class="a">17:00</span></div>
+      <div class="c"><span class="b">18:00</span></div>
+      <div class="c"><span class="b">19:00</span></div>
+      <div class="c"><span class="b">20:00</span></div>
+      <div class="c"><span class="b">21:00</span></div>
+
+      <!-- read -->
+      <div class="st"><span class="sn">Read</span><span class="sv">Reader · reads the stack</span></div>
+      <div class="c"><span class="b">06:04</span><span class="a">06:05</span></div>
+      <div class="c"><span class="b">07:04</span><span class="a">07:04</span></div>
+      <div class="c"><span class="b">08:04</span><span class="a">08:05</span></div>
+      <div class="c"><span class="b">09:04</span><span class="a">09:04</span></div>
+      <div class="c"><span class="b">10:04</span><span class="a">10:04</span></div>
+      <div class="c"><span class="b">11:04</span><span class="a">11:06</span></div>
+      <div class="c cx"><span class="b">12:04</span></div>
+      <div class="c"><span class="b">13:04</span><span class="a">13:04</span></div>
+      <div class="c"><span class="b">14:04</span><span class="a">14:05</span></div>
+      <div class="c"><span class="b">15:04</span><span class="a">15:04</span></div>
+      <div class="c"><span class="b">16:04</span><span class="a">16:05</span></div>
+      <div class="c cur"><span class="b">17:04</span><span class="a">17:05</span></div>
+      <div class="c"><span class="b">18:04</span></div>
+      <div class="c"><span class="b">19:04</span></div>
+      <div class="c"><span class="b">20:04</span></div>
+      <div class="c"><span class="b">21:04</span></div>
+
+      <!-- deliberate -->
+      <div class="st"><span class="sn">Deliberate</span><span class="sv">Council · votes the verdict</span></div>
+      <div class="c"><span class="b">06:12</span><span class="a">06:13</span></div>
+      <div class="c"><span class="b">07:12</span><span class="a">07:12</span></div>
+      <div class="c"><span class="b">08:12</span><span class="a">08:12</span></div>
+      <div class="c"><span class="b">09:12</span><span class="a">09:14</span></div>
+      <div class="c"><span class="b">10:12</span><span class="a">10:12</span></div>
+      <div class="c"><span class="b">11:12</span><span class="a">11:13</span></div>
+      <div class="c cx"><span class="b">12:12</span></div>
+      <div class="c"><span class="b">13:12</span><span class="a">13:13</span></div>
+      <div class="c"><span class="b">14:12</span><span class="a">14:13</span></div>
+      <div class="c"><span class="b">15:12</span><span class="a">15:14</span></div>
+      <div class="c"><span class="b">16:12</span><span class="a">16:12</span></div>
+      <div class="c cur"><span class="b">17:12</span><span class="a">17:13</span></div>
+      <div class="c"><span class="b">18:12</span></div>
+      <div class="c"><span class="b">19:12</span></div>
+      <div class="c"><span class="b">20:12</span></div>
+      <div class="c"><span class="b">21:12</span></div>
+
+      <!-- simulate -->
+      <div class="st"><span class="sn">Simulate</span><span class="sv">Simulator · runs the trial</span></div>
+      <div class="c"><span class="b">06:22</span><span class="a">06:22</span></div>
+      <div class="c"><span class="b">07:22</span><span class="a">07:24</span></div>
+      <div class="c"><span class="b">08:22</span><span class="a">08:22</span></div>
+      <div class="c"><span class="b">09:22</span><span class="a">09:24</span></div>
+      <div class="c"><span class="b">10:22</span><span class="a">10:23</span></div>
+      <div class="c"><span class="b">11:22</span><span class="a">11:22</span></div>
+      <div class="c cx"><span class="b">12:22</span></div>
+      <div class="c"><span class="b">13:22</span><span class="a">13:22</span></div>
+      <div class="c"><span class="b">14:22</span><span class="a">14:43 <em class="late">+21</em></span></div>
+      <div class="c"><span class="b">15:22</span><span class="a">15:23</span></div>
+      <div class="c"><span class="b">16:22</span><span class="a">16:22</span></div>
+      <div class="c cur now"><span class="b">17:22</span><span class="a">17:23 <em class="nowtag">now</em></span></div>
+      <div class="c"><span class="b">18:22</span></div>
+      <div class="c"><span class="b">19:22</span></div>
+      <div class="c"><span class="b">20:22</span></div>
+      <div class="c"><span class="b">21:22</span></div>
+
+      <!-- record -->
+      <div class="st"><span class="sn">Record</span><span class="sv">Archivist · writes lineage</span></div>
+      <div class="c"><span class="b">06:34</span><span class="a">06:35</span></div>
+      <div class="c"><span class="b">07:34</span><span class="a">07:36</span></div>
+      <div class="c"><span class="b">08:34</span><span class="a">08:34</span></div>
+      <div class="c"><span class="b">09:34</span><span class="a">09:36</span></div>
+      <div class="c"><span class="b">10:34</span><span class="a">10:34</span></div>
+      <div class="c"><span class="b">11:34</span><span class="a">11:35</span></div>
+      <div class="c cx"><span class="b">12:34</span></div>
+      <div class="c"><span class="b">13:34</span><span class="a">13:35</span></div>
+      <div class="c"><span class="b">14:34</span><span class="a">14:55</span></div>
+      <div class="c"><span class="b">15:34</span><span class="a">15:35</span></div>
+      <div class="c"><span class="b">16:34</span><span class="a">16:34</span></div>
+      <div class="c cur"><span class="b">17:34</span></div>
+      <div class="c"><span class="b">18:34</span></div>
+      <div class="c"><span class="b">19:34</span></div>
+      <div class="c"><span class="b">20:34</span></div>
+      <div class="c"><span class="b">21:34</span></div>
+
+      <!-- close -->
+      <div class="st"><span class="sn">Close</span><span class="sv">Courier · posts and closes</span></div>
+      <div class="c"><span class="b">06:41</span><span class="a">06:42</span></div>
+      <div class="c"><span class="b">07:41</span><span class="a">07:43</span></div>
+      <div class="c"><span class="b">08:41</span><span class="a">08:41</span></div>
+      <div class="c"><span class="b">09:41</span><span class="a">09:43</span></div>
+      <div class="c"><span class="b">10:41</span><span class="a">10:42</span></div>
+      <div class="c"><span class="b">11:41</span><span class="a">11:41</span></div>
+      <div class="c cx"><span class="b">12:41</span></div>
+      <div class="c"><span class="b">13:41</span><span class="a">13:42</span></div>
+      <div class="c"><span class="b">14:41</span><span class="a">15:02</span></div>
+      <div class="c"><span class="b">15:41</span><span class="a">15:42</span></div>
+      <div class="c"><span class="b">16:41</span><span class="a">16:43</span></div>
+      <div class="c cur"><span class="b">17:41</span></div>
+      <div class="c"><span class="b">18:41</span></div>
+      <div class="c"><span class="b">19:41</span></div>
+      <div class="c"><span class="b">20:41</span></div>
+      <div class="c"><span class="b">21:41</span></div>
+    </div>
+    <div class="tleg">
+      <span><s class="clay">struck</s> — cancelled, kept on the book · <span class="clay mono">+21</span> — minutes late · <span class="sage">now</span> — running stage</span>
+      <span>cells drill by run id <span class="mono drill">r-22NN</span> · dotted figures drill to ledger and journal lines</span>
+    </div>
+  </section>
+
+  <section class="band">
+    <div>
+      <div class="shead"><span class="lab">Scheduler</span></div>
+      <div class="fr"><span class="fl">cadence</span><span class="fv">one open per hour · 06:00–21:00</span></div>
+      <div class="fr"><span class="fl">stage book</span><span class="fv">+0 +4 +12 +22 +34 +41 min</span></div>
+      <div class="fr"><span class="fl">late rule</span><span class="fv">struck past +25 · worst +21</span></div>
+      <div class="fr"><span class="fl">next open</span><span class="fv">18:00:00 · cycle 13 · <span class="drill">r-2213</span></span></div>
+      <div class="fr"><span class="fl">clock</span><span class="fv">farm local · UTC−05</span></div>
+    </div>
+    <div>
+      <div class="shead"><span class="lab">Data</span></div>
+      <div class="fr"><span class="fl">snapshot</span><span class="fv">17:15:09 · <span class="drill">412 MB</span> · verified</span></div>
+      <div class="fr"><span class="fl">archive</span><span class="fv"><span class="drill">1,283 runs</span> · 9.6 GB · to 16:43</span></div>
+      <div class="fr"><span class="fl">backfill</span><span class="fv">0 owed · last repair Aug 19</span></div>
+      <div class="fr"><span class="fl">next snap</span><span class="fv">18:15:00 · hourly at :15</span></div>
+    </div>
+    <div class="inc">
+      <div class="shead"><span class="lab">Incidents</span><span class="note">time · what · action · minutes lost</span></div>
+      <div class="ir"><span class="it">12:01</span><span class="iw">feed empty at open, cycle 07</span><span class="ia">cancelled · struck, kept on book</span><span class="imin">0.0</span></div>
+      <div class="ir"><span class="it">14:22</span><span class="iw">simulator queue stall, cycle 09</span><span class="ia">requeued · ran <span class="mono">14:43</span> · closed <span class="mono">15:02</span></span><span class="imin clay drill">21.0</span></div>
+      <div class="ir"><span class="it">17:15</span><span class="iw">snapshot checksum fail, write 1</span><span class="ia">second write verified <span class="mono">17:15:09</span></span><span class="imin">0.2</span></div>
+      <div class="isum"><span>minutes lost today</span><span class="mono drill">21.2</span><span>of <span class="mono">960</span> booked</span></div>
+    </div>
+    <div>
+      <div class="shead"><span class="lab">Control</span></div>
+      <button class="suspend" type="button">Suspend generation</button>
+      <p class="conseq">Cycle 12 runs to its booked close <span class="mono">17:41</span>. Cycles 13–16 do not open. Ledger, archive and snapshot state hold. Resume reopens at the next booked hour.</p>
+    </div>
+  </section>
+
+  <footer>Every claim sourced · every cost computed · every verdict recorded</footer>
+
+</div>
+</body>
+</html>

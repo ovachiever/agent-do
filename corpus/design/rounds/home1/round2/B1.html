@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,700;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Palette measured from image-B-2026-09-18-1.png */
+  :root{
+    --ground:#FAFAF7;   /* 250,250,247 */
+    --ink:#000000;      /* headline */
+    --body:#3A3D45;     /* body gray, sampled 70..114 */
+    --red:#A2191A;      /* buttons, 162,25,26 */
+    --red-deep:#8A0000; /* figures, 135,0,0 */
+    --red-mid:#AF3535;  /* veto disc, bars 175,53,53 */
+    --rule:#BABBBD;     /* nav / heavy rules */
+    --rule-soft:#CDCED0;/* section rules */
+    --border:#DFE0E0;   /* table borders */
+    --blue:#86B7D7;
+    --pink:#F5ABA9;
+    --pink-stroke:#AC5053;
+    --gray-node:#D3D3D4;
+    --track:#DBDBDB;
+    --green:#488656;
+    --serif:"Newsreader","Times New Roman",Times,serif;
+    --mono:"JetBrains Mono","SF Mono",Menlo,monospace;
+    /* type sizes: 76 / 56 / 42 / 21 / 16 / 13 */
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--ground);color:var(--body)}
+  body{width:1440px;font-family:var(--serif);font-size:21px;line-height:32px;overflow-x:hidden}
+  .page{width:1296px;margin:0 auto}
+  /* grid: 72px margins, 1296 content, two columns 616 + 64 + 616, 8px baseline */
+
+  /* nav */
+  .nav{height:80px;display:flex;align-items:center;border-bottom:1px solid var(--rule)}
+  .brand{font-size:42px;line-height:48px;color:var(--ink);width:320px}
+  .rooms{flex:1;display:flex;gap:0;font-size:16px;line-height:24px;color:var(--body)}
+  .rooms span{padding:0 8px}
+  .rooms i{font-style:normal;color:var(--rule)}
+  .signin{font-size:16px;line-height:24px;color:var(--body);margin-right:32px}
+  .btn{display:inline-block;font-family:var(--serif);font-size:21px;line-height:32px;text-align:center;text-decoration:none}
+  .btn-red{background:var(--red);color:#FAFAF7;padding:8px 40px}
+  .btn-line{border:1px solid var(--rule);color:var(--ink);padding:7px 40px}
+  .nav .btn-red{font-size:16px;line-height:24px;padding:8px 32px}
+
+  /* headline */
+  .lede{padding-top:48px;padding-bottom:48px;border-bottom:1px solid var(--rule)}
+  h1{font-size:56px;line-height:64px;font-weight:700;color:var(--ink);letter-spacing:-0.025em}
+  .intro{padding:32px 0;border-bottom:1px solid var(--rule)}
+
+  /* record row */
+  .record{display:flex;padding:24px 0;border-bottom:1px solid var(--rule)}
+  .record div{flex:1;text-align:center;border-left:1px solid var(--rule)}
+  .record div:first-child{border-left:0}
+  .record .lab{font-family:var(--mono);font-size:16px;line-height:24px;color:var(--ink)}
+  .record .val{font-size:42px;line-height:56px;color:var(--red-deep)}
+
+  /* sections */
+  .sec{display:grid;grid-template-columns:616px 616px;column-gap:64px;padding:40px 0;border-bottom:1px solid var(--rule-soft)}
+  .sec h2{font-size:56px;line-height:64px;font-weight:700;color:var(--ink);margin-bottom:16px}
+  .sec p{font-size:21px;line-height:32px}
+  .cap{font-family:var(--mono);font-size:16px;line-height:24px;color:var(--ink);margin-bottom:8px}
+  .cap small{font-size:13px;line-height:16px;color:var(--body)}
+  .fig{position:relative}
+  .fig svg{display:block}
+  .fig text{font-family:var(--mono);font-size:13px;fill:var(--body)}
+  .fig text.k{font-size:16px;fill:var(--ink)}
+  .fig text.r{fill:var(--red)}
+  .fig .rule{stroke:var(--rule-soft);stroke-width:1}
+
+  /* ledger */
+  table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:16px;line-height:24px;color:var(--ink)}
+  th,td{border:1px solid var(--border);padding:8px 16px;text-align:left;font-weight:400}
+  th{background:#F4F4F1;color:var(--body)}
+  td.beat{color:var(--green)} td.below{color:var(--red)}
+
+  /* closing */
+  .close{padding:40px 0 0}
+  .close p{margin-bottom:32px}
+  .decide{font-size:76px;line-height:80px;font-weight:700;color:var(--ink);margin:8px 0 32px}
+  .actions{display:flex;gap:16px;padding:32px 0 88px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav class="nav">
+    <div class="brand">Palingenesis</div>
+    <div class="rooms"><span>Today</span><i>·</i><span>Pipeline</span><i>·</i><span>Library</span><i>·</i><span>Portfolio</span><i>·</i><span>Simulation</span><i>·</i><span>Engine Room</span></div>
+    <span class="signin">Sign in</span>
+    <a class="btn btn-red" href="#">Open Today</a>
+  </nav>
+
+  <section class="lede">
+    <h1>Palingenesis turns published research into tested innovations, and it does the whole job itself: the reading, the inventing, the arguing, the simulating.<br>You do the ruling.</h1>
+  </section>
+
+  <section class="intro">
+    <p>Most R&amp;D still works one idea at a time. Somebody has a hunch, a team spends months on it, and at the end it gets graded on a single number, usually profit. Palingenesis doesn't work that way. It runs candidates by the hundred, overnight, and grades each of them on six things at once.</p>
+  </section>
+
+  <section class="record">
+    <div><div class="lab">Papers read</div><div class="val">212</div></div>
+    <div><div class="lab">Claims scored</div><div class="val">41</div></div>
+    <div><div class="lab">Interval coverage</div><div class="val">84%</div></div>
+    <div><div class="lab">Positions</div><div class="val">9</div></div>
+  </section>
+
+  <!-- 1 Reads -->
+  <section class="sec">
+    <div>
+      <h2>Reads</h2>
+      <p>The reading never stops, and it isn't picky. Papers, patents, preprints, field reports: whatever touches the problem gets read, including work from fields that have never cited each other. It doesn't summarize any of it. It takes each paper apart into findings, keeps every claim word for word with the passage it came from, and then starts connecting them. When enough findings point the same way it names the cluster and writes up what they agree on. When they thin out it logs a gap and scores it (how new, how feasible, how much it would matter, how risky), because a gap is where the next idea lives. And when it finds something proven on paper that nobody ever tried in the real world, it flags that specifically. Those are the best raw material there is.</p>
+    </div>
+    <div class="fig">
+      <div class="cap">Library <small>212 papers · 45 findings · 3 evidence clusters</small></div>
+      <svg width="616" height="336" viewBox="0 0 616 336">
+        <!-- Cluster A (pink) -->
+        <text class="k" x="96" y="20" text-anchor="middle">Cluster A</text>
+        <g stroke="#B9BABD" stroke-width="1.2">
+          <line x1="40" y1="96" x2="80" y2="72"/><line x1="40" y1="96" x2="96" y2="112"/>
+          <line x1="80" y1="72" x2="96" y2="112"/><line x1="80" y1="72" x2="120" y2="48"/>
+          <line x1="96" y1="112" x2="128" y2="136"/><line x1="96" y1="112" x2="152" y2="96"/>
+          <line x1="152" y1="96" x2="176" y2="64"/><line x1="152" y1="96" x2="200" y2="112"/>
+          <line x1="200" y1="112" x2="240" y2="128"/><line x1="120" y1="48" x2="152" y2="96"/>
+        </g>
+        <g fill="#F5ABA9" stroke="#AC5053" stroke-width="1.2">
+          <circle cx="40" cy="96" r="7"/><circle cx="80" cy="72" r="7"/><circle cx="120" cy="48" r="7"/>
+          <circle cx="96" cy="112" r="10"/><circle cx="128" cy="136" r="7"/><circle cx="152" cy="96" r="7"/>
+          <circle cx="176" cy="64" r="7"/><circle cx="200" cy="112" r="7"/><circle cx="240" cy="128" r="7"/>
+        </g>
+        <!-- Gap (dashed circle) -->
+        <circle cx="300" cy="120" r="56" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="6 5"/>
+        <text class="k" x="300" y="116" text-anchor="middle">Gap</text>
+        <text x="300" y="134" text-anchor="middle">(unexplored)</text>
+        <!-- Cluster B (blue) -->
+        <text class="k" x="472" y="20" text-anchor="middle">Cluster B</text>
+        <g stroke="#B9BABD" stroke-width="1.2">
+          <line x1="360" y1="128" x2="400" y2="104"/><line x1="400" y1="104" x2="440" y2="80"/>
+          <line x1="440" y1="80" x2="480" y2="48"/><line x1="440" y1="80" x2="480" y2="112"/>
+          <line x1="480" y1="112" x2="520" y2="88"/><line x1="480" y1="112" x2="512" y2="144"/>
+          <line x1="520" y1="88" x2="560" y2="64"/><line x1="520" y1="88" x2="560" y2="120"/>
+          <line x1="512" y1="144" x2="552" y2="160"/><line x1="400" y1="104" x2="416" y2="152"/>
+        </g>
+        <g fill="#86B7D7" stroke="#4F86A8" stroke-width="1.2">
+          <circle cx="360" cy="128" r="7"/><circle cx="400" cy="104" r="7"/><circle cx="440" cy="80" r="7"/>
+          <circle cx="480" cy="48" r="7"/><circle cx="480" cy="112" r="10"/><circle cx="520" cy="88" r="7"/>
+          <circle cx="512" cy="144" r="7"/><circle cx="560" cy="64" r="7"/><circle cx="560" cy="120" r="7"/>
+          <circle cx="552" cy="160" r="7"/><circle cx="416" cy="152" r="7"/>
+        </g>
+        <!-- Cluster C (gray) -->
+        <g stroke="#B9BABD" stroke-width="1.2">
+          <line x1="200" y1="176" x2="232" y2="208"/><line x1="232" y1="208" x2="272" y2="200"/>
+          <line x1="232" y1="208" x2="256" y2="240"/><line x1="272" y1="200" x2="304" y2="232"/>
+          <line x1="256" y1="240" x2="296" y2="272"/><line x1="304" y1="232" x2="336" y2="264"/>
+          <line x1="256" y1="240" x2="224" y2="272"/>
+        </g>
+        <g fill="#D3D3D4" stroke="#8E8F93" stroke-width="1.2">
+          <circle cx="200" cy="176" r="7"/><circle cx="232" cy="208" r="7"/><circle cx="272" cy="200" r="7"/>
+          <circle cx="256" cy="240" r="10"/><circle cx="304" cy="232" r="7"/><circle cx="296" cy="272" r="7"/>
+          <circle cx="336" cy="264" r="7"/><circle cx="224" cy="272" r="7"/>
+        </g>
+        <text class="k" x="280" y="304" text-anchor="middle">Cluster C</text>
+        <!-- legend -->
+        <circle cx="416" cy="232" r="6" fill="#F5ABA9" stroke="#AC5053" stroke-width="1.2"/>
+        <text x="436" y="236">Finding</text>
+        <line x1="408" y1="264" x2="424" y2="264" stroke="#B9BABD" stroke-width="1.5"/>
+        <text x="436" y="268">Shared claim</text>
+        <circle cx="416" cy="296" r="6" fill="none" stroke="#000" stroke-width="1" stroke-dasharray="3 2"/>
+        <text x="436" y="300">Gap</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 2 Breeds -->
+  <section class="sec">
+    <div class="fig">
+      <div class="cap">Pipeline <small>Generation 12 · 40 items · best fitness 0.91</small></div>
+      <svg width="616" height="272" viewBox="0 0 616 272">
+        <text class="k" x="24" y="20">Gen 0</text>
+        <text class="k" x="160" y="20">Gen 1</text>
+        <text class="k" x="296" y="20">Gen 2</text>
+        <text class="k" x="432" y="20">Gen 3</text>
+        <!-- paper box -->
+        <rect x="8" y="128" width="88" height="40" fill="none" stroke="#A2191A" stroke-width="1.5"/>
+        <text class="k" x="52" y="153" text-anchor="middle">Paper</text>
+        <!-- gen1 nodes at x=176: y 72,112,148,184,224 -->
+        <g stroke="#B9BABD" stroke-width="1.2" fill="none">
+          <path d="M96 148 C130 148 130 112 166 112"/>
+          <path d="M96 148 L166 148"/>
+          <path d="M96 148 C130 148 130 184 166 184"/>
+          <path d="M96 148 C130 148 130 224 166 224"/>
+          <!-- gen1 -> gen2 -->
+          <path d="M186 72 C230 72 230 56 302 56"/>
+          <path d="M186 72 C230 72 230 96 302 96"/>
+          <path d="M186 112 L302 112"/>
+          <path d="M186 148 C230 148 230 136 302 136"/>
+          <path d="M186 148 C230 148 230 176 302 176"/>
+          <path d="M186 184 L302 200"/>
+          <path d="M186 224 C230 224 230 232 302 232"/>
+          <!-- gen2 -> gen3 -->
+          <path d="M322 56 L438 56"/><path d="M322 96 L438 96"/><path d="M322 112 L438 128"/>
+          <path d="M322 176 L438 176"/><path d="M322 200 L438 208"/><path d="M322 232 L438 240"/>
+        </g>
+        <!-- traced lineage (red) -->
+        <g stroke="#A2191A" stroke-width="1.5" fill="none">
+          <path d="M96 148 C130 148 130 72 166 72"/>
+          <path d="M186 72 C230 72 230 136 302 136"/>
+          <path d="M322 136 C380 136 380 160 438 160"/>
+        </g>
+        <g fill="#FAFAF7" stroke="#8E8F93" stroke-width="1.2">
+          <circle cx="176" cy="112" r="9"/><circle cx="176" cy="148" r="9"/><circle cx="176" cy="184" r="9"/><circle cx="176" cy="224" r="9"/>
+          <circle cx="312" cy="56" r="9"/><circle cx="312" cy="96" r="9"/><circle cx="312" cy="112" r="9"/><circle cx="312" cy="176" r="9"/><circle cx="312" cy="200" r="9"/><circle cx="312" cy="232" r="9"/>
+          <circle cx="448" cy="56" r="9"/><circle cx="448" cy="96" r="9"/><circle cx="448" cy="128" r="9"/><circle cx="448" cy="176" r="9"/><circle cx="448" cy="208" r="9"/><circle cx="448" cy="240" r="9"/>
+        </g>
+        <g fill="#FAFAF7" stroke="#A2191A" stroke-width="1.8">
+          <circle cx="176" cy="72" r="9"/><circle cx="312" cy="136" r="9"/><circle cx="448" cy="160" r="9"/>
+        </g>
+        <line x1="460" y1="160" x2="496" y2="160" stroke="#A2191A" stroke-width="1.2"/>
+        <text class="r" x="504" y="164">Traced lineage</text>
+      </svg>
+    </div>
+    <div>
+      <h2>Breeds</h2>
+      <p>From all of that it breeds. Not one idea but populations of them, generation after generation, using twelve strategies: borrow a mechanism from biology, invert the assumption everyone shares, relax the constraint everyone accepts, chase the edge case, cross two parents, split a lineage into species so the whole population stops converging on the same answer. Duplicates get caught before they cost anything. Every candidate keeps its parentage, so you can trace any idea back through its ancestors to the paper that started it.</p>
+    </div>
+  </section>
+
+  <!-- 3 Argues -->
+  <section class="sec">
+    <div>
+      <h2>Argues</h2>
+      <p>Then the arguing starts, and it happens in three rounds. First a panel of experts scores the candidate on six dimensions at the same time: technical, economic, welfare, ecological, social, ethical. They have to reach consensus or reject it. Then twelve archetypal judges read the same case from twelve temperaments, the cautious one and the reckless one included. Last comes the thirteenth seat, Ophiuchus, whose only job is to find what everyone else missed: the hidden harm, the quiet bias, the side effect nobody priced in, the cost that lands on someone else. It holds a veto that nothing in the system can override. Every judge's reasoning is written down against the exact text they judged, so a verdict is always tied to the thing it judged.</p>
+    </div>
+    <div class="fig">
+      <div class="cap">Dossier <small>Council 5 of 6 · GREENLIGHT · fitness 87.4</small></div>
+      <svg width="616" height="304" viewBox="0 0 616 304">
+        <!-- Round 1 -->
+        <text class="k" x="0" y="16">Council</text>
+        <text x="0" y="36">Expert panel</text>
+        <text x="0" y="52">(six dimensions)</text>
+        <g>
+          <text x="0" y="92">technical</text><rect x="96" y="80" width="140" height="14" fill="#DBDBDB"/><rect x="96" y="80" width="118" height="14" fill="#AF3535"/>
+          <text x="0" y="124">economic</text><rect x="96" y="112" width="140" height="14" fill="#DBDBDB"/><rect x="96" y="112" width="100" height="14" fill="#AF3535"/>
+          <text x="0" y="156">welfare</text><rect x="96" y="144" width="140" height="14" fill="#DBDBDB"/><rect x="96" y="144" width="106" height="14" fill="#AF3535"/>
+          <text x="0" y="188">ecological</text><rect x="96" y="176" width="140" height="14" fill="#DBDBDB"/><rect x="96" y="176" width="72" height="14" fill="#B9BABD"/>
+          <text x="0" y="220">social</text><rect x="96" y="208" width="140" height="14" fill="#DBDBDB"/><rect x="96" y="208" width="94" height="14" fill="#AF3535"/>
+          <text x="0" y="252">ethical</text><rect x="96" y="240" width="140" height="14" fill="#DBDBDB"/><rect x="96" y="240" width="112" height="14" fill="#AF3535"/>
+        </g>
+        <line class="rule" x1="272" y1="8" x2="272" y2="264"/>
+        <!-- Round 2 -->
+        <text class="k" x="296" y="16">Judges</text>
+        <text x="296" y="36">Twelve judges</text>
+        <text x="296" y="52">(twelve temperaments)</text>
+        <g fill="#D3D3D4" stroke="#B9BABD" stroke-width="1">
+          <circle cx="308" cy="96" r="9"/><circle cx="340" cy="96" r="9"/><circle cx="372" cy="96" r="9"/><circle cx="404" cy="96" r="9"/>
+          <circle cx="308" cy="136" r="9"/><circle cx="340" cy="136" r="9"/><circle cx="372" cy="136" r="9"/><circle cx="404" cy="136" r="9"/>
+          <circle cx="308" cy="176" r="9"/><circle cx="340" cy="176" r="9"/><circle cx="372" cy="176" r="9"/><circle cx="404" cy="176" r="9"/>
+        </g>
+        <line class="rule" x1="464" y1="8" x2="464" y2="264"/>
+        <!-- Round 3 -->
+        <text class="k" x="480" y="16">Verdict</text>
+        <text x="480" y="36">Ophiuchus</text>
+        <text x="480" y="52">(thirteenth seat)</text>
+        <circle cx="556" cy="160" r="56" fill="#AF3535"/>
+        <text x="556" y="166" text-anchor="middle" style="font-family:var(--serif);font-size:21px;fill:#FAFAF7;letter-spacing:0.08em">VETO</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 4 Simulates -->
+  <section class="sec">
+    <div class="fig">
+      <div class="cap">Simulation <small>Hindcast skill 0.82 · 90% coverage 88%</small></div>
+      <svg width="616" height="256" viewBox="0 0 616 256">
+        <!-- axes -->
+        <text x="32" y="24" text-anchor="end">100</text>
+        <text x="32" y="72" text-anchor="end">75</text>
+        <text x="32" y="120" text-anchor="end">50</text>
+        <text x="32" y="168" text-anchor="end">25</text>
+        <text x="32" y="216" text-anchor="end">0</text>
+        <g transform="translate(16,0)">
+        <line x1="24" y1="16" x2="24" y2="212" stroke="#000" stroke-width="1"/>
+        <line x1="24" y1="212" x2="392" y2="212" stroke="#000" stroke-width="1"/>
+        <path d="M392 212 L384 208 L384 216 Z" fill="#000"/>
+        <text x="208" y="240" text-anchor="middle">Time</text>
+        <!-- uncertainty band -->
+        <path d="M24 204 L64 196 L104 176 L144 152 L184 132 L224 108 L264 84 L304 60 L344 40 L376 28 L376 76 L344 84 L304 100 L264 116 L224 134 L184 150 L144 166 L104 184 L64 198 L24 208 Z" fill="#AF3535" fill-opacity="0.14"/>
+        <!-- forecast median (dashed) -->
+        <path d="M24 206 L64 197 L104 180 L144 159 L184 141 L224 121 L264 100 L304 80 L344 62 L376 52" fill="none" stroke="#3A3D45" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <!-- observed (solid red) -->
+        <path d="M24 206 L44 204 L64 200 L84 192 L104 184 L124 170 L144 162 L164 150 L184 138 L204 130 L224 118 L244 106 L264 96 L284 88 L304 78 L324 68 L344 60 L364 52 L376 46" fill="none" stroke="#A2191A" stroke-width="2.2"/>
+        <!-- legend -->
+        <line x1="424" y1="60" x2="456" y2="60" stroke="#3A3D45" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <text x="468" y="64">Forecast</text>
+        <rect x="424" y="88" width="32" height="14" fill="#AF3535" fill-opacity="0.14"/>
+        <text x="468" y="100">Coverage</text>
+        <line x1="424" y1="132" x2="456" y2="132" stroke="#A2191A" stroke-width="2.2"/>
+        <text x="468" y="136">Observed</text>
+        </g>
+      </svg>
+    </div>
+    <div>
+      <h2>Simulates</h2>
+      <p>Whatever survives the council goes to a calibrated simulator before anyone builds anything. Physics and systems models get run against the scenarios that matter, with the economics alongside, and a second council of simulated agents argues over the results. The simulator keeps a public score of its own accuracy against what really happened afterward, and when it can't simulate something it says so instead of guessing.</p>
+    </div>
+  </section>
+
+  <!-- 5 Ships -->
+  <section class="sec">
+    <div>
+      <h2>Ships</h2>
+      <p>Survivors go to pilot, then launch, then scale. The claim that got approved stays frozen next to what the field actually measures, for as long as the product lives. A failure doesn't get quietly dropped either. It stays in the book, counted.</p>
+    </div>
+    <div class="fig">
+      <div class="cap">Portfolio <small>41 claims scored · 29 on or above · coverage 84%</small></div>
+      <table>
+        <thead><tr><th>#</th><th>Claimed</th><th>Field</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>−24%</td><td>−31%</td><td class="beat">Beat</td></tr>
+          <tr><td>2</td><td>−0.8%</td><td>+0.2%</td><td class="below">Below</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6 Learns -->
+  <section class="sec">
+    <div class="fig">
+      <div class="cap">Engine Room <small>6 wheels · every order logged on the clock</small></div>
+      <svg width="616" height="304" viewBox="0 0 616 304">
+        <defs>
+          <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0 0 L8 4 L0 8 Z" fill="#A2191A"/>
+          </marker>
+        </defs>
+        <!-- boxes: Reads (top), Breeds (right), Argues (bottom right), Ships (bottom left), Learns (left) -->
+        <g fill="none" stroke="#000" stroke-width="1.2">
+          <rect x="216" y="8" width="176" height="56"/>
+          <rect x="400" y="112" width="176" height="56"/>
+          <rect x="352" y="232" width="176" height="56"/>
+          <rect x="72" y="232" width="176" height="56"/>
+          <rect x="8" y="112" width="176" height="56"/>
+        </g>
+        <g text-anchor="middle">
+          <text class="k" x="304" y="32">Reads</text><text x="304" y="52">Library</text>
+          <text class="k" x="488" y="136">Breeds</text><text x="488" y="156">Pipeline</text>
+          <text class="k" x="440" y="256">Argues</text><text x="440" y="276">Dossier</text>
+          <text class="k" x="160" y="256">Ships</text><text x="160" y="276">Portfolio</text>
+          <text class="k" x="96" y="136">Learns</text><text x="96" y="156">Engine Room</text>
+        </g>
+        <g fill="none" stroke="#A2191A" stroke-width="1.5" marker-end="url(#ah)">
+          <path d="M392 40 C440 48 468 72 480 108"/>
+          <path d="M480 172 C476 200 468 216 456 228"/>
+          <path d="M348 260 L252 260"/>
+          <path d="M120 228 C108 208 100 192 100 172"/>
+          <path d="M120 108 C140 72 172 48 212 40"/>
+        </g>
+      </svg>
+    </div>
+    <div>
+      <h2>Learns</h2>
+      <p>Every outcome changes what the machine reads and believes next. Kept, beaten, missed, failed, it all feeds back: which papers it trusts, which strategies it breeds from, how tightly it holds its own alignment when the population starts to drift, how much it believes its own simulator. It remembers all of it, every candidate, every verdict, every cycle, forever.</p>
+      <div class="cap" style="margin-top:32px">Coverage <small>Calibration</small></div>
+      <table>
+        <tbody>
+          <tr><th>Claimed</th><td>10</td><td>30</td><td>50</td><td>70</td><td>90</td></tr>
+          <tr><th>Observed</th><td>8</td><td>26</td><td>47</td><td>66</td><td>84</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="close">
+    <p>Generations run overnight and the council sits twice a day. Every order you give it is logged on the clock, and nothing is ever deleted.</p>
+    <p>It isn't built for one industry. The engine stays the same; the literature it reads and what its judges know get fitted to whatever field you point it at, and so do the simulator's models.</p>
+    <div class="decide">You decide.</div>
+    <p>The machine does the reading and the breeding, the judging and the modeling. It keeps its own books, too. You look at the winners, check the receipts, and rule.</p>
+    <div class="actions">
+      <a class="btn btn-line" href="#">Sign in</a>
+      <a class="btn btn-red" href="#">Open Today</a>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
