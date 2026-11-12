@@ -184,6 +184,9 @@ def main() -> int:
         )
 
         env = os.environ.copy()
+        env["AGENT_DO_CREDS_PLATFORM"] = "unknown"  # Never resolve Erik's live mailbox credentials in fixtures.
+        for key in ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "GRAPH_TARGET_MAILBOX", "AGENT_EMAIL_GRAPH_ACCOUNT"):
+            env.pop(key, None)
         env["AGENT_EMAIL_FIXTURE"] = str(fixture)
         for key in [
             "AGENT_EMAIL_PROVIDER",
@@ -586,6 +589,8 @@ IMAP4 = IMAP4_SSL
         require("Message-ID: <remote-hydrate@example.test>" in remote_eml, "remote eml missing Message-ID")
         require("Remote provider body invoice 117172125." in remote_eml, "remote eml missing body")
 
+    from test_email_graph import run_tests
+    run_tests()
     print("email tests passed")
     return 0
 

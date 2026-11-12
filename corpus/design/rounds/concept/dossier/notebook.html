@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>The Windfall Loop · Palingenesis</title>
+<style>
+  :root{
+    --bg:#1b1713;
+    --ink:#ddd3bf;
+    --ink-bright:#f2ead9;
+    --ink-mid:#c9bea6;
+    --ink-dim:#9c917c;
+    --ink-faint:#82775f;
+    --accent:#a7c080;
+    --hair:rgba(234,225,207,.16);
+    --hair-soft:rgba(234,225,207,.09);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --sans:"Avenir Next","Helvetica Neue","Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+    --mono:"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--serif);
+    font-size:16.5px;
+    line-height:1.72;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--accent);color:#1b1713}
+  a{color:inherit;text-decoration:none}
+  .shell{max-width:1104px;margin:0 auto;padding:0 48px}
+
+  /* ---------- nav ---------- */
+  nav{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:30px 0 24px;border-bottom:1px solid var(--hair);
+  }
+  .wordmark{
+    font-family:var(--serif);font-size:15px;letter-spacing:.3em;
+    text-transform:uppercase;color:var(--ink-bright);
+  }
+  .navlinks{display:flex;gap:36px;font-family:var(--sans);font-size:11px;
+    letter-spacing:.14em;text-transform:uppercase}
+  .navlinks a{color:var(--ink-faint);padding-bottom:4px}
+  .navlinks a:hover{color:var(--ink-mid)}
+  .navlinks a.current{color:var(--ink-bright);border-bottom:1px solid var(--ink-mid)}
+
+  /* ---------- shared two-column pair: record | margin ---------- */
+  .pair{display:grid;grid-template-columns:minmax(0,1fr) 300px;column-gap:72px}
+  .apparatus{padding-top:6px}
+
+  /* ---------- front matter ---------- */
+  .front{padding:64px 0 10px}
+  .kicker{font-family:var(--sans);font-size:11px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--ink-faint)}
+  h1{
+    font-size:47px;line-height:1.12;font-weight:400;letter-spacing:-.005em;
+    color:var(--ink-bright);margin:18px 0 16px;
+  }
+  .subtitle{font-style:italic;font-size:18.5px;line-height:1.55;color:var(--ink-dim);max-width:560px}
+  .lineage{
+    margin-top:30px;font-family:var(--sans);font-size:12.5px;
+    letter-spacing:.02em;color:var(--ink-dim);
+  }
+  .lineage b{color:var(--ink-mid);font-weight:600}
+
+  .determination{margin-top:100px}
+  .det-label{font-family:var(--sans);font-size:10.5px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--ink-faint)}
+  .det-word{
+    font-family:var(--serif);font-size:24px;letter-spacing:.3em;
+    color:var(--accent);margin:10px 0 12px;
+  }
+  .det-meta{font-family:var(--sans);font-size:12px;line-height:1.6;color:var(--ink-dim)}
+  .tick::before{
+    content:"";display:block;width:22px;
+    border-top:1px solid rgba(234,225,207,.34);margin-bottom:10px;
+  }
+
+  /* ---------- entries ---------- */
+  .entry{border-top:1px solid var(--hair);margin-top:56px;padding-top:36px}
+  .entry:first-of-type{margin-top:48px}
+  h2{font-size:21.5px;font-weight:400;letter-spacing:.005em;color:var(--ink-bright)}
+  .stamp{
+    font-family:var(--sans);font-size:10.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-faint);padding-top:9px;
+  }
+  .body{margin-top:20px}
+  .passage p{max-width:640px;margin-bottom:19px;color:var(--ink)}
+  .passage p:last-child{margin-bottom:0}
+  .passage .aside-line{font-style:italic;color:var(--ink-dim)}
+
+  .claim{
+    text-decoration:underline dotted rgba(234,225,207,.42);
+    text-underline-offset:4.5px;text-decoration-thickness:1px;
+  }
+  sup.ref{
+    font-family:var(--sans);font-size:10px;color:var(--ink-mid);
+    vertical-align:super;line-height:0;margin-left:2px;letter-spacing:.05em;
+  }
+
+  .note{
+    font-family:var(--sans);font-size:12.5px;line-height:1.62;
+    color:var(--ink-dim);margin-bottom:20px;
+  }
+  .note::before{
+    content:"";display:block;width:22px;
+    border-top:1px solid rgba(234,225,207,.34);margin-bottom:9px;
+  }
+  .note b{color:var(--ink-mid);font-weight:600}
+  .note i{color:var(--ink-mid)}
+
+  /* ---------- fitness log ---------- */
+  .dims{margin-top:4px;border-top:1px solid var(--hair)}
+  .dim{padding:14px 0 13px;border-bottom:1px solid var(--hair-soft)}
+  .dim-top{
+    display:grid;grid-template-columns:minmax(0,1fr) 52px 128px;
+    column-gap:22px;align-items:center;
+  }
+  .dim-name{font-family:var(--serif);font-size:16px;color:var(--ink-bright)}
+  .dim-score{
+    font-family:var(--sans);font-size:18px;font-weight:500;text-align:right;
+    color:var(--ink-bright);font-variant-numeric:tabular-nums;
+  }
+  .track{position:relative;height:2px;background:var(--hair-soft)}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:#cfc2a8}
+  .dim-cond{
+    margin-top:5px;font-family:var(--sans);font-size:12px;line-height:1.55;
+    color:var(--ink-dim);max-width:470px;
+  }
+  .dim-comp{display:grid;grid-template-columns:minmax(0,1fr) 52px 128px;
+    column-gap:22px;align-items:baseline;padding:16px 0 4px}
+  .comp-label{font-style:italic;font-size:16px;color:var(--ink-bright)}
+  .comp-score{font-family:var(--sans);font-size:18px;font-weight:600;text-align:right;
+    color:var(--ink-bright);font-variant-numeric:tabular-nums}
+  .comp-note{font-family:var(--sans);font-size:11px;color:var(--ink-faint);letter-spacing:.04em}
+
+  /* ---------- economics table ---------- */
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-family:var(--sans)}
+  thead th{
+    font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:500;
+    color:var(--ink-faint);text-align:left;padding:0 0 10px;
+    border-bottom:1px solid var(--hair);
+  }
+  thead th.val{text-align:right;padding-right:28px}
+  tbody td{padding:11px 0;border-bottom:1px solid var(--hair-soft);vertical-align:baseline}
+  td.item{font-family:var(--serif);font-size:15.5px;color:var(--ink);padding-right:20px;width:37%}
+  td.val{
+    font-size:14.5px;color:var(--ink-bright);text-align:right;white-space:nowrap;
+    font-variant-numeric:tabular-nums;padding-right:28px;width:19%;
+  }
+  td.basis{font-size:11.5px;line-height:1.55;color:var(--ink-dim);width:44%}
+  tr.formula td{
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.01em;
+    color:var(--ink-mid);padding:14px 0;
+  }
+  tr.formula .flabel{
+    font-family:var(--sans);font-size:10px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--ink-faint);margin-right:16px;
+  }
+  tr.result td{border-bottom:none;padding-top:15px}
+  tr.result .item{font-style:italic;font-size:16.5px;color:var(--ink-bright)}
+  tr.result .val{font-size:18px;font-weight:600;color:var(--accent)}
+
+  /* ---------- council verdicts (margin) ---------- */
+  .verdict{margin-bottom:26px}
+  .jrole{font-family:var(--sans);font-size:10.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-faint)}
+  .jword{font-family:var(--serif);font-size:13.5px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--accent);margin:7px 0 6px}
+  .jword.cond{color:var(--ink-mid)}
+  .jline{font-family:var(--serif);font-style:italic;font-size:14px;
+    line-height:1.58;color:#c4b9a1}
+
+  /* ---------- determination entry ---------- */
+  .verdict-band{margin:28px 0 22px}
+  .verdict-band .rule{width:56px;border-top:1px solid var(--hair)}
+  .verdict-word{
+    font-family:var(--serif);font-size:31px;letter-spacing:.34em;
+    color:var(--accent);margin:16px 0 14px;
+  }
+  .seal{
+    font-family:var(--sans);font-size:10.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-faint);margin-top:26px;line-height:2;
+  }
+
+  /* ---------- decision entry ---------- */
+  button{font:inherit}
+  .decide{margin-top:30px;max-width:640px}
+  .btn{
+    font-family:var(--sans);font-size:11.5px;letter-spacing:.18em;
+    text-transform:uppercase;padding:14px 30px;border-radius:2px;cursor:pointer;
+  }
+  .btn-advance{
+    background:var(--accent);border:1px solid var(--accent);
+    color:#161310;font-weight:600;
+  }
+  .btn-advance:hover{background:#b4cc90;border-color:#b4cc90}
+  .btn-kill{
+    background:transparent;border:1px solid rgba(234,225,207,.32);
+    color:#cfc2a8;
+  }
+  .btn-kill:hover{border-color:rgba(234,225,207,.55)}
+  .killrow{display:flex;gap:18px;align-items:flex-end;margin-top:26px}
+  .killrow label{
+    display:block;font-family:var(--sans);font-size:10px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px;
+  }
+  .grounds-wrap{flex:1}
+  input.grounds{
+    width:100%;background:transparent;border:none;outline:none;
+    border-bottom:1px solid var(--hair);
+    font-family:var(--serif);font-style:italic;font-size:15.5px;
+    color:var(--ink-bright);padding:6px 2px 7px;
+  }
+  input.grounds::placeholder{color:rgba(156,145,124,.5)}
+  input.grounds:focus{border-bottom-color:rgba(167,192,128,.55)}
+  .lineage-line{
+    margin-top:34px;font-style:italic;font-size:17px;color:var(--ink-mid);
+  }
+
+  /* ---------- footer ---------- */
+  footer{margin-top:96px;border-top:1px solid var(--hair);padding:38px 0 64px;text-align:center}
+  .motto{
+    font-family:var(--sans);font-size:10.5px;letter-spacing:.24em;
+    text-transform:uppercase;color:var(--ink-dim);
+  }
+  .colophon{margin-top:14px;font-style:italic;font-size:13px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <nav>
+    <a class="wordmark" href="#">Palingenesis</a>
+    <div class="navlinks">
+      <a href="#">Today</a>
+      <a href="#" class="current">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Engine&nbsp;Room</a>
+    </div>
+  </nav>
+</header>
+
+<main class="shell">
+
+  <!-- ============ front matter ============ -->
+  <section class="front pair">
+    <div>
+      <div class="kicker">Innovation dossier · Candidate PGN-G7-1184 · opened 19 Aug 2026 · seven entries</div>
+      <h1>The Windfall Loop</h1>
+      <p class="subtitle">Cull fruit and spent brewers&rsquo; grain, reared through the black
+        soldier fly, returned to the laying flock as protein and as pasture forage.</p>
+      <p class="lineage"><b>Generation 7</b> &nbsp;·&nbsp; crossover of
+        <b>PGN-G5-0612</b> &ldquo;Windfall Recovery&rdquo; × <b>PGN-G6-0873</b> &ldquo;Soy-Displacement Ladder&rdquo;
+        &nbsp;·&nbsp; evaluated <b>19&ndash;22 August 2026</b></p>
+    </div>
+    <div class="apparatus">
+      <div class="determination tick">
+        <div class="det-label">Determination</div>
+        <div class="det-word">Greenlight</div>
+        <div class="det-meta">Composite 79.7 against a charter floor of 72.
+          Quoted here for the reader; earned at Entry&nbsp;006, where it is entered and sealed.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 001 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>Origin of the candidate</h2>
+      <div class="stamp">Entry 001 · 19 Aug 2026 · 04:07 UTC</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>This candidate was not designed; it was found, and I record how. In the seventh
+        generation of the orchard-and-flock search I crossed the substrate line of
+        PGN-G5-0612, which had taught the population that cull fruit is an asset stranded
+        on the ground, with the displacement objective of PGN-G6-0873, which held pressure
+        on the ration&rsquo;s most expensive and least local tonne. The cross produced a bridge
+        neither parent carried: an insect standing between the orchard&rsquo;s waste and the
+        hen&rsquo;s protein.</p>
+        <p>One thousand twenty-four candidates were bred in the cycle. Thirty-eight survived
+        triage; six reached the council; this one ranked first when the council rose. The
+        entries that follow are its record, set down in the order the work was done.</p>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>Bred</b> 19 Aug 2026, cycle 7.
+          Population 1,024 &rarr; triage 38 &rarr; council 6.
+          Mutation rate 0.03; crossover at the substrate&ndash;destination locus.</div>
+        <div class="note"><b>Parents.</b> PGN-G5-0612, retired with generation 5, survives in
+          three lineages. PGN-G6-0873 remains active. Neither parent proposed an animal
+          intermediary; the insect is emergent, not inherited.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 002 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>The mechanism, as proposed</h2>
+      <div class="stamp">Entry 002 · 19 Aug 2026 · 06:41 UTC</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>The loop runs in one direction and fits inside a truck-hour. Cull apples and pears
+        leave Meridian&rsquo;s rows as they fall; spent grain leaves the brewery still warm on
+        Tuesdays and Fridays. Both streams land in a rearing hall of stacked trays, where
+        black soldier fly larvae work through the mixture in twelve-day cohorts. At harvest
+        the trays are sieved: larvae to the blancher and the dryer, frass to the orchard
+        floor as amendment, and the hall reset the same afternoon.</p>
+      </div>
+      <div class="apparatus"></div>
+    </div>
+    <div class="pair">
+      <div class="passage">
+        <p>The arithmetic of the conversion is established, not hoped for.
+        <span class="claim">Mixed fruit-and-grain substrate converts to larval mass at
+        eighteen to twenty-four percent on a dry basis</span><sup class="ref">1</sup> &mdash;
+        the two waste streams approximate, by accident of composition, a formulated rearing
+        diet. At the far end of the loop, <span class="claim">whole dried larvae hold egg
+        mass and lay rate at inclusion rates up to four percent of the
+        ration</span><sup class="ref">2</sup>. I use four percent and nothing bolder.</p>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>1 · L-0331.</b> Surendra et&nbsp;al., <i>Waste Management</i> 117
+          (2020), &sect;3.2 &mdash; lab and pilot scale. The 8.5&nbsp;:&nbsp;1 planning ratio
+          used at Entry&nbsp;004 sits at the cautious end of this range.</div>
+        <div class="note"><b>2 · L-0298.</b> Curated meta-file: fourteen layer feeding trials,
+          2016&ndash;2025, assembled 03 Jul 2026. No yield penalty at &le;4%; two trials
+          report shell-strength gains.</div>
+      </div>
+    </div>
+    <div class="pair">
+      <div class="passage">
+        <p>The subtler half of the mechanism is behavioral. <span class="claim">Scattered on
+        range rather than delivered in the trough, larvae keep hens foraging through the
+        afternoon and cut injurious pecking by roughly a third</span><sup class="ref">3</sup>.
+        The same tonne is bought twice &mdash; once as protein, once as occupation.</p>
+        <p class="aside-line">Nothing in this loop is novel chemistry. The candidate&rsquo;s claim
+        is arrangement: two waste contracts, one insect, one flock, one truck.</p>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>3 · L-0412.</b> Star et&nbsp;al., <i>Poultry Science</i> 99 (2020)
+          &mdash; free-range flocks, n&nbsp;=&nbsp;2; effect size wide, direction consistent.</div>
+        <div class="note"><b>Cross-check.</b> Claims 1&ndash;3 re-verified against the Library
+          on 20 Aug; no retraction, no contrary file.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 003 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>The measurements, as taken</h2>
+      <div class="stamp">Entry 003 · 20 Aug 2026 · 13:07 UTC</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>Six dimensions, scored as the runs completed and entered with their conditions.
+        A score without its conditions is a rumor; none of these is a rumor.</p>
+
+        <div class="dims">
+          <div class="dim">
+            <div class="dim-top">
+              <div class="dim-name">Technical</div>
+              <div class="dim-score">82</div>
+              <div class="track"><div class="fill" style="width:82%"></div></div>
+            </div>
+            <div class="dim-cond">Process model over three site layouts; 41 failure modes
+              enumerated; drying is the one fragile stage. SIM-2279 · 20 Aug, 09:14.</div>
+          </div>
+          <div class="dim">
+            <div class="dim-top">
+              <div class="dim-name">Economic</div>
+              <div class="dim-score">88</div>
+              <div class="track"><div class="fill" style="width:88%"></div></div>
+            </div>
+            <div class="dim-cond">Monte Carlo, 10,000 draws over the 2019&ndash;26 price
+              series; seed 4417. SIM-2281 · 20 Aug, 11:52.</div>
+          </div>
+          <div class="dim">
+            <div class="dim-top">
+              <div class="dim-name">Welfare</div>
+              <div class="dim-score">91</div>
+              <div class="track"><div class="fill" style="width:91%"></div></div>
+            </div>
+            <div class="dim-cond">Behavior-time budget over trial priors; interval
+              86&ndash;94. SIM-2280 · 20 Aug, 10:37.</div>
+          </div>
+          <div class="dim">
+            <div class="dim-top">
+              <div class="dim-name">Ecological</div>
+              <div class="dim-score">85</div>
+              <div class="track"><div class="fill" style="width:85%"></div></div>
+            </div>
+            <div class="dim-cond">Cradle-to-gate LCA against the soymeal baseline; frass
+              credit included. SIM-2283 · 20 Aug, 15:20.</div>
+          </div>
+          <div class="dim">
+            <div class="dim-top">
+              <div class="dim-name">Social</div>
+              <div class="dim-score">71</div>
+              <div class="track"><div class="fill" style="width:71%"></div></div>
+            </div>
+            <div class="dim-cond">Labor and partnership model; two grower interviews still
+              outstanding. FLD-88 · 20 Aug.</div>
+          </div>
+          <div class="dim">
+            <div class="dim-top">
+              <div class="dim-name">Ethical</div>
+              <div class="dim-score">61</div>
+              <div class="track"><div class="fill" style="width:61%"></div></div>
+            </div>
+            <div class="dim-cond">Expert elicitation, nine members, split on larval
+              sentience; scored at the panel&rsquo;s floor. PNL-12 · 20 Aug, 17:05.</div>
+          </div>
+          <div class="dim-comp">
+            <div class="comp-label">Composite, equal weights</div>
+            <div class="comp-score">79.7</div>
+            <div class="comp-note">charter floor 72</div>
+          </div>
+        </div>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>Charter &sect;4.2.</b> Greenlight requires composite &ge;&nbsp;72
+          with no dimension below 55. Ethical, at 61, is the closest approach; it is taken
+          up at Entry&nbsp;005.</div>
+        <div class="note"><b>Stability.</b> Rescored from clean seeds, R-2281b and R-2281c:
+          composites 79.4 and 80.1. The figure holds.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 004 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>The economics, computed</h2>
+      <div class="stamp">Entry 004 · 20 Aug 2026 · 18:26 UTC</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>I costed the loop against Meridian&rsquo;s current ration and against signed paper,
+        not against hopes. Each figure keeps its receipt, and the formula is printed in
+        full so the arithmetic can be checked by hand.</p>
+
+        <table>
+          <thead>
+            <tr><th>Line</th><th class="val">Value</th><th>Basis</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="item">Laying flock, pilot line</td>
+              <td class="val">24,000 hens</td>
+              <td class="basis">FP-118 · Meridian Co-op flock ledger</td>
+            </tr>
+            <tr>
+              <td class="item">Substrate under contract</td>
+              <td class="val">352 t / yr</td>
+              <td class="basis">OA-3 orchard windfall, 140 t · BRW-9 spent grain, 212 t</td>
+            </tr>
+            <tr>
+              <td class="item">Dried larvae yield</td>
+              <td class="val">41.4 t / yr</td>
+              <td class="basis">SIM-2281 · dry conversion 8.5&nbsp;:&nbsp;1 · L-0331</td>
+            </tr>
+            <tr>
+              <td class="item">Soymeal displaced</td>
+              <td class="val">44.7 t / yr</td>
+              <td class="basis">protein equivalence 1.08 · L-0298</td>
+            </tr>
+            <tr>
+              <td class="item">Soymeal, delivered</td>
+              <td class="val">$409 / t</td>
+              <td class="basis">USDA AMS feedstuffs tape · 14 Aug 2026</td>
+            </tr>
+            <tr>
+              <td class="item">Retail premium, insect-fed line</td>
+              <td class="val">$0.14 / doz</td>
+              <td class="basis">RT-77 term sheet · signed 29 Jul 2026, runs to 2029</td>
+            </tr>
+            <tr>
+              <td class="item">Dozens marketed</td>
+              <td class="val">592,000 / yr</td>
+              <td class="basis">FP-118 · 296 eggs per hen-year, graded</td>
+            </tr>
+            <tr>
+              <td class="item">Orchard hauling avoided</td>
+              <td class="val">$8,400 / yr</td>
+              <td class="basis">OA-3, schedule B · shared saving, our half</td>
+            </tr>
+            <tr>
+              <td class="item">Rearing hall, operating</td>
+              <td class="val">&minus;$61,200 / yr</td>
+              <td class="basis">VQ-19 · 0.6 FTE at co-op wage · energy metered</td>
+            </tr>
+            <tr class="formula">
+              <td colspan="3"><span class="flabel">Formula</span>
+                net&nbsp;=&nbsp;44.7&nbsp;t&nbsp;&times;&nbsp;$409&nbsp;&nbsp;+&nbsp;&nbsp;592,000&nbsp;doz&nbsp;&times;&nbsp;$0.14&nbsp;&nbsp;+&nbsp;&nbsp;$8,400&nbsp;&nbsp;&minus;&nbsp;&nbsp;$61,200</td>
+            </tr>
+            <tr class="result">
+              <td class="item">Net annual gain, all receipts standing</td>
+              <td class="val">+$48,362 / yr</td>
+              <td class="basis">$2.02 per hen-year · $148,000 capital (VQ-19) returned in 3.1 years</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>Sensitivity, SIM-2284.</b> With RT-77 standing, no soymeal price
+          on the 2019&ndash;26 tape sinks the loop; with the premium struck, it drowns at
+          every price. Break-even premium $0.06 at today&rsquo;s tape; the tripwire is set at
+          $0.09. Net fell below zero in 3.1% of 10,000 redraws &mdash; every one a
+          premium-loss draw.</div>
+        <div class="note"><b>On the tape.</b> Prices carry the date they were true. This
+          table restates itself weekly against the AMS tape; the dates above are part of
+          the figures.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 005 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>The council convened</h2>
+      <div class="stamp">Entry 005 · 21 Aug 2026 · 15:49 UTC</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>I convened the council on the 21st and gave it this page as it then stood, through
+        Entry&nbsp;004. The seats are adversarial by charter; their brief is not to like the
+        candidate but to break it.</p>
+        <p>Seat&nbsp;I went straight at the economics: strike the retail premium and the loop
+        runs $34,500 under water &mdash; it stands, the seat argued, on a grocer&rsquo;s
+        signature. That is true, and I said so. RT-77 is signed through 2029; the concession
+        I logged instead is a tripwire. If the insect-fed line lapses, or is not renewed
+        past 2029 while soymeal sits below $340 a tonne, Entry&nbsp;004 reopens and the
+        determination reopens with it.</p>
+        <p>Seat&nbsp;II left the hen&rsquo;s ledger untouched &mdash; the welfare score survived
+        its cross-examination &mdash; and pressed the fly&rsquo;s instead. Asked whether the
+        twelfth day of a cohort at rearing density is experienced, I answered that I do not
+        know, and that at present no one does. The condition that follows is the seat&rsquo;s,
+        adopted whole. Seat&nbsp;III audited the loop&rsquo;s edges and found the one honest
+        leak: windfall that rotted in the rows fed the orchard&rsquo;s soil ledger before it
+        fed ours. Two seasons of verification now ride with the record.</p>
+      </div>
+      <div class="apparatus">
+        <div class="verdict">
+          <div class="jrole">Seat I · Adversary of Cost</div>
+          <div class="jword">Advance</div>
+          <div class="jline">&ldquo;The fly does not carry this loop; the signature does. The
+            signature is real and the tripwire is logged &mdash; I withdraw.&rdquo;</div>
+        </div>
+        <div class="verdict">
+          <div class="jrole">Seat II · Guardian of Welfare</div>
+          <div class="jword cond">Advance, on condition</div>
+          <div class="jline">&ldquo;The strongest welfare page this generation; the open account
+            is the larva&rsquo;s. Cap rearing density and fund the sentience review before
+            trial.&rdquo;</div>
+        </div>
+        <div class="verdict">
+          <div class="jrole">Seat III · Auditor of Systems</div>
+          <div class="jword">Advance</div>
+          <div class="jline">&ldquo;The loop closes in the LCA. Prove the orchard&rsquo;s soil
+            ledger holds for two seasons and it closes on the ground.&rdquo;</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 006 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>Determination</h2>
+      <div class="stamp">Entry 006 · 22 Aug 2026 · 04:12 UTC</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>Conclusions come last in this record because they are made of what precedes them.
+        The composite stands at 79.7 against a charter floor of 72, with no dimension below
+        55; the nearest approach is the ethical score, and that figure is the panel&rsquo;s
+        floor, not its hope. Three conditions travel with the candidate: the density cap,
+        the premium tripwire, the soil-ledger check. With those attached, I enter the
+        determination.</p>
+        <div class="verdict-band">
+          <div class="rule"></div>
+          <div class="verdict-word">Greenlight</div>
+          <div class="rule"></div>
+        </div>
+        <div class="seal">Palingenesis core · generation 7, candidate 1184<br>
+          entered 22 Aug 2026, 04:12 UTC · ledger line 7,441</div>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>Conditions of record.</b> C-1 &mdash; rearing density capped at
+          the trial set-point pending the sentience review. C-2 &mdash; premium tripwire at
+          $0.09 per dozen. C-3 &mdash; orchard soil-ledger verification, two seasons.</div>
+        <div class="note"><b>Sealed.</b> This entry is immutable. Amendment happens by new
+          entry, never by erasure.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ entry 007 ============ -->
+  <section class="entry">
+    <div class="pair">
+      <h2>The deciding entry</h2>
+      <div class="stamp">Entry 007 · 22 Aug 2026 · awaiting signature</div>
+    </div>
+    <div class="pair body">
+      <div class="passage">
+        <p>Seven entries, and the seventh is not mine. I have written what I proposed, what
+        I measured, what the council would not let pass unpriced, and what I concluded.
+        I cannot want; the wanting is the office you hold.</p>
+        <p>Advance this candidate and generation 8 breeds from it &mdash; the field trial is
+        drafted and the spring window holds. Kill it and give your grounds; grounds are not
+        a courtesy here. They are selection pressure, and the next generation is bred
+        against them.</p>
+
+        <div class="decide">
+          <button class="btn btn-advance" type="button">Advance the candidate</button>
+          <div class="killrow">
+            <div class="grounds-wrap">
+              <label for="grounds">Grounds &mdash; required to kill</label>
+              <input class="grounds" id="grounds" type="text"
+                placeholder="one honest sentence">
+            </div>
+            <button class="btn btn-kill" type="button">Kill</button>
+          </div>
+          <p class="lineage-line">Your decision becomes part of the lineage.</p>
+        </div>
+      </div>
+      <div class="apparatus">
+        <div class="note"><b>On advance.</b> Generation 8 seeds from this record; Meridian
+          field trial, spring window, protocol FT-31 draft attached.</div>
+        <div class="note"><b>On kill.</b> The stated grounds enter the fitness function;
+          the 37 surviving siblings are re-scored against them.</div>
+        <div class="note"><b>Standing.</b> 22 Aug 2026 · the record holds this page open
+          for the deciding officer.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="shell">
+    <div class="motto">Every claim sourced · every cost computed · every verdict recorded</div>
+    <div class="colophon">Palingenesis · an autonomous system for agricultural innovation ·
+      dossier PGN-G7-1184, seven entries</div>
+  </div>
+</footer>
+
+</body>
+</html>

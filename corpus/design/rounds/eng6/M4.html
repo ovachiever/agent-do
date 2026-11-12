@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis · Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#1B1917;
+  --ink:#E7E3DA;
+  --muted:#A69D90;
+  --hair:rgba(231,227,218,.14);
+  --edge:rgba(231,227,218,.5);
+  --tick:rgba(231,227,218,.3);
+  --gate:rgba(231,227,218,.38);
+  --fill:rgba(231,227,218,.08);
+  --blk:rgba(231,227,218,.3);
+  --sage:hsl(158,30%,55%);
+  --clay:hsl(12,42%,58%);
+  --sage-soft:rgba(106,175,149,.3);
+  --clay-soft:rgba(193,121,103,.3);
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,'Source Sans 3','Segoe UI',sans-serif;
+  --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums}
+.page{width:1440px;margin:0 auto;padding:0 48px}
+.mono{font-family:var(--mono)}
+.clay{color:var(--clay)}
+.dim{color:var(--muted)}
+.k{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.k.mono{text-transform:none;letter-spacing:0}
+
+/* nav */
+.nav{display:flex;align-items:center;gap:36px;border-bottom:1px solid var(--hair)}
+.wordmark{font-family:var(--serif);font-size:19px;font-weight:600}
+.tabs{display:flex;gap:4px}
+.tabs a{display:inline-block;color:var(--muted);text-decoration:none;font-size:13px;padding:23px 11px 21px;border-bottom:2px solid transparent;cursor:pointer}
+.tabs a:hover{color:var(--ink)}
+.tabs a.current{color:var(--sage);border-bottom-color:var(--sage)}
+.tabs a.current:hover{color:var(--sage)}
+.clock{margin-left:auto;font-size:14px}
+.clock .date{color:var(--muted)}
+
+/* lede */
+.lede{display:flex;align-items:baseline;gap:22px;padding:32px 0 26px;flex-wrap:wrap}
+h1{font-family:var(--serif);font-size:31px;font-weight:600;line-height:1}
+h1 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--sage);margin-right:13px}
+.facts{font-size:16px;line-height:24px}
+.sep{color:var(--muted);padding:0 6px}
+
+/* money */
+.m{color:var(--ink);text-decoration:underline dotted rgba(231,227,218,.45);text-decoration-thickness:1px;text-underline-offset:4px}
+a.m:hover{text-decoration-style:solid}
+.m.dim{color:var(--muted)}
+
+/* river figure */
+.window{text-align:right;color:var(--muted);font-size:12px;font-family:var(--mono);margin:2px 0 10px}
+.lane{display:grid;grid-template-columns:repeat(6,224px)}
+.lane>div{text-align:center}
+.stg{font-size:13px;font-weight:600;letter-spacing:.14em;padding-bottom:10px}
+.stg .off{font-family:var(--mono);font-weight:400;color:var(--muted);font-size:12px;letter-spacing:0;margin-left:7px}
+svg{display:block}
+.svgtext{font-family:var(--mono);font-size:12px}
+.svgcaps{font-family:var(--sans);font-size:12px;font-weight:600}
+.t-muted{fill:var(--muted)}
+.t-clay{fill:var(--clay)}
+.t-sage{fill:var(--sage)}
+.counts>div{padding-top:12px}
+.count{font-size:26px;font-weight:600;line-height:1.1}
+.unit{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+.svc{font-family:var(--serif);font-size:16px;margin-top:14px}
+.job{font-size:13px;color:var(--muted);margin-top:1px}
+
+/* ledger rail on the river */
+.rail{border-top:1px solid var(--hair);margin-top:18px;padding-top:12px}
+.moneys>div{text-align:center}
+.mrow{display:inline-block;min-width:178px;text-align:right;font-size:14px}
+.sigma{display:flex;justify-content:flex-end;align-items:baseline;gap:9px;margin-top:12px;font-size:15px;scroll-margin-top:24px}
+.sigma .sep{padding:0 3px}
+
+/* sixteen-cycle day strip */
+.strip{display:grid;grid-template-columns:repeat(16,1fr);gap:6px;margin-top:38px}
+.cell{text-align:center;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.blk{height:18px;margin:6px 3px;position:relative}
+.blk.closed{background:var(--blk)}
+.blk.late{background:var(--clay-soft);border:1px solid var(--clay)}
+.blk.live{background:var(--sage-soft);border:1px solid var(--sage)}
+.blk.booked{border:1px solid rgba(231,227,218,.3)}
+.blk.struck{border:1px solid rgba(231,227,218,.2)}
+.blk.struck::before,.blk.struck::after{content:"";position:absolute;left:50%;top:50%;width:12px;height:1px;background:var(--muted)}
+.blk.struck::before{transform:translate(-50%,-50%) rotate(45deg)}
+.blk.struck::after{transform:translate(-50%,-50%) rotate(-45deg)}
+.legend{display:flex;gap:28px;margin-top:12px;align-items:center}
+.sw{display:inline-block;width:12px;height:12px;margin-right:8px;vertical-align:-1px;position:relative}
+.sw.closed{background:var(--blk)}
+.sw.late{background:var(--clay-soft);border:1px solid var(--clay)}
+.sw.live{background:var(--sage-soft);border:1px solid var(--sage)}
+.sw.booked{border:1px solid rgba(231,227,218,.3)}
+.sw.struck{border:1px solid rgba(231,227,218,.2)}
+.sw.struck::before,.sw.struck::after{content:"";position:absolute;left:50%;top:50%;width:9px;height:1px;background:var(--muted)}
+.sw.struck::before{transform:translate(-50%,-50%) rotate(45deg)}
+.sw.struck::after{transform:translate(-50%,-50%) rotate(-45deg)}
+
+/* hairline bands */
+.bands{margin-top:42px}
+.band{display:grid;grid-template-columns:150px 1fr;column-gap:28px;padding:15px 0;border-top:1px solid var(--hair)}
+.blabel{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding-top:3px}
+.bcontent{display:flex;flex-wrap:wrap;column-gap:42px;row-gap:8px;align-items:baseline}
+.kv .k{margin-right:9px}
+.v{font-size:14px}
+
+/* incidents */
+.band.incidents .bcontent{display:block}
+.irow{display:grid;grid-template-columns:76px 400px 1fr 150px;column-gap:28px}
+.ihead{border-bottom:1px solid var(--hair);padding-bottom:7px}
+.irow .itd{font-size:14px;padding:9px 0 2px}
+.num{text-align:right}
+.itotal{display:flex;justify-content:flex-end;align-items:baseline;gap:10px;border-top:1px solid var(--hair);padding-top:10px;margin-top:9px}
+.itotal .v{font-size:14px}
+
+/* control */
+.band.control .bcontent{align-items:center;column-gap:28px}
+button{background:none;border:1px solid rgba(231,227,218,.45);color:var(--ink);font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;padding:13px 24px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--sage);outline-offset:3px}
+.consequence{font-size:14px;color:var(--muted)}
+
+footer{margin-top:48px;border-top:1px solid var(--hair);padding:24px 0 44px;text-align:center;font-family:var(--serif);font-style:italic;font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="nav">
+  <div class="wordmark">Palingenesis</div>
+  <nav class="tabs">
+    <a>Today</a><a>Pipeline</a><a>Library</a><a>Portfolio</a><a>Simulation</a><a class="current" aria-current="page">Engine Room</a>
+  </nav>
+  <div class="clock"><span class="mono">17:26:08</span><span class="date"> · Fri 22 Aug</span></div>
+</header>
+
+<section class="lede">
+  <h1><span class="dot"></span>Nominal</h1>
+  <p class="facts">ten closed, one struck<span class="sep">·</span><a class="m" href="#ledger">$107.13</a> of <a class="m" href="#ledger">$500.00</a> spent<span class="sep">·</span>cycle 12 mid-Simulate<span class="sep">·</span>13 opens <span class="mono">18:00:00</span></p>
+</section>
+
+<figure class="river">
+  <div class="window">06:00 &#8594; 17:26</div>
+
+  <div class="lane stages">
+    <div class="stg">OPEN<span class="off">+0</span></div>
+    <div class="stg">READ<span class="off">+4</span></div>
+    <div class="stg">DELIBERATE<span class="off">+12</span></div>
+    <div class="stg">SIMULATE<span class="off">+22</span></div>
+    <div class="stg">RECORD<span class="off">+34</span></div>
+    <div class="stg">CLOSE<span class="off">+41</span></div>
+  </div>
+
+  <svg width="1344" height="236" viewBox="0 0 1344 236" role="img" aria-label="Material flow through six stages">
+    <!-- junction ticks -->
+    <g stroke="var(--tick)" stroke-width="1" shape-rendering="crispEdges">
+      <line x1="112.5" y1="66.5" x2="112.5" y2="169.5"/>
+      <line x1="336.5" y1="93" x2="336.5" y2="143"/>
+      <line x1="560.5" y1="85.5" x2="560.5" y2="150.5"/>
+      <line x1="784.5" y1="96" x2="784.5" y2="140"/>
+      <line x1="1008.5" y1="98" x2="1008.5" y2="138"/>
+      <line x1="1232.5" y1="98" x2="1232.5" y2="138"/>
+    </g>
+    <!-- band: three honest scale segments -->
+    <g fill="var(--fill)" stroke="var(--edge)" stroke-width="1">
+      <path d="M64 66.5 L112 66.5 C224 66.5 224 93 336 93 L436 93 L436 143 L336 143 C224 143 224 169.5 112 169.5 L64 169.5 Z"/>
+      <path d="M460 85.5 L660 85.5 L660 150.5 L460 150.5 Z"/>
+      <path d="M684 96 C712 96 734 107 752 107 C766 107 772 96 784 96 C896 96 896 98 1008 98 L1288 98 L1288 138 L1008 138 C896 138 896 140 784 140 C772 140 766 129 752 129 C734 129 712 140 684 140 Z"/>
+    </g>
+    <!-- struck cycle 07: gap notch -->
+    <rect x="136" y="63" width="8" height="110" fill="var(--bg)"/>
+    <g stroke="rgba(231,227,218,.28)" stroke-width="1" shape-rendering="crispEdges">
+      <line x1="136.5" y1="68" x2="136.5" y2="168"/>
+      <line x1="143.5" y1="68" x2="143.5" y2="168"/>
+    </g>
+    <line x1="140" y1="52" x2="140" y2="61" stroke="var(--tick)" stroke-width="1"/>
+    <!-- +21 stall: clay pinch into Simulate -->
+    <g fill="none" stroke="var(--clay)" stroke-width="1.5">
+      <path d="M684 96 C712 96 734 107 752 107 C766 107 772 96 784 96"/>
+      <path d="M684 140 C712 140 734 129 752 129 C766 129 772 140 784 140"/>
+    </g>
+    <!-- scale gates -->
+    <g stroke="var(--gate)" stroke-width="1" shape-rendering="crispEdges">
+      <line x1="440.5" y1="72" x2="440.5" y2="164"/>
+      <line x1="456.5" y1="72" x2="456.5" y2="164"/>
+      <line x1="664.5" y1="72" x2="664.5" y2="164"/>
+      <line x1="680.5" y1="72" x2="680.5" y2="164"/>
+    </g>
+    <!-- live run -->
+    <circle cx="784" cy="118" r="4.5" fill="var(--sage)"/>
+    <circle cx="784" cy="118" r="10" fill="none" stroke="var(--sage)" stroke-width="1"/>
+    <!-- marks -->
+    <text x="140" y="46" text-anchor="middle" class="svgtext t-muted">r-2207 struck</text>
+    <text x="752" y="80" text-anchor="middle" class="svgtext t-clay">r-2209 +21</text>
+    <text x="784" y="163" text-anchor="middle" class="svgtext t-sage">r-2212 live</text>
+    <text x="448" y="197" text-anchor="middle" class="svgcaps t-muted" letter-spacing="1.4">SCALE BREAK</text>
+    <text x="672" y="197" text-anchor="middle" class="svgcaps t-muted" letter-spacing="1.4">SCALE BREAK</text>
+  </svg>
+
+  <div class="lane counts">
+    <div>
+      <div class="count">132</div>
+      <div class="unit">Sources scouted</div>
+      <div class="svc">Scout</div>
+      <div class="job">stocks the docket</div>
+    </div>
+    <div>
+      <div class="count">64</div>
+      <div class="unit">Papers read</div>
+      <div class="svc">Reader</div>
+      <div class="job">reads the stack</div>
+    </div>
+    <div>
+      <div class="count">409</div>
+      <div class="unit">Claims kept</div>
+      <div class="svc">Council</div>
+      <div class="job">votes the verdict</div>
+    </div>
+    <div>
+      <div class="count">11</div>
+      <div class="unit">Trials run</div>
+      <div class="svc">Simulator</div>
+      <div class="job">runs the trial</div>
+    </div>
+    <div>
+      <div class="count">10</div>
+      <div class="unit">Verdicts recorded</div>
+      <div class="svc">Archivist</div>
+      <div class="job">writes lineage</div>
+    </div>
+    <div>
+      <div class="count">10</div>
+      <div class="unit">Digests posted</div>
+      <div class="svc">Courier</div>
+      <div class="job">posts and closes</div>
+    </div>
+  </div>
+
+  <div class="rail">
+    <div class="lane moneys">
+      <div><span class="mrow"><span class="m">$8.62</span><span class="dim"> / </span><span class="m dim">$45</span><span class="dim"> · </span><span class="m dim">&#8776;$12.40</span></span></div>
+      <div><span class="mrow"><span class="m">$19.84</span><span class="dim"> / </span><span class="m dim">$60</span><span class="dim"> · </span><span class="m dim">&#8776;$28.90</span></span></div>
+      <div><span class="mrow"><span class="m">$36.90</span><span class="dim"> / </span><span class="m dim">$130</span><span class="dim"> · </span><span class="m dim">&#8776;$53.70</span></span></div>
+      <div><span class="mrow"><span class="m">$31.55</span><span class="dim"> / </span><span class="m dim">$175</span><span class="dim"> · </span><span class="m dim">&#8776;$46.00</span></span></div>
+      <div><span class="mrow"><span class="m">$5.71</span><span class="dim"> / </span><span class="m dim">$40</span><span class="dim"> · </span><span class="m dim">&#8776;$8.30</span></span></div>
+      <div><span class="mrow"><span class="m">$4.51</span><span class="dim"> / </span><span class="m dim">$50</span><span class="dim"> · </span><span class="m dim">&#8776;$6.60</span></span></div>
+    </div>
+    <div class="sigma" id="ledger">
+      <span class="k">Spent</span><span class="m">$107.13</span><span class="sep">·</span><span class="k">Cap</span><span class="m dim">$500.00</span><span class="sep">·</span><span class="k">&#8776; Close</span><span class="m dim">$155.90</span>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div class="cell"><div>06:00</div><div class="blk closed"></div><div>r-2201</div></div>
+    <div class="cell"><div>07:00</div><div class="blk closed"></div><div>r-2202</div></div>
+    <div class="cell"><div>08:00</div><div class="blk closed"></div><div>r-2203</div></div>
+    <div class="cell"><div>09:00</div><div class="blk closed"></div><div>r-2204</div></div>
+    <div class="cell"><div>10:00</div><div class="blk closed"></div><div>r-2205</div></div>
+    <div class="cell"><div>11:00</div><div class="blk closed"></div><div>r-2206</div></div>
+    <div class="cell"><div>12:00</div><div class="blk struck"></div><div>r-2207</div></div>
+    <div class="cell"><div>13:00</div><div class="blk closed"></div><div>r-2208</div></div>
+    <div class="cell"><div>14:00</div><div class="blk late"></div><div>r-2209</div></div>
+    <div class="cell"><div>15:00</div><div class="blk closed"></div><div>r-2210</div></div>
+    <div class="cell"><div>16:00</div><div class="blk closed"></div><div>r-2211</div></div>
+    <div class="cell"><div>17:00</div><div class="blk live"></div><div>r-2212</div></div>
+    <div class="cell"><div>18:00</div><div class="blk booked"></div><div>r-2213</div></div>
+    <div class="cell"><div>19:00</div><div class="blk booked"></div><div>r-2214</div></div>
+    <div class="cell"><div>20:00</div><div class="blk booked"></div><div>r-2215</div></div>
+    <div class="cell"><div>21:00</div><div class="blk booked"></div><div>r-2216</div></div>
+  </div>
+  <div class="legend">
+    <span class="k"><span class="sw closed"></span>closed</span>
+    <span class="k"><span class="sw struck"></span>struck</span>
+    <span class="k"><span class="sw late"></span>late</span>
+    <span class="k"><span class="sw live"></span>live</span>
+    <span class="k"><span class="sw booked"></span>booked</span>
+  </div>
+</figure>
+
+<section class="bands">
+
+  <div class="band">
+    <div class="blabel">Timetable</div>
+    <div class="bcontent">
+      <span class="kv"><span class="k">Booked</span><span class="v">16 cycles · hourly · <span class="mono">06:00&#8211;21:00</span></span></span>
+      <span class="kv"><span class="k">Offsets</span><span class="v">open <span class="mono">+0</span> · read <span class="mono">+4</span> · deliberate <span class="mono">+12</span> · simulate <span class="mono">+22</span> · record <span class="mono">+34</span> · close <span class="mono">+41</span></span></span>
+      <span class="kv"><span class="k">Late rule</span><span class="v">struck past <span class="mono">+25</span></span></span>
+      <span class="kv"><span class="k mono">r-2207</span><span class="v">struck · kept on book</span></span>
+      <span class="kv"><span class="k mono">r-2209</span><span class="v">simulate booked <span class="mono">14:22</span> · actual <span class="mono">14:43</span> <span class="mono clay">+21</span> · closed <span class="mono">15:02</span></span></span>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="blabel">Scheduler</div>
+    <div class="bcontent">
+      <span class="kv"><span class="k">Cadence</span><span class="v">one open / hour · <span class="mono">06:00&#8211;21:00</span></span></span>
+      <span class="kv"><span class="k">Next open</span><span class="v"><span class="mono">18:00:00</span> · cycle 13 · <span class="mono">r-2213</span></span></span>
+      <span class="kv"><span class="k">Worst today</span><span class="v mono clay">+21</span></span>
+      <span class="kv"><span class="k">Clock</span><span class="v">farm local · <span class="mono">UTC&#8722;05</span></span></span>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="blabel">Data</div>
+    <div class="bcontent">
+      <span class="kv"><span class="k">Snapshot</span><span class="v"><span class="mono">17:15:09</span> · 412 MB · verified</span></span>
+      <span class="kv"><span class="k">Next snap</span><span class="v"><span class="mono">18:15:00</span> · hourly at <span class="mono">:15</span></span></span>
+      <span class="kv"><span class="k">Archive</span><span class="v">1,283 runs · 9.6 GB · to <span class="mono">16:43</span></span></span>
+      <span class="kv"><span class="k">Backfill</span><span class="v">0 owed</span></span>
+      <span class="kv"><span class="k">Last repair</span><span class="v">Aug 19</span></span>
+    </div>
+  </div>
+
+  <div class="band incidents">
+    <div class="blabel">Incidents</div>
+    <div class="bcontent">
+      <div class="irow ihead">
+        <span class="k">Time</span><span class="k">Event</span><span class="k">Action</span><span class="k num">Min lost</span>
+      </div>
+      <div class="irow">
+        <span class="itd mono">12:01</span>
+        <span class="itd">feed empty · cycle 07</span>
+        <span class="itd">struck · kept on book</span>
+        <span class="itd num">0.0</span>
+      </div>
+      <div class="irow">
+        <span class="itd mono">14:22</span>
+        <span class="itd">simulator queue stall · cycle 09</span>
+        <span class="itd">requeued <span class="mono">14:43</span> · closed <span class="mono">15:02</span></span>
+        <span class="itd num clay">21.0</span>
+      </div>
+      <div class="irow">
+        <span class="itd mono">17:15</span>
+        <span class="itd">snapshot checksum fail · write 1</span>
+        <span class="itd">second write verified <span class="mono">17:15:09</span></span>
+        <span class="itd num">0.2</span>
+      </div>
+      <div class="itotal">
+        <span class="k">Lost today</span><span class="v">21.2 of 960 booked</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="band control">
+    <div class="blabel">Control</div>
+    <div class="bcontent">
+      <button type="button">Suspend Generation</button>
+      <span class="consequence">Cycle 12 runs to <span class="mono">17:41</span> · 13&#8211;16 do not open · resume reopens next booked hour.</span>
+    </div>
+  </div>
+
+</section>
+
+<footer>Every claim sourced · every cost computed · every verdict recorded</footer>
+
+</div>
+</body>
+</html>

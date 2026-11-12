@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palingenesis — Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#E7E3DA;
+    --bg:#1B1917;
+    --frame:rgba(231,227,218,0.5);
+    --frame-dim:rgba(231,227,218,0.28);
+    --ink-72:rgba(231,227,218,0.72);
+    --ink-58:rgba(231,227,218,0.58);
+    --sage:hsl(158,30%,55%);
+    --clay:hsl(12,42%,58%);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);}
+  body{
+    font-family:'JetBrains Mono', 'IBM Plex Mono', monospace;
+    color:var(--ink);
+    font-size:15px;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{
+    max-width:1440px;
+    margin:0 auto;
+    padding:18px 28px 34px;
+  }
+
+  /* ---------- nav ---------- */
+  .nav{
+    display:flex;
+    align-items:center;
+    gap:22px;
+    font-size:12px;
+    letter-spacing:0.06em;
+    padding:2px 4px 14px;
+    color:var(--ink-58);
+  }
+  .nav .wordmark{
+    color:var(--ink);
+    font-weight:700;
+    letter-spacing:0.08em;
+  }
+  .nav .sep{color:var(--frame-dim);}
+  .nav .active{color:var(--ink);border-bottom:1px solid var(--ink);padding-bottom:2px;}
+
+  /* ---------- frame primitive ---------- */
+  .frame{
+    border:1px solid var(--frame);
+    position:relative;
+  }
+  .frame::before,.frame::after{
+    content:"";
+    position:absolute;
+    width:6px;height:6px;
+    pointer-events:none;
+  }
+  .frame::before{top:-1px;left:-1px;border-top:1px solid var(--ink);border-left:1px solid var(--ink);}
+  .frame::after{bottom:-1px;right:-1px;border-bottom:1px solid var(--ink);border-right:1px solid var(--ink);}
+
+  /* ---------- status bar ---------- */
+  .status{
+    display:flex;
+    flex-direction:column;
+  }
+  .status-row{
+    display:flex;
+    align-items:center;
+    gap:28px;
+    padding:11px 18px;
+    font-size:14px;
+    letter-spacing:0.02em;
+  }
+  .status-row + .status-row{border-top:1px solid var(--frame);}
+  .status-row .lead{font-weight:700;letter-spacing:0.08em;}
+  .status-row .dim{color:var(--ink-58);}
+  .status-row .spacer{flex:1;}
+  .status-row .badge{
+    color:var(--ink);
+    border:1px solid var(--frame);
+    padding:1px 8px;
+    font-size:12px;
+    letter-spacing:0.06em;
+  }
+  .action-cell{
+    display:inline-flex;
+    align-items:center;
+    min-height:24px;
+    padding:2px 14px;
+    border:1px solid var(--ink);
+    letter-spacing:0.04em;
+    font-size:13px;
+    font-weight:600;
+  }
+
+  /* ---------- three panes ---------- */
+  .panes{
+    display:flex;
+    border-top:1px solid var(--frame);
+  }
+  .pane{
+    padding:18px 22px 20px;
+    position:relative;
+  }
+  .pane + .pane{border-left:1px solid var(--frame);}
+  .pane + .pane::before,.pane + .pane::after{
+    content:"";
+    position:absolute;
+    left:-1px;width:1px;height:6px;
+    background:var(--ink);
+  }
+  .pane + .pane::before{top:-1px;}
+  .pane + .pane::after{bottom:-1px;}
+
+  .pane-runs{flex:0 0 258px;}
+  .pane-selected{flex:1 1 auto;min-width:0;}
+  .pane-inspector{flex:0 0 296px;}
+
+  .pane-title{
+    text-transform:uppercase;
+    font-size:12.5px;
+    letter-spacing:0.1em;
+    color:var(--ink-72);
+    margin-bottom:16px;
+  }
+
+  /* ---------- runs list ---------- */
+  .run-group-label{
+    font-size:12.5px;
+    color:var(--ink-58);
+    margin:14px 0 8px;
+  }
+  .run-group-label:first-of-type{margin-top:0;}
+  .run-row{
+    padding:5px 8px 9px 6px;
+    margin:0 -8px;
+    border-left:2px solid transparent;
+  }
+  .run-row.selected{
+    background:rgba(231,227,218,0.06);
+    border-left:2px solid var(--ink);
+  }
+  .run-time-line{
+    display:flex;
+    align-items:baseline;
+    gap:9px;
+    font-size:15px;
+  }
+  .glyph{font-size:13px;position:relative;top:-1px;}
+  .glyph.sage{color:var(--sage);}
+  .glyph.clay{color:var(--clay);}
+  .glyph.neutral{color:var(--ink-72);}
+  .run-status-line{
+    padding-left:22px;
+    font-size:13px;
+    color:var(--ink-58);
+    margin-top:1px;
+  }
+  .run-status-line .state-sage{color:var(--sage);}
+  .run-status-line .state-clay{color:var(--clay);}
+  .run-status-line .run-id{color:var(--ink-58);}
+
+  /* ---------- selected run pane ---------- */
+  .run-heading{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:14px;
+  }
+  .run-heading .title{font-size:16px;font-weight:600;letter-spacing:0.01em;}
+  .run-heading .subtitle{font-size:12.5px;color:var(--ink-58);}
+
+  .chart-wrap{width:100%;}
+  .chart-wrap svg{width:100%;height:auto;display:block;}
+
+  .legend{
+    display:flex;
+    align-items:center;
+    gap:20px;
+    font-size:12.5px;
+    color:var(--ink-72);
+    padding:10px 2px 0;
+    flex-wrap:wrap;
+  }
+  .legend-item{display:flex;align-items:center;gap:7px;}
+  .swatch-line{width:16px;height:2px;display:inline-block;}
+  .swatch-line.sage{background:var(--sage);}
+  .swatch-line.ink{background:var(--ink);}
+  .swatch-hatch{width:14px;height:14px;display:inline-block;border:1px solid var(--frame-dim);}
+  .swatch-hatch.h50{
+    background-image:repeating-linear-gradient(45deg, rgba(231,227,218,0.55) 0 2px, transparent 2px 5px);
+  }
+  .swatch-hatch.h90{
+    background-image:repeating-linear-gradient(45deg, rgba(231,227,218,0.3) 0 1.5px, transparent 1.5px 7px);
+  }
+
+  .breakdown{
+    margin-top:18px;
+    padding-top:14px;
+    border-top:1px solid var(--frame-dim);
+  }
+  .breakdown-label{
+    font-size:12.5px;
+    letter-spacing:0.04em;
+    color:var(--ink-72);
+    margin-bottom:8px;
+  }
+  .breakdown-row{
+    font-size:14px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .breakdown-row .sep{color:var(--ink-58);}
+  .breakdown-row b{font-weight:600;}
+
+  /* ---------- inspector pane ---------- */
+  .inspector-block{margin-bottom:18px;}
+  .inspector-block:last-child{margin-bottom:0;}
+  .inspector-label{
+    font-size:12.5px;
+    letter-spacing:0.08em;
+    color:var(--ink-72);
+    margin-bottom:7px;
+  }
+  .result-value{font-size:22px;font-weight:700;letter-spacing:0.01em;}
+  .result-range{font-size:13px;color:var(--ink-58);margin-top:3px;}
+  .inspector-line{font-size:14px;margin-top:3px;}
+  .inspector-line.dim{color:var(--ink-58);}
+
+  /* ---------- hindcast strip ---------- */
+  .hindcast-frame{margin-top:22px;}
+  .hindcast-title-row{
+    display:flex;
+    align-items:center;
+    padding:12px 18px 10px;
+  }
+  .hindcast-title{
+    font-size:12.5px;
+    letter-spacing:0.1em;
+    color:var(--ink-72);
+  }
+  table.hindcast{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13.5px;
+  }
+  table.hindcast th,table.hindcast td{
+    text-align:left;
+    padding:8px 18px;
+    white-space:nowrap;
+  }
+  table.hindcast thead th{
+    border-top:1px solid var(--frame);
+    border-bottom:1px solid var(--frame-dim);
+    font-size:12px;
+    letter-spacing:0.08em;
+    color:var(--ink-58);
+    font-weight:400;
+    text-transform:uppercase;
+  }
+  table.hindcast tbody tr + tr td{border-top:1px solid rgba(231,227,218,0.10);}
+  table.hindcast td.col-forecast{color:var(--ink-72);}
+  table.hindcast td.col-covered.hit{color:var(--ink);}
+  table.hindcast td.col-covered.miss{color:var(--clay);}
+  table.hindcast td.col-skill{color:var(--ink-72);}
+  table.hindcast col.c-issued{width:12%;}
+  table.hindcast col.c-forecast{width:22%;}
+  table.hindcast col.c-interval{width:16%;}
+  table.hindcast col.c-actual{width:10%;}
+  table.hindcast col.c-covered{width:14%;}
+  table.hindcast col.c-skill{width:26%;}
+
+  /* ---------- footer ---------- */
+  .footer-motto{
+    text-align:center;
+    font-size:12.5px;
+    letter-spacing:0.04em;
+    color:var(--ink-58);
+    padding-top:22px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="nav">
+    <span class="wordmark">PALINGENESIS</span>
+    <span class="sep">·</span>
+    <span>Today</span>
+    <span class="sep">·</span>
+    <span>Pipeline</span>
+    <span class="sep">·</span>
+    <span>Library</span>
+    <span class="sep">·</span>
+    <span>Portfolio</span>
+    <span class="sep">·</span>
+    <span class="active">Simulation</span>
+    <span class="sep">·</span>
+    <span>Engine Room</span>
+  </div>
+
+  <div class="frame status">
+    <div class="status-row">
+      <span class="lead">SIMULATION</span>
+      <span class="dim">Model: palingenesis-sim v0.9.3</span>
+      <span class="badge">CALIBRATED</span>
+      <span class="dim">Valid through 30 Sep</span>
+    </div>
+    <div class="status-row">
+      <span>Site fit 67%</span>
+      <span class="dim">Hindcast skill 0.82 (baseline 0.61)</span>
+      <span class="dim">90% coverage: 88%</span>
+      <span class="spacer"></span>
+      <span class="action-cell">Run scenario</span>
+    </div>
+
+    <div class="panes">
+      <div class="pane pane-runs">
+        <div class="pane-title">Runs</div>
+
+        <div class="run-group-label">Today</div>
+        <div class="run-row">
+          <div class="run-time-line"><span class="glyph sage">●</span><span>17:22</span></div>
+          <div class="run-status-line"><span class="state-sage">Completed</span> <span class="run-id">sim-4473</span></div>
+        </div>
+        <div class="run-row selected">
+          <div class="run-time-line"><span class="glyph neutral">◐</span><span>14:43</span></div>
+          <div class="run-status-line">Boundary <span class="run-id">sim-4471</span></div>
+        </div>
+        <div class="run-row">
+          <div class="run-time-line"><span class="glyph clay">○</span><span>12:04</span></div>
+          <div class="run-status-line"><span class="state-clay">No estimate</span> <span class="run-id">sim-4474</span></div>
+        </div>
+
+        <div class="run-group-label">Yesterday</div>
+        <div class="run-row">
+          <div class="run-time-line"><span class="glyph clay">○</span><span>16:20</span></div>
+          <div class="run-status-line"><span class="run-id">sim-4475</span></div>
+        </div>
+        <div class="run-row">
+          <div class="run-time-line"><span class="glyph clay">○</span><span>14:03</span></div>
+          <div class="run-status-line"><span class="run-id">sim-4472</span></div>
+        </div>
+      </div>
+
+      <div class="pane pane-selected">
+        <div class="run-heading">
+          <span class="title">Litter moisture</span>
+          <span class="subtitle">(sim-4471)</span>
+        </div>
+
+        <div class="chart-wrap">
+          <svg viewBox="0 0 620 235" preserveAspectRatio="xMidYMid meet">
+            <!-- bracket: uncertainty envelope -->
+            <line x1="416.2" y1="15" x2="600" y2="15" stroke="#E7E3DA" stroke-width="1" opacity="0.55"/>
+            <line x1="416.2" y1="15" x2="416.2" y2="19" stroke="#E7E3DA" stroke-width="1" opacity="0.55"/>
+            <line x1="600" y1="15" x2="600" y2="19" stroke="#E7E3DA" stroke-width="1" opacity="0.55"/>
+            <text x="508" y="10" text-anchor="middle" font-size="12" letter-spacing="0.04em" fill="#E7E3DA" opacity="0.65" font-family="'JetBrains Mono',monospace">uncertainty envelope</text>
+
+            <!-- gridlines -->
+            <line x1="40" y1="20" x2="600" y2="20" stroke="#E7E3DA" stroke-width="1" opacity="0.14"/>
+            <line x1="40" y1="80" x2="600" y2="80" stroke="#E7E3DA" stroke-width="1" opacity="0.14"/>
+            <line x1="40" y1="140" x2="600" y2="140" stroke="#E7E3DA" stroke-width="1" opacity="0.14"/>
+            <line x1="40" y1="200" x2="600" y2="200" stroke="#E7E3DA" stroke-width="1" opacity="0.14"/>
+
+            <!-- y tick labels -->
+            <text x="32" y="24" text-anchor="end" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">-4</text>
+            <text x="32" y="84" text-anchor="end" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">-8</text>
+            <text x="32" y="144" text-anchor="end" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">-12</text>
+            <text x="32" y="204" text-anchor="end" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">-16</text>
+
+            <!-- axes -->
+            <line x1="40" y1="20" x2="40" y2="200" stroke="#E7E3DA" stroke-width="1" opacity="0.4"/>
+            <line x1="40" y1="200" x2="600" y2="200" stroke="#E7E3DA" stroke-width="1" opacity="0.4"/>
+
+            <!-- x tick labels -->
+            <text x="40" y="220" text-anchor="middle" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">08:00</text>
+            <text x="264" y="220" text-anchor="middle" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">12:00</text>
+            <text x="488" y="220" text-anchor="middle" font-size="12" fill="#E7E3DA" opacity="0.58" font-family="'JetBrains Mono',monospace">16:00</text>
+
+            <!-- now boundary -->
+            <line x1="416.2" y1="20" x2="416.2" y2="200" stroke="#E7E3DA" stroke-width="1" stroke-dasharray="2 4" opacity="0.28"/>
+
+            <!-- 90% band -->
+            <polygon points="416.2,89 488,81.5 544,78.5 600,80 600,170 544,144.5 488,117.5 416.2,89"
+              fill="rgba(231,227,218,0.10)" stroke="none"/>
+            <polygon points="416.2,89 488,81.5 544,78.5 600,80 600,170 544,144.5 488,117.5 416.2,89"
+              fill="url(#hatch90)" stroke="none"/>
+
+            <!-- 50% band -->
+            <polygon points="416.2,89 488,95 544,99.5 600,102.5 600,147.5 544,134 488,113 416.2,89"
+              fill="rgba(231,227,218,0.16)" stroke="none"/>
+            <polygon points="416.2,89 488,95 544,99.5 600,102.5 600,147.5 544,134 488,113 416.2,89"
+              fill="url(#hatch50)" stroke="none"/>
+
+            <defs>
+              <pattern id="hatch50" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="6" stroke="#E7E3DA" stroke-width="2" opacity="0.30"/>
+              </pattern>
+              <pattern id="hatch90" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#E7E3DA" stroke-width="1.5" opacity="0.16"/>
+              </pattern>
+            </defs>
+
+            <!-- median (forecast) line -->
+            <polyline points="416.2,89 488,107 544,117.5 600,125" fill="none" stroke="#E7E3DA" stroke-width="1.6" stroke-dasharray="5 4" opacity="0.9"/>
+
+            <!-- observed line -->
+            <polyline points="40,20 124,32 208,48.5 292,62 376,78.5 416.2,89" fill="none" stroke="hsl(158,30%,55%)" stroke-width="2"/>
+            <circle cx="416.2" cy="89" r="3" fill="hsl(158,30%,55%)"/>
+          </svg>
+        </div>
+
+        <div class="legend">
+          <span class="legend-item"><span class="swatch-line sage"></span>Observed</span>
+          <span class="legend-item"><span class="swatch-line ink"></span>Median</span>
+          <span class="legend-item"><span class="swatch-hatch h50"></span>50%</span>
+          <span class="legend-item"><span class="swatch-hatch h90"></span>90%</span>
+        </div>
+
+        <div class="breakdown">
+          <div class="breakdown-label">Quantity breakdown / component effects</div>
+          <div class="breakdown-row">
+            <span>bedding char <b>−7</b></span><span class="sep">·</span>
+            <span>ventilation <b>−3</b></span><span class="sep">·</span>
+            <span>ambient RH <b>−1</b></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane pane-inspector">
+        <div class="pane-title">Run inspector</div>
+
+        <div class="inspector-block">
+          <div class="inspector-label">RESULT</div>
+          <div class="result-value">−11%</div>
+          <div class="result-range">−14…−8</div>
+        </div>
+
+        <div class="inspector-block">
+          <div class="inspector-label">DOMAIN</div>
+          <div class="inspector-line">Near boundary</div>
+          <div class="inspector-line">Litter core T1</div>
+          <div class="inspector-line dim">calibration pending 30 Sep</div>
+        </div>
+
+        <div class="inspector-block">
+          <div class="inspector-label">PROVENANCE</div>
+          <div class="inspector-line dim">Input snapshot 2026-08-22 14:43</div>
+          <div class="inspector-line dim">Sensor cutoff 14:40</div>
+          <div class="inspector-line dim">Model version v0.9.3</div>
+          <div class="inspector-line dim">Parameter set 67% site / 33% published</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame hindcast-frame">
+    <div class="hindcast-title-row">
+      <span class="hindcast-title">Hindcast</span>
+    </div>
+    <table class="hindcast">
+      <colgroup>
+        <col class="c-issued"><col class="c-forecast"><col class="c-interval"><col class="c-actual"><col class="c-covered"><col class="c-skill">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Issued ↕</th>
+          <th>Forecast</th>
+          <th>Interval</th>
+          <th>Actual</th>
+          <th>Covered</th>
+          <th>vs baseline</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2026-07-01</td>
+          <td class="col-forecast">lay rate wk 48</td>
+          <td>91.2–93.8%</td>
+          <td>92.9</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.84 vs 0.61</td>
+        </tr>
+        <tr>
+          <td>2026-07-01</td>
+          <td class="col-forecast">feed intake g/hen/d</td>
+          <td>108–114</td>
+          <td>111</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.79</td>
+        </tr>
+        <tr>
+          <td>2026-07-15</td>
+          <td class="col-forecast">egg mass g/hen/d</td>
+          <td>57.1–60.4</td>
+          <td>60.9</td>
+          <td class="col-covered miss">✗ +0.5</td>
+          <td class="col-skill">0.71</td>
+        </tr>
+        <tr>
+          <td>2026-07-15</td>
+          <td class="col-forecast">barn RH %</td>
+          <td>61–69</td>
+          <td>66</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.88</td>
+        </tr>
+        <tr>
+          <td>2026-08-01</td>
+          <td class="col-forecast">mortality cum %</td>
+          <td>0.9–1.4</td>
+          <td>1.1</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.83</td>
+        </tr>
+        <tr>
+          <td>2026-08-01</td>
+          <td class="col-forecast">shell thickness µm</td>
+          <td>372–388</td>
+          <td>381</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.80</td>
+        </tr>
+        <tr>
+          <td>2026-08-15</td>
+          <td class="col-forecast">margin $/dozen</td>
+          <td>0.41–0.58</td>
+          <td>0.52</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.77</td>
+        </tr>
+        <tr>
+          <td>2026-08-15</td>
+          <td class="col-forecast">water intake L/hen/d</td>
+          <td>0.19–0.23</td>
+          <td>0.21</td>
+          <td class="col-covered hit">✓</td>
+          <td class="col-skill">0.86</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer-motto">Every claim sourced · every cost computed · every verdict recorded</div>
+
+</div>
+</body>
+</html>
