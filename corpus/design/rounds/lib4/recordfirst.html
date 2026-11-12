@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>The Library · Palingenesis</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;            /* 14px+ on base bg only */
+    --hair:rgba(231,227,218,0.14);
+    --hair-strong:rgba(231,227,218,0.22);
+    --dot:rgba(231,227,218,0.35);
+    --sage:hsl(158,30%,55%);
+    --raise:#211E1B;            /* ask box surface */
+    --layer:#282420;            /* drawer surface */
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg);color:var(--ink)}
+  body{font-family:var(--sans);min-width:1440px;font-size:14px;line-height:1.4}
+  a{color:inherit;text-decoration:none}
+  .lbl{font-size:12px;letter-spacing:.13em;text-transform:uppercase;font-family:var(--sans)}
+  .mono{font-family:var(--mono)}
+  .dotted{border-bottom:1px dotted var(--dot)}
+  .go{color:var(--muted)}
+
+  /* ---------- top nav ---------- */
+  nav{display:flex;align-items:center;height:56px;padding:0 48px;border-bottom:1px solid var(--hair);gap:30px}
+  .wordmark{font-family:var(--serif);font-size:18px;color:var(--ink);letter-spacing:.02em;margin-right:14px;padding:8px 0}
+  nav a.nl{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);padding:9px 1px;border-bottom:2px solid transparent}
+  nav a.nl.active{color:var(--ink);border-bottom-color:var(--sage)}
+  .nav-live{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;padding:6px 0}
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--sage);animation:breathe 2.6s ease-in-out infinite alternate}
+  @keyframes breathe{from{opacity:.45}to{opacity:1}}
+
+  /* ---------- masthead ---------- */
+  header.mast{padding:16px 48px 0;text-align:center}
+  .dateline{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:5px 0;color:var(--muted)}
+  .dateline .lbl{letter-spacing:.16em}
+  .dateline a{display:inline-block;padding:6px 0}
+  h1{font-family:var(--serif);font-weight:400;font-size:40px;line-height:1.1;margin:14px 0 4px;letter-spacing:.01em}
+  .motto{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--faint);margin-bottom:12px}
+  .rule2{border-top:1px solid var(--hair);height:4px;border-bottom:1px solid var(--hair)}
+
+  /* ---------- stat band ---------- */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--hair);padding:0 48px}
+  a.stat{display:block;padding:13px 24px 14px;border-left:1px solid var(--hair)}
+  a.stat:first-child{border-left:none;padding-left:2px}
+  .s-label{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between}
+  .s-label .go{font-family:var(--mono)}
+  .s-value{margin-top:6px;display:flex;align-items:baseline;gap:8px}
+  .s-num{font-size:26px;font-weight:600;letter-spacing:-.01em}
+  .s-unit{font-size:12px;color:var(--muted)}
+  .s-delta{font-size:12px;color:var(--sage)}
+  .s-prov{margin-top:5px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+  /* ---------- ask box ---------- */
+  .ask-zone{padding:16px 48px 6px}
+  .ask{display:flex;align-items:center;gap:20px;background:var(--raise);border:1px solid var(--hair-strong);padding:0 11px 0 22px;height:58px}
+  .ask-label{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--sage);border-right:1px solid var(--hair);padding:12px 20px 12px 0;white-space:nowrap}
+  .ask-q{flex:1;font-family:var(--serif);font-style:italic;font-size:17px;color:var(--muted);display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
+  .caret{width:2px;height:22px;background:var(--sage);flex:none;animation:breathe 1.4s steps(2,jump-none) infinite alternate}
+  .ask-btn{flex:none;background:var(--sage);color:#1B1917;font-size:12px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;padding:11px 20px;border-radius:2px}
+  .ask-sub{display:flex;justify-content:space-between;align-items:center;padding:4px 2px 0;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .ask-sub a{display:inline-block;padding:6px 0}
+  .ask-sub .try{color:var(--sage);margin-right:8px}
+
+  /* ---------- main: record + dock ---------- */
+  main{position:relative;padding:8px 48px 0;display:grid;grid-template-columns:1fr 232px;column-gap:28px;align-items:start}
+
+  .rec-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--hair);padding:9px 0}
+  .rec-title{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink)}
+  .rec-meta{display:flex;align-items:baseline;gap:14px}
+  .rec-meta a{font-family:var(--mono);font-size:12px;color:var(--muted);display:inline-block;padding:6px 0}
+  .rec-key{font-family:var(--serif);font-style:italic;font-size:12px;color:var(--muted)}
+
+  .cols{columns:3;column-gap:32px;column-rule:1px solid var(--hair);padding-top:14px}
+  .hour{font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--muted);display:flex;align-items:center;gap:10px;margin:2px 0 10px;break-inside:avoid}
+  .hour::after{content:"";flex:1;border-top:1px solid var(--hair)}
+  a.entry{display:block;break-inside:avoid;margin-bottom:13px;padding-bottom:2px}
+  .e-meta{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .e-title{font-family:var(--serif);font-size:15px;line-height:1.32;margin:3px 0 2px}
+  .e-title span{border-bottom:1px dotted var(--dot)}
+  .e-src{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px}
+  .e-verdict{font-size:12px;color:var(--muted);margin-top:3px}
+  .e-verdict b{font-weight:500;color:var(--ink)}
+  .e-verdict .flag{color:var(--sage)}
+  a.continued{display:block;break-inside:avoid;font-family:var(--serif);font-style:italic;font-size:14px;color:var(--faint);border-top:1px solid var(--hair);padding:10px 0;margin-top:4px}
+  a.continued .go{color:var(--muted)}
+
+  /* ---------- dock ---------- */
+  .dock{border-left:1px solid var(--hair);padding-left:20px}
+  .dock-head{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding:9px 0;border-bottom:1px solid var(--hair);display:flex;justify-content:space-between}
+  a.dock-item{display:block;padding:11px 2px 12px;border-bottom:1px solid var(--hair)}
+  .d-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .d-name{font-size:14px;font-weight:500}
+  .d-count{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+  .d-gloss{font-size:12px;color:var(--muted);margin-top:3px}
+  a.dock-item.active{box-shadow:inset 3px 0 0 var(--sage);padding-left:12px;background:var(--raise)}
+  a.dock-item.active .d-name{color:var(--sage)}
+  a.dock-item.active .d-count{color:var(--sage)}
+
+  /* ---------- drawer overlay (In use now, open) ---------- */
+  .drawer{position:absolute;top:4px;right:268px;width:468px;z-index:40;background:var(--layer);border:1px solid var(--hair-strong);box-shadow:0 22px 70px rgba(0,0,0,.6),-30px 12px 70px rgba(0,0,0,.45)}
+  .dw-head{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 16px 11px;border-bottom:1px solid var(--hair)}
+  .dw-kicker{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--sage)}
+  .dw-title{font-family:var(--serif);font-weight:400;font-size:21px;margin-top:3px}
+  .dw-sub{font-size:12px;color:var(--muted);margin-top:3px}
+  a.dw-close{width:26px;height:26px;border:1px solid var(--hair-strong);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--ink);flex:none}
+  a.dw-entry{display:block;padding:10px 16px 11px;border-bottom:1px solid var(--hair)}
+  .dwe-row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px}
+  .dwe-id{color:var(--sage)}
+  .dwe-since{color:var(--muted)}
+  .dwe-claim{font-family:var(--serif);font-size:14px;line-height:1.35;margin:4px 0 3px}
+  .dwe-feed{font-size:12px;color:var(--muted)}
+  .dwe-feed span{color:var(--ink);border-bottom:1px dotted var(--dot)}
+  .dw-foot{padding:6px 16px 10px;display:flex;justify-content:space-between;align-items:center}
+  .dw-foot a{display:inline-block;font-family:var(--mono);font-size:12px;color:var(--muted);padding:6px 0}
+
+  /* ---------- under strips ---------- */
+  .strips{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;padding:26px 48px 0}
+  .strip-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--hair);padding:8px 0}
+  .strip-head .t{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink)}
+  .strip-head a{font-family:var(--mono);font-size:12px;color:var(--muted);display:inline-block;padding:6px 0}
+  a.row{display:flex;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid var(--hair)}
+  .r-id{font-family:var(--mono);font-size:12px;color:var(--ink);width:52px;flex:none;border-bottom:1px dotted var(--dot);align-self:center}
+  .chip{font-family:var(--mono);font-size:12px;width:60px;flex:none}
+  .chip.run{color:var(--sage)}
+  .chip.que{color:var(--muted)}
+  .r-topic{font-size:13px;color:var(--ink);flex:1}
+  .r-meta{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+  a.tail{display:inline-block;font-family:var(--mono);font-size:12px;color:var(--muted);padding:8px 0}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:32px;border-top:1px solid var(--hair);padding:17px 48px 24px;text-align:center}
+  footer .lbl{color:var(--muted);letter-spacing:.15em}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="wordmark">Palingenesis</span>
+  <a class="nl" href="#">Today</a>
+  <a class="nl" href="#">Pipeline</a>
+  <a class="nl active" href="#">Library</a>
+  <a class="nl" href="#">Portfolio</a>
+  <a class="nl" href="#">Simulation</a>
+  <a class="nl" href="#">Engine Room</a>
+  <span class="nav-live"><span class="pulse"></span>07:04 · reading now</span>
+</nav>
+
+<header class="mast">
+  <div class="dateline">
+    <span class="lbl">Vol. III · <a class="dotted" href="#">№ 512</a></span>
+    <span class="lbl">Saturday, 22 August 2026</span>
+    <span class="lbl"><a class="dotted" href="#">Overnight edition · closed 06:54 <span class="go">›</span></a></span>
+  </div>
+  <h1>The Library</h1>
+  <div class="motto">All that the machine has read, weighed, and kept.</div>
+  <div class="rule2"></div>
+</header>
+
+<section class="stats">
+  <a class="stat" href="#">
+    <span class="s-label"><span>Corpus</span><span class="go">›</span></span>
+    <span class="s-value"><span class="s-num">51,408</span><span class="s-unit">papers</span><span class="s-delta">+231 overnight</span></span>
+    <span class="s-prov">counted live · index rebuilt 06:54</span>
+  </a>
+  <a class="stat" href="#">
+    <span class="s-label"><span>Evidence records</span><span class="go">›</span></span>
+    <span class="s-value"><span class="s-num">3,942</span><span class="s-unit">distilled claims</span></span>
+    <span class="s-prov">121 cited by open dossiers</span>
+  </a>
+  <a class="stat" href="#">
+    <span class="s-label"><span>Sweeps</span><span class="go">›</span></span>
+    <span class="s-value"><span class="s-num">3</span><span class="s-unit">running</span><span class="s-delta">5 queued</span></span>
+    <span class="s-prov">7 engine-called · 1 by hand</span>
+  </a>
+  <a class="stat" href="#">
+    <span class="s-label"><span>Read spend</span><span class="go">›</span></span>
+    <span class="s-value"><span class="s-num">$1.94</span><span class="s-unit">overnight</span></span>
+    <span class="s-prov">$41.02 Aug · metered per token</span>
+  </a>
+</section>
+
+<section class="ask-zone">
+  <div class="ask">
+    <span class="ask-label">Ask the Library</span>
+    <span class="ask-q"><span class="caret"></span>Ask anything the machine has read — answers cite their sources.</span>
+    <a class="ask-btn" href="#">Ask ›</a>
+  </div>
+  <div class="ask-sub">
+    <span><span class="try">try:</span><a class="dotted" href="#">cover crops that hold nitrogen without added irrigation <span class="go">›</span></a></span>
+    <span>⌘L from anywhere</span>
+  </div>
+</section>
+
+<main>
+  <section class="record">
+    <div class="rec-head">
+      <span class="rec-title">The Overnight Record</span>
+      <span class="rec-meta">
+        <span class="rec-key">underdots open lineage</span>
+        <a class="dotted" href="#">231 papers · 02:00–06:54 · $1.94 metered ›</a>
+      </span>
+    </div>
+    <div class="cols">
+
+      <div class="hour">02:00</div>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>02:07</span><span>$0.008</span></span>
+        <div class="e-title"><span>Perennial sorghum ratooning: vigor decline across five seasons</span></div>
+        <div class="e-src">Agron. J. · 2025 · 10.1002/agj2.70112</div>
+        <div class="e-verdict"><b>2 claims kept</b> → EV-3208 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>02:19</span><span>$0.011</span></span>
+        <div class="e-title"><span>Cover-crop rooting depth and residual soil nitrogen</span></div>
+        <div class="e-src">Plant &amp; Soil · 2026 · 10.1007/s11104-4471</div>
+        <div class="e-verdict"><b>3 claims kept</b> → EV-3210 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>02:41</span><span>$0.006</span></span>
+        <div class="e-title"><span>Rhizobial inoculant persistence in no-till vertisols</span></div>
+        <div class="e-src">Field Crops Res. · 2026 · 10.1016/j.fcr.109441</div>
+        <div class="e-verdict"><b>1 claim kept</b> · linked S-88 <span class="go">›</span></div>
+      </a>
+
+      <div class="hour">03:00</div>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>03:02</span><span>$0.009</span></span>
+        <div class="e-title"><span>Biochar and N₂O: a twelve-site meta-analysis</span></div>
+        <div class="e-src">GCB Bioenergy · 2025 · 10.1111/gcbb.13188</div>
+        <div class="e-verdict"><span class="flag">⇄ contradiction raised</span> · C-114 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>03:14</span><span>$0.007</span></span>
+        <div class="e-title"><span>Windbreak porosity and lateral evaporative loss</span></div>
+        <div class="e-src">Agric. For. Meteorol. · 2024 · 10.1016/j.agrformet.110219</div>
+        <div class="e-verdict">shelved · 0 claims <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>03:36</span><span>$0.012</span></span>
+        <div class="e-title"><span>Drought memory in sorghum: primed transcription after repeat stress</span></div>
+        <div class="e-src">J. Exp. Bot. · 2026 · 10.1093/jxb/eraf102</div>
+        <div class="e-verdict"><b>2 claims kept</b> → EV-3214 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>03:52</span><span>$0.005</span></span>
+        <div class="e-title"><span>Alley cropping with black locust: light competition budgets</span></div>
+        <div class="e-src">Agroforest. Syst. · 2023 · 10.1007/s10457-3319</div>
+        <div class="e-verdict"><b>1 claim kept</b> <span class="go">›</span></div>
+      </a>
+
+      <div class="hour">04:00</div>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>04:11</span><span>$0.010</span></span>
+        <div class="e-title"><span>AMF inoculation and water-use efficiency under deficit irrigation</span></div>
+        <div class="e-src">Mycorrhiza · 2024 · 10.1007/s00572-2214</div>
+        <div class="e-verdict"><b>2 claims kept</b> → EV-2984 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>04:26</span><span>$0.008</span></span>
+        <div class="e-title"><span>Saline aquifer reuse for forage barley: ion accumulation limits</span></div>
+        <div class="e-src">Agric. Water Manag. · 2026 · 10.1016/j.agwat.109012</div>
+        <div class="e-verdict"><b>1 claim kept</b> · linked S-90 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>04:47</span><span>$0.006</span></span>
+        <div class="e-title"><span>Pollinator corridor width and wild-bee visitation decay</span></div>
+        <div class="e-src">Ecol. Appl. · 2025 · 10.1002/eap.70041</div>
+        <div class="e-verdict"><b>2 claims kept</b> → EV-3221 <span class="go">›</span></div>
+      </a>
+
+      <div class="hour">05:00</div>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>05:03</span><span>$0.013</span></span>
+        <div class="e-title"><span>Intercropped maize–pigeonpea under conservation tillage: a 40-trial synthesis</span></div>
+        <div class="e-src">Eur. J. Agron. · 2026 · 10.1016/j.eja.127411</div>
+        <div class="e-verdict"><b>3 claims kept</b> → EV-3224 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>05:21</span><span>$0.007</span></span>
+        <div class="e-title"><span>Soil microbial necromass as a nitrogen reservoir in drylands</span></div>
+        <div class="e-src">Soil Biol. Biochem. · 2025 · 10.1016/j.soilbio.109344</div>
+        <div class="e-verdict"><b>1 claim kept</b> · linked S-88 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>05:40</span><span>$0.004</span></span>
+        <div class="e-title"><span>Canopy temperature depression as a drought-tolerance proxy</span></div>
+        <div class="e-src">Crop Sci. · 2022 · 10.1002/csc2.20811</div>
+        <div class="e-verdict"><b>1 claim kept</b> · supersedes EV-2210 <span class="go">›</span></div>
+      </a>
+
+      <div class="hour">06:00</div>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>06:05</span><span>$0.009</span></span>
+        <div class="e-title"><span>Biochar feedstock pyrolysis temperature and N₂O response</span></div>
+        <div class="e-src">Soil Till. Res. · 2026 · 10.1016/j.still.106201</div>
+        <div class="e-verdict"><b>2 claims kept</b> · cited into C-114 <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>06:22</span><span>$0.008</span></span>
+        <div class="e-title"><span>Deficit-irrigated lucerne stands: recovery after severance</span></div>
+        <div class="e-src">Irrig. Sci. · 2024 · 10.1007/s00271-1188</div>
+        <div class="e-verdict"><b>1 claim kept</b> <span class="go">›</span></div>
+      </a>
+      <a class="entry" href="#">
+        <span class="e-meta"><span>06:39</span><span>$0.005</span></span>
+        <div class="e-title"><span>Hedgerow age and carabid overwinter density</span></div>
+        <div class="e-src">Biol. Conserv. · 2025 · 10.1016/j.biocon.110902</div>
+        <div class="e-verdict">shelved · 0 claims <span class="go">›</span></div>
+      </a>
+
+      <a class="continued" href="#">Continued in the Reading ledger — 215 more overnight entries <span class="go">›</span></a>
+    </div>
+  </section>
+
+  <aside class="dock">
+    <div class="dock-head"><span>Views</span><span>6</span></div>
+    <a class="dock-item active" href="#">
+      <span class="d-row"><span class="d-name">In use now</span><span class="d-count">6 · open ‹</span></span>
+      <span class="d-gloss">feeding live dossiers</span>
+    </a>
+    <a class="dock-item" href="#">
+      <span class="d-row"><span class="d-name">Connections</span><span class="d-count">6,118 ›</span></span>
+      <span class="d-gloss">what cites what, across fields</span>
+    </a>
+    <a class="dock-item" href="#">
+      <span class="d-row"><span class="d-name">Refresh due</span><span class="d-count">12 ›</span></span>
+      <span class="d-gloss">sources going stale</span>
+    </a>
+    <a class="dock-item" href="#">
+      <span class="d-row"><span class="d-name">Reading ledger</span><span class="d-count">Mar ’24→ ›</span></span>
+      <span class="d-gloss">every read, every cent</span>
+    </a>
+    <a class="dock-item" href="#">
+      <span class="d-row"><span class="d-name">Contradictions</span><span class="d-count">9 ›</span></span>
+      <span class="d-gloss">where sources disagree</span>
+    </a>
+    <a class="dock-item" href="#">
+      <span class="d-row"><span class="d-name">Sweeps</span><span class="d-count">3 + 5 ›</span></span>
+      <span class="d-gloss">hunts running &amp; queued</span>
+    </a>
+  </aside>
+
+  <!-- open drawer: In use now -->
+  <div class="drawer">
+    <div class="dw-head">
+      <div>
+        <div class="dw-kicker">Dock · In use now</div>
+        <div class="dw-title">In use now</div>
+        <div class="dw-sub">evidence records feeding live dossiers · 6 records · 4 dossiers</div>
+      </div>
+      <a class="dw-close" href="#">×</a>
+    </div>
+    <a class="dw-entry" href="#">
+      <span class="dwe-row"><span class="dwe-id">EV-3117</span><span class="dwe-since">since 04:12</span></span>
+      <div class="dwe-claim">“Biochar at 12 t/ha cuts N₂O flux 31% in irrigated vertisols.”</div>
+      <div class="dwe-feed">feeding <span>D-21 · Biochar amendment</span> · Sánchez ’25 <span class="go">›</span></div>
+    </a>
+    <a class="dw-entry" href="#">
+      <span class="dwe-row"><span class="dwe-id">EV-2984</span><span class="dwe-since">since 03:55</span></span>
+      <div class="dwe-claim">“AMF inoculation lifts water-use efficiency 14% under deficit irrigation.”</div>
+      <div class="dwe-feed">feeding <span>D-17 · Drought-memory rotation</span> · Ferreira ’24 <span class="go">›</span></div>
+    </a>
+    <a class="dw-entry" href="#">
+      <span class="dwe-row"><span class="dwe-id">EV-3214</span><span class="dwe-since">since 05:02</span></span>
+      <div class="dwe-claim">“Repeat-stress priming holds sorghum yield loss to 6% in a second drought.”</div>
+      <div class="dwe-feed">feeding <span>D-17 · Drought-memory rotation</span> · Okafor ’26 <span class="go">›</span></div>
+    </a>
+    <a class="dw-entry" href="#">
+      <span class="dwe-row"><span class="dwe-id">EV-3221</span><span class="dwe-since">since 06:10</span></span>
+      <div class="dwe-claim">“Wild-bee visitation halves beyond 180 m from the corridor edge.”</div>
+      <div class="dwe-feed">feeding <span>D-09 · Pollinator corridor design</span> · Lindqvist ’25 <span class="go">›</span></div>
+    </a>
+    <div class="dw-foot">
+      <a class="dotted" href="#">2 more feeding this hour ›</a>
+      <a class="dotted" href="#">all 121 cited records ›</a>
+    </div>
+  </div>
+</main>
+
+<section class="strips">
+  <div>
+    <div class="strip-head"><span class="t">Sweeps — running &amp; queued</span><a class="dotted" href="#">8 total ›</a></div>
+    <a class="row" href="#"><span class="r-id">S-88</span><span class="chip run">running</span><span class="r-topic">soil microbiome × drought memory</span><span class="r-meta">engine · Thu 21:40 · 312 papers · $2.11 ›</span></a>
+    <a class="row" href="#"><span class="r-id">S-90</span><span class="chip run">running</span><span class="r-topic">saline irrigation reuse</span><span class="r-meta">engine · 05:12 · 84 papers · $0.61 ›</span></a>
+    <a class="row" href="#"><span class="r-id">S-91</span><span class="chip run">running</span><span class="r-topic">pollinator corridor spacing</span><span class="r-meta">by hand · 06:02 · 41 papers · $0.29 ›</span></a>
+    <a class="row" href="#"><span class="r-id">S-92</span><span class="chip que">queued</span><span class="r-topic">perennial grain lodging resistance</span><span class="r-meta">engine · starts on S-88 close ›</span></a>
+    <a class="row" href="#"><span class="r-id">S-93</span><span class="chip que">queued</span><span class="r-topic">windbreak water budgets</span><span class="r-meta">engine · position 2 ›</span></a>
+    <a class="tail dotted" href="#">3 more queued ›</a>
+  </div>
+  <div>
+    <div class="strip-head"><span class="t">Contradictions open</span><a class="dotted" href="#">9 ›</a></div>
+    <a class="row" href="#"><span class="r-id">C-114</span><span class="r-topic">biochar N₂O magnitude — 31% ⇄ 9%</span><span class="r-meta">Sánchez ’25 vs Kettering ’24 · opened 03:02 ›</span></a>
+    <a class="row" href="#"><span class="r-id">C-109</span><span class="r-topic">AMF gains past year two</span><span class="r-meta">Ferreira ’24 vs Hoang ’23 · 3 d ›</span></a>
+    <a class="row" href="#"><span class="r-id">C-96</span><span class="r-topic">lucerne severance recovery rate</span><span class="r-meta">2 sources · 11 d ›</span></a>
+    <a class="tail dotted" href="#">6 more open ›</a>
+  </div>
+</section>
+
+<footer>
+  <span class="lbl">Every claim sourced · every cost computed · every verdict recorded</span>
+</footer>
+
+</body>
+</html>

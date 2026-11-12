@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis · Today</title>
+<style>
+  :root{
+    --bg:#1c1915;
+    --ink:#ece4d2;
+    --ink2:#d7cfbc;
+    --mut:#a2977f;
+    --faint:#847a64;
+    --ghost:#675e4c;
+    --accent:#a8c86b;
+    --hair:rgba(236,228,210,.15);
+    --hair2:rgba(236,228,210,.07);
+    --rule:rgba(236,228,210,.32);
+    --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);color:var(--ink);
+    font:400 14px/1.5 var(--sans);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    min-width:1180px;
+  }
+  ::selection{background:var(--accent);color:#1c1915}
+  a{color:inherit;text-decoration:none}
+
+  .sheet{max-width:1156px;margin:0 auto;padding:30px 56px 34px}
+
+  /* ---------- masthead ---------- */
+  .mast{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:16px;border-bottom:1px solid var(--hair)}
+  .wordmark{font:500 18px/1 var(--serif);letter-spacing:.26em;text-transform:uppercase;color:var(--ink)}
+  .mast nav{display:flex;gap:30px}
+  .mast nav a{font:600 11.5px/1 var(--sans);letter-spacing:.15em;text-transform:uppercase;color:var(--mut)}
+  .mast nav a:hover{color:var(--ink)}
+  .mast nav a.on{color:var(--ink);border-bottom:1px solid var(--accent);padding-bottom:5px}
+  .briefline{display:flex;justify-content:space-between;margin-top:11px;
+    font:500 10px/1.4 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--ghost)}
+
+  /* ---------- section chrome ---------- */
+  section{margin-top:24px;border-top:1px solid var(--hair);padding-top:16px}
+  section.first{border-top:none;padding-top:0}
+  .seclab{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
+  .seclab h2{font:700 10.5px/1 var(--sans);letter-spacing:.2em;text-transform:uppercase;color:#8d8370}
+  .seclab .note{font:500 10px/1 var(--sans);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost)}
+
+  /* ---------- I · conditions ---------- */
+  .pulse{display:grid;grid-template-columns:1fr 1fr 1fr 1fr}
+  .cell{padding-right:26px}
+  .cell + .cell{border-left:1px solid var(--hair2);padding-left:26px}
+  .cell .lab{font:600 10px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  .cell .val{font:300 27px/1 var(--sans);font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:var(--ink)}
+  .cell .sub{font:400 11px/1.5 var(--sans);color:var(--mut);margin-top:8px}
+  .go{color:var(--accent);font-weight:500;letter-spacing:.04em}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);
+    vertical-align:3px;margin-right:11px;animation:beat 3.2s ease-in-out infinite}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.4}}
+
+  /* ---------- II · decisions ---------- */
+  .cand{display:grid;grid-template-columns:132px 1fr 212px;column-gap:40px;padding:20px 0 22px}
+  .cand + .cand{border-top:1px solid var(--hair2)}
+  .fitnum{font:275 44px/1 var(--sans);font-variant-numeric:tabular-nums;letter-spacing:-.015em;color:var(--ink)}
+  .fitlab{font:600 10px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin-top:9px}
+  .fitsub{font:400 11px/1.45 var(--sans);color:var(--mut);margin-top:5px}
+  .candmeta{font:600 10px/1 var(--sans);letter-spacing:.15em;text-transform:uppercase;color:var(--faint)}
+  .thesis{font:400 21px/1.38 var(--serif);color:var(--ink);margin:7px 0 9px;letter-spacing:.002em}
+  .facts{font:400 12.5px/1.55 var(--sans);color:var(--mut)}
+  .commit{font:400 13px/1.5 var(--sans);color:var(--ink2);margin-top:6px}
+  .commit strong{font-weight:600;color:var(--ink)}
+  .rail{text-align:right;padding-top:3px}
+  .verdict{font:700 13px/1 var(--sans);letter-spacing:.24em;color:var(--accent)}
+  .vprov{font:400 10px/1.5 var(--sans);color:var(--ghost);margin-top:7px}
+  .acts{margin-top:17px;display:flex;justify-content:flex-end;gap:18px}
+  .acts a{font:600 11.5px/1 var(--sans);letter-spacing:.05em;color:var(--faint)}
+  .acts a:hover{color:var(--ink)}
+  .acts a.ratify{color:var(--accent);border-bottom:1px solid var(--accent);padding-bottom:3px}
+
+  /* ---------- III · log ---------- */
+  .log .row{display:grid;grid-template-columns:56px 102px 1fr 118px;column-gap:22px;
+    padding:7.5px 0;border-top:1px solid var(--hair2);align-items:baseline}
+  .log .row.r1{border-top:none;padding-top:0}
+  .t{font:400 12px/1.5 var(--sans);font-variant-numeric:tabular-nums;color:#b6ac96}
+  .sys{font:600 9.5px/1.7 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .entry{font:400 13px/1.5 var(--sans);color:var(--ink2)}
+  .entry strong{font-weight:600;color:var(--ink)}
+  .cost{font:400 12px/1.5 var(--sans);font-variant-numeric:tabular-nums;text-align:right;color:var(--mut)}
+  .log .total{display:grid;grid-template-columns:56px 102px 1fr 118px;column-gap:22px;
+    border-top:1px solid var(--hair);margin-top:2px;padding-top:9px;align-items:baseline}
+  .total .entry{font:italic 400 13.5px/1.5 var(--serif);color:var(--mut)}
+  .total .cost{color:var(--ink);font-weight:600}
+  .total .cost span{display:block;font:400 10.5px/1.5 var(--sans);color:var(--faint)}
+
+  /* ---------- IV · authority ---------- */
+  .auth{display:flex;justify-content:space-between;align-items:flex-end;gap:60px}
+  .auth p{font:400 12.5px/1.6 var(--sans);color:var(--mut);max-width:560px}
+  .sig{width:300px;flex:none}
+  .sigline{height:30px;border-bottom:1px solid var(--rule)}
+  .signame{font:600 10px/1 var(--sans);letter-spacing:.15em;text-transform:uppercase;color:var(--mut);margin-top:8px}
+  .sigstate{font:400 10px/1.5 var(--sans);color:var(--ghost);margin-top:4px}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:26px;border-top:1px solid var(--hair);padding-top:14px;
+    display:flex;justify-content:space-between;align-items:baseline}
+  .motto{font:italic 400 13.5px/1.4 var(--serif);color:#9a9078}
+  .tag{font:600 9.5px/1 var(--sans);letter-spacing:.22em;text-transform:uppercase;color:var(--ghost)}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <header class="mast">
+    <div class="wordmark">Palingenesis</div>
+    <nav>
+      <a class="on" href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Engine&nbsp;Room</a>
+    </nav>
+  </header>
+  <div class="briefline">
+    <span>Briefing № 611 · Generation 214 closing · composed 06:02 utc, Friday 22 August 2026</span>
+    <span>valid until 18:00 or the next veto</span>
+  </div>
+
+  <!-- I ▸ conditions: one glance, go / no-go -->
+  <section class="first" style="margin-top:22px;border-top:1px solid var(--hair);padding-top:16px">
+    <div class="seclab"><h2>I · Conditions at 06:02</h2></div>
+    <div class="pulse">
+      <div class="cell">
+        <div class="lab">Status</div>
+        <div class="val go"><span class="dot"></span>Running</div>
+        <div class="sub">5 of 5 systems answering · 71 days without fault</div>
+      </div>
+      <div class="cell">
+        <div class="lab">Spend today</div>
+        <div class="val">$124.33</div>
+        <div class="sub">metered since 00:00 utc · 20.7% of the $600.00 ceiling you set 14 Jul</div>
+      </div>
+      <div class="cell">
+        <div class="lab">Next generation</div>
+        <div class="val">3 h 58 m</div>
+        <div class="sub">cycle 215 opens 10:00 utc · estimated run cost $58.00</div>
+      </div>
+      <div class="cell" style="padding-right:0">
+        <div class="lab">Awaiting you</div>
+        <div class="val">2 decisions</div>
+        <div class="sub">both queued 04:52 · waiting 1 h 10 m · stated in full below</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- II ▸ the decisions, each with exactly the facts needed -->
+  <section>
+    <div class="seclab">
+      <h2>II · For your decision</h2>
+      <span class="note">ratified here is executed — no further confirmation</span>
+    </div>
+
+    <article class="cand" style="padding-top:2px">
+      <div>
+        <div class="fitnum">87.4</div>
+        <div class="fitlab">Fitness</div>
+        <div class="fitsub">±2.1 · 12,000 simulated seasons</div>
+      </div>
+      <div>
+        <div class="candmeta">C-214-03 · saltgrass endophyte → bread wheat · 14 sources, 3 independent replications</div>
+        <h3 class="thesis">A saltgrass endophyte, moved into bread wheat, holds yield within 2% on 40% less water.</h3>
+        <div class="facts">Council 6–1 — lone dissent, economist seat: field-scale inoculation cost unproven · yield held in 96% of drought seasons</div>
+        <div class="commit">Ratifying commits <strong>$18,400</strong> — greenhouse trial G-12, seeds in 6 days, reads out in 90.</div>
+      </div>
+      <div class="rail">
+        <div class="verdict">Greenlight</div>
+        <div class="vprov">council verdict · recorded 04:52 · ledger V-8841</div>
+        <div class="acts"><a class="ratify" href="#">Ratify</a><a href="#">Defer</a><a href="#">Return to council</a></div>
+      </div>
+    </article>
+
+    <article class="cand" style="padding-bottom:6px">
+      <div>
+        <div class="fitnum">82.9</div>
+        <div class="fitlab">Fitness</div>
+        <div class="fitsub">±1.8 · 9,600 simulated grow-outs</div>
+      </div>
+      <div>
+        <div class="candmeta">C-214-11 · pulsed uv-b, protected tomato · 11 sources, 2 replications</div>
+        <h3 class="thesis">Pulsed pre-dawn UV-B triples anthocyanin in greenhouse tomato at $0.004 a plant.</h3>
+        <div class="facts">Council 7–0, unanimous · gain held in 93% of grow-outs · packer premium modeled at 9%</div>
+        <div class="commit">Ratifying commits <strong>$6,200</strong> — chamber trial L-4, begins Monday, reads out in 45.</div>
+      </div>
+      <div class="rail">
+        <div class="verdict">Greenlight</div>
+        <div class="vprov">council verdict · recorded 04:52 · ledger V-8842</div>
+        <div class="acts"><a class="ratify" href="#">Ratify</a><a href="#">Defer</a><a href="#">Return to council</a></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- III ▸ the night's log, terse and metered -->
+  <section class="log">
+    <div class="seclab">
+      <h2>III · Machine log · 00:00–06:02 utc</h2>
+      <span class="note">seven entries · every cost metered</span>
+    </div>
+
+    <div class="row r1">
+      <div class="t">00:05</div><div class="sys">Archivist</div>
+      <div class="entry"><strong>Sealed</strong> generation 213: 41 candidates examined, 38 struck, 2 shipped to field partners, 1 withdrawn. Hash on record.</div>
+      <div class="cost">$2.14</div>
+    </div>
+    <div class="row">
+      <div class="t">00:41</div><div class="sys">Reader</div>
+      <div class="entry"><strong>Read</strong> 1,284 papers across six feeds; 31 flagged novel; 3 passed to candidate synthesis.</div>
+      <div class="cost">$31.07</div>
+    </div>
+    <div class="row">
+      <div class="t">01:58</div><div class="sys">Simulator</div>
+      <div class="entry"><strong>Simulation closed</strong> — C-214-11: 9,600 greenhouse grow-outs; anthocyanin gain held in 93% of runs. Fitness 82.9 ±1.8.</div>
+      <div class="cost">$28.55</div>
+    </div>
+    <div class="row">
+      <div class="t">02:36</div><div class="sys">Council</div>
+      <div class="entry"><strong>Veto</strong> — C-214-07, rhizobium co-culture: the nitrogen claim rests on a dataset retracted in 2024. Struck 5–2; sources unwound.</div>
+      <div class="cost">$9.62</div>
+    </div>
+    <div class="row">
+      <div class="t">03:58</div><div class="sys">Simulator</div>
+      <div class="entry"><strong>Simulation closed</strong> — C-214-03: 12,000 seasons under four drought regimes; yield held within 2% in 96% of runs. Fitness 87.4 ±2.1.</div>
+      <div class="cost">$41.20</div>
+    </div>
+    <div class="row">
+      <div class="t">04:52</div><div class="sys">Council</div>
+      <div class="entry"><strong>Advanced</strong> C-214-03 (6–1) and C-214-11 (7–0) to the principal's queue; the economist seat's dissent filed in full.</div>
+      <div class="cost">$11.75</div>
+    </div>
+    <div class="row">
+      <div class="t">05:47</div><div class="sys">Engine</div>
+      <div class="entry"><strong>Commissioned</strong> a literature sweep — field-scale endophyte economics, 2015–2026, six databases: the C-214-03 dissent, restated as a question. Returns by 09:00.</div>
+      <div class="cost">est. $38.00</div>
+    </div>
+
+    <div class="total">
+      <div></div><div></div>
+      <div class="entry">Window closed 06:02 — the ledger above reconciles against the meter, to the cent.</div>
+      <div class="cost">$124.33<span>+ $38.00 committed</span></div>
+    </div>
+  </section>
+
+  <!-- IV ▸ where the authority signs -->
+  <section class="auth-sec">
+    <div class="seclab"><h2>IV · Authority</h2></div>
+    <div class="auth">
+      <p>Composed by the engine from the live meter and the generation-213 seal. Two ratifications
+      wait above; nothing plants, spends, or ships without your hand.</p>
+      <div class="sig">
+        <div class="sigline"></div>
+        <div class="signame">Dr. E. Almeida — Principal in Command</div>
+        <div class="sigstate">signature pending · 2 ratifications above</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="motto">Every claim sourced · every cost computed · every verdict recorded</div>
+    <div class="tag">Palingenesis · autonomous agricultural innovation</div>
+  </footer>
+
+</div>
+</body>
+</html>

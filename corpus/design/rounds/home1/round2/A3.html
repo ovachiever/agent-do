@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..600;1,8..60,300..600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ground:#1B1917;
+    --ink:#E7E3DA; --ink-2:#B7B2A6; --ink-3:#8C8577;
+    --hair:rgba(231,227,218,.14); --hair-faint:rgba(231,227,218,.08); --hair-strong:rgba(231,227,218,.30);
+    --sage:#9CB08C; --clay:#C17A52;
+    --paper:#F8F7F5; --paper-ink:#262019; --paper-muted:#6F6557; --paper-faint:#9C917F; --paper-hair:#DCD3C0; --paper-sage:#4C6640;
+    --serif:'Source Serif 4','Iowan Old Style',Palatino,Georgia,serif;
+    --sans:'Source Sans 3',-apple-system,'Helvetica Neue',Arial,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    /* type scale: six sizes on the page, all on the 8px baseline */
+    --t1:44px; --l1:48px;   /* lot title · You decide. */
+    --t2:36px; --l2:40px;   /* record figures · lot numerals */
+    --t3:20px; --l3:32px;   /* catalogue note · closing lead */
+    --t4:17px; --l4:28px;   /* body */
+    --t5:13px; --l5:24px;   /* mono lines · nav · swatch */
+    --t6:11px; --l6:16px;   /* caps labels */
+    /* grid: 12 columns × 78px, 24px gutters, 120px margins at 1440 · column x = 120 + n·102 */
+    --col:78px; --gut:24px; --margin:120px; --page:1200px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--ground);color:var(--ink)}
+  body{font-family:var(--serif);font-size:var(--t4);line-height:var(--l4);min-width:1440px;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  a{color:inherit;text-decoration:none}
+  .wrap{width:var(--page);margin:0 auto}
+  .caps{font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.2em;text-transform:uppercase;font-weight:600;color:var(--ink-3)}
+  .chev{color:var(--ink-3)}
+
+  /* ————— nav strip: the one skeleton ————— */
+  .mast{border-bottom:1px solid var(--hair)}
+  .mast .wrap{display:flex;align-items:center;height:71px}
+  .wordmark{font-family:var(--serif);font-size:var(--t5);line-height:var(--l5);letter-spacing:.34em;text-transform:uppercase}
+  .wordmark span{color:var(--sage)}
+  .rooms{display:flex;gap:32px;margin-left:72px}
+  .rooms a{font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+  .rooms a:hover{color:var(--ink)}
+  .acts{margin-left:auto;display:flex;align-items:center;gap:32px}
+  .acts a{font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
+  .acts a.pri{border:1px solid var(--sage);color:var(--sage);padding:7px 16px}
+  .acts a.pri:hover{background:rgba(156,176,140,.12)}
+
+  section{border-top:1px solid var(--hair)}
+  section:first-of-type{border-top:none}
+  .pad{padding:71px 0 72px}
+
+  /* ————— the lot title faces the frontispiece ————— */
+  .spread{display:grid;grid-template-columns:690px 384px;column-gap:126px;align-items:start}
+  .title{font-size:var(--t1);line-height:var(--l1);font-weight:300;letter-spacing:-.012em;margin-top:32px}
+  .note{font-size:var(--t3);line-height:var(--l3);font-style:italic;color:var(--ink-2);margin-top:40px;max-width:60ch}
+
+  /* the Today edition, drawn on paper at reduced scale */
+  .front{padding-top:32px}
+  .front .caps{display:flex;justify-content:space-between}
+  .front .caps a{color:var(--sage)}
+  .swatch{margin-top:16px;background:var(--paper);color:var(--paper-ink);padding:24px 24px 24px;font-family:var(--serif);border:1px solid var(--paper-hair)}
+  .swatch .strip{display:flex;justify-content:space-between;font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.14em;text-transform:uppercase;color:var(--paper-muted);padding-bottom:7px;border-bottom:1px solid var(--paper-hair)}
+  .swatch .strip b{color:var(--paper-ink);font-weight:600}
+  .swatch .mh{margin-top:24px;text-align:center;font-size:var(--t3);line-height:var(--l3);letter-spacing:.18em;text-indent:.18em;text-transform:uppercase;font-weight:400}
+  .swatch .rule2{margin-top:15px;border-top:2px solid var(--paper-ink)}
+  .swatch .rule2::after{content:"";display:block;margin-top:2px;border-top:1px solid var(--paper-ink)}
+  .swatch .pulse{display:flex;justify-content:space-between;padding:8px 0 7px;border-bottom:1px solid var(--paper-hair);font-family:var(--sans);font-size:var(--t5);line-height:var(--l5);color:var(--paper-muted)}
+  .swatch .pulse b{color:var(--paper-ink);font-weight:600}
+  .swatch .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--paper-sage);margin-right:7px;vertical-align:1px}
+  .swatch .score{display:grid;grid-template-columns:1fr 1fr 1fr;padding:16px 0 15px;border-bottom:1px solid var(--paper-hair);font-family:var(--sans)}
+  .swatch .score .k{font-size:var(--t6);line-height:var(--l6);letter-spacing:.14em;text-transform:uppercase;color:var(--paper-faint)}
+  .swatch .score .v{font-size:var(--t5);line-height:var(--l5);font-weight:600;color:var(--paper-ink)}
+  .swatch .score .v.verdict{color:var(--paper-sage);letter-spacing:.12em;text-transform:uppercase}
+  .swatch .greek{padding:16px 0 0}
+  .swatch .greek i{display:block;height:6px;background:var(--paper-hair);margin-bottom:10px}
+  .swatch .greek i:nth-child(1){width:92%} .swatch .greek i:nth-child(2){width:100%} .swatch .greek i:nth-child(3){width:96%} .swatch .greek i:nth-child(4){width:61%}
+  .swatch .open{margin-top:14px;font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:var(--paper-sage);border-bottom:1px solid rgba(76,102,64,.4);display:inline-block;padding-bottom:1px}
+  .swatch .record{margin-top:24px;border-top:2px solid var(--paper-ink);padding-top:8px;display:grid;grid-template-columns:1fr 1fr;row-gap:16px;font-family:var(--sans)}
+  .swatch .record .k{font-size:var(--t6);line-height:var(--l6);letter-spacing:.14em;text-transform:uppercase;color:var(--paper-faint)}
+  .swatch .record .v{font-size:var(--t5);line-height:var(--l5);font-weight:600}
+
+  /* ————— the catalogue: six lots, two ruled columns ————— */
+  .cat-head{display:flex;justify-content:space-between;align-items:baseline}
+  .catalogue{position:relative;margin-top:32px;border-top:1px solid var(--hair)}
+  .catalogue::before{content:"";position:absolute;left:600px;top:0;bottom:0;width:1px;background:var(--hair)}
+  .row{display:grid;grid-template-columns:486px 486px;column-gap:228px;padding:47px 0 48px;border-top:1px solid var(--hair)}
+  .row:first-child{border-top:none}
+  .lot-head{display:flex;justify-content:space-between;align-items:baseline}
+  .numeral{font-size:var(--t2);line-height:var(--l2);font-weight:300;color:var(--ink)}
+  .term{font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.22em;text-transform:uppercase;font-weight:600;color:var(--ink-3);margin-left:16px}
+  .door{font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.18em;text-transform:uppercase;font-weight:600;color:var(--sage)}
+  .door .chev{color:var(--sage)}
+  .line{font-family:var(--mono);font-size:var(--t5);line-height:var(--l5);color:var(--ink-2);margin-top:16px;padding-top:15px;border-top:1px solid var(--hair-faint)}
+  .inst{display:block;margin-top:8px}
+  .body{margin-top:24px;color:var(--ink);max-width:60ch}
+
+  /* ————— the record: the standing row of figure boxes ————— */
+  .strip{margin-top:32px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);display:grid;grid-template-columns:repeat(4,1fr)}
+  .fig{display:block;padding:31px 24px 32px;border-left:1px solid var(--hair-faint)}
+  .fig:first-child{border-left:none;padding-left:0}
+  .fig .value{display:block;font-family:var(--sans);font-weight:300;font-size:var(--t2);line-height:var(--l2);color:var(--ink)}
+  .fig .label{display:block;margin-top:8px;font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.2em;text-transform:uppercase;font-weight:600;color:var(--ink-2)}
+  .fig .src{display:block;margin-top:8px;font-family:var(--mono);font-size:var(--t5);line-height:var(--l5);color:var(--ink-3)}
+  .fig:hover .src{color:var(--sage)}
+  .fig:hover .src .chev{color:var(--sage)}
+
+  /* ————— closing note ————— */
+  .closing{display:grid;grid-template-columns:486px 486px;column-gap:228px}
+  .closing p{color:var(--ink-2)}
+
+  /* ————— the owner ————— */
+  .owner .display{display:block;font-size:var(--t1);line-height:var(--l1);font-weight:300;letter-spacing:-.012em;margin-top:32px}
+  .owner .rest{display:block;font-size:var(--t3);line-height:var(--l3);margin-top:32px;max-width:58ch;color:var(--ink)}
+  .foot-acts{margin-top:64px;display:flex;align-items:center;gap:24px;font-family:var(--sans);font-size:var(--t6);line-height:var(--l6);letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+  .foot-acts a{color:var(--ink-2);padding:15px 32px;border:1px solid var(--hair-strong)}
+  .foot-acts a.pri{background:var(--sage);color:var(--ground);border-color:var(--sage)}
+  .foot-acts .sep{color:var(--ink-3)}
+  .end{height:120px}
+</style>
+</head>
+<body>
+
+<header class="mast" data-blk>
+  <div class="wrap">
+    <a class="wordmark" href="#">Palin<span>genesis</span></a>
+    <nav class="rooms"><a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a href="#">Engine Room</a></nav>
+    <div class="acts"><a href="#">Sign in</a><a class="pri" href="#">Open Today</a></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- the lot title, facing the frontispiece -->
+  <section class="pad">
+    <div class="wrap spread">
+      <div data-blk>
+        <p class="caps">THE PROMISE</p>
+        <h1 class="title">Palingenesis turns published research into tested innovations, and it does the whole job itself: the reading, the inventing, the arguing, the simulating. You do the ruling.</h1>
+        <p class="note">Most R&amp;D still works one idea at a time. Somebody has a hunch, a team spends months on it, and at the end it gets graded on a single number, usually profit. Palingenesis doesn&#x27;t work that way. It runs candidates by the hundred, overnight, and grades each of them on six things at once.</p>
+      </div>
+      <aside class="front" data-blk>
+        <p class="caps"><span>Today</span></p>
+        <div class="swatch">
+          <div class="strip"><b>Today</b><span>Since 00:00</span></div>
+          <p class="mh">Palingenesis</p>
+          <div class="rule2"></div>
+          <div class="pulse"><span><i class="dot"></i>Generation 12</span><span><b>Council 5 of 6</b></span></div>
+          <div class="score">
+            <div><div class="k">Verdict</div><div class="v verdict">Greenlight</div></div>
+            <div><div class="k">Fitness</div><div class="v">87.4</div></div>
+            <div><div class="k">Coverage</div><div class="v">84%</div></div>
+          </div>
+          <div class="greek"><i></i><i></i><i></i><i></i></div>
+          <a class="open" href="#">Open Today</a>
+          <div class="record">
+            <div><div class="k">Papers read</div><div class="v">212</div></div>
+            <div><div class="k">Claims scored</div><div class="v">41</div></div>
+            <div><div class="k">Interval coverage</div><div class="v">84%</div></div>
+            <div><div class="k">Positions</div><div class="v">9</div></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- the catalogue -->
+  <section class="pad">
+    <div class="wrap">
+      <div class="cat-head" data-blk><p class="caps">HOW IT WORKS</p><p class="caps">THE ROOMS</p></div>
+      <div class="catalogue">
+        <div class="row">
+      <article class="lot" data-blk>
+        <header class="lot-head">
+          <div><span class="numeral">I</span><span class="term">Reads</span></div>
+          <a class="door" href="#">Open Library <span class="chev">&#9656;</span></a>
+        </header>
+        <p class="line">212 papers · 45 findings · 3 evidence clusters</p>
+        <svg class="inst" viewBox="0 0 486 40" width="486" height="40" role="img" aria-label="212 papers · 45 findings · 3 evidence clusters"><line x1="0" y1="34" x2="486" y2="34" stroke="var(--hair)" stroke-width="1"/><line x1="0.5" y1="10" x2="0.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="8.5" y1="10" x2="8.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="16.5" y1="10" x2="16.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="24.5" y1="10" x2="24.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="32.5" y1="10" x2="32.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="40.5" y1="10" x2="40.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="48.5" y1="10" x2="48.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="56.5" y1="10" x2="56.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="64.5" y1="10" x2="64.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="72.5" y1="10" x2="72.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="80.5" y1="10" x2="80.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="88.5" y1="10" x2="88.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="96.5" y1="10" x2="96.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="104.5" y1="10" x2="104.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="112.5" y1="10" x2="112.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="120.5" y1="10" x2="120.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="128.5" y1="10" x2="128.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="136.5" y1="10" x2="136.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="176.5" y1="10" x2="176.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="184.5" y1="10" x2="184.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="192.5" y1="10" x2="192.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="200.5" y1="10" x2="200.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="208.5" y1="10" x2="208.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="216.5" y1="10" x2="216.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="224.5" y1="10" x2="224.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="232.5" y1="10" x2="232.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="240.5" y1="10" x2="240.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="248.5" y1="10" x2="248.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="256.5" y1="10" x2="256.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="264.5" y1="10" x2="264.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="272.5" y1="10" x2="272.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="280.5" y1="10" x2="280.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="288.5" y1="10" x2="288.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="328.5" y1="10" x2="328.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="336.5" y1="10" x2="336.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="344.5" y1="10" x2="344.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="352.5" y1="10" x2="352.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="360.5" y1="10" x2="360.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="368.5" y1="10" x2="368.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="376.5" y1="10" x2="376.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="384.5" y1="10" x2="384.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="392.5" y1="10" x2="392.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="400.5" y1="10" x2="400.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="408.5" y1="10" x2="408.5" y2="30" stroke="var(--sage)" stroke-width="1"/><line x1="416.5" y1="10" x2="416.5" y2="30" stroke="var(--sage)" stroke-width="1"/></svg>
+        <p class="body">The reading never stops, and it isn&#x27;t picky. Papers, patents, preprints, field reports: whatever touches the problem gets read, including work from fields that have never cited each other. It doesn&#x27;t summarize any of it. It takes each paper apart into findings, keeps every claim word for word with the passage it came from, and then starts connecting them. When enough findings point the same way it names the cluster and writes up what they agree on. When they thin out it logs a gap and scores it (how new, how feasible, how much it would matter, how risky), because a gap is where the next idea lives. And when it finds something proven on paper that nobody ever tried in the real world, it flags that specifically. Those are the best raw material there is.</p>
+      </article>
+      <article class="lot" data-blk>
+        <header class="lot-head">
+          <div><span class="numeral">II</span><span class="term">Breeds</span></div>
+          <a class="door" href="#">Open Pipeline <span class="chev">&#9656;</span></a>
+        </header>
+        <p class="line">Generation 12 · 40 items · best fitness 0.91</p>
+        <svg class="inst" viewBox="0 0 486 40" width="486" height="40" role="img" aria-label="Generation 12 · 40 items · best fitness 0.91"><line x1="4" y1="22" x2="482" y2="22" stroke="var(--hair-strong)" stroke-width="1"/><line x1="4" y1="14" x2="4" y2="30" stroke="var(--ink-3)" stroke-width="1"/><line x1="243.0" y1="14" x2="243.0" y2="30" stroke="var(--ink-3)" stroke-width="1"/><line x1="482" y1="14" x2="482" y2="30" stroke="var(--ink-3)" stroke-width="1"/><circle cx="439.0" cy="22" r="5" fill="var(--sage)"/></svg>
+        <p class="body">From all of that it breeds. Not one idea but populations of them, generation after generation, using twelve strategies: borrow a mechanism from biology, invert the assumption everyone shares, relax the constraint everyone accepts, chase the edge case, cross two parents, split a lineage into species so the whole population stops converging on the same answer. Duplicates get caught before they cost anything. Every candidate keeps its parentage, so you can trace any idea back through its ancestors to the paper that started it.</p>
+      </article></div>
+        <div class="row">
+      <article class="lot" data-blk>
+        <header class="lot-head">
+          <div><span class="numeral">III</span><span class="term">Judges</span></div>
+          <a class="door" href="#">Open Dossier <span class="chev">&#9656;</span></a>
+        </header>
+        <p class="line">Council 5 of 6 · GREENLIGHT · fitness 87.4</p>
+        <svg class="inst" viewBox="0 0 486 40" width="486" height="40" role="img" aria-label="Council 5 of 6 · GREENLIGHT · fitness 87.4"><rect x="0" y="12" width="16" height="16" fill="var(--sage)"/><rect x="24" y="12" width="16" height="16" fill="var(--sage)"/><rect x="48" y="12" width="16" height="16" fill="var(--sage)"/><rect x="72" y="12" width="16" height="16" fill="var(--sage)"/><rect x="96" y="12" width="16" height="16" fill="var(--sage)"/><rect x="120.5" y="12.5" width="15" height="15" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><line x1="184" y1="20" x2="482" y2="20" stroke="var(--hair-strong)" stroke-width="1"/><line x1="184" y1="12" x2="184" y2="28" stroke="var(--ink-3)" stroke-width="1"/><line x1="333.0" y1="12" x2="333.0" y2="28" stroke="var(--ink-3)" stroke-width="1"/><line x1="482" y1="12" x2="482" y2="28" stroke="var(--ink-3)" stroke-width="1"/><circle cx="444.5" cy="20" r="5" fill="var(--ink)"/></svg>
+        <p class="body">Then the arguing starts, and it happens in three rounds. First a panel of experts scores the candidate on six dimensions at the same time: technical, economic, welfare, ecological, social, ethical. They have to reach consensus or reject it. Then twelve archetypal judges read the same case from twelve temperaments, the cautious one and the reckless one included. Last comes the thirteenth seat, Ophiuchus, whose only job is to find what everyone else missed: the hidden harm, the quiet bias, the side effect nobody priced in, the cost that lands on someone else. It holds a veto that nothing in the system can override. Every judge&#x27;s reasoning is written down against the exact text they judged, so a verdict is always tied to the thing it judged.</p>
+      </article>
+      <article class="lot" data-blk>
+        <header class="lot-head">
+          <div><span class="numeral">IV</span><span class="term">Simulates</span></div>
+          <a class="door" href="#">Open Simulation <span class="chev">&#9656;</span></a>
+        </header>
+        <p class="line">Hindcast skill 0.82 · 90% coverage 88%</p>
+        <svg class="inst" viewBox="0 0 486 40" width="486" height="40" role="img" aria-label="Hindcast skill 0.82 · 90% coverage 88%"><line x1="0" y1="36" x2="486" y2="36" stroke="var(--hair)" stroke-width="1"/><polygon points="0,32.5 60,31 120,28.5 180,25 240,20.5 300,14.5 360,9.5 420,6 480,4 480,16 420,18 360,20.5 300,23.5 240,27.5 180,31 120,33.5 60,35 0,35.5" fill="var(--hair)"/><polyline points="0,34 60,33 120,31 180,28 240,24 300,19 360,15 420,12 480,10" fill="none" stroke="var(--ink-2)" stroke-width="1"/><polyline points="0,35 60,32 120,32 180,27 240,25 300,18 360,16 420,13 480,8" fill="none" stroke="var(--sage)" stroke-width="1.5" stroke-dasharray="3 3"/><line x1="300" y1="4" x2="300" y2="36" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="1 3"/></svg>
+        <p class="body">Whatever survives the council goes to a calibrated simulator before anyone builds anything. Physics and systems models get run against the scenarios that matter, with the economics alongside, and a second council of simulated agents argues over the results. The simulator keeps a public score of its own accuracy against what really happened afterward, and when it can&#x27;t simulate something it says so instead of guessing.</p>
+      </article></div>
+        <div class="row">
+      <article class="lot" data-blk>
+        <header class="lot-head">
+          <div><span class="numeral">V</span><span class="term">Proves</span></div>
+          <a class="door" href="#">Open Portfolio <span class="chev">&#9656;</span></a>
+        </header>
+        <p class="line">41 claims scored · 29 on or above · coverage 84%</p>
+        <svg class="inst" viewBox="0 0 486 40" width="486" height="40" role="img" aria-label="41 claims scored · 29 on or above · coverage 84%"><rect x="0.0" y="14" width="8" height="12" fill="var(--sage)"/><rect x="11.9" y="14" width="8" height="12" fill="var(--sage)"/><rect x="23.7" y="14" width="8" height="12" fill="var(--sage)"/><rect x="35.6" y="14" width="8" height="12" fill="var(--sage)"/><rect x="47.4" y="14" width="8" height="12" fill="var(--sage)"/><rect x="59.3" y="14" width="8" height="12" fill="var(--sage)"/><rect x="71.1" y="14" width="8" height="12" fill="var(--sage)"/><rect x="83.0" y="14" width="8" height="12" fill="var(--sage)"/><rect x="94.8" y="14" width="8" height="12" fill="var(--sage)"/><rect x="106.7" y="14" width="8" height="12" fill="var(--sage)"/><rect x="118.5" y="14" width="8" height="12" fill="var(--sage)"/><rect x="130.4" y="14" width="8" height="12" fill="var(--sage)"/><rect x="142.2" y="14" width="8" height="12" fill="var(--sage)"/><rect x="154.1" y="14" width="8" height="12" fill="var(--sage)"/><rect x="166.0" y="14" width="8" height="12" fill="var(--sage)"/><rect x="177.8" y="14" width="8" height="12" fill="var(--sage)"/><rect x="189.7" y="14" width="8" height="12" fill="var(--sage)"/><rect x="201.5" y="14" width="8" height="12" fill="var(--sage)"/><rect x="213.4" y="14" width="8" height="12" fill="var(--sage)"/><rect x="225.2" y="14" width="8" height="12" fill="var(--sage)"/><rect x="237.1" y="14" width="8" height="12" fill="var(--sage)"/><rect x="248.9" y="14" width="8" height="12" fill="var(--sage)"/><rect x="260.8" y="14" width="8" height="12" fill="var(--sage)"/><rect x="272.6" y="14" width="8" height="12" fill="var(--sage)"/><rect x="284.5" y="14" width="8" height="12" fill="var(--sage)"/><rect x="296.3" y="14" width="8" height="12" fill="var(--sage)"/><rect x="308.2" y="14" width="8" height="12" fill="var(--sage)"/><rect x="320.0" y="14" width="8" height="12" fill="var(--sage)"/><rect x="331.9" y="14" width="8" height="12" fill="var(--sage)"/><rect x="343.8" y="14" width="8" height="12" fill="var(--clay)"/><rect x="355.6" y="14" width="8" height="12" fill="var(--clay)"/><rect x="367.5" y="14" width="8" height="12" fill="var(--clay)"/><rect x="379.3" y="14" width="8" height="12" fill="var(--clay)"/><rect x="391.2" y="14" width="8" height="12" fill="var(--clay)"/><rect x="403.0" y="14" width="8" height="12" fill="var(--clay)"/><rect x="414.9" y="14" width="8" height="12" fill="var(--clay)"/><rect x="426.7" y="14" width="8" height="12" fill="var(--clay)"/><rect x="438.6" y="14" width="8" height="12" fill="var(--clay)"/><rect x="450.4" y="14" width="8" height="12" fill="var(--clay)"/><rect x="462.3" y="14" width="8" height="12" fill="var(--clay)"/><rect x="474.1" y="14" width="8" height="12" fill="var(--clay)"/><line x1="0" y1="34" x2="486" y2="34" stroke="var(--hair)" stroke-width="1"/></svg>
+        <p class="body">Survivors go to pilot, then launch, then scale. The claim that got approved stays frozen next to what the field actually measures, for as long as the product lives. A failure doesn&#x27;t get quietly dropped either. It stays in the book, counted.</p>
+      </article>
+      <article class="lot" data-blk>
+        <header class="lot-head">
+          <div><span class="numeral">VI</span><span class="term">Accounts</span></div>
+          <a class="door" href="#">Open Engine Room <span class="chev">&#9656;</span></a>
+        </header>
+        <p class="line">6 wheels · every order logged on the clock</p>
+        <svg class="inst" viewBox="0 0 486 40" width="486" height="40" role="img" aria-label="6 wheels · every order logged on the clock"><rect x="0.5" y="4.5" width="65" height="23" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><rect x="6" y="18" width="48.6" height="3" fill="var(--sage)"/><rect x="84.5" y="4.5" width="65" height="23" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><rect x="90" y="18" width="37.8" height="3" fill="var(--sage)"/><rect x="168.5" y="4.5" width="65" height="23" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><rect x="174" y="18" width="43.2" height="3" fill="var(--sage)"/><rect x="252.5" y="4.5" width="65" height="23" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><rect x="258" y="18" width="29.7" height="3" fill="var(--sage)"/><rect x="336.5" y="4.5" width="65" height="23" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><rect x="342" y="18" width="40.5" height="3" fill="var(--sage)"/><rect x="420.5" y="4.5" width="65" height="23" fill="none" stroke="var(--hair-strong)" stroke-width="1"/><rect x="426" y="18" width="32.4" height="3" fill="var(--sage)"/><line x1="0" y1="36" x2="486" y2="36" stroke="var(--hair)" stroke-width="1"/><line x1="0.0" y1="30" x2="0.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="20.2" y1="33" x2="20.2" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="40.5" y1="33" x2="40.5" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="60.8" y1="33" x2="60.8" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="81.0" y1="33" x2="81.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="101.2" y1="33" x2="101.2" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="121.5" y1="30" x2="121.5" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="141.8" y1="33" x2="141.8" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="162.0" y1="33" x2="162.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="182.2" y1="33" x2="182.2" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="202.5" y1="33" x2="202.5" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="222.8" y1="33" x2="222.8" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="243.0" y1="30" x2="243.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="263.2" y1="33" x2="263.2" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="283.5" y1="33" x2="283.5" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="303.8" y1="33" x2="303.8" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="324.0" y1="33" x2="324.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="344.2" y1="33" x2="344.2" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="364.5" y1="30" x2="364.5" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="384.8" y1="33" x2="384.8" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="405.0" y1="33" x2="405.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="425.2" y1="33" x2="425.2" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="445.5" y1="33" x2="445.5" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="465.8" y1="33" x2="465.8" y2="36" stroke="var(--ink-3)" stroke-width="1"/><line x1="486.0" y1="30" x2="486.0" y2="36" stroke="var(--ink-3)" stroke-width="1"/></svg>
+        <p class="body">Every outcome changes what the machine reads and believes next. Kept, beaten, missed, failed, it all feeds back: which papers it trusts, which strategies it breeds from, how tightly it holds its own alignment when the population starts to drift, how much it believes its own simulator. It remembers all of it, every candidate, every verdict, every cycle, forever.</p>
+      </article></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- the record -->
+  <section class="pad">
+    <div class="wrap">
+      <p class="caps" data-blk>THE RECORD</p>
+      <div class="strip" data-blk><a class="fig" href="#"><span class="value">212</span><span class="label">Papers read</span><span class="src">Library <span class="chev">&#9656;</span></span></a><a class="fig" href="#"><span class="value">41</span><span class="label">Claims scored</span><span class="src">Portfolio <span class="chev">&#9656;</span></span></a><a class="fig" href="#"><span class="value">84%</span><span class="label">Interval coverage</span><span class="src">Portfolio <span class="chev">&#9656;</span></span></a><a class="fig" href="#"><span class="value">9</span><span class="label">Positions</span><span class="src">Portfolio <span class="chev">&#9656;</span></span></a></div>
+    </div>
+  </section>
+
+  <!-- closing note -->
+  <section class="pad">
+    <div class="wrap closing">
+      <p data-blk>Generations run overnight and the council sits twice a day. Every order you give it is logged on the clock, and nothing is ever deleted.</p>
+      <p data-blk>It isn&#x27;t built for one industry. The engine stays the same; the literature it reads and what its judges know get fitted to whatever field you point it at, and so do the simulator&#x27;s models.</p>
+    </div>
+  </section>
+
+  <!-- the owner -->
+  <section class="pad owner">
+    <div class="wrap" data-blk>
+      <p class="caps">THE OWNER</p>
+      <p><span class="display">You decide.</span><span class="rest">The machine does the reading and the breeding, the judging and the modeling. It keeps its own books, too. You look at the winners, check the receipts, and rule.</span></p>
+      <p class="foot-acts"><a href="#">Sign in</a><span class="sep">·</span><a class="pri" href="#">Open Today</a></p>
+    </div>
+  </section>
+
+</main>
+<div class="end"></div>
+</body>
+</html>
