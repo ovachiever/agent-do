@@ -42,13 +42,16 @@ ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))
 
 def redact(text: str) -> str:
     """Remove common secrets and terminal control characters from log text."""
+    # Normalize control sequences first so they cannot split a credential and
+    # make it recognizable only after redaction has already run.
+    text = ANSI_ESCAPE.sub("", text)
+    text = "".join(char for char in text if char in "\n\t" or ord(char) >= 32)
     for pattern in REDACT_PATTERNS:
         if pattern.groups >= 2:
             text = pattern.sub(lambda match: match.group(1) + match.group(2) + "[REDACTED]", text)
         else:
             text = pattern.sub("[REDACTED]", text)
-    text = ANSI_ESCAPE.sub("", text)
-    return "".join(char for char in text if char in "\n\t" or ord(char) >= 32)
+    return text
 
 
 def normalize_run(raw: dict[str, Any], repository: str, deployments: list[dict[str, Any]] | None,

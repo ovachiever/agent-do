@@ -87,7 +87,7 @@ else:
 def main() -> int:
     import sys
     sys.path.insert(0, str(ROOT / "lib"))
-    from ci_trace import bounded_log_stream
+    from ci_trace import bounded_log_stream, redact
 
     # A byte cap can cut away the identifying prefix of a secret. Never emit
     # that partial line, even when there are no subsequent complete lines.
@@ -95,6 +95,8 @@ def main() -> int:
     require(partial["log"] == "" and partial["truncated"]["bytes"], f"partial secret escaped: {partial}")
     complete = bounded_log_stream(io.BytesIO(b"old long line\nnewest\n"), "1", False, 10, 7)
     require(complete["log"] == "newest" and complete["truncated"]["bytes"], f"complete final line lost: {complete}")
+    decorated = "token" + "=sensitive" + "\x1b[0m" + "remainder"
+    require("remainder" not in redact(decorated), "terminal escapes allowed a credential suffix to escape")
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         binp = tmp / "bin"; binp.mkdir()
