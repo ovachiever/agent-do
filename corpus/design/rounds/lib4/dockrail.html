@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --bg2:#211E1B;
+    --railbg:#181613;
+    --ink:#E7E3DA;
+    --mut:#A69D90;
+    --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --dot:rgba(231,227,218,0.30);
+    --sage:hsl(158,30%,55%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);font-family:var(--sans);
+    display:flex;flex-direction:column;min-height:100vh;min-width:1280px;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;text-decoration:none}
+  .mono{font-family:var(--mono)}
+
+  /* doorway grammar: dotted underline = opens to its lineage */
+  .dw{border-bottom:1px dotted var(--dot);padding-bottom:1px}
+  .entry:hover .dw,.tile:hover .dw,.stat:hover .dw,.more:hover .dw{
+    color:var(--sage);border-bottom-color:var(--sage);
+  }
+
+  /* ── top nav ─────────────────────────────── */
+  nav{display:flex;align-items:center;gap:36px;height:54px;padding:0 28px;
+      border-bottom:1px solid var(--hair);flex:none}
+  .brand{font-family:var(--serif);font-size:19px;letter-spacing:.02em}
+  .links{display:flex;gap:26px}
+  .links a{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);
+           padding:10px 2px 8px;border-bottom:2px solid transparent}
+  .links a:hover{color:var(--ink)}
+  .links a.on{color:var(--sage);border-bottom-color:var(--sage)}
+  .stamp{margin-left:auto;font-size:12px;color:var(--mut);letter-spacing:.06em}
+
+  /* ── shell: left rail + main ─────────────── */
+  .shell{display:grid;grid-template-columns:252px 1fr;flex:1;min-height:0}
+
+  .rail{background:var(--railbg);border-right:1px solid var(--hair);
+        display:flex;flex-direction:column;min-height:0}
+  .rail-h{display:flex;justify-content:space-between;align-items:baseline;
+          padding:16px 18px 12px;border-bottom:1px solid var(--hair)}
+  .rail-h .t{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+  .rail-h .c{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .tile{display:block;padding:13px 16px 14px 16px;border-bottom:1px solid var(--hair);
+        border-left:2px solid transparent;cursor:pointer}
+  .tile:hover{background:var(--bg2);border-left-color:var(--sage)}
+  .tn{font-size:14px;color:var(--ink);display:flex;justify-content:space-between;align-items:center}
+  .chev{color:var(--fnt);font-size:16px;line-height:1}
+  .tile:hover .chev{color:var(--sage)}
+  .tc{margin-top:6px;display:flex;align-items:baseline;gap:10px;min-width:0}
+  .tc .n{font-size:21px;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .note{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .note b{color:var(--ink);font-weight:600}
+  .note.s{color:var(--sage)}
+
+  /* ── masthead band ───────────────────────── */
+  main{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .mast{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;
+        padding:20px 32px 16px;border-bottom:1px solid var(--hair);flex:none}
+  h1{font-family:var(--serif);font-size:42px;font-weight:400;line-height:1;letter-spacing:.005em}
+  .dateline{margin-top:10px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+            color:var(--mut);font-variant-numeric:tabular-nums}
+  .ask{width:432px;flex:none}
+  .ask-label{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--sage);margin-bottom:7px}
+  .ask-box{display:flex;align-items:stretch;height:42px;background:var(--bg2);
+           border:1px solid rgba(231,227,218,0.22)}
+  .ask-box:focus-within{border-color:var(--sage)}
+  .ask-box input{flex:1;min-width:0;background:none;border:0;outline:0;padding:0 14px;
+                 color:var(--ink);font-family:var(--sans);font-size:14px}
+  .ask-box input::placeholder{color:var(--mut);font-family:var(--serif);font-style:italic}
+  .ask-go{display:flex;align-items:center;gap:7px;padding:0 16px;border-left:1px solid var(--hair);
+          color:var(--sage);font-size:12px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+  .ask-go:hover{background:hsla(158,30%,55%,0.10)}
+  .ask-note{margin-top:6px;text-align:right;font-family:var(--serif);font-style:italic;
+            font-size:13px;color:var(--mut)}
+
+  /* ── stat line ───────────────────────────── */
+  .stats{display:flex;align-items:baseline;padding:12px 32px;border-bottom:1px solid var(--hair);flex:none}
+  .stat{display:flex;align-items:baseline;gap:8px;padding:2px 18px;border-left:1px solid var(--hair);cursor:pointer}
+  .stat:first-child{border-left:0;padding-left:0}
+  .sl{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
+  .sv{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+  .su{font-size:12px;color:var(--mut)}
+  .ldot{width:7px;height:7px;border-radius:50%;background:var(--sage);align-self:center;flex:none;
+        animation:pulse 2.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  @media (prefers-reduced-motion:reduce){.ldot{animation:none}}
+
+  /* ── the overnight record ────────────────── */
+  .record{flex:1;min-height:0;display:flex;flex-direction:column;padding:14px 32px 0}
+  .dbl{border-top:2px solid rgba(231,227,218,0.40);border-bottom:1px solid var(--hair);height:5px;flex:none}
+  .rec-h{display:flex;justify-content:space-between;align-items:flex-end;padding:10px 0;flex:none}
+  h2{font-family:var(--serif);font-size:21px;font-weight:400}
+  .rec-meta{text-align:right}
+  .m1{font-size:12px;color:var(--mut);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  .m2{margin-top:3px;font-family:var(--serif);font-style:italic;font-size:13px;color:var(--mut)}
+
+  .cols{flex:1;min-height:0;overflow:hidden;display:grid;grid-template-columns:1fr 1fr 1fr;
+        border-top:1px solid var(--hair)}
+  .rcol{padding:0 22px;min-width:0}
+  .rcol:first-child{padding-left:0}
+  .rcol + .rcol{border-left:1px solid var(--hair)}
+  .rcol:last-child{padding-right:0}
+
+  .entry{display:block;padding:9px 2px 10px;border-bottom:1px solid var(--hair);cursor:pointer}
+  .entry:hover{background:var(--bg2)}
+  .rcol .entry:last-child{border-bottom:0}
+  .e-top{display:flex;align-items:baseline;gap:9px;font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .e-id{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .e-cost{font-variant-numeric:tabular-nums;flex:none}
+  .e-title{margin:5px 0 4px;font-family:var(--serif);font-size:13.5px;line-height:1.35;color:var(--ink)}
+  .lead .e-title{font-size:17px;line-height:1.3}
+  .leadlab{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--sage);margin-bottom:7px}
+  .fx{display:flex;gap:9px;align-items:baseline;min-width:0}
+  .tag{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);flex:none}
+  .tag.hard{color:var(--ink);font-weight:600}
+  .tag.live{color:var(--sage)}
+  .ft{font-size:12px;color:var(--mut);min-width:0}
+  .ft .mono{font-size:12px}
+  .mv{color:var(--ink);font-variant-numeric:tabular-nums}
+
+  .more{flex:none;text-align:center;padding:11px 0 13px;font-size:12px;letter-spacing:.12em;
+        text-transform:uppercase;color:var(--mut);cursor:pointer}
+
+  /* ── footer ──────────────────────────────── */
+  footer{flex:none;display:flex;align-items:center;justify-content:space-between;
+         padding:0 28px;height:40px;border-top:1px solid var(--hair)}
+  .motto{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--mut)}
+  .side{font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.06em}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">Palingenesis</div>
+  <div class="links">
+    <a href="#">Today</a>
+    <a href="#">Pipeline</a>
+    <a href="#" class="on">Library</a>
+    <a href="#">Portfolio</a>
+    <a href="#">Simulation</a>
+    <a href="#">Engine&nbsp;Room</a>
+  </div>
+  <div class="stamp mono">SAT 22 AUG 2026 · 05:41 UTC</div>
+</nav>
+
+<div class="shell">
+
+  <!-- left rail: the card catalogue -->
+  <aside class="rail">
+    <div class="rail-h"><span class="t">Card catalogue</span><span class="c">7 drawers</span></div>
+
+    <a class="tile" href="#">
+      <div class="tn">Connections<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">391</span><span class="note s">+14 overnight</span></div>
+    </a>
+
+    <a class="tile" href="#">
+      <div class="tn">In use now<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">31</span><span class="note">across 9 dossiers</span></div>
+    </a>
+
+    <a class="tile" href="#">
+      <div class="tn">Refresh due<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">116</span><span class="note"><b>18</b> overdue</span></div>
+    </a>
+
+    <a class="tile" href="#">
+      <div class="tn">Reading ledger<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">$221.38</span><span class="note">this month · $7.41 today</span></div>
+    </a>
+
+    <a class="tile" href="#">
+      <div class="tn">Contradictions<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">7</span><span class="note">2 opened overnight</span></div>
+    </a>
+
+    <a class="tile" href="#">
+      <div class="tn">Sweeps<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">13</span><span class="note">4 running · 9 queued</span></div>
+    </a>
+
+    <a class="tile" href="#">
+      <div class="tn">Retraction watch<span class="chev">›</span></div>
+      <div class="tc"><span class="n dw">12</span><span class="note">1 struck overnight</span></div>
+    </a>
+  </aside>
+
+  <!-- main: broadsheet -->
+  <main>
+
+    <header class="mast">
+      <div>
+        <h1>The Library</h1>
+        <div class="dateline">№ 412 · Overnight edition · Saturday 22 August 2026 · Set 05:41 UTC</div>
+      </div>
+      <div class="ask">
+        <div class="ask-label">Ask the Library</div>
+        <div class="ask-box">
+          <input type="text" placeholder="Ask anything the machine has read…">
+          <span class="ask-go">Ask ›</span>
+        </div>
+        <div class="ask-note">Answers cite their sources</div>
+      </div>
+    </header>
+
+    <div class="stats">
+      <span class="stat"><span class="sl">Corpus</span><span class="sv dw">141,306</span><span class="su">works</span></span>
+      <span class="stat"><span class="sl">Overnight</span><span class="sv dw">1,142</span><span class="su">read</span></span>
+      <span class="stat"><span class="sl">Evidence</span><span class="sv dw">8,431</span><span class="su">records</span></span>
+      <span class="stat"><span class="sl">Claims resolved</span><span class="sv dw">962</span></span>
+      <span class="stat"><span class="sl">Meter today</span><span class="sv dw">$7.41</span></span>
+      <span class="stat"><span class="ldot"></span><span class="sl">Reading</span><span class="sv dw">3</span><span class="su">open</span></span>
+    </div>
+
+    <section class="record">
+      <div class="dbl"></div>
+      <div class="rec-h">
+        <h2>The Overnight Record</h2>
+        <div class="rec-meta">
+          <div class="m1">1,142 works between 22:04 and 05:41 · meter $9.63</div>
+          <div class="m2">Every entry opens to its full lineage</div>
+        </div>
+      </div>
+
+      <div class="cols">
+
+        <!-- column 1 -->
+        <div class="rcol">
+
+          <div class="entry lead">
+            <div class="leadlab">Most consequential</div>
+            <div class="e-top"><span>05:12</span><span class="e-id dw">doi 10.1038/s41477-026-04918</span><span class="e-cost">14¢</span></div>
+            <div class="e-title">Stacked three-gene rust resistance holds yield under Ug99 in the field</div>
+            <div class="fx"><span class="tag">Supports</span><span class="ft">dossier <span class="mono dw">D-114</span> · claim <span class="mono dw">c-2291</span> <span class="mv">0.75 → 0.81</span></span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>04:58</span><span class="e-id dw">arXiv 2608.09121</span><span class="e-cost">9¢</span></div>
+            <div class="e-title">Hyperspectral transformer flags early blight 11 days before NDVI</div>
+            <div class="fx"><span class="tag">New link</span><span class="ft">1 connection added · cited into <span class="mono dw">D-102</span></span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>04:41</span><span class="e-id dw">doi 10.1094/PDIS-25-1904</span><span class="e-cost">11¢</span></div>
+            <div class="e-title">Punjab Xanthomonas survey puts resistance allele frequency at 0.34</div>
+            <div class="fx"><span class="tag">Refresh</span><span class="ft">record <span class="mono dw">ev-5521</span> renewed · was 26 months old</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>03:56</span><span class="e-id dw">doi 10.1016/j.soilbio.2026.109442</span><span class="e-cost">12¢</span></div>
+            <div class="e-title">Rhizobacteria consortium lifts maize drought survival 22% — greenhouse only</div>
+            <div class="fx"><span class="tag">Weak support</span><span class="ft">claim <span class="mono dw">c-1174</span> held <span class="mv">0.44</span> · field gap noted</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>03:31</span><span class="e-id dw">EP 4 512 887 A1</span><span class="e-cost">8¢</span></div>
+            <div class="e-title">Base-edited ACCase herbicide tolerance in rice, claims 1–14</div>
+            <div class="fx"><span class="tag">New link</span><span class="ft">2 connections added · watch <span class="mono dw">№ 31</span> set</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>03:07</span><span class="e-id dw">doi 10.3390/agronomy14092409</span><span class="e-cost">2¢</span></div>
+            <div class="e-title">Retraction: biochar yield meta-analysis withdrawn by journal</div>
+            <div class="fx"><span class="tag hard">Retracted</span><span class="ft"><span class="mono dw">ev-3310</span> struck · <span class="mono dw">D-87</span> holds on 3 sources</span></div>
+          </div>
+
+        </div>
+
+        <!-- column 2 -->
+        <div class="rcol">
+
+          <div class="entry">
+            <div class="e-top"><span>02:52</span><span class="e-id dw">doi 10.1111/pbi.14988</span><span class="e-cost">13¢</span></div>
+            <div class="e-title">Node editing delays soy flowering across two site-years</div>
+            <div class="fx"><span class="tag">Supports</span><span class="ft">claim <span class="mono dw">c-3308</span> <span class="mv">0.61 → 0.64</span></span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>02:18</span><span class="e-id dw">doi 10.1093/jxb/erae331</span><span class="e-cost">10¢</span></div>
+            <div class="e-title">Stomatal model transfers across three cultivars under VPD swings</div>
+            <div class="fx"><span class="tag hard">Contradicts</span><span class="ft">against <span class="mono dw">ev-2988</span> · contradiction <span class="mono dw">№ 61</span> opened</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>01:44</span><span class="e-id dw">arXiv 2608.07714</span><span class="e-cost">9¢</span></div>
+            <div class="e-title">Weeding-robot vision loses 38% accuracy from simulation to field</div>
+            <div class="fx"><span class="tag hard">Caution</span><span class="ft">claim <span class="mono dw">c-1990</span> <span class="mv">0.71 → 0.63</span></span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>01:16</span><span class="e-id dw">bioRxiv 2026.08.19.612044</span><span class="e-cost">7¢</span></div>
+            <div class="e-title">Mycovirus hypovirulence transfers between Fusarium strains</div>
+            <div class="fx"><span class="tag">Sweep seeded</span><span class="ft">sweep <span class="mono dw">№ 19</span> queued · replication watch set</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>00:58</span><span class="e-id dw">PCT/US2026/041877</span><span class="e-cost">8¢</span></div>
+            <div class="e-title">Phage cocktail suppresses Ralstonia wilt in greenhouse trial</div>
+            <div class="fx"><span class="tag">New link</span><span class="ft">1 connection added · cited into <span class="mono dw">D-131</span></span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>00:43</span><span class="e-id dw">NOAA CPC · SEP–NOV 2026</span><span class="e-cost">2¢</span></div>
+            <div class="e-title">Seasonal precipitation outlook, September–November, grain belts</div>
+            <div class="fx"><span class="tag">Refresh</span><span class="ft">6 irrigation records renewed</span></div>
+          </div>
+
+        </div>
+
+        <!-- column 3 -->
+        <div class="rcol">
+
+          <div class="entry">
+            <div class="e-top"><span>00:31</span><span class="e-id dw">doi 10.2136/vzj2026.05.0067</span><span class="e-cost">10¢</span></div>
+            <div class="e-title">Capacitance soil probes drift 9% a season in vertisols</div>
+            <div class="fx"><span class="tag hard">Contradicts</span><span class="ft">against <span class="mono dw">ev-4471</span> · contradiction <span class="mono dw">№ 62</span> opened</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>00:14</span><span class="e-id dw">bioRxiv 2026.08.18.611310</span><span class="e-cost">7¢</span></div>
+            <div class="e-title">Wild Aegilops introgression widens wheat heat window 1.8 °C</div>
+            <div class="fx"><span class="tag">Supports</span><span class="ft">claim <span class="mono dw">c-2101</span> <span class="mv">0.53 → 0.58</span> · sweep <span class="mono dw">№ 22</span> seeded</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>23:52</span><span class="e-id dw">doi 10.1017/S0021859626000341</span><span class="e-cost">9¢</span></div>
+            <div class="e-title">Faba–wheat intercrop transfers 31 kg/ha nitrogen, ¹⁵N-traced</div>
+            <div class="fx"><span class="tag">New link</span><span class="ft">2 connections added</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>23:21</span><span class="e-id dw">doi 10.1104/pp.26.00882</span><span class="e-cost">12¢</span></div>
+            <div class="e-title">Root cortical aerenchyma cuts maize phosphorus demand 18%</div>
+            <div class="fx"><span class="tag">Supports</span><span class="ft">claim <span class="mono dw">c-1408</span> <span class="mv">0.75 → 0.77</span></span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>22:47</span><span class="e-id dw">doi 10.3389/fpls.2026.1499812</span><span class="e-cost">8¢</span></div>
+            <div class="e-title">Silicon amendment null on blast severity across six trials</div>
+            <div class="fx"><span class="tag">Null</span><span class="ft">claim <span class="mono dw">c-0917</span> unchanged · null recorded</span></div>
+          </div>
+
+          <div class="entry">
+            <div class="e-top"><span>22:04</span><span class="e-id dw">sweep № 17 · four languages</span><span class="e-cost">est $38</span></div>
+            <div class="e-title">Sweep commissioned: Ralstonia biocontrol literature, 2019–2026</div>
+            <div class="fx"><span class="tag live">Running</span><span class="ft">214 works queued · first results by 09:00</span></div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div class="more">18 of 1,142 shown · full record in the <span class="dw">reading ledger</span> ›</div>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <span class="side">PALINGENESIS · THE LIBRARY</span>
+  <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+  <span class="side">№ 412 · 05:41 UTC</span>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --panel:#211E1B;
+    --field:#26221E;
+    --line:rgba(231,227,218,0.14);
+    --line-strong:rgba(231,227,218,0.30);
+    --cream:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --sage:hsl(158,30%,55%);
+    --sage-deep:hsl(158,30%,47%);
+    --ink:#1B1917;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{color:var(--cream);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased;min-width:1200px}
+  a{text-decoration:none;color:inherit}
+  ::selection{background:var(--sage);color:var(--ink)}
+  :focus-visible{outline:1px solid var(--sage);outline-offset:2px}
+
+  .wrap{max-width:1296px;margin:0 auto;padding:0 36px}
+
+  /* ---------- labels & type helpers ---------- */
+  .lbl{font:600 12px/1 var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .lbl-strong{color:var(--cream)}
+  .mono{font-family:var(--mono)}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ---------- nav ---------- */
+  header{border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;height:58px}
+  .brand{font:400 20px/1 var(--serif);color:var(--cream);letter-spacing:.01em;padding:8px 0}
+  .navlinks{display:flex;gap:2px;margin-left:44px;list-style:none;align-self:stretch;align-items:stretch}
+  .navlinks a{display:flex;align-items:center;position:relative;padding:0 15px;font:500 14px var(--sans);color:var(--muted)}
+  .navlinks a:hover{color:var(--cream)}
+  .navlinks a.active{color:var(--cream)}
+  .navlinks a.active::after{content:"";position:absolute;left:15px;right:15px;bottom:-1px;height:2px;background:var(--sage)}
+  .navstamp{margin-left:auto;font:400 12px var(--mono);color:var(--muted);letter-spacing:.04em}
+
+  /* ---------- hero: ask the library ---------- */
+  .hero{padding:44px 0 0;text-align:center}
+  .hero-inner{max-width:780px;margin:0 auto}
+  .hero h1{font:400 34px/1.2 var(--serif);color:var(--cream);margin:14px 0 24px;letter-spacing:.002em}
+  .askrow{display:flex;gap:10px}
+  .ask{flex:1;height:54px;background:var(--field);border:1px solid var(--line-strong);border-radius:8px;
+       padding:0 18px;font:400 17px var(--sans);color:var(--cream);caret-color:var(--sage)}
+  .ask::placeholder{color:var(--muted)}
+  .ask:hover{border-color:rgba(231,227,218,0.42)}
+  .ask:focus{border-color:var(--sage);outline:none}
+  .askbtn{height:54px;padding:0 28px;border:0;border-radius:8px;background:var(--sage);color:var(--ink);
+          font:600 15px var(--sans);letter-spacing:.02em;cursor:pointer}
+  .askbtn:hover{background:var(--sage-deep)}
+  .askmeta{margin-top:13px;font:600 12px/1 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+
+  .examples{margin:22px auto 0;text-align:left}
+  .ex{display:flex;align-items:baseline;justify-content:space-between;gap:18px;padding:9px 4px;min-height:28px}
+  .ex + .ex{border-top:1px solid var(--line)}
+  .exq{font:italic 400 15px/1.4 var(--serif);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .exq .tick{font-style:normal;color:var(--faint);margin-right:8px}
+  .exh{font:400 12px var(--mono);color:var(--muted);white-space:nowrap}
+  .ex:hover .exq,.ex:hover .exh{color:var(--cream)}
+
+  /* ---------- stat strip ---------- */
+  .strip{margin-top:32px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+         display:grid;grid-template-columns:repeat(7,1fr)}
+  .cell{padding:13px 18px 14px}
+  .cell + .cell{border-left:1px solid var(--line)}
+  .cell .lbl{display:block;margin-bottom:7px}
+  .big{font:600 22px/1.1 var(--sans);color:var(--cream);font-variant-numeric:tabular-nums}
+  .sub{font:400 13px var(--sans);color:var(--muted);font-variant-numeric:tabular-nums}
+
+  /* ---------- corpus line + chips ---------- */
+  .band{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:14px 0 18px}
+  .corpusline{font:400 12px var(--mono);color:var(--muted);letter-spacing:.02em;white-space:nowrap}
+  .chips{display:flex;gap:8px;flex-shrink:0}
+  .chip{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 13px;border:1px solid var(--line);
+        border-radius:999px;font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .chip:hover{color:var(--cream);border-color:var(--line-strong)}
+
+  /* ---------- panels ---------- */
+  .cols{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:20px;align-items:start}
+  .col{display:flex;flex-direction:column;gap:20px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 18px 12px}
+  .phead{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:4px}
+  .phead .info{font:400 12px var(--mono);color:var(--muted);white-space:nowrap}
+  .cap{display:grid;gap:10px;padding:8px 0 6px;font:600 12px/1 var(--sans);letter-spacing:.08em;
+       text-transform:uppercase;color:var(--muted)}
+  .cap span:last-child{text-align:right}
+
+  .pfoot{margin-top:8px;padding:9px 0 2px;border-top:1px solid var(--line)}
+  .pfoot a{display:inline-flex;align-items:center;min-height:24px;font:500 13px var(--sans);color:var(--muted)}
+  .pfoot a:hover{color:var(--cream)}
+
+  /* reading log */
+  .liverow{display:flex;align-items:center;gap:9px;padding:8px 0 9px;border-bottom:1px solid var(--line);
+           font:400 12px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--sage);flex-shrink:0}
+  .liverow .lt{overflow:hidden;text-overflow:ellipsis}
+  .logcap{grid-template-columns:46px minmax(0,1fr) 92px}
+  .logrow{display:grid;grid-template-columns:46px minmax(0,1fr) 92px;gap:10px;align-items:baseline;
+          padding:7px 0;border-top:1px solid var(--line)}
+  .logrow:first-of-type{border-top:0}
+  .t{font:400 12px var(--mono);color:var(--muted)}
+  .paper{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:400 14px var(--sans);color:var(--cream)}
+  .src{color:var(--muted)}
+  .rt{font:400 12px var(--mono);color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+  /* market signals */
+  .sig{padding:11px 0 12px;border-top:1px solid var(--line)}
+  .sig:first-of-type{border-top:0;padding-top:7px}
+  .sighead{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+  .delta{font:400 12px var(--mono);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sigval{display:flex;align-items:center;gap:8px;margin:7px 0 6px}
+  .val{font:600 24px/1 var(--sans);color:var(--cream);font-variant-numeric:tabular-nums}
+  .unit{font:400 14px var(--sans);color:var(--muted)}
+  .spark{margin-left:auto;flex-shrink:0}
+  .prov{font:400 12px var(--mono);color:var(--muted);letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .feeds{margin-top:4px}
+
+  /* sweeps */
+  .swrow{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line)}
+  .swrow:first-of-type{border-top:0;padding-top:6px}
+  .swid{font:400 12px var(--mono);color:var(--muted)}
+  .swmain{min-width:0}
+  .swtitle{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:400 14px var(--sans);color:var(--cream)}
+  .swstat{margin-top:3px;font:400 12px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+  .swstat .on{color:var(--sage)}
+
+  /* evidence */
+  .evcap{grid-template-columns:62px minmax(0,1fr) 86px}
+  .evrow{display:grid;grid-template-columns:62px minmax(0,1fr) 86px;gap:10px;align-items:baseline;
+         padding:7px 0;border-top:1px solid var(--line)}
+  .evrow:first-of-type{border-top:0}
+  .evid{font:400 12px var(--mono);color:var(--muted)}
+  .claim{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:400 14px var(--sans);color:var(--cream)}
+  .claim .flag{font:400 12px var(--mono);color:var(--muted)}
+
+  /* contradictions */
+  .ctrow{display:grid;grid-template-columns:46px minmax(0,1fr) 44px;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+  .ctrow:first-of-type{border-top:0;padding-top:6px}
+  .ctid{font:400 12px var(--mono);color:var(--muted)}
+  .ctmain{min-width:0}
+  .cttopic{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:400 14px var(--sans);color:var(--cream)}
+  .ctpair{margin-top:3px;font:400 12px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctdate{font:400 12px var(--mono);color:var(--muted);text-align:right}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:34px;border-top:1px solid var(--line);padding:22px 0 28px;text-align:center}
+  .motto{font:600 12px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#">Palingenesis</a>
+    <ul class="navlinks">
+      <li><a href="#">Today</a></li>
+      <li><a href="#">Pipeline</a></li>
+      <li><a class="active" href="#">Library</a></li>
+      <li><a href="#">Engine Room</a></li>
+    </ul>
+    <span class="navstamp num">SAT · 22 AUG 2026 · 16:02 CT</span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ ASK THE LIBRARY ============ -->
+  <section class="hero">
+    <div class="hero-inner">
+      <span class="lbl">The Library · reading since March 2025</span>
+      <h1>Ask anything the machine has read</h1>
+      <div class="askrow">
+        <input class="ask" type="text" aria-label="Ask the Library"
+               placeholder="A claim, a market, a paper, a cost&hellip;">
+        <button class="askbtn" type="button">Ask</button>
+      </div>
+      <div class="askmeta">Cites evidence records · metered · avg $0.019 per answer</div>
+
+      <div class="examples">
+        <a class="ex" href="#">
+          <span class="exq"><span class="tick">&#8627;</span>Which shell-strength QTLs replicate across commercial lines?</span>
+          <span class="exh num">&rarr; 14 records · 6 papers</span>
+        </a>
+        <a class="ex" href="#">
+          <span class="exq"><span class="tick">&#8627;</span>Has anything contradicted the 0.85 lysine:ME heat ratio this quarter?</span>
+          <span class="exh num">&rarr; CT-41 · open</span>
+        </a>
+        <a class="ex" href="#">
+          <span class="exq"><span class="tick">&#8627;</span>Where does the corpus disagree with itself right now?</span>
+          <span class="exh num">&rarr; 7 contradictions</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STAT STRIP ============ -->
+  <section class="strip" aria-label="Library stats">
+    <div class="cell"><span class="lbl">Read today</span><span class="big">61</span> <span class="sub">papers · $1.84</span></div>
+    <div class="cell"><span class="lbl">This week</span><span class="big">428</span> <span class="sub">papers · $12.07</span></div>
+    <div class="cell"><span class="lbl">Aug spend</span><span class="big">$41.28</span> <span class="sub">metered</span></div>
+    <div class="cell"><span class="lbl">Corpus</span><span class="big">18,240</span> <span class="sub">documents</span></div>
+    <div class="cell"><span class="lbl">Evidence</span><span class="big">3,912</span> <span class="sub">records</span></div>
+    <div class="cell"><span class="lbl">Contradictions</span><span class="big">7</span> <span class="sub">open</span></div>
+    <div class="cell"><span class="lbl">Sweeps</span><span class="big">3</span> <span class="sub">1 commissioned · 2 queued</span></div>
+  </section>
+
+  <div class="band">
+    <span class="corpusline num">14,382 papers · 2,146 patents · 1,712 extension bulletins — 18,240 documents</span>
+    <nav class="chips" aria-label="Library views">
+      <a class="chip" href="#">Kinship map</a>
+      <a class="chip" href="#">Germinating <span class="num">14</span></a>
+      <a class="chip" href="#">Provenance graph</a>
+      <a class="chip" href="#">Reading room</a>
+    </nav>
+  </div>
+
+  <!-- ============ THE RECORD ============ -->
+  <section class="cols">
+
+    <!-- col A: reading log -->
+    <div class="col">
+      <div class="panel">
+        <div class="phead">
+          <span class="lbl lbl-strong">Read today</span>
+          <span class="info num">61 papers · $1.84 metered</span>
+        </div>
+        <div class="liverow">
+          <span class="dot"></span>
+          <span class="lt">now — Photorefractoriness and molt-free cycle extension: a review</span>
+          <span class="num" style="margin-left:auto">00:42</span>
+        </div>
+        <div class="cap logcap"><span>Time</span><span>Paper · source</span><span>Claims · $</span></div>
+
+        <div class="logrow"><span class="t num">15:41</span><span class="paper">Eggshell translucency and cuticle deposition in extended-lay W-80 flocks <span class="src">— Poult. Sci. 105(8) &rsquo;26</span></span><span class="rt">4 · $0.031</span></div>
+        <div class="logrow"><span class="t num">15:18</span><span class="paper">Genomic prediction of shell dynamic stiffness across three pure lines <span class="src">— Genet. Sel. Evol. 58 &rsquo;26</span></span><span class="rt">6 · $0.034</span></div>
+        <div class="logrow"><span class="t num">14:52</span><span class="paper">Betaine as a methionine sparer under cyclic heat stress <span class="src">— Br. Poult. Sci. 67(2) &rsquo;25</span></span><span class="rt">3 · $0.027</span></div>
+        <div class="logrow"><span class="t num">14:29</span><span class="paper">Black soldier fly larvae meal: ileal lysine digestibility in W-36 hens <span class="src">— Anim. Feed Sci. Tech. 312 &rsquo;26</span></span><span class="rt">2 · $0.022</span></div>
+        <div class="logrow"><span class="t num">14:03</span><span class="paper">Keel-bone damage and aviary tier geometry: a 40-flock survey <span class="src">— Vet. Rec. 198 &rsquo;25</span></span><span class="rt">5 · $0.029</span></div>
+        <div class="logrow"><span class="t num">13:37</span><span class="paper">Ammonia sensor drift in deep-pit houses: correction models <span class="src">— Biosyst. Eng. 244 &rsquo;24</span></span><span class="rt">2 · $0.019</span></div>
+        <div class="logrow"><span class="t num">13:09</span><span class="paper">Ovotransferrin polymorphism and albumen decline past 80 wk <span class="src">— Poult. Sci. 105(7) &rsquo;26</span></span><span class="rt">3 · $0.026</span></div>
+        <div class="logrow"><span class="t num">12:44</span><span class="paper">Dietary calcium particle size and nocturnal shell formation <span class="src">— J. Appl. Poult. Res. 34 &rsquo;25</span></span><span class="rt">4 · $0.024</span></div>
+
+        <div class="pfoot"><a href="#">Full log · 428 this week &rarr;</a></div>
+      </div>
+    </div>
+
+    <!-- col B: market signals + sweeps -->
+    <div class="col">
+      <div class="panel">
+        <div class="phead">
+          <span class="lbl lbl-strong">Market signals</span>
+          <span class="info num">3 series live</span>
+        </div>
+
+        <div class="sig">
+          <div class="sighead">
+            <span class="lbl">Shell eggs · natl large white</span>
+            <span class="delta num">&#9650; +3.2% w/w</span>
+          </div>
+          <div class="sigval">
+            <span class="val">$2.14</span><span class="unit">/doz</span>
+            <svg class="spark" viewBox="0 0 84 22" width="84" height="22" aria-hidden="true">
+              <polyline points="1,16 11,15 21,17 31,14 41,15 51,11 61,12 71,8 81,5" fill="none" stroke="#A69D90" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle cx="81" cy="5" r="2" fill="hsl(158,30%,55%)"/>
+            </svg>
+          </div>
+          <div class="prov">USDA ERS · shell egg table · pulled 2026-08-19</div>
+          <div class="prov feeds">&rarr; DS-140 revenue model</div>
+        </div>
+
+        <div class="sig">
+          <div class="sighead">
+            <span class="lbl">L-lysine HCl 98.5%</span>
+            <span class="delta num">&#9660; &minus;1.5% w/w</span>
+          </div>
+          <div class="sigval">
+            <span class="val">$1.38</span><span class="unit">/kg</span>
+            <svg class="spark" viewBox="0 0 84 22" width="84" height="22" aria-hidden="true">
+              <polyline points="1,7 11,8 21,6 31,9 41,10 51,9 61,12 71,13 81,15" fill="none" stroke="#A69D90" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle cx="81" cy="15" r="2" fill="hsl(158,30%,55%)"/>
+            </svg>
+          </div>
+          <div class="prov">Feedinfo · spot FOB CN · pulled 2026-08-21</div>
+          <div class="prov feeds">&rarr; DS-102 ration optimizer</div>
+        </div>
+
+        <div class="sig">
+          <div class="sighead">
+            <span class="lbl">Soybean meal · Dec &rsquo;26</span>
+            <span class="delta num">&#9660; &minus;0.8% d/d</span>
+          </div>
+          <div class="sigval">
+            <span class="val">$312.40</span><span class="unit">/ton</span>
+            <svg class="spark" viewBox="0 0 84 22" width="84" height="22" aria-hidden="true">
+              <polyline points="1,9 11,12 21,8 31,11 41,9 51,13 61,11 71,14 81,15" fill="none" stroke="#A69D90" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle cx="81" cy="15" r="2" fill="hsl(158,30%,55%)"/>
+            </svg>
+          </div>
+          <div class="prov">CME · ZM Z6 settle · 2026-08-21</div>
+          <div class="prov feeds">&rarr; DS-102 ration optimizer</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="phead">
+          <span class="lbl lbl-strong">Sweeps</span>
+          <span class="info num">1 commissioned · 2 queued</span>
+        </div>
+        <div class="swrow">
+          <span class="swid">SW-88</span>
+          <span class="swmain">
+            <span class="swtitle">Molt-free cycle extension beyond 100 wk</span>
+            <span class="swstat"><span class="on">&#9679; commissioned</span> · 214/412 papers · $4.71</span>
+          </span>
+        </div>
+        <div class="swrow">
+          <span class="swid">SW-89</span>
+          <span class="swmain">
+            <span class="swtitle">BSF meal inclusion ceilings, layer diets</span>
+            <span class="swstat">&#9675; queued · est 180 papers · pos 1</span>
+          </span>
+        </div>
+        <div class="swrow">
+          <span class="swid">SW-90</span>
+          <span class="swmain">
+            <span class="swtitle">Ammonia sensor drift correction</span>
+            <span class="swstat">&#9675; queued · est 95 papers · pos 2</span>
+          </span>
+        </div>
+        <div class="pfoot"><a href="#">Commission a sweep &rarr;</a></div>
+      </div>
+    </div>
+
+    <!-- col C: evidence + contradictions -->
+    <div class="col">
+      <div class="panel">
+        <div class="phead">
+          <span class="lbl lbl-strong">Evidence</span>
+          <span class="info num">3,912 records</span>
+        </div>
+        <div class="cap evcap"><span>Record</span><span>Claim</span><span>Dossier · src</span></div>
+
+        <div class="evrow"><span class="evid">EV-3911</span><span class="claim">Shell-strength QTL on GGA9 replicates in 3/3 commercial lines</span><span class="rt">DS-114 · 3</span></div>
+        <div class="evrow"><span class="evid">EV-3907</span><span class="claim">Lysine:ME 0.85 optimal for W-36 at 32&nbsp;&deg;C <span class="flag">· CT-41</span></span><span class="rt">DS-102 · 2</span></div>
+        <div class="evrow"><span class="evid">EV-3898</span><span class="claim">Betaine spares 22% supplemental methionine above 30&nbsp;&deg;C</span><span class="rt">DS-102 · 4</span></div>
+        <div class="evrow"><span class="evid">EV-3894</span><span class="claim">Cuticle score predicts SE penetration risk, r&nbsp;=&nbsp;0.61</span><span class="rt">DS-121 · 2</span></div>
+        <div class="evrow"><span class="evid">EV-3871</span><span class="claim">BSF meal safe to 8% inclusion, lysine-corrected</span><span class="rt">DS-133 · 3</span></div>
+
+        <div class="pfoot"><a href="#">All records &rarr;</a></div>
+      </div>
+
+      <div class="panel">
+        <div class="phead">
+          <span class="lbl lbl-strong">Contradictions</span>
+          <span class="info num">7 open</span>
+        </div>
+        <div class="ctrow">
+          <span class="ctid">CT-41</span>
+          <span class="ctmain">
+            <span class="cttopic">Lysine:ME optimum under heat</span>
+            <span class="ctpair">EV-3907 &harr; EV-2214 · held for SW-88</span>
+          </span>
+          <span class="ctdate num">08-18</span>
+        </div>
+        <div class="ctrow">
+          <span class="ctid">CT-39</span>
+          <span class="ctmain">
+            <span class="cttopic">Calcium particle timing effect</span>
+            <span class="ctpair">EV-3811 &harr; EV-1963 · needs replication</span>
+          </span>
+          <span class="ctdate num">08-12</span>
+        </div>
+        <div class="ctrow">
+          <span class="ctid">CT-38</span>
+          <span class="ctmain">
+            <span class="cttopic">Post-molt light schedule</span>
+            <span class="ctpair">EV-3790 &harr; EV-2450 · sweep proposed</span>
+          </span>
+          <span class="ctdate num">08-09</span>
+        </div>
+        <div class="pfoot"><a href="#">All contradictions · 7 open &rarr;</a></div>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+  </div>
+</footer>
+
+</body>
+</html>

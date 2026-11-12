@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sqlite3
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from email_graph import GraphError, GraphMailbox
+
 
 OUTPUT_JSON = os.environ.get("AGENT_EMAIL_OUTPUT_JSON") == "1"
 FIXTURE_PATH = os.environ.get("AGENT_EMAIL_FIXTURE")
@@ -33,9 +36,15 @@ ATTACH_SEP = chr(29)
 ATTACH_FIELD_SEP = chr(28)
 INBOX_NAMES = {"inbox", "in box", "inbox/"}
 REMOTE_HYDRATION_DISABLED = os.environ.get("AGENT_EMAIL_DISABLE_REMOTE_HYDRATION") == "1"
+QUERY_CONTEXT: dict[str, Any] = {}
+
+
+def query_context(payload: dict[str, Any]) -> dict[str, Any]:
+    return {**QUERY_CONTEXT, **payload}
 
 
 def emit(payload: dict[str, Any], *, raw: str | None = None) -> None:
+    payload = query_context(payload)
     if OUTPUT_JSON:
         print(json.dumps(payload, indent=2))
         return
@@ -46,7 +55,7 @@ def emit(payload: dict[str, Any], *, raw: str | None = None) -> None:
 
 
 def fail(message: str, *, error: str, code: int = 1, extra: dict[str, Any] | None = None) -> None:
-    payload: dict[str, Any] = {"ok": False, "error": error, "message": message}
+    payload: dict[str, Any] = query_context({"ok": False, "error": error, "message": message})
     if extra:
         payload.update(extra)
     if OUTPUT_JSON:
@@ -184,6 +193,7 @@ def normalize_message(item: dict[str, Any], index: int) -> dict[str, Any]:
         "date": normalize_text(item.get("date")),
         "body": body,
         "source": source,
+        "origin": item.get("origin", "envelope_index"),
         "attachments": attachments,
         "provider": dict(provider),
         "availability": availability,
@@ -201,9 +211,10 @@ def project_message(message: dict[str, Any], *, include_source: bool = False, in
         "date": message.get("date", ""),
         "body": message.get("body", ""),
         "availability": dict(message.get("availability") or {}),
+        "source": message.get("origin", "envelope_index"),
     }
     if include_source:
-        projected["source"] = message.get("source", "")
+        projected["raw_source"] = message.get("source", "")
     if include_attachments:
         projected["attachments"] = list(message.get("attachments") or [])
     return projected
@@ -280,7 +291,7 @@ class FixtureSource:
         scoped = [message for message in self.messages if message_in_mailboxes(message, selected)]
         return sort_messages(scoped)[:limit]
 
-    def get_message(self, selected: list[dict[str, Any]], message_id: str) -> dict[str, Any] | None:
+    def get_message(self, selected: list[dict[str, Any]], message_id: str, *, args=None) -> dict[str, Any] | None:
         for message in self.messages:
             if message.get("id") == message_id and message_in_mailboxes(message, selected):
                 return message
@@ -289,8 +300,10 @@ class FixtureSource:
     def query_messages(self, args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[dict[str, Any]], tuple[int, int]]:
         selected = self.selected_mailboxes(args)
         counts = self.count_messages(selected)
-        messages = self.list_messages(selected, max(1, args.limit))
+        messages = self.list_messages(selected, None)
         matches_list = [item for item in messages if matches(item, args)]
+        if args.limit is not None:
+            matches_list = matches_list[:max(1, args.limit)]
         return selected, matches_list, counts
 
 
@@ -299,10 +312,77 @@ class MacMailSource:
         if sys.platform != "darwin" and not os.environ.get("AGENT_EMAIL_ENVELOPE_INDEX"):
             fail("Email querying currently requires macOS Mail.app or AGENT_EMAIL_FIXTURE", error="unsupported_platform")
         self.db_path = self._locate_envelope_index()
-        self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = sqlite3.Row
+        self._snapshot = None
+        self.conn = None
         self._accounts: list[dict[str, Any]] | None = None
         self._mailboxes: list[dict[str, Any]] | None = None
+        self.refresh()
+
+    def close(self) -> None:
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+        if self._snapshot is not None:
+            self._snapshot.cleanup()
+            self._snapshot = None
+
+    def refresh(self) -> None:
+        self.close()
+        self._snapshot = tempfile.TemporaryDirectory(prefix="agent-email-index-")
+        target = Path(self._snapshot.name) / self.db_path.name
+        try:
+            # Copy the WAL and SHM as well as the database. Opening the copy
+            # lets SQLite recover its snapshot without touching Mail's live DB.
+            for suffix in ("", "-wal", "-shm"):
+                original = Path(str(self.db_path) + suffix)
+                if original.exists():
+                    shutil.copy2(original, Path(str(target) + suffix))
+            self.conn = sqlite3.connect(str(target))
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA query_only=ON")
+        except (OSError, sqlite3.Error):
+            self.close()
+            fail("Could not snapshot Apple Mail's index and journal", error="envelope_snapshot_failed")
+        self._accounts = None
+        self._mailboxes = None
+
+    def coverage(self) -> list[dict[str, Any]]:
+        # Day/month groups are measured from every indexed message, independent
+        # of query filters and output limits. Cadence is the median interval
+        # between observed receiving days, not a guessed staleness constant.
+        rows = self._query("""
+            SELECT mb.url, date(m.date_received, 'unixepoch') AS day,
+                   strftime('%Y-%m', m.date_received, 'unixepoch') AS mon,
+                   MAX(m.date_received) AS newest, COUNT(*) AS message_count
+            FROM messages m JOIN mailboxes mb ON mb.ROWID = m.mailbox
+            WHERE m.date_received > 0
+            GROUP BY mb.url, day, mon
+        """)
+        data = {a["name"]: {"days": set(), "months": {}, "newest": None} for a in self.accounts()}
+        for row in rows:
+            account, _, _ = self._decode_mailbox(row["url"])
+            item = data[account]
+            item["days"].add(row["day"])
+            item["months"][row["mon"]] = item["months"].get(row["mon"], 0) + row["message_count"]
+            item["newest"] = max(item["newest"] or 0, row["newest"])
+        now = datetime.now(timezone.utc).timestamp()
+        result = []
+        for account, data_item in data.items():
+            days = sorted(datetime.fromisoformat(day).replace(tzinfo=timezone.utc) for day in data_item["days"])
+            gaps = [(b - a).total_seconds() for a, b in zip(days, days[1:])]
+            cadence = statistics.median(gaps) if gaps else None
+            newest = data_item["newest"]
+            age = max(0, now - newest) if newest is not None else None
+            freshness = "unknown" if cadence is None or age is None else ("stale" if age > cadence else "fresh")
+            result.append({
+                "name": account,
+                "newest_received": datetime.fromtimestamp(newest, timezone.utc).isoformat() if newest else None,
+                "freshness": freshness, "age_seconds": age,
+                "cadence_seconds": cadence, "cadence_samples": len(gaps),
+                "cadence_authority": "median interval between distinct UTC receiving days in this account's index",
+                "monthly_counts": data_item["months"],
+            })
+        return result
 
     @property
     def platform(self) -> str:
@@ -398,7 +478,7 @@ class MacMailSource:
         _, messages, _ = self.query_messages(args, selected_override=selected)
         return messages
 
-    def get_message(self, selected: list[dict[str, Any]], message_id: str) -> dict[str, Any] | None:
+    def get_message(self, selected: list[dict[str, Any]], message_id: str, *, args=None) -> dict[str, Any] | None:
         if not selected:
             return None
         args = argparse.Namespace(
@@ -423,7 +503,7 @@ class MacMailSource:
         selected_override: list[dict[str, Any]] | None = None,
         message_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], tuple[int, int]]:
-        selected = selected_override or self.selected_mailboxes(args)
+        selected = selected_override if selected_override is not None else self.selected_mailboxes(args)
         counts = self.count_messages(selected)
         if not selected:
             return selected, [], counts
@@ -481,7 +561,7 @@ class MacMailSource:
         if args.unread:
             where.append("COALESCE(m.read, 0) = 0")
 
-        limit = max(1, int(args.limit))
+        limit = max(1, int(args.limit)) if args.limit is not None else None
         query = f"""
             SELECT
                 m.ROWID AS rowid,
@@ -522,9 +602,10 @@ class MacMailSource:
             ) att ON att.message = m.ROWID
             WHERE {" AND ".join(where)}
             ORDER BY COALESCE(m.date_received, m.date_sent, 0) DESC
-            LIMIT ?
+            {"LIMIT ?" if limit is not None else ""}
         """
-        params.append(limit)
+        if limit is not None:
+            params.append(limit)
         rows = self._query(query, tuple(params))
         matches_list: list[dict[str, Any]] = []
         for index, row in enumerate(rows, start=1):
@@ -580,6 +661,191 @@ class MacMailSource:
         return selected, matches_list, counts
 
 
+class MailboxSource:
+    """Route accounts independently; a failed live read never becomes local success."""
+
+    def __init__(self, local: MacMailSource, graph: GraphMailbox | None = None):
+        self.local = local
+        self.graph = graph or GraphMailbox()
+        self.platform = "Microsoft Graph + macOS Mail Envelope Index"
+        self._warned: set[str] = set()
+        accounts = local.accounts()
+        names = [a["name"] for a in accounts]
+        exchange = [a["name"] for a in accounts if a["type"].lower() in {"ews", "exchange", "outlook", "office365"}]
+        exact = [name for name in names if normalize_key(name) in {
+            normalize_key(self.graph.target), normalize_key(self.graph.local_account)
+        } or (self.graph.target and normalize_key(unquote(urlparse(name).netloc)) == normalize_key(self.graph.target))]
+        if self.graph.local_account and self.graph.local_account not in names:
+            fail("AGENT_EMAIL_GRAPH_ACCOUNT must name an indexed account exactly", error="graph_account_binding_invalid")
+        if self.graph.local_account:
+            exact = [self.graph.local_account]
+        self.graph_account = exact[0] if len(exact) == 1 else (
+            exchange[0] if len(exchange) == 1 and not self.graph.local_account else self.graph.target
+        )
+        self.binding = "explicit" if exact else ("unique_exchange_account" if self.graph_account in exchange else "separate_live_account")
+
+    def close(self) -> None:
+        self.local.close()
+
+    def refresh(self) -> None:
+        self.local.refresh()
+
+    def accounts(self) -> list[dict[str, Any]]:
+        items = [dict(item) for item in self.local.accounts()]
+        if self.graph_account and self.graph_account not in {item["name"] for item in items}:
+            items.append({"name": self.graph_account, "type": "GRAPH"})
+        for item in items:
+            if item["name"] == self.graph_account:
+                item.update(live_provider="graph", target_mailbox=self.graph.target, binding=self.binding)
+        return items
+
+    def mailboxes(self) -> list[dict[str, Any]]:
+        items = [dict(item) for item in self.local.mailboxes()]
+        if self.graph_account and not any(item["account"] == self.graph_account and is_inbox_mailbox(item["mailbox"]) for item in items):
+            items.append({"account": self.graph_account, "mailbox": "Inbox"})
+        return items
+
+    def selected_mailboxes(self, args: argparse.Namespace) -> list[dict[str, Any]]:
+        scoped = argparse.Namespace(**vars(args))
+        if self.graph.target and normalize_key(getattr(args, "account", "")) == normalize_key(self.graph.target):
+            scoped.account = self.graph_account
+        if getattr(scoped, "account", "") and not any(normalize_key(item["name"]) == normalize_key(scoped.account) for item in self.accounts()):
+            fail("No account matches --account; use email status for exact account names", error="account_not_found")
+        selected = scope_mailboxes(self.mailboxes(), scoped)
+        # A remote folder may never have existed in the stale local index.
+        if getattr(scoped, "mailbox", "") and self.graph_account and (
+            not getattr(scoped, "account", "") or scoped.account == self.graph_account
+        ) and not any(item["account"] == self.graph_account for item in selected):
+            selected.append({"account": self.graph_account, "mailbox": scoped.mailbox})
+        return selected
+
+    def coverage(self, *, probe: bool = False) -> list[dict[str, Any]]:
+        local = {item["name"]: item for item in self.local.coverage()}
+        graph_status = self.graph.status(probe=probe)
+        items = []
+        for account in self.accounts():
+            item = {**account, **local.get(account["name"], {
+                "newest_received": None, "freshness": "unknown", "cadence_seconds": None,
+                "cadence_samples": 0, "monthly_counts": {},
+            })}
+            item["live_provider"] = "graph" if item["name"] == self.graph_account else None
+            item["live_search_ready"] = graph_status["live_search_ready"] if item["live_provider"] else False
+            if item["live_provider"]:
+                item["provider_status"] = graph_status
+            items.append(item)
+        return items
+
+    def _context(self, selected: list[dict], *, served: bool = False, errors: list[dict] | None = None, account_names=None) -> None:
+        names = account_names if account_names is not None else {item["account"] for item in selected}
+        stale = [item for item in self.coverage() if item["name"] in names and item["freshness"] != "fresh"]
+        for item in stale:
+            item["served_live"] = served and item["name"] == self.graph_account
+        incomplete = any(not item["served_live"] for item in stale) or bool(errors) or self.graph.last_search.get("possibly_truncated", False)
+        QUERY_CONTEXT.clear()
+        QUERY_CONTEXT.update(stale_accounts=stale, coverage_complete=not incomplete, provider_errors=errors or [])
+        if served:
+            QUERY_CONTEXT["graph_search"] = self.graph.last_search
+        if not OUTPUT_JSON:
+            for item in stale:
+                if item["served_live"]:
+                    continue
+                line = f"Email coverage warning: {item['name']} is {item['freshness']} (newest {item['newest_received']}); no verified live search covers it."
+                if line not in self._warned:
+                    print(line, file=sys.stderr)
+                    self._warned.add(line)
+            for error in errors or []:
+                print(f"Email provider warning: {error['error']}", file=sys.stderr)
+            if served and self.graph.last_search.get("possibly_truncated"):
+                print("Email coverage warning: Graph reached its documented search ceiling; results may be incomplete.", file=sys.stderr)
+
+    def _normalize_graph(self, row: dict) -> dict:
+        sender = (row.get("from") or {}).get("emailAddress") or {}
+        body_data = row.get("body") or {}
+        body = str(body_data.get("content") or "")
+        if body_data.get("contentType", "").lower() == "html":
+            body = html_body_to_text(body)
+        raw = row.get("_raw_source", "")
+        attachments = extract_remote_attachments(BytesParser(policy=policy.default).parsebytes(raw.encode())) if raw else []
+        return normalize_message({
+            "id": self.graph.message_id(row["id"]), "account": self.graph_account,
+            "mailbox": row.get("_mailbox", ""), "subject": row.get("subject", ""),
+            "from": f"{sender.get('name', '')} <{sender.get('address', '')}>",
+            "date": row.get("receivedDateTime", ""), "read": row.get("isRead"),
+            "body": body, "source": raw, "origin": "graph", "attachments": attachments,
+            "provider": {"message_id_header": row.get("internetMessageId", "")},
+            "availability": {"body_is_full": True, "body_kind": "full"},
+        }, 1)
+
+    def query_messages(self, args: argparse.Namespace) -> tuple[list[dict], list[dict], tuple[int, int]]:
+        selected = self.selected_mailboxes(args)
+        requested = normalize_key(args.account)
+        if self.graph.target and requested == normalize_key(self.graph.target):
+            requested = normalize_key(self.graph_account)
+        account_names = {item["account"] for item in selected}
+        if requested:
+            account_names.update(item["name"] for item in self.accounts() if normalize_key(item["name"]) == requested)
+        graph_selected = self.graph_account in account_names
+        self.graph.last_search = {}
+        errors = []
+        live_messages = []
+        live_counts = (0, 0)
+        served = False
+        if graph_selected and self.graph.configured:
+            try:
+                rows, live_counts = self.graph.query(args, matches=lambda row: matches(self._normalize_graph(row), args))
+                live_messages = [self._normalize_graph(row) for row in rows]
+                live_messages = [item for item in live_messages if matches(item, args)]
+                served = True
+            except GraphError as exc:
+                errors.append({"account": self.graph_account, **exc.receipt()})
+        elif graph_selected and self.graph.target:
+            errors.append({"account": self.graph_account, "error": "graph_credentials_missing" if self.graph.missing else "graph_dependency_missing"})
+        local_selected = [item for item in selected if not (
+            item["account"] == self.graph_account and (served or errors)
+        )]
+        _, local_messages, local_counts = self.local.query_messages(args, selected_override=local_selected)
+        result = sort_messages(local_messages + live_messages)
+        if args.limit is not None:
+            result = result[:max(1, args.limit)]
+        self._context(selected, served=served, errors=errors, account_names=account_names)
+        if not result and not QUERY_CONTEXT["coverage_complete"]:
+            fail("No match can be concluded because mailbox coverage is incomplete", error="incomplete_coverage")
+        return selected, result, tuple(a + b for a, b in zip(local_counts, live_counts))
+
+    def get_message(self, selected: list[dict], message_id: str, *, args=None) -> dict | None:
+        self.graph.last_search = {}
+        local_message = None
+        if not message_id.startswith("graph:"):
+            local_message = self.local.get_message([item for item in selected if item.get("url")], message_id)
+            if local_message and local_message["account"] == self.graph_account and self.graph.configured:
+                try:
+                    message_id = self.graph.resolve_message_id(local_message.get("provider", {}).get("message_id_header", ""))
+                except GraphError as exc:
+                    self._context(selected, errors=[{"account": self.graph_account, **exc.receipt()}])
+                    fail("The indexed message could not be resolved in Graph", error=exc.code)
+        if message_id.startswith("graph:"):
+            selected_graph = [item for item in selected if item["account"] == self.graph_account]
+            if not selected_graph:
+                fail("Graph message is outside the selected account", error="graph_message_outside_scope")
+            try:
+                row = self.graph.get(message_id, mailbox=args.mailbox or "", all_mailboxes=args.all_mailboxes)
+            except GraphError as exc:
+                self._context(selected, errors=[{"account": self.graph_account, **exc.receipt()}])
+                fail("Live Graph message retrieval failed", error=exc.code)
+            self._context(selected, served=True)
+            return self._normalize_graph(row)
+        self._context(selected)
+        return local_message
+
+    def count_messages(self, selected: list[dict]) -> tuple[int, int]:
+        self._context(selected)
+        return self.local.count_messages([item for item in selected if item.get("url")])
+
+    def list_messages(self, selected: list[dict], limit: int | None) -> list[dict]:
+        self._context(selected)
+        return self.local.list_messages([item for item in selected if item.get("url")], limit)
+
+
 def load_fixture_source() -> FixtureSource | None:
     if not FIXTURE_PATH:
         return None
@@ -598,7 +864,7 @@ def current_source() -> FixtureSource | MacMailSource:
     fixture = load_fixture_source()
     if fixture is not None:
         return fixture
-    return MacMailSource()
+    return MailboxSource(MacMailSource())
 
 
 def is_inbox_mailbox(name: str) -> bool:
@@ -1055,6 +1321,7 @@ def hydrate_remote_message(message: dict[str, Any]) -> dict[str, Any]:
         hydrated = dict(message)
         hydrated["body"] = body or message.get("body", "")
         hydrated["source"] = source
+        hydrated["origin"] = "imap"
         hydrated["attachments"] = attachments
         hydrated["availability"] = availability_from_message(
             body=str(hydrated["body"] or ""),
@@ -1221,6 +1488,8 @@ def wait_for_message(source: FixtureSource | MacMailSource, args: argparse.Names
     selected: list[dict[str, Any]] = []
     counts = (0, 0)
     while True:
+        if isinstance(source, MailboxSource):
+            source.refresh()
         selected, matches_list, counts = filtered_messages(source, args)
         last_count = len(matches_list)
         if matches_list:
@@ -1258,6 +1527,8 @@ def handle_snapshot(source: FixtureSource | MacMailSource, args: argparse.Namesp
         "inbox_unread": inbox_counts[1],
         "recent_messages": {"count": len(messages), "items": [project_message(item) for item in messages]},
     }
+    if isinstance(source, MailboxSource):
+        source._context(selected)  # The auxiliary inbox count must not narrow the receipt.
     emit(payload)
 
 
@@ -1302,7 +1573,7 @@ def handle_link(source: FixtureSource | MacMailSource, args: argparse.Namespace)
 
 def handle_get(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> None:
     selected = source.selected_mailboxes(args)
-    message = source.get_message(selected, args.message_id)
+    message = source.get_message(selected, args.message_id, args=args)
     if message is None:
         fail(
             "No email found for the requested message id",
@@ -1316,7 +1587,7 @@ def handle_get(source: FixtureSource | MacMailSource, args: argparse.Namespace) 
 
 def handle_export(source: FixtureSource | MacMailSource, args: argparse.Namespace) -> None:
     selected = source.selected_mailboxes(args)
-    message = source.get_message(selected, args.message_id)
+    message = source.get_message(selected, args.message_id, args=args)
     if message is None:
         fail(
             "No email found for the requested message id",
@@ -1396,15 +1667,20 @@ def handle_status(source: FixtureSource | MacMailSource, args: argparse.Namespac
             "get_exact_message": True,
             "export": True,
             "remote_hydration": True,
-            "remote_body_search": False,
+            "remote_body_search": isinstance(source, MailboxSource),
         },
         "provider": remote_provider_status(),
     }
-    if isinstance(source, MacMailSource):
+    if isinstance(source, (MacMailSource, MailboxSource)):
+        local = source.local if isinstance(source, MailboxSource) else source
         payload["apple_mail"] = {
-            "envelope_index": str(source.db_path),
+            "envelope_index": str(local.db_path),
             "source": "metadata_index",
         }
+        accounts = source.coverage(probe=True) if isinstance(source, MailboxSource) else source.coverage()
+        payload["accounts"] = {"count": len(accounts), "items": accounts}
+        if isinstance(source, MailboxSource):
+            payload["graph"] = next((item["provider_status"] for item in accounts if item.get("live_provider") == "graph"), source.graph.status())
     else:
         payload["fixture"] = True
     emit(payload)
@@ -1422,13 +1698,13 @@ def add_filter_args(subparser: argparse.ArgumentParser, *, allow_all_mailboxes: 
     subparser.add_argument("--subject", dest="subject_filter")
     subparser.add_argument("--contains")
     subparser.add_argument("--unread", action="store_true")
-    subparser.add_argument("--limit", type=int, default=20)
+    subparser.add_argument("--limit", type=int, help="Caller-requested maximum results; default: all matches")
     subparser.add_argument("--exclude-id", dest="exclude_ids", action="append", default=[])
     add_scope_args(subparser, allow_all_mailboxes=allow_all_mailboxes)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Query and export local Mail index messages.")
+    parser = argparse.ArgumentParser(description="Query live Graph mailboxes and the local Mail index with coverage receipts.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     snapshot = sub.add_parser("snapshot")
@@ -1441,14 +1717,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     latest = sub.add_parser("latest")
     add_filter_args(latest)
+    latest.set_defaults(limit=1)  # Singular verb, not an arbitrary search cap.
 
     wait = sub.add_parser("wait")
     add_filter_args(wait)
+    wait.set_defaults(limit=1)
     wait.add_argument("--timeout", type=int, default=60)
     wait.add_argument("--interval", type=int, default=5)
 
     code = sub.add_parser("code")
     add_filter_args(code)
+    code.set_defaults(limit=1)
     code.add_argument("--timeout", type=int, default=120)
     code.add_argument("--interval", type=int, default=5)
     code.add_argument("--length", type=int)
@@ -1456,6 +1735,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     link = sub.add_parser("link")
     add_filter_args(link)
+    link.set_defaults(limit=1)
     link.add_argument("--timeout", type=int, default=120)
     link.add_argument("--interval", type=int, default=5)
     link.add_argument("--domain")
@@ -1487,7 +1767,16 @@ def main() -> None:
     args = parser.parse_args(sys.argv[1:])
     args.query_text = getattr(args, "query", None) or ""
     source = current_source()
+    try:
+        dispatch(source, args)
+    except sqlite3.Error:
+        fail("The copied Mail index could not be queried; mailbox coverage is unavailable", error="envelope_snapshot_invalid")
+    finally:
+        if isinstance(source, (MacMailSource, MailboxSource)):
+            source.close()
 
+
+def dispatch(source, args) -> None:
     if args.command == "snapshot":
         handle_snapshot(source, args)
     elif args.command == "search":
