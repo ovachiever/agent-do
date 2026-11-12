@@ -1,0 +1,1194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis — Engine Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400..700&family=Source+Sans+3:wght@400..700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917; --lift:#211E1B; --lift2:#272320; --lift3:#2B2723;
+  --ink:#E7E3DA; --muted:#A69D90; --faint:#6E675E;
+  --line:rgba(231,227,218,0.14); --line2:rgba(231,227,218,0.28);
+  --sage:hsl(158,30%,55%); --sageD:hsl(158,22%,19%);
+  --clay:hsl(12,42%,58%); --clayD:hsl(12,26%,17%);
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:'Source Sans 3',-apple-system,'Helvetica Neue',sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);min-width:1280px;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+input{font:14px var(--sans);color:var(--ink);background:#171412;border:1px solid var(--line2);padding:7px 10px;min-width:0}
+input:focus{outline:0;border-color:var(--sage)}
+:focus-visible{outline:1px solid var(--sage);outline-offset:2px}
+.wrap{max-width:1408px;margin:0 auto;padding:0 44px}
+.sage{color:var(--sage)} .clay{color:var(--clay)} .mut{color:var(--muted)}
+.tmono{font-family:var(--mono)}
+
+/* masthead */
+.mast{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px solid var(--line)}
+.m1{display:flex;align-items:center;gap:28px;height:54px}
+.brand{font:600 19px var(--serif);letter-spacing:.02em}
+.rooms{display:flex;gap:20px;font:13px/1 var(--sans);color:var(--muted)}
+.rooms span{padding:6px 1px;cursor:default}
+.rooms .cur{color:var(--ink);border-bottom:1px solid var(--sage);padding-bottom:5px}
+.clock{margin-left:auto;font:13px var(--mono);color:var(--muted)}
+.m2{display:flex;align-items:center;gap:14px;min-height:46px;border-top:1px solid var(--line)}
+.crumbs{display:flex;align-items:center;gap:9px;font:600 12px var(--sans);letter-spacing:.13em;text-transform:uppercase}
+.crumb{color:var(--muted);padding:7px 1px;letter-spacing:.13em}
+button.crumb:hover{color:var(--sage)}
+.crumb.cur{color:var(--ink);cursor:default}
+.csep{color:var(--faint);font-size:14px}
+.eschint{font:12px var(--sans);color:var(--muted);opacity:.7;margin-left:2px;text-transform:none;letter-spacing:0}
+.course{margin-left:auto;display:flex;align-items:center;gap:12px;font:13px var(--sans);color:var(--muted)}
+.course .lbl{margin-right:-2px}
+.course b{color:var(--ink);font-weight:600}
+.cbtn{border:1px solid var(--line2);padding:6px 12px;font:600 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.cbtn:hover{color:var(--sage);border-color:var(--sage)}
+.loggednote{font:12px var(--sans);color:var(--sage)}
+.cformrow{border-top:1px solid var(--line);padding:12px 0;display:flex;gap:16px;align-items:flex-end}
+.cformrow label{display:flex;flex-direction:column;gap:6px;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.cformrow .note{font:12px var(--sans);color:var(--muted);padding-bottom:9px;text-transform:none;letter-spacing:0}
+
+/* generic block anatomy */
+main{padding:24px 0 8px}
+.lede{font:400 21px/1.45 var(--serif);max-width:1080px;margin:6px 0 2px}
+.ledechips{display:flex;align-items:center;gap:10px;margin-top:10px}
+.bandcap{display:flex;align-items:center;gap:12px;margin:26px 0 10px}
+.capline{flex:1;height:1px;background:var(--line)}
+.capnote{font:12px var(--sans);color:var(--muted)}
+.lbl{font:600 12px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.grid7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.grid6{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.grid4x{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.blk{position:relative;background:var(--lift);border:1px solid var(--line);padding:13px 14px 11px;display:flex;flex-direction:column;min-height:122px}
+.blk .lbl{margin-bottom:9px}
+.fig{font:600 27px/1.1 var(--serif);font-variant-numeric:tabular-nums}
+.fig.big{font-size:31px}
+.fig.mono{font:600 19px/1.35 var(--mono)}
+.fig .dim{color:var(--muted)}
+.sub{font:13px/1.5 var(--sans);color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:7px;min-height:17px}
+.state{font:13px var(--sans);color:var(--muted);margin-top:auto;padding-top:9px}
+.cue{position:absolute;right:11px;bottom:9px;font:13px var(--sans);color:var(--muted);opacity:.5}
+.blk.click{cursor:pointer}
+.blk.click:hover{background:var(--lift2);border-color:var(--line2)}
+.blk.click:hover .cue{color:var(--sage);opacity:1}
+.bar{height:3px;background:rgba(231,227,218,0.09);margin-top:10px;position:relative}
+.bar i{position:absolute;top:0;bottom:0;left:0;background:var(--sage)}
+.bar em{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--muted)}
+.step{display:inline-flex;gap:4px;visibility:hidden;margin-left:2px}
+.blk:hover .step{visibility:visible}
+.step button{width:24px;height:24px;border:1px solid var(--line2);color:var(--muted);font:600 14px var(--mono);display:grid;place-items:center;padding:0}
+.step button:hover{color:var(--sage);border-color:var(--sage)}
+.kv{display:flex;justify-content:space-between;gap:12px;font:13px/1.6 var(--sans);color:var(--muted)}
+.kv b{color:var(--ink);font-weight:400;text-align:right}
+.kv b.tmono{font-size:13px}
+
+/* panels + tables */
+.panel{border:1px solid var(--line);background:var(--lift)}
+.phead{display:flex;align-items:baseline;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.pstate{font:13px var(--sans);color:var(--muted)}
+.pnum{margin-left:auto;font:13px var(--mono);color:var(--muted)}
+.legend{margin-left:auto;display:flex;gap:14px;font:12px var(--sans);color:var(--muted)}
+.legend .lg-done{color:var(--ink)} .legend .lg-live{color:var(--sage)} .legend .lg-slip{color:var(--clay)} .legend .lg-struck{color:var(--clay);text-decoration:line-through} .legend .lg-held{text-decoration:line-through}
+.thead{display:grid;gap:0 10px;padding:9px 16px;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+.row{display:grid;gap:0 10px;padding:0 16px;min-height:46px;align-items:center;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row.click{cursor:pointer}
+.row.click:hover{background:var(--lift2)}
+.row .cuecell{color:var(--muted);opacity:.5;font-size:13px;text-align:right}
+.row.click:hover .cuecell{color:var(--sage);opacity:1}
+.num{font:13px var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.cell-mono{font:13px var(--mono)}
+.eltitle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px}
+.cols-st{grid-template-columns:150px 150px 1fr 100px 120px 80px 110px 26px}
+.cols-pp{grid-template-columns:44px 1fr 210px 56px 76px 96px 26px}
+.cols-log{grid-template-columns:64px 1fr 190px}
+.logrow .t{font:13px var(--mono);color:var(--muted)}
+.logrow .txt{font:14px/1.45 var(--sans);padding:8px 0}
+.logrow .right{justify-self:end;display:flex;align-items:center;gap:8px}
+.logrow.click .runref{font:12px var(--mono);color:var(--muted)}
+.logrow.click:hover .runref{color:var(--sage)}
+.chipE{font:600 12px/1 var(--sans);letter-spacing:.1em;border:1px solid var(--sage);color:var(--sage);padding:4px 8px;text-transform:uppercase}
+.mins{font:13px var(--mono);color:var(--muted)}
+.mins.clay{color:var(--clay)}
+@keyframes rowin{from{background:var(--sageD)}to{background:transparent}}
+.flash{animation:rowin 1.8s ease-out}
+.rowflash{background:var(--sageD) !important}
+
+/* timetable */
+.ttg{display:grid;grid-template-columns:118px repeat(16,minmax(0,1fr));grid-template-rows:56px repeat(6,46px);grid-auto-flow:column;gap:1px;background:var(--line)}
+.ttg>div{background:var(--lift)}
+.ttg>div.tgl,.ttg>div.gut{background:var(--bg)}
+.tgl{display:flex;flex-direction:column;justify-content:center;padding:0 12px;gap:2px}
+.tgl b{font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--ink)}
+.tgl span{font:12px var(--sans);color:var(--muted)}
+.tth{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer}
+.tth .cy{font:12px var(--mono);color:var(--muted)}
+.tth .rid{font:600 13px var(--mono);color:var(--ink)}
+.tth .tag{font:600 12px/1 var(--sans);letter-spacing:.08em}
+.tth.struck .rid{color:var(--clay);text-decoration:line-through}
+.tc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;font:12px var(--mono);line-height:1.25}
+.tc .b{color:var(--muted)}
+.tc .a{color:var(--ink)}
+.tc .x{color:var(--clay)}
+.tc .slp{color:var(--clay)}
+.tc .lv{color:var(--sage);font-weight:600}
+.tc .sm{color:var(--sage)}
+.tc .heldt{color:var(--muted);text-decoration:line-through}
+.ttg .hov{background:var(--lift2)}
+.ttg .tc:hover,.ttg .tth:hover{background:var(--lift3)}
+@keyframes blink{50%{opacity:.35}}
+.pulse{animation:blink 1.6s infinite}
+
+/* standing orders band */
+.soband{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.so{background:var(--lift);padding:12px 16px;display:flex;flex-direction:column;gap:6px;min-height:96px}
+.so .val{font:14px var(--sans);color:var(--ink)}
+.so .prov{font:12px var(--sans);color:var(--muted)}
+.so .prov.sage{color:var(--sage)}
+.so .edit{margin-top:auto;align-self:flex-start;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:6px 0;min-height:24px}
+.so .edit:hover{color:var(--sage)}
+.so .soform{display:flex;gap:6px;margin-top:auto}
+.so .soform input{flex:1;font-size:13px;padding:5px 8px}
+
+/* controls */
+.control{display:flex;align-items:center;gap:24px;border:1px solid var(--line);background:var(--lift);padding:16px 18px;margin-top:26px}
+.btnbig{border:1px solid var(--clay);color:var(--clay);padding:13px 26px;font:600 13px var(--sans);letter-spacing:.14em;text-transform:uppercase;min-height:44px}
+.btnbig:hover{background:var(--clayD)}
+.btnbig.armed{background:var(--clay);color:#1B1917}
+.btnbig.resume{border-color:var(--sage);color:var(--sage)}
+.btnbig.resume:hover{background:var(--sageD)}
+.cons{font:14px/1.5 var(--sans);color:var(--muted);max-width:700px}
+.btn{border:1px solid var(--line2);padding:10px 18px;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--ink);min-height:38px}
+.btn:hover{border-color:var(--sage);color:var(--sage)}
+.btn.pri{border-color:var(--sage);color:var(--sage)}
+.btn.pri:hover{background:var(--sageD)}
+.btn.ghost{color:var(--muted);border-color:var(--line2)}
+.chip{display:inline-block;font:600 12px/1 var(--sans);letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border:1px solid currentColor}
+.chip.sage{color:var(--sage)} .chip.clay{color:var(--clay)} .chip.mut{color:var(--muted)}
+.chip.parked{border-style:dashed}
+.idchip{font:600 13px var(--mono);color:var(--ink);border:1px solid var(--line2);padding:4px 9px}
+
+/* stage centerpiece band */
+.bigline{padding:20px 18px;font:600 19px/1.5 var(--serif)}
+.bigline .tmono{font-size:16px;font-weight:400}
+.bigline.claytone{color:var(--clay)}
+.bigline .mut{font-weight:400}
+
+/* paper page */
+.paperhead{font:600 25px/1.35 var(--serif);max-width:1040px;margin:8px 0 4px}
+.papersub{font:14px var(--sans);color:var(--muted)}
+.crow{display:grid;grid-template-columns:60px 1fr 92px;gap:0 10px;padding:11px 16px;border-bottom:1px solid var(--line);font:15px/1.5 var(--sans);align-items:baseline}
+.crow:last-child{border-bottom:0}
+.crow .cid{font:13px var(--mono);color:var(--muted)}
+.crow .cloc{font:13px var(--mono);color:var(--muted);text-align:right}
+
+.foot{margin:36px auto 26px;text-align:center;font:14px var(--sans);color:var(--faint)}
+.pagein{animation:fadein .18s ease-out}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ---- v2: wheel controls, presets, docket, claim preview ---- */
+.presetrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--line);background:var(--lift);padding:12px 14px;margin-bottom:14px}
+.presetrow .lbl{margin:0}
+.presetbtn{border:1px solid var(--line2);padding:8px 14px;font:600 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);min-height:32px}
+.presetbtn:hover{color:var(--sage);border-color:var(--sage)}
+.presetbtn.on{color:var(--sage);border-color:var(--sage)}
+.presetpreview{display:flex;align-items:center;gap:12px;font:14px/1.5 var(--serif);color:var(--muted);flex:1;min-width:260px}
+.presetpreview b{color:var(--ink);font-weight:600}
+.wheelgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.wstate{display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap}
+.lastact{font:13px var(--sans);color:var(--muted)}
+.wctlrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.wctlrow button{border:1px solid var(--line2);padding:6px 10px;font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);min-height:26px}
+.wctlrow button:hover{color:var(--sage);border-color:var(--sage)}
+.wctlrow button.on{color:var(--sage);border-color:var(--sage)}
+.wdisc{border-top:1px solid var(--line);margin-top:11px;padding-top:11px;display:flex;flex-direction:column;gap:9px}
+.wdisc .stepline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.wdisc .stepval{font:600 15px var(--mono)}
+.wdisc select{background:#171412;border:1px solid var(--line2);color:var(--ink);font:13px var(--sans);padding:6px 8px;min-height:30px}
+.wdisc input[type=time]{min-height:30px;width:120px}
+.wdisc .preview{font:13px/1.5 var(--serif);color:var(--muted)}
+.wdisc .preview b{color:var(--ink);font-weight:600}
+.wdisc .actions{display:flex;gap:8px}
+.miniSet{border:1px solid var(--sage);color:var(--sage);padding:6px 12px;font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;min-height:26px}
+.miniSet:hover{background:var(--sageD)}
+.miniCancel{border:1px solid var(--line2);color:var(--muted);padding:6px 12px;font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;min-height:26px}
+.miniCancel:hover{color:var(--ink)}
+.docketrow{display:flex;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--line);font:14px var(--sans);color:var(--ink)}
+.docketrow:last-child{border-bottom:0}
+.revertbtn{font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);padding:4px 8px;min-height:24px;display:inline-flex;align-items:center}
+.revertbtn:hover{color:var(--clay);border-color:var(--clay)}
+.claimsCell{cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.claimprev{padding:9px 16px 11px 60px;background:var(--lift2);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:5px}
+.claimprev .cline{font:13px/1.5 var(--serif);color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+window.__errs=[];window.addEventListener('error',function(e){window.__errs.push(String(e.message))});
+const DATA = {"runs":[{"id":"r-2201","cycle":1,"open":"06:00","status":"closed","theme":"gypsum and leaching on sodic loams","lede":"Verdict v-2201: gypsum plus a four-irrigation leaching interval recovers most of the sodic yield gap — advanced to the amendment shortlist, 4–1.","vote":"4–1","kind":"advance","seasons":3,"conf":"0.78","verdict":"v-2201","digest":"d-2201","result":"t-2201","closedAt":"06:41","sources":12,"papersN":6,"claims":38,"costs":{"open":74,"read":186,"deliberate":342,"simulate":284,"record":56,"close":44},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"06:00","bookedEnd":"06:04","slip":0,"actual":"06:00","actualEnd":"06:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 6 to the stack.","detail":{"sources":12,"admitted":6}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"06:04","bookedEnd":"06:12","slip":0,"actual":"06:04","actualEnd":"06:12","state":"done","lede":"The Reader ingested six papers in eight minutes and kept 38 claims for $1.86.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"06:12","bookedEnd":"06:22","slip":0,"actual":"06:12","actualEnd":"06:22","state":"done","lede":"The Council weighed 38 claims and voted 4–1 to advance.","detail":{"claims":38,"vote":"4–1","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"06:22","bookedEnd":"06:34","slip":0,"actual":"06:22","actualEnd":"06:34","state":"done","lede":"The Simulator ran three seasons in twelve minutes and posted result t-2201 at 0.78 confidence.","detail":{"seasons":"three","result":"t-2201","conf":"0.78"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"06:34","bookedEnd":"06:41","slip":0,"actual":"06:34","actualEnd":"06:41","state":"done","lede":"The Archivist linked 38 claims to evidence and recorded verdict v-2201 at 06:41.","detail":{"claims":38,"ev0":"e-2201-01","evN":"e-2201-06","verdict":"v-2201","at":"06:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"06:41","bookedEnd":"06:42","slip":0,"actual":"06:41","actualEnd":"06:42","state":"done","lede":"The Courier posted digest d-2201 and closed the book at 06:41.","detail":{"digest":"d-2201","at":"06:41"}}],"papers":[{"t":"Gypsum rate and leaching interval on sodic clay loams","j":"Geoderma","y":2023,"claims":[{"text":"Gypsum at 3 t ha⁻¹ cut ESP 20→9","loc":"Table 4"},{"text":"Amendment cost recovered in 4 seasons","loc":"l.287"},{"text":"Ca²⁺ displacement peaked 6 weeks post-application","loc":"Fig. 4"},{"text":"Stand recovery reached 91% of non-saline check","loc":"l.265"},{"text":"Infiltration rose 33% after amendment","loc":"Table 1"},{"text":"Amendment cost recovered in 2 seasons","loc":"Fig. 3"},{"text":"Yield gap closed 0.5 t ha⁻¹ on reclaimed strips","loc":"§6.2"}],"cost":29,"ev":"e-2201-01"},{"t":"Phosphogypsum reclamation of saline-sodic soils: a six-site trial","j":"Soil Tillage Res","y":2024,"claims":[{"text":"Effect capped where the water table sat above 1.2 m","loc":"§5.1"},{"text":"Ca²⁺ displacement peaked 5 weeks post-application","loc":"l.107"},{"text":"Leaching every 5th irrigation held the salt balance","loc":"Table 3"},{"text":"Stand recovery reached 78% of non-saline check","loc":"Fig. 4"},{"text":"Gypsum at 5 t ha⁻¹ cut ESP 19→8","loc":"§4.4"},{"text":"ECe held under 7 dS m⁻¹ through grain fill","loc":"Fig. 2"}],"cost":32,"ev":"e-2201-02"},{"t":"Exchangeable sodium decline under drip leaching regimes","j":"Agric Water Manag","y":2022,"claims":[{"text":"Response absent on gypsiferous subsoils","loc":"§1.1"},{"text":"Phosphogypsum matched mined gypsum at 89% rate","loc":"Fig. 2"},{"text":"Leaching every 4th irrigation held the salt balance","loc":"§2.2"},{"text":"Gypsum at 6 t ha⁻¹ cut ESP 18→8","loc":"l.320"},{"text":"Yield gap closed 0.9 t ha⁻¹ on reclaimed strips","loc":"§2.2"},{"text":"Ca²⁺ displacement peaked 4 weeks post-application","loc":"§4.2"}],"cost":39,"ev":"e-2201-03"},{"t":"Wheat stand recovery after gypsum-assisted reclamation","j":"Field Crops Res","y":2025,"claims":[{"text":"Gypsum at 5 t ha⁻¹ cut ESP 21→8","loc":"§3.3"},{"text":"Yield gap closed 0.7 t ha⁻¹ on reclaimed strips","loc":"Fig. 5"},{"text":"Sodic crust strength fell 37%","loc":"l.138"},{"text":"Ca²⁺ displacement peaked 3 weeks post-application","loc":"l.340"},{"text":"Phosphogypsum matched mined gypsum at 73% rate","loc":"§3.2"},{"text":"Sodic crust strength fell 42%","loc":"§6.1"},{"text":"Phosphogypsum matched mined gypsum at 85% rate","loc":"§2.2"}],"cost":29,"ev":"e-2201-04"},{"t":"Calcium dynamics in reclaimed root zones","j":"Plant Soil","y":2021,"claims":[{"text":"Sodic crust strength fell 45%","loc":"l.155"},{"text":"Sodic crust strength fell 54%","loc":"l.50"},{"text":"Yield gap closed 0.8 t ha⁻¹ on reclaimed strips","loc":"§1.2"},{"text":"Stand recovery reached 83% of non-saline check","loc":"l.128"},{"text":"Infiltration rose 36% after amendment","loc":"Fig. 2"},{"text":"Amendment cost recovered in 3 seasons","loc":"§1.1"}],"cost":25,"ev":"e-2201-05"},{"t":"Economic thresholds for amendment-led reclamation","j":"Agric Syst","y":2024,"claims":[{"text":"ECe held under 5 dS m⁻¹ through grain fill","loc":"§1.3"},{"text":"Stand recovery reached 79% of non-saline check","loc":"§6.1"},{"text":"ECe held under 4 dS m⁻¹ through grain fill","loc":"§5.1"},{"text":"Infiltration rose 30% after amendment","loc":"§4.2"},{"text":"Sodic crust strength fell 47%","loc":"l.28"},{"text":"Gypsum at 6 t ha⁻¹ cut ESP 21→8","loc":"§4.4"}],"cost":32,"ev":"e-2201-06"}],"incidents":[]},{"id":"r-2202","cycle":2,"open":"07:00","status":"closed","theme":"brackish irrigation scheduling","lede":"Verdict v-2202: cyclic fresh–saline scheduling holds root-zone salt inside the wheat threshold — advanced unanimously to the irrigation playbook.","vote":"5–0","kind":"advance","seasons":3,"conf":"0.81","verdict":"v-2202","digest":"d-2202","result":"t-2202","closedAt":"07:41","sources":13,"papersN":6,"claims":38,"costs":{"open":79,"read":181,"deliberate":331,"simulate":291,"record":58,"close":46},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"07:00","bookedEnd":"07:04","slip":0,"actual":"07:00","actualEnd":"07:04","state":"done","lede":"The Scout stocked the docket with 13 sources and admitted 6 to the stack.","detail":{"sources":13,"admitted":6}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"07:04","bookedEnd":"07:12","slip":1,"actual":"07:05","actualEnd":"07:13","state":"done","lede":"The Reader ingested six papers in eight minutes and kept 38 claims for $1.81.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"07:12","bookedEnd":"07:22","slip":0,"actual":"07:12","actualEnd":"07:22","state":"done","lede":"The Council weighed 38 claims and voted 5–0 to advance.","detail":{"claims":38,"vote":"5–0","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"07:22","bookedEnd":"07:34","slip":0,"actual":"07:22","actualEnd":"07:34","state":"done","lede":"The Simulator ran three seasons in twelve minutes and posted result t-2202 at 0.81 confidence.","detail":{"seasons":"three","result":"t-2202","conf":"0.81"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"07:34","bookedEnd":"07:41","slip":0,"actual":"07:34","actualEnd":"07:41","state":"done","lede":"The Archivist linked 38 claims to evidence and recorded verdict v-2202 at 07:41.","detail":{"claims":38,"ev0":"e-2202-01","evN":"e-2202-06","verdict":"v-2202","at":"07:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"07:41","bookedEnd":"07:42","slip":0,"actual":"07:41","actualEnd":"07:42","state":"done","lede":"The Courier posted digest d-2202 and closed the book at 07:41.","detail":{"digest":"d-2202","at":"07:41"}}],"papers":[{"t":"Deficit scheduling with brackish water in durum wheat","j":"Irrig Sci","y":2024,"claims":[{"text":"Night sets lowered canopy temperature 4 °C","loc":"l.35"},{"text":"Alternate-furrow buildup stayed confined to the dry furrow","loc":"§4.2"},{"text":"Scheduling threshold set at 7 dS m⁻¹","loc":"l.235"},{"text":"Shallow water table supplied 16% of crop water","loc":"§1.2"},{"text":"Night sets lowered canopy temperature 2 °C","loc":"§3.1"},{"text":"Brackish finish irrigations proved safe after anthesis","loc":"§3.4"},{"text":"Shallow water table supplied 21% of crop water","loc":"l.225"}],"cost":29,"ev":"e-2202-01"},{"t":"Cyclic fresh–saline irrigation and root-zone salt balance","j":"Agric Water Manag","y":2023,"claims":[{"text":"Evaporation share rose 13% under salt stress","loc":"l.143"},{"text":"Evaporation share rose 9% under salt stress","loc":"Fig. 3"},{"text":"Sensor triggers saved 18 mm per cycle","loc":"l.77"},{"text":"Leaf rolling onset lagged 4 days under cyclic order","loc":"Fig. 2"},{"text":"Evaporation share rose 14% under salt stress","loc":"§4.2"},{"text":"Leaf rolling onset lagged 5 days under cyclic order","loc":"§6.3"}],"cost":25,"ev":"e-2202-02"},{"t":"Sensor-triggered irrigation under shallow saline water tables","j":"Comput Electron Agric","y":2025,"claims":[{"text":"Sensor triggers saved 19 mm per cycle","loc":"§5.3"},{"text":"Sensor triggers saved 21 mm per cycle","loc":"§6.2"},{"text":"Sensor triggers saved 17 mm per cycle","loc":"Table 3"},{"text":"Deficit at 77% ET held yield within 8%","loc":"Table 5"},{"text":"Evaporation share rose 10% under salt stress","loc":"l.265"},{"text":"Shallow water table supplied 13% of crop water","loc":"Table 3"}],"cost":41,"ev":"e-2202-03"},{"t":"Evapotranspiration partitioning in salt-stressed wheat","j":"Eur J Agron","y":2022,"claims":[{"text":"Scheduling threshold set at 5 dS m⁻¹","loc":"§2.4"},{"text":"Cyclic fresh–saline order cut root-zone salt 31%","loc":"§2.1"},{"text":"Salt returned to baseline after 4 fresh cycles","loc":"l.60"},{"text":"Shallow water table supplied 22% of crop water","loc":"l.146"},{"text":"Leaf rolling onset lagged 7 days under cyclic order","loc":"§2.4"},{"text":"Cyclic fresh–saline order cut root-zone salt 25%","loc":"§4.3"},{"text":"Scheduling threshold set at 6 dS m⁻¹","loc":"§4.1"}],"cost":33,"ev":"e-2202-04"},{"t":"Salinity buildup under alternate-furrow irrigation","j":"Irrig Sci","y":2021,"claims":[{"text":"Evaporation share rose 8% under salt stress","loc":"§1.4"},{"text":"Evaporation share rose 12% under salt stress","loc":"l.170"},{"text":"Sensor triggers saved 14 mm per cycle","loc":"§1.3"},{"text":"Scheduling threshold set at 8 dS m⁻¹","loc":"§2.4"},{"text":"Leaf rolling onset lagged 3 days under cyclic order","loc":"l.194"},{"text":"Shallow water table supplied 19% of crop water","loc":"l.270"}],"cost":29,"ev":"e-2202-05"},{"t":"Night irrigation and canopy temperature in brackish systems","j":"Field Crops Res","y":2023,"claims":[{"text":"Leaf rolling onset lagged 6 days under cyclic order","loc":"l.111"},{"text":"Night sets lowered canopy temperature 3 °C","loc":"§6.3"},{"text":"Cyclic fresh–saline order cut root-zone salt 24%","loc":"Fig. 4"},{"text":"Cyclic fresh–saline order cut root-zone salt 30%","loc":"§2.2"},{"text":"Shallow water table supplied 18% of crop water","loc":"l.335"},{"text":"Shallow water table supplied 24% of crop water","loc":"§6.4"}],"cost":24,"ev":"e-2202-06"}],"incidents":[]},{"id":"r-2203","cycle":3,"open":"08:00","status":"closed","theme":"K⁺/Na⁺ cultivar physiology","lede":"Verdict v-2203: K⁺/Na⁺ screening ranks six lines cleanly but field evidence runs thin — parked for a second read, 3–2.","vote":"3–2","kind":"park","seasons":2,"conf":"0.64","verdict":"v-2203","digest":"d-2203","result":"t-2203","closedAt":"08:41","sources":11,"papersN":5,"claims":32,"costs":{"open":71,"read":154,"deliberate":319,"simulate":277,"record":54,"close":43},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"08:00","bookedEnd":"08:04","slip":0,"actual":"08:00","actualEnd":"08:04","state":"done","lede":"The Scout stocked the docket with 11 sources and admitted 5 to the stack.","detail":{"sources":11,"admitted":5}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"08:04","bookedEnd":"08:12","slip":0,"actual":"08:04","actualEnd":"08:12","state":"done","lede":"The Reader ingested five papers in eight minutes and kept 32 claims for $1.54.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"08:12","bookedEnd":"08:22","slip":0,"actual":"08:12","actualEnd":"08:22","state":"done","lede":"The Council weighed 32 claims and voted 3–2 to park.","detail":{"claims":32,"vote":"3–2","kind":"park","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"08:22","bookedEnd":"08:34","slip":0,"actual":"08:22","actualEnd":"08:34","state":"done","lede":"The Simulator ran two seasons in twelve minutes and posted result t-2203 at 0.64 confidence.","detail":{"seasons":"two","result":"t-2203","conf":"0.64"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"08:34","bookedEnd":"08:41","slip":0,"actual":"08:34","actualEnd":"08:41","state":"done","lede":"The Archivist linked 32 claims to evidence and recorded verdict v-2203 at 08:41.","detail":{"claims":32,"ev0":"e-2203-01","evN":"e-2203-05","verdict":"v-2203","at":"08:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"08:41","bookedEnd":"08:42","slip":0,"actual":"08:41","actualEnd":"08:42","state":"done","lede":"The Courier posted digest d-2203 and closed the book at 08:41.","detail":{"digest":"d-2203","at":"08:41"}}],"papers":[{"t":"K⁺/Na⁺ discrimination and yield stability in bread wheat","j":"J Exp Bot","y":2023,"claims":[{"text":"K⁺/Na⁺ above 1.1 predicted survival in 15 of 16 lines","loc":"§6.2"},{"text":"Leaf blade Na⁺ stayed under 47 mmol kg⁻¹ in tolerant lines","loc":"§5.4"},{"text":"Root K⁺ retention tracked biomass at r = 0.81","loc":"Fig. 5"},{"text":"Lysimeter and field ranks agreed 90%","loc":"§6.1"},{"text":"Osmotic-phase ranking held across 5 panels","loc":"§4.4"},{"text":"Screen ranked 18 of 24 cultivars field-consistent","loc":"l.189"},{"text":"Root K⁺ retention tracked biomass at r = 0.73","loc":"§5.1"}],"cost":34,"ev":"e-2203-01"},{"t":"HKT1;5 allelic variation across elite wheat panels","j":"New Phytol","y":2024,"claims":[{"text":"Flag-leaf exclusion ran strongest at booting","loc":"l.295"},{"text":"Two landraces beat elite checks at 10 dS m⁻¹","loc":"§3.2"},{"text":"K⁺/Na⁺ above 1.4 predicted survival in 15 of 16 lines","loc":"§5.2"},{"text":"Root K⁺ retention tracked biomass at r = 0.83","loc":"l.51"},{"text":"HKT1;5 allele class explained 40% of variance","loc":"l.65"},{"text":"Root K⁺ retention tracked biomass at r = 0.84","loc":"Table 1"}],"cost":31,"ev":"e-2203-02"},{"t":"Leaf sodium exclusion as a selection proxy","j":"Crop Sci","y":2022,"claims":[{"text":"Leaf blade Na⁺ stayed under 78 mmol kg⁻¹ in tolerant lines","loc":"§3.3"},{"text":"Root K⁺ retention tracked biomass at r = 0.88","loc":"Table 5"},{"text":"Lysimeter and field ranks agreed 81%","loc":"§5.2"},{"text":"Leaf blade Na⁺ stayed under 62 mmol kg⁻¹ in tolerant lines","loc":"Table 5"},{"text":"Root K⁺ retention tracked biomass at r = 0.77","loc":"§2.4"},{"text":"Root K⁺ retention tracked biomass at r = 0.66","loc":"l.233"},{"text":"Trait heritability h² = 0.79","loc":"Table 5"}],"cost":28,"ev":"e-2203-03"},{"t":"Osmotic-phase tolerance ranking of 24 cultivars","j":"Funct Plant Biol","y":2025,"claims":[{"text":"Leaf blade Na⁺ stayed under 76 mmol kg⁻¹ in tolerant lines","loc":"Table 5"},{"text":"HKT1;5 allele class explained 45% of variance","loc":"§3.1"},{"text":"Leaf blade Na⁺ stayed under 56 mmol kg⁻¹ in tolerant lines","loc":"§6.3"},{"text":"Root K⁺ retention tracked biomass at r = 0.69","loc":"§1.2"},{"text":"HKT1;5 allele class explained 57% of variance","loc":"l.283"},{"text":"Trait heritability h² = 0.60","loc":"l.140"}],"cost":34,"ev":"e-2203-04"},{"t":"Ion partitioning under staged salinity in lysimeters","j":"Plant Physiol","y":2021,"claims":[{"text":"Lysimeter and field ranks agreed 88%","loc":"l.330"},{"text":"Osmotic-phase ranking held across 3 panels","loc":"§6.4"},{"text":"HKT1;5 allele class explained 51% of variance","loc":"§6.3"},{"text":"Screen ranked 22 of 24 cultivars field-consistent","loc":"§4.1"},{"text":"Leaf blade Na⁺ stayed under 64 mmol kg⁻¹ in tolerant lines","loc":"Fig. 2"},{"text":"K⁺/Na⁺ above 1.2 predicted survival in 13 of 16 lines","loc":"§2.2"}],"cost":27,"ev":"e-2203-05"}],"incidents":[]},{"id":"r-2204","cycle":4,"open":"09:00","status":"closed","theme":"rhizobia and PGPR inoculants","lede":"Verdict v-2204: ACC-deaminase consortia hold seedling vigor to 9 dS m⁻¹ — advanced to seed-treatment trials, 4–1.","vote":"4–1","kind":"advance","seasons":4,"conf":"0.84","verdict":"v-2204","digest":"d-2204","result":"t-2204","closedAt":"09:41","sources":12,"papersN":7,"claims":45,"costs":{"open":83,"read":212,"deliberate":358,"simulate":305,"record":61,"close":48},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"09:00","bookedEnd":"09:04","slip":0,"actual":"09:00","actualEnd":"09:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 7 to the stack.","detail":{"sources":12,"admitted":7}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"09:04","bookedEnd":"09:12","slip":0,"actual":"09:04","actualEnd":"09:12","state":"done","lede":"The Reader ingested seven papers in eight minutes and kept 45 claims for $2.12.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"09:12","bookedEnd":"09:22","slip":0,"actual":"09:12","actualEnd":"09:22","state":"done","lede":"The Council weighed 45 claims and voted 4–1 to advance.","detail":{"claims":45,"vote":"4–1","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"09:22","bookedEnd":"09:34","slip":0,"actual":"09:22","actualEnd":"09:34","state":"done","lede":"The Simulator ran four seasons in twelve minutes and posted result t-2204 at 0.84 confidence.","detail":{"seasons":"four","result":"t-2204","conf":"0.84"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"09:34","bookedEnd":"09:41","slip":0,"actual":"09:34","actualEnd":"09:41","state":"done","lede":"The Archivist linked 45 claims to evidence and recorded verdict v-2204 at 09:41.","detail":{"claims":45,"ev0":"e-2204-01","evN":"e-2204-07","verdict":"v-2204","at":"09:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"09:41","bookedEnd":"09:42","slip":0,"actual":"09:41","actualEnd":"09:42","state":"done","lede":"The Courier posted digest d-2204 and closed the book at 09:41.","detail":{"digest":"d-2204","at":"09:41"}}],"papers":[{"t":"PGPR consortia and wheat vigor on saline seedbeds","j":"Front Plant Sci","y":2024,"claims":[{"text":"Mycorrhizal colonization held 49% under sodic water","loc":"l.335"},{"text":"Consortium beat single strains in 6 of 10 trials","loc":"l.156"},{"text":"Field persistence 62% at 60 days","loc":"§3.4"},{"text":"Na⁺ leaf load fell 15% with dual inoculant","loc":"l.193"},{"text":"Nodulation lifted 26% at 7 dS m⁻¹","loc":"l.192"},{"text":"Field persistence 64% at 60 days","loc":"l.61"},{"text":"Response ceiling above 12 dS m⁻¹","loc":"l.197"}],"cost":29,"ev":"e-2204-01"},{"t":"ACC-deaminase rhizobacteria under osmotic stress","j":"Plant Soil","y":2023,"claims":[{"text":"Seed-coat survival halved above 35 °C storage","loc":"l.61"},{"text":"Tillering gained 57 shoots m⁻² with co-inoculation","loc":"Table 2"},{"text":"Consortium beat single strains in 9 of 10 trials","loc":"Fig. 4"},{"text":"Nodulation lifted 25% at 9 dS m⁻¹","loc":"§4.2"},{"text":"Priming effect persisted two cropping cycles","loc":"§5.3"},{"text":"Consortium beat single strains in 8 of 10 trials","loc":"l.213"}],"cost":25,"ev":"e-2204-02"},{"t":"Halotolerant Azospirillum isolates: field persistence","j":"Appl Soil Ecol","y":2022,"claims":[{"text":"Field persistence 57% at 60 days","loc":"§1.1"},{"text":"Mycorrhizal colonization held 52% under sodic water","loc":"§6.1"},{"text":"Tillering gained 37 shoots m⁻² with co-inoculation","loc":"l.171"},{"text":"Nodulation lifted 37% at 6 dS m⁻¹","loc":"l.51"},{"text":"Field persistence 74% at 60 days","loc":"§4.3"},{"text":"Field persistence 60% at 60 days","loc":"§1.2"},{"text":"Field persistence 79% at 60 days","loc":"§1.2"}],"cost":38,"ev":"e-2204-03"},{"t":"Seed-coat inoculant survival in saline furrows","j":"Agron J","y":2025,"claims":[{"text":"Nodulation lifted 27% at 9 dS m⁻¹","loc":"Fig. 4"},{"text":"Nodulation lifted 24% at 6 dS m⁻¹","loc":"Fig. 2"},{"text":"Benefit priced at $10 ha⁻¹ treatment cost","loc":"§2.4"},{"text":"Na⁺ leaf load fell 16% with dual inoculant","loc":"l.89"},{"text":"ACC-deaminase strains held vigor to 8 dS m⁻¹","loc":"§5.3"},{"text":"Mycorrhizal colonization held 59% under sodic water","loc":"§2.4"}],"cost":29,"ev":"e-2204-04"},{"t":"Mycorrhizal colonization under sodic irrigation","j":"Plant Soil","y":2020,"claims":[{"text":"Benefit priced at $15 ha⁻¹ treatment cost","loc":"§2.2"},{"text":"ACC-deaminase strains held vigor to 10 dS m⁻¹","loc":"§1.4"},{"text":"Nodulation lifted 43% at 9 dS m⁻¹","loc":"l.203"},{"text":"Response ceiling above 11 dS m⁻¹","loc":"§4.1"},{"text":"Tillering gained 65 shoots m⁻² with co-inoculation","loc":"l.323"},{"text":"Na⁺ leaf load fell 18% with dual inoculant","loc":"§5.3"},{"text":"Mycorrhizal colonization held 57% under sodic water","loc":"§4.2"}],"cost":37,"ev":"e-2204-05"},{"t":"Co-inoculation timing and tillering under salt stress","j":"Field Crops Res","y":2024,"claims":[{"text":"Mycorrhizal colonization held 54% under sodic water","loc":"§4.1"},{"text":"Na⁺ leaf load fell 17% with dual inoculant","loc":"§2.2"},{"text":"Field persistence 72% at 60 days","loc":"Table 2"},{"text":"Mycorrhizal colonization held 42% under sodic water","loc":"l.308"},{"text":"Na⁺ leaf load fell 19% with dual inoculant","loc":"l.290"},{"text":"ACC-deaminase strains held vigor to 9 dS m⁻¹","loc":"§4.4"}],"cost":25,"ev":"e-2204-06"},{"t":"Microbial priming effects on Na⁺ compartmentation","j":"J Exp Bot","y":2025,"claims":[{"text":"Tillering gained 66 shoots m⁻² with co-inoculation","loc":"§6.4"},{"text":"Tillering gained 67 shoots m⁻² with co-inoculation","loc":"Table 5"},{"text":"Mycorrhizal colonization held 61% under sodic water","loc":"§3.3"},{"text":"Benefit priced at $16 ha⁻¹ treatment cost","loc":"Fig. 1"},{"text":"Na⁺ leaf load fell 11% with dual inoculant","loc":"§3.4"},{"text":"Mycorrhizal colonization held 55% under sodic water","loc":"§4.3"}],"cost":29,"ev":"e-2204-07"}],"incidents":[]},{"id":"r-2205","cycle":5,"open":"10:00","status":"closed","theme":"leaching fractions and drainage","lede":"Verdict v-2205: pulsed leaching exports nearly twice the salt per unit water — advanced into the water budget, 4–1.","vote":"4–1","kind":"advance","seasons":3,"conf":"0.77","verdict":"v-2205","digest":"d-2205","result":"t-2205","closedAt":"10:41","sources":12,"papersN":6,"claims":38,"costs":{"open":77,"read":183,"deliberate":337,"simulate":288,"record":57,"close":45},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"10:00","bookedEnd":"10:04","slip":0,"actual":"10:00","actualEnd":"10:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 6 to the stack.","detail":{"sources":12,"admitted":6}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"10:04","bookedEnd":"10:12","slip":0,"actual":"10:04","actualEnd":"10:12","state":"done","lede":"The Reader ingested six papers in eight minutes and kept 38 claims for $1.83.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"10:12","bookedEnd":"10:22","slip":0,"actual":"10:12","actualEnd":"10:22","state":"done","lede":"The Council weighed 38 claims and voted 4–1 to advance.","detail":{"claims":38,"vote":"4–1","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"10:22","bookedEnd":"10:34","slip":2,"actual":"10:24","actualEnd":"10:36","state":"done","lede":"The Simulator ran three seasons in twelve minutes and posted result t-2205 at 0.77 confidence.","detail":{"seasons":"three","result":"t-2205","conf":"0.77"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"10:34","bookedEnd":"10:41","slip":0,"actual":"10:34","actualEnd":"10:41","state":"done","lede":"The Archivist linked 38 claims to evidence and recorded verdict v-2205 at 10:41.","detail":{"claims":38,"ev0":"e-2205-01","evN":"e-2205-06","verdict":"v-2205","at":"10:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"10:41","bookedEnd":"10:42","slip":0,"actual":"10:41","actualEnd":"10:42","state":"done","lede":"The Courier posted digest d-2205 and closed the book at 10:41.","detail":{"digest":"d-2205","at":"10:41"}}],"papers":[{"t":"Leaching requirement recalculated for skip-row wheat","j":"Agric Water Manag","y":2024,"claims":[{"text":"EM38 mapped root-zone ECe at r² = 0.82","loc":"§4.1"},{"text":"Leaching requirement ran 22% below the handbook value","loc":"§2.4"},{"text":"Reuse proved safe to 5 dS m⁻¹ for 4 cycles","loc":"§6.1"},{"text":"Salt export peaked in the first 20 mm of drainage","loc":"§5.4"},{"text":"Field-scale budget closed within 4%","loc":"§2.2"},{"text":"Leaching requirement ran 21% below the handbook value","loc":"Fig. 5"},{"text":"Field-scale budget closed within 6%","loc":"§1.4"}],"cost":39,"ev":"e-2205-01"},{"t":"Tile drain spacing on irrigated sodic plains","j":"Agric Water Manag","y":2021,"claims":[{"text":"EM38 mapped root-zone ECe at r² = 0.85","loc":"Table 5"},{"text":"Drain flow lagged irrigation by 7 h","loc":"§1.1"},{"text":"Reuse proved safe to 6 dS m⁻¹ for 3 cycles","loc":"Table 2"},{"text":"Winter rain credited 30% of the leaching budget","loc":"§1.2"},{"text":"Winter rain credited 27% of the leaching budget","loc":"Table 3"},{"text":"Pulsed events exported 1.8× salt per unit water","loc":"§4.2"}],"cost":21,"ev":"e-2205-02"},{"t":"Salt export efficiency of pulsed leaching events","j":"Irrig Sci","y":2023,"claims":[{"text":"Salt export peaked in the first 21 mm of drainage","loc":"§3.3"},{"text":"Winter rain credited 21% of the leaching budget","loc":"§5.3"},{"text":"Leaching requirement ran 18% below the handbook value","loc":"§2.1"},{"text":"Leaching requirement ran 16% below the handbook value","loc":"l.139"},{"text":"Reuse proved safe to 6 dS m⁻¹ for 2 cycles","loc":"§2.2"},{"text":"Drain flow lagged irrigation by 6 h","loc":"§5.3"}],"cost":35,"ev":"e-2205-03"},{"t":"Root-zone salinity mapping from EM38 transects","j":"Geoderma","y":2022,"claims":[{"text":"Pulsed events exported 1.9× salt per unit water","loc":"Fig. 1"},{"text":"Winter rain credited 29% of the leaching budget","loc":"§3.3"},{"text":"Reuse proved safe to 5 dS m⁻¹ for 3 cycles","loc":"§4.3"},{"text":"Tile spacing 21 m held the water table at 1.5 m","loc":"§2.2"},{"text":"Tile spacing 24 m held the water table at 1.5 m","loc":"§4.3"},{"text":"Pulsed events exported 1.7× salt per unit water","loc":"§2.3"},{"text":"EM38 mapped root-zone ECe at r² = 0.87","loc":"§1.2"}],"cost":32,"ev":"e-2205-04"},{"t":"Winter rainfall credit in leaching budgets","j":"Eur J Agron","y":2025,"claims":[{"text":"EM38 mapped root-zone ECe at r² = 0.74","loc":"Table 1"},{"text":"Drain flow lagged irrigation by 14 h","loc":"§6.3"},{"text":"Tile spacing 18 m held the water table at 1.5 m","loc":"l.162"},{"text":"Salt export peaked in the first 31 mm of drainage","loc":"l.67"},{"text":"Leaching requirement ran 15% below the handbook value","loc":"§6.4"},{"text":"Field-scale budget closed within 9%","loc":"§4.3"}],"cost":24,"ev":"e-2205-05"},{"t":"Drainage water reuse limits for cereal rotations","j":"Agric Syst","y":2023,"claims":[{"text":"Skip-row planting cut the requirement 11%","loc":"Fig. 4"},{"text":"Leaching requirement ran 13% below the handbook value","loc":"Table 5"},{"text":"Skip-row planting cut the requirement 16%","loc":"§3.2"},{"text":"Salt export peaked in the first 30 mm of drainage","loc":"Fig. 1"},{"text":"EM38 mapped root-zone ECe at r² = 0.79","loc":"§4.4"},{"text":"Pulsed events exported 1.6× salt per unit water","loc":"l.100"}],"cost":32,"ev":"e-2205-06"}],"incidents":[]},{"id":"r-2206","cycle":6,"open":"11:00","status":"closed","theme":"seed priming and early vigor","lede":"Verdict v-2206: halopriming lifts emergence but the effect fades by tillering — parked pending a cost read, 3–2.","vote":"3–2","kind":"park","seasons":2,"conf":"0.61","verdict":"v-2206","digest":"d-2206","result":"t-2206","closedAt":"11:41","sources":13,"papersN":5,"claims":32,"costs":{"open":80,"read":151,"deliberate":312,"simulate":272,"record":53,"close":42},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"11:00","bookedEnd":"11:04","slip":0,"actual":"11:00","actualEnd":"11:04","state":"done","lede":"The Scout stocked the docket with 13 sources and admitted 5 to the stack.","detail":{"sources":13,"admitted":5}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"11:04","bookedEnd":"11:12","slip":0,"actual":"11:04","actualEnd":"11:12","state":"done","lede":"The Reader ingested five papers in eight minutes and kept 32 claims for $1.51.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"11:12","bookedEnd":"11:22","slip":0,"actual":"11:12","actualEnd":"11:22","state":"done","lede":"The Council weighed 32 claims and voted 3–2 to park.","detail":{"claims":32,"vote":"3–2","kind":"park","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"11:22","bookedEnd":"11:34","slip":0,"actual":"11:22","actualEnd":"11:34","state":"done","lede":"The Simulator ran two seasons in twelve minutes and posted result t-2206 at 0.61 confidence.","detail":{"seasons":"two","result":"t-2206","conf":"0.61"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"11:34","bookedEnd":"11:41","slip":0,"actual":"11:34","actualEnd":"11:41","state":"done","lede":"The Archivist linked 32 claims to evidence and recorded verdict v-2206 at 11:41.","detail":{"claims":32,"ev0":"e-2206-01","evN":"e-2206-05","verdict":"v-2206","at":"11:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"11:41","bookedEnd":"11:42","slip":0,"actual":"11:41","actualEnd":"11:42","state":"done","lede":"The Courier posted digest d-2206 and closed the book at 11:41.","detail":{"digest":"d-2206","at":"11:41"}}],"papers":[{"t":"Halopriming and emergence uniformity in saline seedbeds","j":"Crop Sci","y":2024,"claims":[{"text":"On-farm priming added $5 ha⁻¹ cost","loc":"l.321"},{"text":"Emergence advanced 4 days under salt","loc":"Table 5"},{"text":"Priming window of 9–18 h proved optimal","loc":"l.130"},{"text":"Coleoptile length predicted emergence at r = 0.64","loc":"l.189"},{"text":"Priming window of 9–15 h proved optimal","loc":"l.250"},{"text":"Benefit ran largest on crusting seedbeds","loc":"§5.2"},{"text":"Stand uniformity CV fell 26%","loc":"§6.4"}],"cost":31,"ev":"e-2206-01"},{"t":"Osmopriming durum wheat: germination at 12 dS m⁻¹","j":"Ann Bot","y":2022,"claims":[{"text":"Effect faded by tillering in 7 of 9 trials","loc":"§1.2"},{"text":"Coleoptile length predicted emergence at r = 0.61","loc":"l.233"},{"text":"On-farm priming added $4 ha⁻¹ cost","loc":"§6.3"},{"text":"Coleoptile length predicted emergence at r = 0.80","loc":"§6.4"},{"text":"Primed seedling Na⁺ load ran 11% lower at 20 days","loc":"l.134"},{"text":"On-farm priming added $7 ha⁻¹ cost","loc":"§2.2"}],"cost":34,"ev":"e-2206-02"},{"t":"Priming memory and seedling Na⁺ loads","j":"J Exp Bot","y":2021,"claims":[{"text":"Emergence advanced 3 days under salt","loc":"§4.3"},{"text":"Germination held 70% at 12 dS m⁻¹ primed","loc":"§3.3"},{"text":"Primed seedling Na⁺ load ran 15% lower at 20 days","loc":"§4.2"},{"text":"Coleoptile length predicted emergence at r = 0.70","loc":"l.248"},{"text":"Primed seedling Na⁺ load ran 18% lower at 20 days","loc":"§4.4"},{"text":"Primed seedling Na⁺ load ran 16% lower at 20 days","loc":"§2.3"},{"text":"Primed seedling Na⁺ load ran 13% lower at 20 days","loc":"l.107"}],"cost":31,"ev":"e-2206-03"},{"t":"On-farm priming logistics and stand establishment","j":"Agron J","y":2023,"claims":[{"text":"Priming window of 11–14 h proved optimal","loc":"§6.2"},{"text":"Effect faded by tillering in 8 of 9 trials","loc":"§1.2"},{"text":"Halopriming lifted emergence 15% at 10 dS m⁻¹","loc":"§3.3"},{"text":"On-farm priming added $9 ha⁻¹ cost","loc":"§4.1"},{"text":"Germination held 72% at 12 dS m⁻¹ primed","loc":"§4.4"},{"text":"On-farm priming added $8 ha⁻¹ cost","loc":"§2.4"}],"cost":34,"ev":"e-2206-04"},{"t":"Coleoptile length as an emergence predictor under salt","j":"Funct Plant Biol","y":2020,"claims":[{"text":"Stand uniformity CV fell 34%","loc":"Fig. 3"},{"text":"Stand uniformity CV fell 33%","loc":"l.270"},{"text":"Stand uniformity CV fell 35%","loc":"l.150"},{"text":"Primed seedling Na⁺ load ran 19% lower at 20 days","loc":"§1.3"},{"text":"Germination held 78% at 12 dS m⁻¹ primed","loc":"§4.4"},{"text":"Priming window of 12–18 h proved optimal","loc":"l.31"}],"cost":21,"ev":"e-2206-05"}],"incidents":[]},{"id":"r-2207","cycle":7,"open":"12:00","status":"struck","theme":"mulching and evaporation control","lede":"Cycle 07 opened to an empty feed at 12:01 and was struck — kept on the book, no spend beyond the open.","vote":null,"kind":null,"seasons":null,"conf":null,"verdict":null,"digest":null,"result":null,"closedAt":null,"sources":0,"papersN":0,"claims":0,"costs":{"open":4,"read":0,"deliberate":0,"simulate":0,"record":0,"close":0},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"12:00","bookedEnd":"12:04","slip":0,"actual":"12:00","actualEnd":"12:01","state":"done","lede":"The Scout opened 12:00 to an empty feed — cycle 07 struck at 12:01, kept on the book.","detail":{"sources":0,"admitted":0,"note":"feed empty at 12:01 · 0 sources · cycle struck kept on book"}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"12:04","bookedEnd":"12:12","slip":0,"actual":null,"actualEnd":null,"state":"struck","lede":"The Reader never ran — cycle 07 was struck at open.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"12:12","bookedEnd":"12:22","slip":0,"actual":null,"actualEnd":null,"state":"struck","lede":"The Council never ran — cycle 07 was struck at open.","detail":null},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"12:22","bookedEnd":"12:34","slip":0,"actual":null,"actualEnd":null,"state":"struck","lede":"The Simulator never ran — cycle 07 was struck at open.","detail":null},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"12:34","bookedEnd":"12:41","slip":0,"actual":null,"actualEnd":null,"state":"struck","lede":"The Archivist never ran — cycle 07 was struck at open.","detail":null},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"12:41","bookedEnd":"12:42","slip":0,"actual":null,"actualEnd":null,"state":"struck","lede":"The Courier never ran — cycle 07 was struck at open.","detail":null}],"papers":[],"incidents":[{"t":"12:01","text":"feed empty at open — cycle struck, kept on book","mins":0.0}]},{"id":"r-2208","cycle":8,"open":"13:00","status":"closed","theme":"biochar and organic amendments","lede":"Verdict v-2208: compost–gypsum co-application beats either amendment alone on saline-sodic ground — advanced unanimously to the shortlist.","vote":"5–0","kind":"advance","seasons":3,"conf":"0.83","verdict":"v-2208","digest":"d-2208","result":"t-2208","closedAt":"13:41","sources":12,"papersN":6,"claims":38,"costs":{"open":76,"read":188,"deliberate":340,"simulate":295,"record":58,"close":46},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"13:00","bookedEnd":"13:04","slip":0,"actual":"13:00","actualEnd":"13:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 6 to the stack.","detail":{"sources":12,"admitted":6}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"13:04","bookedEnd":"13:12","slip":0,"actual":"13:04","actualEnd":"13:12","state":"done","lede":"The Reader ingested six papers in eight minutes and kept 38 claims for $1.88.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"13:12","bookedEnd":"13:22","slip":0,"actual":"13:12","actualEnd":"13:22","state":"done","lede":"The Council weighed 38 claims and voted 5–0 to advance.","detail":{"claims":38,"vote":"5–0","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"13:22","bookedEnd":"13:34","slip":0,"actual":"13:22","actualEnd":"13:34","state":"done","lede":"The Simulator ran three seasons in twelve minutes and posted result t-2208 at 0.83 confidence.","detail":{"seasons":"three","result":"t-2208","conf":"0.83"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"13:34","bookedEnd":"13:41","slip":0,"actual":"13:34","actualEnd":"13:41","state":"done","lede":"The Archivist linked 38 claims to evidence and recorded verdict v-2208 at 13:41.","detail":{"claims":38,"ev0":"e-2208-01","evN":"e-2208-06","verdict":"v-2208","at":"13:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"13:41","bookedEnd":"13:42","slip":0,"actual":"13:41","actualEnd":"13:42","state":"done","lede":"The Courier posted digest d-2208 and closed the book at 13:41.","detail":{"digest":"d-2208","at":"13:41"}}],"papers":[{"t":"Biochar feedstock and salt sorption in root zones","j":"Geoderma","y":2024,"claims":[{"text":"Aggregate stability rose 20% under brackish water","loc":"§2.2"},{"text":"Compost–gypsum pairing beat either alone by 12%","loc":"§2.2"},{"text":"Biochar at 12 t ha⁻¹ sorbed 17% of applied Na⁺","loc":"§5.4"},{"text":"Cost per ESP point landed near $27 ha⁻¹","loc":"§5.1"},{"text":"CEC rose 21% at 8 t ha⁻¹","loc":"§1.3"},{"text":"Compost–gypsum pairing beat either alone by 13%","loc":"§2.4"},{"text":"Compost–gypsum pairing beat either alone by 21%","loc":"§2.4"}],"cost":31,"ev":"e-2208-01"},{"t":"Compost–gypsum co-application on saline-sodic fields","j":"Soil Tillage Res","y":2023,"claims":[{"text":"Aggregate stability rose 18% under brackish water","loc":"Fig. 1"},{"text":"Aggregate stability rose 29% under brackish water","loc":"l.230"},{"text":"Wood feedstock beat manure feedstock by 9%","loc":"Fig. 1"},{"text":"Effect stayed durable 2 seasons after one dose","loc":"§3.4"},{"text":"SAR drifted +1 units as biochar aged","loc":"Fig. 3"},{"text":"Emergence gained 9% on carbon-amended beds","loc":"§4.3"}],"cost":31,"ev":"e-2208-02"},{"t":"Humic amendments and aggregate stability under brackish irrigation","j":"Plant Soil","y":2022,"claims":[{"text":"Effect stayed durable 4 seasons after one dose","loc":"§2.2"},{"text":"Biochar at 8 t ha⁻¹ sorbed 13% of applied Na⁺","loc":"§3.3"},{"text":"Straw mulch cut evaporative salt rise 33%","loc":"§5.1"},{"text":"Straw mulch cut evaporative salt rise 21%","loc":"§2.1"},{"text":"Effect stayed durable 3 seasons after one dose","loc":"§1.1"},{"text":"Wood feedstock beat manure feedstock by 14%","loc":"l.283"}],"cost":26,"ev":"e-2208-03"},{"t":"Biochar aging and sodium adsorption ratio drift","j":"Geoderma","y":2021,"claims":[{"text":"SAR drifted +2 units as biochar aged","loc":"§6.4"},{"text":"Wood feedstock beat manure feedstock by 12%","loc":"§4.4"},{"text":"Cost per ESP point landed near $19 ha⁻¹","loc":"l.96"},{"text":"CEC rose 22% at 10 t ha⁻¹","loc":"§6.2"},{"text":"Emergence gained 17% on carbon-amended beds","loc":"Fig. 3"},{"text":"Wood feedstock beat manure feedstock by 15%","loc":"l.185"},{"text":"Wood feedstock beat manure feedstock by 10%","loc":"l.331"}],"cost":35,"ev":"e-2208-04"},{"t":"Straw incorporation and evaporative salt rise","j":"Field Crops Res","y":2022,"claims":[{"text":"Aggregate stability rose 17% under brackish water","loc":"Fig. 3"},{"text":"Cost per ESP point landed near $20 ha⁻¹","loc":"l.30"},{"text":"Straw mulch cut evaporative salt rise 34%","loc":"Table 5"},{"text":"Biochar at 5 t ha⁻¹ sorbed 12% of applied Na⁺","loc":"l.259"},{"text":"Straw mulch cut evaporative salt rise 23%","loc":"§4.3"},{"text":"SAR drifted +3 units as biochar aged","loc":"§2.3"}],"cost":39,"ev":"e-2208-05"},{"t":"Carbon-amended seedbeds: emergence economics","j":"Agric Syst","y":2025,"claims":[{"text":"Compost–gypsum pairing beat either alone by 16%","loc":"l.224"},{"text":"Biochar at 7 t ha⁻¹ sorbed 25% of applied Na⁺","loc":"l.70"},{"text":"Cost per ESP point landed near $28 ha⁻¹","loc":"Table 3"},{"text":"Biochar at 9 t ha⁻¹ sorbed 22% of applied Na⁺","loc":"Fig. 1"},{"text":"Compost–gypsum pairing beat either alone by 15%","loc":"l.28"},{"text":"Straw mulch cut evaporative salt rise 24%","loc":"§2.1"}],"cost":26,"ev":"e-2208-06"}],"incidents":[]},{"id":"r-2209","cycle":9,"open":"14:00","status":"closed","theme":"co-inoculation and rotation under saline irrigation","lede":"Verdict v-2209: co-inoculated legume bridges desalinate the root zone while paying a nitrogen credit — advanced to rotation design, 4–1.","vote":"4–1","kind":"advance","seasons":3,"conf":"0.79","verdict":"v-2209","digest":"d-2209","result":"t-2209","closedAt":"15:02","sources":11,"papersN":7,"claims":45,"costs":{"open":81,"read":219,"deliberate":361,"simulate":374,"record":62,"close":47},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"14:00","bookedEnd":"14:04","slip":0,"actual":"14:00","actualEnd":"14:04","state":"done","lede":"The Scout stocked the docket with 11 sources and admitted 7 to the stack.","detail":{"sources":11,"admitted":7}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"14:04","bookedEnd":"14:12","slip":0,"actual":"14:04","actualEnd":"14:12","state":"done","lede":"The Reader ingested seven papers in eight minutes and kept 45 claims for $2.19.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"14:12","bookedEnd":"14:22","slip":0,"actual":"14:12","actualEnd":"14:22","state":"done","lede":"The Council weighed 45 claims and voted 4–1 to advance.","detail":{"claims":45,"vote":"4–1","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"14:22","bookedEnd":"14:34","slip":21,"actual":"14:43","actualEnd":"14:55","state":"done","lede":"The Simulator stalled in queue at 14:22, was requeued at 14:43, and ran three seasons to result t-2209 at 0.79 confidence.","detail":{"seasons":"three","result":"t-2209","conf":"0.79"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"14:34","bookedEnd":"14:41","slip":21,"actual":"14:55","actualEnd":"15:02","state":"done","lede":"The Archivist linked 45 claims to evidence and recorded verdict v-2209 at 15:02.","detail":{"claims":45,"ev0":"e-2209-01","evN":"e-2209-07","verdict":"v-2209","at":"15:02"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"14:41","bookedEnd":"14:42","slip":21,"actual":"15:02","actualEnd":"15:03","state":"done","lede":"The Courier posted digest d-2209 and closed the book at 15:02.","detail":{"digest":"d-2209","at":"15:02"}}],"papers":[{"t":"Rhizobium co-inoculation under saline irrigation","j":"Field Crops Res","y":2025,"claims":[{"text":"Co-inoculation lifted nodulation 41% at 8 dS m⁻¹","loc":"§1.3"},{"text":"Grain yield gap narrowed 0.62 t ha⁻¹ over single strain","loc":"l.164"},{"text":"Effect persisted through two irrigation cycles","loc":"§4.3"},{"text":"Na⁺ leaf load fell 17% with the dual inoculant","loc":"§6.4"},{"text":"Response flattened above 11 dS m⁻¹ — ceiling noted","loc":"Fig. 5"},{"text":"Strain S18 outperformed S4 across all sites","loc":"§3.1"},{"text":"Benefit priced at $11 ha⁻¹ seed-treatment cost","loc":"§5.2"}],"cost":26,"ev":"e-2209-01"},{"t":"Halophyte–wheat rotations and root-zone desalination","j":"Plant Soil","y":2024,"claims":[{"text":"Desalination reached 37 cm depth in one season","loc":"l.252"},{"text":"Rotation cut amendment need 26%","loc":"Fig. 2"},{"text":"Sesbania manure lifted next-cycle yield 13%","loc":"§1.1"},{"text":"Bridge crop water cost ran 74 mm","loc":"§2.2"},{"text":"Bridge crop water cost ran 113 mm","loc":"Table 5"},{"text":"Nitrogen credit reached 32 kg ha⁻¹ under brackish regimes","loc":"§1.3"}],"cost":42,"ev":"e-2209-02"},{"t":"Suaeda biomass harvest as a salt export pathway","j":"Ann Bot","y":2023,"claims":[{"text":"Wheat after a legume bridge yielded +0.7 t ha⁻¹","loc":"Fig. 5"},{"text":"Wheat after a legume bridge yielded +0.6 t ha⁻¹","loc":"§5.1"},{"text":"Inoculant carryover held 40% across the boundary","loc":"l.65"},{"text":"Sesbania manure lifted next-cycle yield 14%","loc":"§6.3"},{"text":"Inoculant carryover held 35% across the boundary","loc":"§6.4"},{"text":"Nitrogen credit reached 23 kg ha⁻¹ under brackish regimes","loc":"l.165"},{"text":"Desalination reached 45 cm depth in one season","loc":"Table 2"}],"cost":38,"ev":"e-2209-03"},{"t":"Legume bridge crops on marginal saline land","j":"Eur J Agron","y":2024,"claims":[{"text":"Bridge crop water cost ran 71 mm","loc":"§1.3"},{"text":"Rotation cut amendment need 17%","loc":"§3.1"},{"text":"Two-season rotation paid back at $90 ha⁻¹","loc":"§4.2"},{"text":"Sesbania manure lifted next-cycle yield 15%","loc":"Fig. 3"},{"text":"Bridge crop water cost ran 60 mm","loc":"§3.1"},{"text":"Two-season rotation paid back at $41 ha⁻¹","loc":"Fig. 3"}],"cost":34,"ev":"e-2209-04"},{"t":"Rotational nitrogen credit under brackish regimes","j":"Agron J","y":2022,"claims":[{"text":"Rotation cut amendment need 27%","loc":"§2.4"},{"text":"Suaeda harvest removed 18% of root-zone Na⁺","loc":"l.142"},{"text":"Halophyte season exported 517 kg salt ha⁻¹","loc":"§4.3"},{"text":"Halophyte season exported 298 kg salt ha⁻¹","loc":"Table 4"},{"text":"Desalination reached 49 cm depth in one season","loc":"§5.1"},{"text":"Sesbania manure lifted next-cycle yield 9%","loc":"l.340"},{"text":"Inoculant carryover held 36% across the boundary","loc":"§1.2"}],"cost":30,"ev":"e-2209-05"},{"t":"Sesbania green manure and post-cycle wheat yield","j":"Field Crops Res","y":2021,"claims":[{"text":"Sesbania manure lifted next-cycle yield 11%","loc":"l.145"},{"text":"Bridge crop water cost ran 116 mm","loc":"§6.1"},{"text":"Halophyte season exported 483 kg salt ha⁻¹","loc":"l.135"},{"text":"Halophyte season exported 424 kg salt ha⁻¹","loc":"§4.2"},{"text":"Inoculant carryover held 47% across the boundary","loc":"Fig. 4"},{"text":"Halophyte season exported 368 kg salt ha⁻¹","loc":"Fig. 4"}],"cost":26,"ev":"e-2209-06"},{"t":"Inoculant survival across rotation boundaries","j":"Appl Soil Ecol","y":2025,"claims":[{"text":"Desalination reached 52 cm depth in one season","loc":"§3.1"},{"text":"Two-season rotation paid back at $85 ha⁻¹","loc":"§3.4"},{"text":"Halophyte season exported 343 kg salt ha⁻¹","loc":"§4.3"},{"text":"Nitrogen credit reached 24 kg ha⁻¹ under brackish regimes","loc":"§4.3"},{"text":"Nitrogen credit reached 42 kg ha⁻¹ under brackish regimes","loc":"§5.4"},{"text":"Rotation cut amendment need 30%","loc":"l.185"}],"cost":23,"ev":"e-2209-07"}],"incidents":[{"t":"14:22","text":"simulator queue stall — requeued 14:43, closed 15:02","mins":21.0}]},{"id":"r-2210","cycle":10,"open":"15:00","status":"closed","theme":"remote sensing of salt stress","lede":"Verdict v-2210: hyperspectral early-warning indices fall below field noise — rejected on the evidence, 2–3.","vote":"2–3","kind":"reject","seasons":2,"conf":"0.58","verdict":"v-2210","digest":"d-2210","result":"t-2210","closedAt":"15:41","sources":12,"papersN":5,"claims":32,"costs":{"open":72,"read":149,"deliberate":315,"simulate":279,"record":55,"close":44},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"15:00","bookedEnd":"15:04","slip":0,"actual":"15:00","actualEnd":"15:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 5 to the stack.","detail":{"sources":12,"admitted":5}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"15:04","bookedEnd":"15:12","slip":0,"actual":"15:04","actualEnd":"15:12","state":"done","lede":"The Reader ingested five papers in eight minutes and kept 32 claims for $1.49.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"15:12","bookedEnd":"15:22","slip":0,"actual":"15:12","actualEnd":"15:22","state":"done","lede":"The Council weighed 32 claims and voted 2–3 to reject.","detail":{"claims":32,"vote":"2–3","kind":"reject","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"15:22","bookedEnd":"15:34","slip":0,"actual":"15:22","actualEnd":"15:34","state":"done","lede":"The Simulator ran two seasons in twelve minutes and posted result t-2210 at 0.58 confidence.","detail":{"seasons":"two","result":"t-2210","conf":"0.58"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"15:34","bookedEnd":"15:41","slip":1,"actual":"15:35","actualEnd":"15:42","state":"done","lede":"The Archivist linked 32 claims to evidence and recorded verdict v-2210 at 15:41.","detail":{"claims":32,"ev0":"e-2210-01","evN":"e-2210-05","verdict":"v-2210","at":"15:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"15:41","bookedEnd":"15:42","slip":0,"actual":"15:41","actualEnd":"15:42","state":"done","lede":"The Courier posted digest d-2210 and closed the book at 15:41.","detail":{"digest":"d-2210","at":"15:41"}}],"papers":[{"t":"Canopy hyperspectral indices for early salt stress","j":"Remote Sens","y":2024,"claims":[{"text":"False positives hit 15% on wet mornings","loc":"Table 5"},{"text":"False positives hit 17% on wet mornings","loc":"l.195"},{"text":"Red-edge bands beat NDVI by 19%","loc":"§2.3"},{"text":"Loss became visible from orbit at 32% severity","loc":"l.224"},{"text":"Red-edge bands beat NDVI by 10%","loc":"l.303"},{"text":"False positives hit 25% on wet mornings","loc":"Table 3"},{"text":"Fluorescence proxy failed below 43% canopy cover","loc":"l.306"}],"cost":41,"ev":"e-2210-01"},{"t":"UAV thermal gradients over variably saline fields","j":"Precis Agric","y":2023,"claims":[{"text":"Loss became visible from orbit at 36% severity","loc":"l.297"},{"text":"Fluorescence proxy failed below 48% canopy cover","loc":"§4.1"},{"text":"Fluorescence proxy failed below 45% canopy cover","loc":"§5.1"},{"text":"Meta-analysis: 14 of 31 studies underpowered","loc":"l.274"},{"text":"Sentinel-2 mapped decline at r² = 0.65","loc":"l.52"},{"text":"Index flagged stress 4 days before visible wilt","loc":"Fig. 4"}],"cost":20,"ev":"e-2210-02"},{"t":"Sentinel-2 time series and yield decline mapping","j":"Remote Sens","y":2022,"claims":[{"text":"Ground truthing cut error 32%","loc":"l.100"},{"text":"Sentinel-2 mapped decline at r² = 0.54","loc":"l.55"},{"text":"Fluorescence proxy failed below 35% canopy cover","loc":"Table 5"},{"text":"Ground truthing cut error 22%","loc":"l.132"},{"text":"Sentinel-2 mapped decline at r² = 0.64","loc":"§3.1"},{"text":"Detection threshold sat at 8 dS m⁻¹","loc":"§6.4"},{"text":"Meta-analysis: 16 of 31 studies underpowered","loc":"§2.3"}],"cost":31,"ev":"e-2210-03"},{"t":"Chlorophyll fluorescence proxies under osmotic shock","j":"Plant Physiol","y":2025,"claims":[{"text":"Meta-analysis: 18 of 31 studies underpowered","loc":"Table 2"},{"text":"Loss became visible from orbit at 27% severity","loc":"l.318"},{"text":"Loss became visible from orbit at 30% severity","loc":"§6.4"},{"text":"Index flagged stress 9 days before visible wilt","loc":"Table 5"},{"text":"Red-edge bands beat NDVI by 13%","loc":"§4.4"},{"text":"Index flagged stress 6 days before visible wilt","loc":"Table 4"}],"cost":30,"ev":"e-2210-04"},{"t":"Salinity stress detection thresholds: a meta-analysis","j":"Eur J Agron","y":2021,"claims":[{"text":"Ground truthing cut error 21%","loc":"§2.2"},{"text":"Fluorescence proxy failed below 34% canopy cover","loc":"Table 2"},{"text":"Meta-analysis: 19 of 31 studies underpowered","loc":"§6.3"},{"text":"UAV thermal split saline zones at a 4 °C delta","loc":"§1.3"},{"text":"UAV thermal split saline zones at a 3 °C delta","loc":"§1.2"},{"text":"Ground truthing cut error 27%","loc":"§1.1"}],"cost":27,"ev":"e-2210-05"}],"incidents":[]},{"id":"r-2211","cycle":11,"open":"16:00","status":"closed","theme":"raised beds and tillage on salt-affected soils","lede":"Verdict v-2211: permanent raised beds move salt to the shoulders and hold five-year yields — advanced to bed-geometry simulation, 4–1.","vote":"4–1","kind":"advance","seasons":3,"conf":"0.82","verdict":"v-2211","digest":"d-2211","result":"t-2211","closedAt":"16:41","sources":12,"papersN":6,"claims":39,"costs":{"open":85,"read":190,"deliberate":349,"simulate":298,"record":57,"close":46},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"16:00","bookedEnd":"16:04","slip":0,"actual":"16:00","actualEnd":"16:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 6 to the stack.","detail":{"sources":12,"admitted":6}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"16:04","bookedEnd":"16:12","slip":0,"actual":"16:04","actualEnd":"16:12","state":"done","lede":"The Reader ingested six papers in eight minutes and kept 39 claims for $1.90.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"16:12","bookedEnd":"16:22","slip":0,"actual":"16:12","actualEnd":"16:22","state":"done","lede":"The Council weighed 39 claims and voted 4–1 to advance.","detail":{"claims":39,"vote":"4–1","kind":"advance","pending":false}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"16:22","bookedEnd":"16:34","slip":0,"actual":"16:22","actualEnd":"16:34","state":"done","lede":"The Simulator ran three seasons in twelve minutes and posted result t-2211 at 0.82 confidence.","detail":{"seasons":"three","result":"t-2211","conf":"0.82"}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"16:34","bookedEnd":"16:41","slip":0,"actual":"16:34","actualEnd":"16:41","state":"done","lede":"The Archivist linked 39 claims to evidence and recorded verdict v-2211 at 16:41.","detail":{"claims":39,"ev0":"e-2211-01","evN":"e-2211-06","verdict":"v-2211","at":"16:41"}},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"16:41","bookedEnd":"16:42","slip":0,"actual":"16:41","actualEnd":"16:42","state":"done","lede":"The Courier posted digest d-2211 and closed the book at 16:41.","detail":{"digest":"d-2211","at":"16:41"}}],"papers":[{"t":"Raised beds and salt redistribution in furrow systems","j":"Soil Tillage Res","y":2024,"claims":[{"text":"Furrow wetting pattern set the salt geometry","loc":"l.331"},{"text":"Shoulder residue raised local salt 15%","loc":"§6.2"},{"text":"Shoulder ECe ran 3× the furrow bottom","loc":"§5.4"},{"text":"Permanent beds held 95% yield over five years","loc":"l.169"},{"text":"Water use fell 22% versus flat basins","loc":"l.232"},{"text":"Water use fell 12% versus flat basins","loc":"§3.1"},{"text":"Re-forming beds each cycle erased the benefit","loc":"§3.4"}],"cost":37,"ev":"e-2211-01"},{"t":"Permanent beds under brackish irrigation: five-year yields","j":"Field Crops Res","y":2023,"claims":[{"text":"Shoulder ECe ran 2× the furrow bottom","loc":"Fig. 2"},{"text":"Beds moved salt to shoulders; seed row ran 30% cleaner","loc":"l.191"},{"text":"Permanent beds held 91% yield over five years","loc":"Table 2"},{"text":"Shoulder residue raised local salt 17%","loc":"§1.3"},{"text":"Shoulder residue raised local salt 11%","loc":"l.250"},{"text":"Beds moved salt to shoulders; seed row ran 42% cleaner","loc":"§3.4"}],"cost":21,"ev":"e-2211-02"},{"t":"Residue retention and evaporative concentration at bed shoulders","j":"Agric Water Manag","y":2022,"claims":[{"text":"Controlled traffic lifted infiltration 43%","loc":"Table 3"},{"text":"Bed height near 15 cm minimized seedling exposure","loc":"l.164"},{"text":"Strip-till transition cost 6% of one season's yield","loc":"§1.4"},{"text":"Water use fell 18% versus flat basins","loc":"l.302"},{"text":"Bed height near 19 cm minimized seedling exposure","loc":"l.127"},{"text":"Shoulder residue raised local salt 14%","loc":"Table 5"},{"text":"Shoulder residue raised local salt 22%","loc":"l.73"}],"cost":41,"ev":"e-2211-03"},{"t":"Controlled traffic and infiltration on sodic soils","j":"Soil Tillage Res","y":2021,"claims":[{"text":"Permanent beds held 94% yield over five years","loc":"§3.3"},{"text":"Shoulder ECe ran 4× the furrow bottom","loc":"§3.2"},{"text":"Strip-till transition cost 7% of one season's yield","loc":"§6.2"},{"text":"Controlled traffic lifted infiltration 26%","loc":"§1.4"},{"text":"Water use fell 14% versus flat basins","loc":"l.188"},{"text":"Beds moved salt to shoulders; seed row ran 37% cleaner","loc":"l.257"}],"cost":27,"ev":"e-2211-04"},{"t":"Bed geometry and seedling salt exposure","j":"Irrig Sci","y":2025,"claims":[{"text":"Shoulder residue raised local salt 13%","loc":"Table 2"},{"text":"Bed height near 23 cm minimized seedling exposure","loc":"§4.3"},{"text":"Beds moved salt to shoulders; seed row ran 35% cleaner","loc":"l.143"},{"text":"Permanent beds held 97% yield over five years","loc":"§1.4"},{"text":"Strip-till transition cost 9% of one season's yield","loc":"§2.2"},{"text":"Beds moved salt to shoulders; seed row ran 32% cleaner","loc":"§6.2"},{"text":"Beds moved salt to shoulders; seed row ran 26% cleaner","loc":"Table 3"}],"cost":27,"ev":"e-2211-05"},{"t":"Strip-till transitions on salt-affected ground","j":"Agron J","y":2024,"claims":[{"text":"Controlled traffic lifted infiltration 20%","loc":"l.178"},{"text":"Shoulder residue raised local salt 16%","loc":"l.202"},{"text":"Permanent beds held 89% yield over five years","loc":"Table 4"},{"text":"Bed height near 21 cm minimized seedling exposure","loc":"l.71"},{"text":"Strip-till transition cost 10% of one season's yield","loc":"§2.1"},{"text":"Controlled traffic lifted infiltration 44%","loc":"l.284"}],"cost":37,"ev":"e-2211-06"}],"incidents":[]},{"id":"r-2212","cycle":12,"open":"17:00","status":"live","theme":"cover crops and root-zone salinity","lede":"Cycle 12 is mid-Simulate — three services closed, the trial in season two of three, record books 17:34.","vote":"4–1","kind":null,"seasons":3,"conf":null,"verdict":null,"digest":null,"result":"t-2212","closedAt":null,"sources":12,"papersN":5,"claims":32,"costs":{"open":80,"read":171,"deliberate":326,"simulate":192,"record":0,"close":0},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"17:00","bookedEnd":"17:04","slip":0,"actual":"17:00","actualEnd":"17:04","state":"done","lede":"The Scout stocked the docket with 12 sources and admitted 5 to the stack.","detail":{"sources":12,"admitted":5}},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"17:04","bookedEnd":"17:12","slip":0,"actual":"17:04","actualEnd":"17:12","state":"done","lede":"The Reader ingested five papers in eight minutes and kept 32 claims for $1.71.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"17:12","bookedEnd":"17:22","slip":0,"actual":"17:12","actualEnd":"17:22","state":"done","lede":"The Council weighed 32 claims and voted 4–1 — the verdict records at 17:34.","detail":{"claims":32,"vote":"4–1","kind":null,"pending":true}},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"17:22","bookedEnd":"17:34","slip":0,"actual":"17:22","actualEnd":null,"state":"live","lede":"The Simulator is mid-trial — season two of three, result pending.","detail":{"live":true}},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"17:34","bookedEnd":"17:41","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Archivist books 17:34 — lineage writes on close of trial.","detail":null},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"17:41","bookedEnd":"17:42","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Courier books 17:41 — posts and closes on record.","detail":null}],"papers":[{"t":"Cover crop water use versus salt suppression trade-offs","j":"Agric Water Manag","y":2025,"claims":[{"text":"Deep roots cut capillary rise 38%","loc":"Table 2"},{"text":"Termination 4 weeks pre-sow proved optimal","loc":"§4.3"},{"text":"Residual mulch lifted wheat stand 14%","loc":"§1.2"},{"text":"Evaporation fell 21% under mulch","loc":"l.339"},{"text":"Deep roots cut capillary rise 36%","loc":"§5.2"},{"text":"Trade-off ran net positive in 12 of 16 site-years","loc":"Table 4"},{"text":"Late termination cost 33 mm of recharge","loc":"Table 4"}],"cost":43,"ev":"e-2212-01"},{"t":"Deep-rooted covers and capillary salt rise","j":"Plant Soil","y":2023,"claims":[{"text":"Evaporation fell 23% under mulch","loc":"§6.1"},{"text":"Margins gained 0.4 t ha⁻¹ under covers","loc":"§3.1"},{"text":"Evaporation fell 39% under mulch","loc":"l.183"},{"text":"Residual mulch lifted wheat stand 13%","loc":"§2.2"},{"text":"Termination 2 weeks pre-sow proved optimal","loc":"§3.3"},{"text":"Suppression scaled with cover biomass","loc":"l.291"}],"cost":28,"ev":"e-2212-02"},{"t":"Termination timing and soil water recharge","j":"Eur J Agron","y":2024,"claims":[{"text":"Trade-off ran net positive in 9 of 16 site-years","loc":"§3.2"},{"text":"Evaporation fell 25% under mulch","loc":"§5.2"},{"text":"Deep roots cut capillary rise 24%","loc":"l.104"},{"text":"Evaporation fell 40% under mulch","loc":"l.183"},{"text":"Margins gained 0.2 t ha⁻¹ under covers","loc":"§4.4"},{"text":"Mixed covers held ground 13% longer","loc":"l.99"},{"text":"Evaporation fell 31% under mulch","loc":"l.42"}],"cost":32,"ev":"e-2212-03"},{"t":"Mixed-species covers on saline margins","j":"Agric Syst","y":2022,"claims":[{"text":"Late termination cost 27 mm of recharge","loc":"§6.4"},{"text":"Evaporation fell 27% under mulch","loc":"§6.1"},{"text":"Residual mulch lifted wheat stand 11%","loc":"Table 1"},{"text":"Deep roots cut capillary rise 29%","loc":"l.161"},{"text":"Deep roots cut capillary rise 18%","loc":"§4.1"},{"text":"Late termination cost 24 mm of recharge","loc":"l.137"}],"cost":36,"ev":"e-2212-04"},{"t":"Post-cover wheat establishment under residual mulch","j":"Field Crops Res","y":2024,"claims":[{"text":"Evaporation fell 22% under mulch","loc":"§2.2"},{"text":"Residual mulch lifted wheat stand 15%","loc":"§4.4"},{"text":"Cover water use 110 mm against 36% salt suppression","loc":"§4.2"},{"text":"Margins gained 0.3 t ha⁻¹ under covers","loc":"l.335"},{"text":"Late termination cost 15 mm of recharge","loc":"§5.3"},{"text":"Cover water use 101 mm against 23% salt suppression","loc":"§1.3"}],"cost":32,"ev":"e-2212-05"}],"incidents":[]},{"id":"r-2213","cycle":13,"open":"18:00","status":"booked","theme":"","lede":"","vote":null,"kind":null,"seasons":null,"conf":null,"verdict":null,"digest":null,"result":null,"closedAt":null,"sources":0,"papersN":0,"claims":0,"costs":{"open":0,"read":0,"deliberate":0,"simulate":0,"record":0,"close":0},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"18:00","bookedEnd":"18:04","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Scout books 18:00 — not yet run.","detail":null},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"18:04","bookedEnd":"18:12","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Reader books 18:04 — not yet run.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"18:12","bookedEnd":"18:22","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Council books 18:12 — not yet run.","detail":null},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"18:22","bookedEnd":"18:34","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Simulator books 18:22 — not yet run.","detail":null},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"18:34","bookedEnd":"18:41","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Archivist books 18:34 — not yet run.","detail":null},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"18:41","bookedEnd":"18:42","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Courier books 18:41 — not yet run.","detail":null}],"papers":[],"incidents":[]},{"id":"r-2214","cycle":14,"open":"19:00","status":"booked","theme":"","lede":"","vote":null,"kind":null,"seasons":null,"conf":null,"verdict":null,"digest":null,"result":null,"closedAt":null,"sources":0,"papersN":0,"claims":0,"costs":{"open":0,"read":0,"deliberate":0,"simulate":0,"record":0,"close":0},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"19:00","bookedEnd":"19:04","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Scout books 19:00 — not yet run.","detail":null},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"19:04","bookedEnd":"19:12","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Reader books 19:04 — not yet run.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"19:12","bookedEnd":"19:22","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Council books 19:12 — not yet run.","detail":null},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"19:22","bookedEnd":"19:34","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Simulator books 19:22 — not yet run.","detail":null},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"19:34","bookedEnd":"19:41","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Archivist books 19:34 — not yet run.","detail":null},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"19:41","bookedEnd":"19:42","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Courier books 19:41 — not yet run.","detail":null}],"papers":[],"incidents":[]},{"id":"r-2215","cycle":15,"open":"20:00","status":"booked","theme":"","lede":"","vote":null,"kind":null,"seasons":null,"conf":null,"verdict":null,"digest":null,"result":null,"closedAt":null,"sources":0,"papersN":0,"claims":0,"costs":{"open":0,"read":0,"deliberate":0,"simulate":0,"record":0,"close":0},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"20:00","bookedEnd":"20:04","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Scout books 20:00 — not yet run.","detail":null},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"20:04","bookedEnd":"20:12","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Reader books 20:04 — not yet run.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"20:12","bookedEnd":"20:22","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Council books 20:12 — not yet run.","detail":null},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"20:22","bookedEnd":"20:34","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Simulator books 20:22 — not yet run.","detail":null},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"20:34","bookedEnd":"20:41","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Archivist books 20:34 — not yet run.","detail":null},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"20:41","bookedEnd":"20:42","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Courier books 20:41 — not yet run.","detail":null}],"papers":[],"incidents":[]},{"id":"r-2216","cycle":16,"open":"21:00","status":"booked","theme":"","lede":"","vote":null,"kind":null,"seasons":null,"conf":null,"verdict":null,"digest":null,"result":null,"closedAt":null,"sources":0,"papersN":0,"claims":0,"costs":{"open":0,"read":0,"deliberate":0,"simulate":0,"record":0,"close":0},"stages":[{"k":"open","name":"Open","service":"Scout","job":"stocks the docket","off":0,"offEnd":4,"booked":"21:00","bookedEnd":"21:04","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Scout books 21:00 — not yet run.","detail":null},{"k":"read","name":"Read","service":"Reader","job":"reads the stack","off":4,"offEnd":12,"booked":"21:04","bookedEnd":"21:12","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Reader books 21:04 — not yet run.","detail":null},{"k":"deliberate","name":"Deliberate","service":"Council","job":"votes the verdict","off":12,"offEnd":22,"booked":"21:12","bookedEnd":"21:22","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Council books 21:12 — not yet run.","detail":null},{"k":"simulate","name":"Simulate","service":"Simulator","job":"runs the trial","off":22,"offEnd":34,"booked":"21:22","bookedEnd":"21:34","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Simulator books 21:22 — not yet run.","detail":null},{"k":"record","name":"Record","service":"Archivist","job":"writes lineage","off":34,"offEnd":41,"booked":"21:34","bookedEnd":"21:41","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Archivist books 21:34 — not yet run.","detail":null},{"k":"close","name":"Close","service":"Courier","job":"posts and closes","off":41,"offEnd":42,"booked":"21:41","bookedEnd":"21:42","slip":0,"actual":null,"actualEnd":null,"state":"booked","lede":"The Courier books 21:41 — not yet run.","detail":null}],"papers":[],"incidents":[]}],"day":{"services":[{"key":"scout","name":"Scout","stage":"Open","sk":"open","job":"stocks the docket","spent":862,"allot":4500,"close":1240},{"key":"reader","name":"Reader","stage":"Read","sk":"read","job":"reads the stack","spent":1984,"allot":6000,"close":2890},{"key":"council","name":"Council","stage":"Deliberate","sk":"deliberate","job":"votes the verdict","spent":3690,"allot":13000,"close":5370},{"key":"simulator","name":"Simulator","stage":"Simulate","sk":"simulate","job":"runs the trial","spent":3155,"allot":17500,"close":4600},{"key":"archivist","name":"Archivist","stage":"Record","sk":"record","job":"writes lineage","spent":571,"allot":4000,"close":830},{"key":"courier","name":"Courier","stage":"Close","sk":"close","job":"posts and closes","spent":451,"allot":5000,"close":660}],"volumes":[{"label":"Sources","fig":132,"state":"scouted","sk":"open"},{"label":"Papers","fig":64,"state":"read","sk":"read"},{"label":"Claims","fig":409,"state":"kept","sk":"read"},{"label":"Trials","fig":11,"state":"run · one live","sk":"simulate"},{"label":"Verdicts","fig":10,"state":"recorded","sk":"record"},{"label":"Digests","fig":10,"state":"posted","sk":"close"}],"stagesMeta":[{"k":"open","name":"Open","service":"Scout","off":0},{"k":"read","name":"Read","service":"Reader","off":4},{"k":"deliberate","name":"Deliberate","service":"Council","off":12},{"k":"simulate","name":"Simulate","service":"Simulator","off":22},{"k":"record","name":"Record","service":"Archivist","off":34},{"k":"close","name":"Close","service":"Courier","off":41}],"log":[{"t":"09:12","kind":"order","text":"Simulator allot raised $150→$175"},{"t":"10:00","kind":"order","text":"course set: drought wheat × cycles 13–24"},{"t":"12:01","kind":"incident","mins":0.0,"run":"r-2207","text":"feed empty, cycle 07 → struck kept on book"},{"t":"14:22","kind":"incident","mins":21.0,"run":"r-2209","text":"simulator queue stall, cycle 09 → requeued 14:43, closed 15:02"},{"t":"17:15","kind":"incident","mins":0.2,"text":"snapshot checksum fail → write 2 verified 17:15:09"}]}};
+const RUNS = DATA.runs;
+const SVC = DATA.day.services;
+const STAGE_ORDER = ['open','read','deliberate','simulate','record','close'];
+const LIVE_T0 = 17*3600+22*60;
+const DAY_SPENT = SVC.reduce((a,s)=>a+s.spent,0);
+const DAY_CLOSE = 15590;
+
+/* ---- v2: yield meters, per-wheel mock control defaults, mock rates ---- */
+const volByLabel = Object.fromEntries(DATA.day.volumes.map(v=>[v.label,v]));
+// Yield meters — sourced directly from today's own volumes, matched to the wheel that produced them.
+// Council's "verdicts" and Archivist's "lineages" are the same underlying count (one lineage per
+// verdict); Council votes it, Archivist links and records it.
+const WHEEL_YIELD = {
+  scout:     {fig:volByLabel['Sources'].fig,  unit:'sources',  state:volByLabel['Sources'].state},
+  reader:    {fig:volByLabel['Papers'].fig,   unit:'papers',   state:volByLabel['Papers'].state},
+  council:   {fig:volByLabel['Verdicts'].fig, unit:'verdicts', state:volByLabel['Verdicts'].state},
+  simulator: {fig:volByLabel['Trials'].fig,   unit:'trials',   state:volByLabel['Trials'].state},
+  archivist: {fig:volByLabel['Verdicts'].fig, unit:'lineages', state:'linked to evidence'},
+  courier:   {fig:volByLabel['Digests'].fig,  unit:'digests',  state:volByLabel['Digests'].state}
+};
+const PROJECT_UNIT = {scout:'sources',reader:'claims',council:'claims weighed',simulator:'trials',archivist:'links',courier:'digests'};
+
+const R0 = RUNS[0]; // r-2201, today's first closed cycle — source for a few "per cycle" defaults below
+// Depth throttle defaults (mock; not measured). Reader and Simulator carry the stated operating
+// defaults (papers/cycle, seasons/trial). Scout, Council and Archivist default to r-2201's own
+// counts: 12 sources scouted, 38 claims kept, 6 evidence links (e-2201-01..06).
+const DEPTH_DEF = {
+  scout:     {unit:'sources/cycle', val:R0.sources, min:8,  max:20, step:2},
+  reader:    {unit:'papers/cycle',  val:6,           min:4,  max:8,  step:1},
+  council:   {unit:'claims/cycle',  val:R0.claims,   min:20, max:60, step:5},
+  simulator: {unit:'seasons/trial', val:40,          min:20, max:60, step:5},
+  archivist: {unit:'links/cycle',   val:R0.papersN,  min:4,  max:10, step:1},
+  courier:   {unit:'posts/cycle',   val:1,           min:1,  max:3,  step:1}
+};
+const CEILINGS = ['hard stop','finish current act','degrade depth','borrow from pool'];
+const PRESETS = {
+  survey:  {scout:'running', reader:'running', council:'parked',  simulator:'parked',  archivist:'parked',  courier:'parked'},
+  full:    {scout:'running', reader:'running', council:'running', simulator:'running', archivist:'running', courier:'running'},
+  digest:  {scout:'parked',  reader:'parked',  council:'running', simulator:'parked',  archivist:'running', courier:'parked'}
+};
+const PRESET_LABEL = {survey:'Survey', full:'Full pipeline', digest:'Digest-only'};
+const PRESET_PREVIEW = {
+  survey: 'Scout + Reader run · Council, Simulator, Archivist, Courier park · verdicts pause today',
+  full:   'all six run · normal cadence resumes',
+  digest: 'Council + Archivist run · Scout, Reader, Simulator, Courier park · no new sources scouted'
+};
+
+const NOW0 = 17*3600+26*60+8; // clock at load — also S.clock's initial value below
+const DAY_CLOSE_T = 21*3600;
+const CYCLES_PER_DAY = RUNS.length; // 16 hourly slots, captured before any manual "Run now" insert
+const ALL_PAPERS = RUNS.flatMap(r=>r.papers||[]);
+const AVG_CLAIMS_PER_PAPER = ALL_PAPERS.reduce((a,p)=>a+p.claims.length,0)/ALL_PAPERS.length;
+const BASE_TRIALS = WHEEL_YIELD.simulator.fig; // 11, today's own trial count
+// Mock spend rate per wheel — cents/hour, derived once from today's spent -> projected-close
+// trajectory (SVC[].spent -> SVC[].close) over the hours remaining before the 21:00 book-close.
+// Held fixed thereafter; a ceiling forecast only moves when Erik changes an allot or a depth.
+const HOURS_TO_CLOSE_AT_LOAD = Math.max(0.25, (DAY_CLOSE_T - NOW0)/3600);
+const SPEND_RATE = Object.fromEntries(SVC.map(s=>[s.key, Math.max(1,(s.close-s.spent))/HOURS_TO_CLOSE_AT_LOAD]));
+
+const S = {
+  view:{level:'day',run:null,stage:null,paper:null},
+  course:{topic:'drought-tolerant wheat',cycles:'13–24',at:'10:00',by:'Erik'},
+  log: DATA.day.log.map(o=>Object.assign({},o)),
+  allot: Object.fromEntries(SVC.map(s=>[s.key,s.allot])),
+  ceiling: Object.fromEntries(SVC.map(s=>[s.key,'finish current act'])),
+  depth: Object.fromEntries(SVC.map(s=>[s.key,DEPTH_DEF[s.key].val])),
+  wheels: Object.fromEntries(SVC.map(s=>[s.key,{state:'running',holdUntil:null}])),
+  soloKey:null, soloSnapshot:null,
+  docket:[], docketSeq:1,
+  ui:{
+    allot: Object.fromEntries(SVC.map(s=>[s.key,{open:false,draftAllot:0,draftCeiling:'finish current act'}])),
+    depth: Object.fromEntries(SVC.map(s=>[s.key,{open:false,draftVal:0}])),
+    hold: Object.fromEntries(SVC.map(s=>[s.key,{open:false,draft:'18:00'}])),
+    preset:{draft:null},
+    expandClaims:{}
+  },
+  standing:[
+    {k:'cadence', label:'cadence', val:'hourly · 06:00–21:00', by:'default', at:null},
+    {k:'strike',  label:'strike',  val:'past +25',             by:'default', at:null},
+    {k:'retry',   label:'retry',   val:'×1 then requeue',      by:'default', at:null},
+    {k:'snapshot',label:'snapshot',val:'hourly at :15',        by:'default', at:null}
+  ],
+  suspended:false, armed:false, rerun:{}, courseOpen:false, editSO:null,
+  seedPaperOpen:false, seedQuestionOpen:false,
+  clock: NOW0, flash:null
+};
+let armT=null;
+
+const money = c => '$'+(c/100).toFixed(2);
+const hm  = s => String(Math.floor(s/3600)).padStart(2,'0')+':'+String(Math.floor((s%3600)/60)).padStart(2,'0');
+const hms = s => hm(s)+':'+String(s%60).padStart(2,'0');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const runOf = id => RUNS.find(r=>r.id===id);
+const runTotal = r => STAGE_ORDER.reduce((a,k)=>a+(r.costs[k]||0),0);
+const dayAllot = () => SVC.reduce((a,s)=>a+S.allot[s.key],0);
+const minutesLost = () => S.log.reduce((a,e)=>a+(e.mins||0),0);
+const liveEl = () => Math.min(12,Math.max(0,Math.floor((S.clock-LIVE_T0)/60)))+'m in';
+const isHeld = r => S.suspended && r.status==='booked';
+const stOf = (r,k) => r.stages.find(s=>s.k===k);
+const truncTitle = t => t.length>30 ? t.slice(0,29).trimEnd()+'…' : t;
+
+function pushOrder(text, revertFn){
+  const entry = {t:hm(S.clock), kind:'order', text:text};
+  if(revertFn) entry.revertFn = revertFn;
+  S.log.push(entry);
+  S.flash=S.log.length-1;
+  setTimeout(()=>{S.flash=null;},2000);
+  return entry;
+}
+function doRevert(idx){
+  const e=S.log[idx];
+  if(!e||e.kind!=='order'||!e.revertFn||e.reverted) return;
+  e.revertFn();
+  e.reverted=true;
+  pushOrder('reverted: '+e.text);
+  render();
+}
+
+/* ---------- v2: wheel state helpers ---------- */
+function snapshotWheels(){
+  const o={}; SVC.forEach(s=>{o[s.key]={state:S.wheels[s.key].state,holdUntil:S.wheels[s.key].holdUntil};});
+  return o;
+}
+function applyWheelSnapshot(snap){
+  SVC.forEach(s=>{S.wheels[s.key].state=snap[s.key].state; S.wheels[s.key].holdUntil=snap[s.key].holdUntil;});
+}
+function depthRatio(key){ return S.depth[key]/DEPTH_DEF[key].val; }
+function ceilingForecast(key, allotVal, ratio){
+  const svc=SVC.find(s=>s.key===key);
+  const rate = SPEND_RATE[key]*(ratio||1);
+  if(rate<=0 || allotVal<=svc.spent) return {reached:false};
+  const hoursToHit=(allotVal-svc.spent)/rate;
+  const atSec = NOW0 + hoursToHit*3600;
+  if(atSec>=DAY_CLOSE_T) return {reached:false};
+  return {reached:true, at:hm(Math.round(atSec))};
+}
+function downstreamClause(key, behavior){
+  const idx=SVC.findIndex(s=>s.key===key);
+  const cur=SVC[idx].name;
+  const nextName = idx<SVC.length-1 ? SVC[idx+1].name : SVC[0].name+' next cycle';
+  if(behavior==='hard stop') return `then: ${cur} stops mid-act · ${nextName} runs short`;
+  if(behavior==='finish current act') return `then: finishes the act in progress · ${nextName} opens short next cycle`;
+  if(behavior==='degrade depth') return `then: depth throttle drops for the rest of today · ${nextName} sees fewer inputs`;
+  return `then: draws from the day pool · ${nextName} unaffected`;
+}
+function forecastLine(key, allotVal, behavior){
+  const f=ceilingForecast(key, allotVal, depthRatio(key));
+  if(!f.reached) return 'not reached today at current pace';
+  return `hits allotment ≈ ${f.at} at current pace · ${downstreamClause(key,behavior)}`;
+}
+function projectedCount(key, val){
+  switch(key){
+    case 'scout': return Math.round(val*CYCLES_PER_DAY);
+    case 'reader': return Math.round(val*AVG_CLAIMS_PER_PAPER*CYCLES_PER_DAY);
+    case 'council': return Math.round(val*CYCLES_PER_DAY);
+    case 'simulator': return Math.round(BASE_TRIALS*DEPTH_DEF.simulator.val/val);
+    case 'archivist': return Math.round(val*CYCLES_PER_DAY);
+    case 'courier': return Math.round(val*CYCLES_PER_DAY);
+  }
+}
+function projectDaily(key, val){ return `≈${projectedCount(key,val)} ${PROJECT_UNIT[key]}/day`; }
+function lastAct(sk){
+  for(let i=RUNS.length-1;i>=0;i--){
+    const r=RUNS[i], st=stOf(r,sk);
+    if(st && (st.state==='done'||st.state==='live')){
+      const d=st.detail||{};
+      if(sk==='open') return d.admitted!=null?`admitted ${d.admitted} of ${d.sources} · ${st.actual}`:`scouted · ${st.actual}`;
+      if(sk==='read') return `kept ${r.claims} claims · ${st.actual}`;
+      if(sk==='deliberate') return d.vote?`voted ${d.vote} · ${st.actual}`:`deliberated · ${st.actual}`;
+      if(sk==='simulate') return st.state==='live'?'mid-trial · live':(d.result?`posted ${d.result} · ${st.actual}`:`ran · ${st.actual}`);
+      if(sk==='record') return d.verdict?`recorded ${d.verdict} · ${st.actual}`:`recorded · ${st.actual}`;
+      if(sk==='close') return d.digest?`posted ${d.digest} · ${st.actual}`:`closed · ${st.actual}`;
+    }
+  }
+  return '—';
+}
+function chipForState(key){
+  const w=S.wheels[key];
+  if(S.soloKey===key) return '<span class="chip sage">SOLO</span>';
+  if(w.state==='stopped') return '<span class="chip clay">STOPPED</span>';
+  if(w.state==='parked') return '<span class="chip mut parked">PARKED</span>';
+  if(w.state==='held') return `<span class="chip clay">HELD · ${esc(w.holdUntil||'')}</span>`;
+  return '<span class="chip mut">RUNNING</span>';
+}
+
+/* ---------- masthead ---------- */
+function crumbSpec(){
+  const v=S.view, out=[{t:'Day',go:'day'}];
+  if(v.level==='day') return out;
+  out.push({t:v.run,go:'run:'+v.run});
+  if(v.level==='run') return out;
+  const st=stOf(runOf(v.run), v.level==='paper'?'read':v.stage);
+  out.push({t:st.name,go:'stage:'+v.run+':'+st.k});
+  if(v.level==='stage') return out;
+  out.push({t:truncTitle(runOf(v.run).papers[v.paper].t),go:null});
+  return out;
+}
+function mastHTML(){
+  const cs=crumbSpec();
+  const crumbs=cs.map((c,i)=>{
+    const last=i===cs.length-1;
+    const inner=last?`<span class="crumb cur">${esc(c.t)}</span>`:`<button class="crumb" data-go="${c.go}">${esc(c.t)}</button>`;
+    return inner+(last?'':'<span class="csep">▸</span>');
+  }).join('');
+  const eschint=cs.length>1?'<span class="eschint">esc ▴</span>':'';
+  const lastOrder=S.log[S.log.length-1];
+  const courseNote=(S.flash!==null&&lastOrder&&lastOrder.kind==='order'&&lastOrder.text.indexOf('course set')===0)?`<span class="loggednote">logged ${lastOrder.t} · Erik</span>`:'';
+  const form=!S.courseOpen?'':`
+    <div class="wrap cformrow">
+      <label>topic<input id="cTopic" value="${esc(S.course.topic)}" style="width:340px"></label>
+      <label>cycles<input id="cCycles" value="${esc(S.course.cycles)}" style="width:110px"></label>
+      <button class="btn pri" id="courseSetBtn" data-act="courseSet">Set course</button>
+      <button class="btn ghost" data-act="courseCancel">Cancel</button>
+      <span class="note">an order — logs on the clock, tagged Erik</span>
+    </div>`;
+  const seedPaperForm=!S.seedPaperOpen?'':`
+    <div class="wrap cformrow">
+      <label>DOI<input id="seedDoi" placeholder="10.1038/xxxxx" style="width:300px"></label>
+      <button class="btn pri" id="seedPaperSetBtn" data-act="seedPaperSet">Seed paper</button>
+      <button class="btn ghost" data-act="seedPaperCancel">Cancel</button>
+      <span class="note">an order — appends to the docket, logs on the clock, tagged Erik</span>
+    </div>`;
+  const seedQForm=!S.seedQuestionOpen?'':`
+    <div class="wrap cformrow">
+      <label>Question<input id="seedQuestion" placeholder="what should next cycle ask?" style="width:420px"></label>
+      <button class="btn pri" id="seedQuestionSetBtn" data-act="seedQuestionSet">Seed question</button>
+      <button class="btn ghost" data-act="seedQuestionCancel">Cancel</button>
+      <span class="note">an order — appends to the docket, logs on the clock, tagged Erik</span>
+    </div>`;
+  return `<header class="mast">
+    <div class="wrap m1">
+      <span class="brand">Palingenesis</span>
+      <div class="rooms"><span>Today</span><span>Pipeline</span><span>Library</span><span>Portfolio</span><span>Simulation</span><span class="cur">Engine Room</span></div>
+      <span class="clock" id="clock">${hms(S.clock)} · farm local UTC−05</span>
+    </div>
+    <div class="wrap m2">
+      <div class="crumbs">${crumbs}${eschint}</div>
+      <div class="course">
+        <span class="lbl">Course</span>
+        <span><b>${esc(S.course.topic)}</b> · cycles ${esc(S.course.cycles)} · set ${esc(S.course.at)} by ${esc(S.course.by)}</span>
+        ${courseNote}
+        <button class="cbtn" data-act="courseToggle">${S.courseOpen?'Close':'Change course'}</button>
+        <button class="cbtn" data-act="seedPaperToggle">${S.seedPaperOpen?'Close':'Seed paper'}</button>
+        <button class="cbtn" data-act="seedQuestionToggle">${S.seedQuestionOpen?'Close':'Seed question'}</button>
+      </div>
+    </div>
+    ${form}${seedPaperForm}${seedQForm}
+  </header>`;
+}
+
+/* ---------- shared block ---------- */
+function blk(o){
+  const click=o.go||o.act;
+  const attrs=(o.go?` data-go="${o.go}"`:'')+(o.act?` data-act="${o.act}"`:'')+(click?' role="button" tabindex="0"':'');
+  return `<div class="blk${click?' click':''}"${attrs}>
+    <div class="lbl">${o.lbl}</div>
+    <div class="fig${o.figcls?' '+o.figcls:''}">${o.fig}</div>
+    ${o.subs||''}
+    ${o.bar||''}
+    <div class="state">${o.state||''}</div>
+    ${click?'<div class="cue">▸</div>':''}
+  </div>`;
+}
+
+/* ---------- day: wheel-set + wheel blocks ---------- */
+function presetRowHTML(){
+  const draft=S.ui.preset.draft;
+  const buttons=Object.keys(PRESET_LABEL).map(k=>
+    `<button class="presetbtn${draft===k?' on':''}" data-act="presetOpen:${k}">${PRESET_LABEL[k]}</button>`).join('');
+  const preview=draft
+    ? `<span class="presetpreview"><b>${PRESET_LABEL[draft]}:</b> ${esc(PRESET_PREVIEW[draft])}</span>
+       <button class="miniSet" data-act="presetSet">Set</button>
+       <button class="miniCancel" data-act="presetCancel">Cancel</button>`
+    : `<span class="presetpreview mut">a wheel-set order — applies to all six, logs once</span>`;
+  return `<div class="presetrow"><span class="lbl">Wheel-set</span>${buttons}${preview}</div>`;
+}
+function wheelFig(key){
+  const y=WHEEL_YIELD[key];
+  if(S.depth[key]===DEPTH_DEF[key].val) return {fig:String(y.fig), sub:`${y.unit} · ${y.state}`};
+  return {fig:'≈'+projectedCount(key,S.depth[key]), sub:`${PROJECT_UNIT[key]}/day · projected`};
+}
+function allotDisclosure(key){
+  const ui=S.ui.allot[key]; if(!ui.open) return '';
+  const changed = ui.draftAllot!==S.allot[key] || ui.draftCeiling!==S.ceiling[key];
+  const head = changed ? `${money(S.allot[key])} → ${money(ui.draftAllot)}` : `${money(ui.draftAllot)} allot`;
+  const line = `${head}: ${forecastLine(key, ui.draftAllot, ui.draftCeiling)}`;
+  return `<div class="wdisc">
+    <div class="stepline"><span class="lbl" style="margin:0">Allot</span>
+      <span class="step" style="visibility:visible">
+        <button data-act="wallotStep:${key}:dn" aria-label="lower allot">−</button>
+        <button data-act="wallotStep:${key}:up" aria-label="raise allot">+</button>
+      </span>
+      <span class="stepval">${money(ui.draftAllot)}</span>
+      <select data-ceiling="${key}">${CEILINGS.map(c=>`<option value="${esc(c)}"${c===ui.draftCeiling?' selected':''}>${esc(c)}</option>`).join('')}</select>
+    </div>
+    <p class="preview">${esc(line)}</p>
+    <div class="actions"><button class="miniSet" data-act="wallotSet:${key}">Set</button><button class="miniCancel" data-act="wallotCancel:${key}">Cancel</button></div>
+  </div>`;
+}
+function depthDisclosure(key){
+  const ui=S.ui.depth[key]; if(!ui.open) return '';
+  const d=DEPTH_DEF[key]; const svc=SVC.find(s=>s.key===key);
+  const changed = ui.draftVal!==S.depth[key];
+  const head = changed ? `${svc.name} ${S.depth[key]} → ${ui.draftVal} ${d.unit}` : `${svc.name} ${ui.draftVal} ${d.unit}`;
+  const f=ceilingForecast(key, S.allot[key], ui.draftVal/d.val);
+  const ceilTxt=f.reached?`ceiling ≈ ${f.at}`:'ceiling not reached';
+  const line=`${head}: ${projectDaily(key,ui.draftVal)}, ${ceilTxt}`;
+  return `<div class="wdisc">
+    <div class="stepline"><span class="lbl" style="margin:0">Depth</span>
+      <span class="step" style="visibility:visible">
+        <button data-act="wdepthStep:${key}:dn" aria-label="lower depth">−</button>
+        <button data-act="wdepthStep:${key}:up" aria-label="raise depth">+</button>
+      </span>
+      <span class="stepval">${ui.draftVal}</span><span class="mut" style="font-size:13px">${d.unit}</span>
+    </div>
+    <p class="preview">${esc(line)}</p>
+    <div class="actions"><button class="miniSet" data-act="wdepthSet:${key}">Set</button><button class="miniCancel" data-act="wdepthCancel:${key}">Cancel</button></div>
+  </div>`;
+}
+function holdDisclosure(key){
+  const ui=S.ui.hold[key]; if(!ui.open) return '';
+  return `<div class="wdisc">
+    <div class="stepline"><span class="lbl" style="margin:0">Hold until</span>
+      <input type="time" id="holdInput_${key}" value="${ui.draft}">
+    </div>
+    <div class="actions"><button class="miniSet" id="holdSetBtn_${key}" data-act="wholdSet:${key}">Set hold</button><button class="miniCancel" data-act="wholdCancel:${key}">Cancel</button></div>
+  </div>`;
+}
+function svcBlockDay(s){
+  const key=s.key;
+  const {fig,sub}=wheelFig(key);
+  const live = key==='simulator' && RUNS.some(r=>{const st=stOf(r,'simulate');return st&&st.state==='live';}) && S.wheels[key].state==='running';
+  const stopLbl = S.wheels[key].state==='stopped' ? 'Start' : 'Stop';
+  const soloLbl = S.soloKey===key ? 'Un-solo' : 'Solo';
+  const au=S.ui.allot[key], du=S.ui.depth[key], hu=S.ui.hold[key];
+  return `<div class="blk wheel" data-act="trace:${s.sk}" role="button" tabindex="0">
+    <div class="lbl">${s.name}</div>
+    <div class="fig">${fig}</div>
+    <div class="sub">${esc(sub)}</div>
+    <div class="wstate">${chipForState(key)}${live?'<span class="sage pulse">● live</span>':''}<span class="lastact">${esc(lastAct(s.sk))}</span></div>
+    <div class="wctlrow">
+      <button data-act="wstop:${key}">${stopLbl}</button>
+      <button data-act="wsolo:${key}">${soloLbl}</button>
+      <button class="${du.open?'on':''}" data-act="wdepthOpen:${key}">Depth</button>
+      <button class="${hu.open?'on':''}" data-act="wholdOpen:${key}">Hold</button>
+      <button class="${au.open?'on':''}" data-act="wallotOpen:${key}">Allot ▾</button>
+    </div>
+    ${allotDisclosure(key)}${depthDisclosure(key)}${holdDisclosure(key)}
+    <div class="state">${s.job}</div>
+  </div>`;
+}
+function cellHTML(r,st){
+  const held=isHeld(r);
+  let inner='';
+  if(held){ inner=`<span class="heldt">${st.booked}</span><span class="b">held</span>`; }
+  else if(st.state==='struck'){ inner='<span class="x">—</span>'; }
+  else if(st.state==='booked'){ inner=`<span class="b">${st.booked}</span>`; }
+  else if(st.state==='live'){ inner=`<span class="lv"><span class="pulse">●</span> ${st.actual}</span><span class="sm" data-live-elapsed>${liveEl()}</span>`; }
+  else if(st.slip>0){ inner=`<span class="b">${st.booked}</span><span class="slp">${st.actual} +${st.slip}</span>`; }
+  else { inner=`<span class="a">${st.actual}</span>`; }
+  return `<div class="tc" data-go="stage:${r.id}:${st.k}" data-run="${r.id}" data-strow="${st.k}" role="button" tabindex="0">${inner}</div>`;
+}
+function timetableHTML(){
+  const gut=['<div class="gut"></div>'].concat(DATA.day.stagesMeta.map(m=>
+    `<div class="tgl" data-strow="${m.k}"><b>${m.name}</b><span>${m.service} · +${m.off}</span></div>`)).join('');
+  const cols=RUNS.map(r=>{
+    const held=isHeld(r);
+    let tag='';
+    if(r.status==='live') tag='<span class="tag sage">LIVE</span>';
+    else if(r.status==='struck') tag='<span class="tag clay">STRUCK</span>';
+    else if(held) tag='<span class="tag clay">HELD</span>';
+    else if(r.manual) tag='<span class="tag mut">MANUAL</span>';
+    else if(r.cycle===13&&!S.suspended) tag='<span class="tag mut">NEXT</span>';
+    const head=`<div class="tth${r.status==='struck'?' struck':''}" data-go="run:${r.id}" data-run="${r.id}" role="button" tabindex="0" aria-label="open ${r.id}">
+      <span class="cy">c${String(r.cycle).padStart(2,'0')}</span><span class="rid">${r.id}</span>${tag}</div>`;
+    return head+r.stages.map(st=>cellHTML(r,st)).join('');
+  }).join('');
+  const legend=`<span class="legend"><span class="lg-done">done</span><span>booked</span><span class="lg-slip">+slip</span><span class="lg-live">● live</span><span class="lg-struck">struck</span>${S.suspended?'<span class="lg-held">held</span>':''}</span>`;
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">Timetable</span><span class="pstate">one open per hour · 06:00–21:00</span>${legend}</div>
+    <div class="ttg" style="grid-template-columns:118px repeat(${RUNS.length},minmax(0,1fr))">${gut}${cols}</div>
+  </section>`;
+}
+function logRow(e,i){
+  const link=e.run?` click" data-go="run:${e.run}" role="button" tabindex="0`:'';
+  const revertBtn=(e.kind==='order'&&e.revertFn&&!e.reverted)?`<button class="revertbtn" data-act="revertLog:${i}">Revert</button>`:'';
+  const right=e.kind==='order'
+    ? `<span class="chipE">Erik</span>${revertBtn}`
+    : `<span class="mins${(e.mins||0)>=1?' clay':''}">${(e.mins||0).toFixed(1)}</span>`;
+  const ref=e.run?`<span class="runref">▸ ${e.run}</span>`:'';
+  return `<div class="row logrow cols-log${link}${S.flash===i?' flash':''}">
+    <span class="t">${e.t}</span><span class="txt">${esc(e.text)}</span>
+    <span class="right">${ref}${right}</span></div>`;
+}
+function logPanel(entries,label,stateTxt){
+  const lost=minutesLost();
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">${label}</span><span class="pstate">${stateTxt}</span>
+      <span class="pnum"><span class="${lost>0?'clay':''}">${lost.toFixed(1)}</span> of 960 min lost</span></div>
+    ${entries.map((e)=>logRow(e,S.log.indexOf(e))).join('')}
+  </section>`;
+}
+function docketHTML(){
+  const rows = S.docket.length
+    ? S.docket.map(d=>`<div class="docketrow"><span>${esc(d.text)}</span><span class="mut">${d.kind}</span></div>`).join('')
+    : `<div class="docketrow"><span class="mut">no seeds queued</span><span></span></div>`;
+  return `<section class="panel">${rows}</section>`;
+}
+function standingHTML(){
+  return `<div class="soband">${S.standing.map(so=>{
+    const prov=so.by==='default'?'<span class="prov">default</span>':`<span class="prov sage">set ${so.at} by ${esc(so.by)}</span>`;
+    const body=S.editSO===so.k
+      ? `<div class="soform"><input id="soInput" value="${esc(so.val)}">
+         <button class="btn pri" id="soSetBtn" data-act="soSet:${so.k}" style="min-height:30px;padding:5px 10px">Set</button>
+         <button class="btn ghost" data-act="soCancel" style="min-height:30px;padding:5px 10px">✕</button></div>`
+      : `<button class="edit" data-act="soEdit:${so.k}">edit</button>`;
+    return `<div class="so"><span class="lbl">${so.label}</span><span class="val">${esc(so.val)}</span>${prov}${body}</div>`;
+  }).join('')}</div>`;
+}
+function dayHTML(){
+  const sus=S.suspended;
+  const ledeTail=sus
+    ? `<b class="sage">cycle 12 mid-Simulate</b>, cycles 13–16 <b class="clay">held by order</b>.`
+    : `<b class="sage">cycle 12 mid-Simulate</b>, cycle 13 opens 18:00:00.`;
+  const lede=`<b class="sage">Nominal</b> — ten closed, <b class="clay">one struck</b>; ${ledeTail}`;
+  const vols=DATA.day.volumes.map(v=>blk({
+    lbl:v.label, fig:String(v.fig), state:v.state, act:'trace:'+v.sk
+  })).join('');
+  const schBlk=`<div class="blk${sus?'':' click'}"${sus?'':' data-go="run:r-2213" role="button" tabindex="0"'}>
+    <div class="lbl">Scheduler</div>
+    <div class="fig mono">${sus?'held':'18:00:00'}</div>
+    <div class="sub">${sus?'resume to rebook · r-2213':'next open · cycle 13 · r-2213'}</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:2px">
+      <div class="kv"><span>cadence</span><b>one open per hour · 06:00–21:00</b></div>
+      <div class="kv"><span>late rule</span><b>struck past +25 · worst +21</b></div>
+      <div class="kv"><span>clock</span><b>farm local · UTC−05</b></div>
+    </div>
+    <div class="state">${sus?'<span class="clay">suspended by Erik</span>':'on cadence'}</div>
+    <div class="wctlrow"><button data-act="runOneNow">Run now</button></div>
+    ${sus?'':'<div class="cue">▸</div>'}
+  </div>`;
+  const dataBlk=`<div class="blk">
+    <div class="lbl">Data</div>
+    <div class="fig mono">412 MB</div>
+    <div class="sub">snapshot 17:15:09 · verified</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:2px">
+      <div class="kv"><span>archive</span><b>1,283 runs · 9.6 GB · to 16:43</b></div>
+      <div class="kv"><span>backfill</span><b>0 owed</b></div>
+      <div class="kv"><span>repair</span><b>last Aug 19</b></div>
+      <div class="kv"><span>next snap</span><b class="tmono">18:15:00 · hourly :15</b></div>
+    </div>
+    <div class="state">write 2 verified</div>
+  </div>`;
+  const consequence=sus
+    ? `Cycles 13–16 held by order at ${esc(S.log.filter(e=>e.text.indexOf('generation suspended')===0).slice(-1)[0].t)} · resume reopens next booked hour.`
+    : 'Cycle 12 runs to 17:41 · 13–16 do not open · resume reopens next booked hour.';
+  const ctlBtn=sus
+    ? `<button class="btnbig resume" data-act="resume">Resume generation</button>`
+    : `<button class="btnbig${S.armed?' armed':''}" data-act="suspend">${S.armed?'Confirm suspend — 13–16 will not open':'Suspend generation'}</button>`;
+  return `
+    <p class="lede">${lede}</p>
+    <div class="bandcap"><span class="lbl">Wheels</span><span class="capnote">work today · six services</span><span class="capline"></span></div>
+    ${presetRowHTML()}
+    <div class="wheelgrid">${SVC.map(svcBlockDay).join('')}</div>
+    <div class="bandcap"><span class="lbl">Timetable</span><span class="capnote">${RUNS.length} cycles · booked and actual</span><span class="capline"></span></div>
+    ${timetableHTML()}
+    <div class="bandcap"><span class="lbl">Volumes</span><span class="capnote">to 17:26</span><span class="capline"></span></div>
+    <div class="grid6">${vols}</div>
+    <div class="bandcap"><span class="lbl">Machine</span><span class="capnote">scheduler · data</span><span class="capline"></span></div>
+    <div class="mrow">${schBlk}${dataBlk}</div>
+    <div class="bandcap"><span class="lbl">Docket</span><span class="capnote">seeded for next cycle</span><span class="capline"></span></div>
+    ${docketHTML()}
+    <div class="bandcap"><span class="lbl">Standing orders</span><span class="capnote">value · provenance</span><span class="capline"></span></div>
+    ${standingHTML()}
+    <div class="bandcap"><span class="lbl">Log</span><span class="capnote">orders and incidents · on the clock</span><span class="capline"></span></div>
+    ${logPanel(S.log,'Log','orders sage-tagged Erik')}
+    <section class="control">${ctlBtn}<p class="cons">${consequence}</p></section>`;
+}
+
+/* ---------- run ---------- */
+function runChip(r){
+  if(r.status==='live') return '<span class="chip sage">Live</span>';
+  if(r.status==='struck') return '<span class="chip clay">Struck</span>';
+  if(isHeld(r)) return '<span class="chip clay">Held</span>';
+  if(r.status==='booked') return '<span class="chip mut">Booked</span>';
+  return '<span class="chip mut">Closed</span>';
+}
+function runLede(r){
+  if(r.status==='booked'){
+    return isHeld(r)
+      ? `Cycle ${r.cycle} is held on book by order — resume reopens the next booked hour.`
+      : `Cycle ${r.cycle} opens ${r.open}:00 under course ${esc(S.course.topic)} — six services booked to the hour.`;
+  }
+  return esc(r.lede);
+}
+function svcBlockRun(r,st){
+  const cost=r.costs[st.k]||0;
+  const run_=st.state==='done'||st.state==='live';
+  const fig=(run_||cost>0)?money(cost):'<span class="dim">—</span>';
+  let sub='';
+  if(isHeld(r)) sub='held';
+  else if(st.state==='booked') sub=`books ${st.booked}`;
+  else if(st.state==='struck') sub='<span class="clay">struck</span>';
+  else if(st.k==='open') sub=`${r.sources} sources`;
+  else if(st.k==='read') sub=`${r.papersN} papers`;
+  else if(st.k==='deliberate') sub=`vote ${r.vote}`;
+  else if(st.k==='simulate') sub=r.status==='live'?'<span class="sage">trial live</span>':`${r.seasons} seasons`;
+  else if(st.k==='record') sub=r.verdict?`${r.verdict}`:'—';
+  else sub=r.digest?`posted ${r.closedAt}`:'—';
+  return blk({lbl:st.service,fig:fig,subs:`<div class="sub">${sub}</div>`,state:st.job,go:`stage:${r.id}:${st.k}`});
+}
+function stageTable(r){
+  const rows=r.stages.map(st=>{
+    const held=isHeld(r);
+    const actual=held?'held':(st.state==='live'?st.actual+' · live':(st.actual?st.actual+(st.actualEnd?'–'+st.actualEnd:''):'—'));
+    const slip=st.slip>0?`<span class="clay">+${st.slip}</span>`:(st.state==='done'?'0':'—');
+    const cost=(st.state==='done'||st.state==='live'||(r.costs[st.k]||0)>0)?money(r.costs[st.k]||0):'—';
+    const acls=st.state==='live'?' sage':(st.slip>0?' clay':'');
+    return `<div class="row click cols-st" data-go="stage:${r.id}:${st.k}" role="button" tabindex="0">
+      <span class="lbl" style="letter-spacing:.12em">${st.name}</span>
+      <span class="mut">${st.service}</span><span></span>
+      <span class="cell-mono mut">${st.booked}</span>
+      <span class="cell-mono${acls}">${st.state==='struck'?'<span class="clay">—</span>':actual}</span>
+      <span class="cell-mono mut">${slip}</span>
+      <span class="num">${cost}</span><span class="cuecell">▸</span>
+    </div>`;
+  }).join('');
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">Stages</span><span class="pstate">booked → actual</span>
+      <span class="pnum">${r.id}</span></div>
+    <div class="thead cols-st"><span>Stage</span><span>Service</span><span></span><span>Booked</span><span>Actual</span><span>Slip</span><span style="text-align:right">Cost</span><span></span></div>
+    ${rows}
+  </section>`;
+}
+function runHTML(r){
+  const held=isHeld(r);
+  const chips=`<div class="ledechips">${runChip(r)}${r.verdict?`<span class="idchip">${r.verdict}</span>`:''}${r.digest?`<span class="idchip">${r.digest}</span>`:''}</div>`;
+  const runBlk=`<div class="blk">
+    <div class="lbl">Run ledger</div>
+    <div class="fig big">${(r.status==='booked')?'<span class="dim">—</span>':money(runTotal(r))}</div>
+    <div class="sub">of day ${money(DAY_SPENT)}</div>
+    <div class="state">${r.status==='booked'?(held?'held on book':'opens '+r.open+':00'):'six services'}</div>
+  </div>`;
+  const summary=(()=>{
+    const b=[];
+    const dash='<span class="dim">—</span>';
+    if(r.status==='struck'){
+      b.push(blk({lbl:'Sources',fig:'0',state:'<span class="clay">feed empty</span>',go:`stage:${r.id}:open`}));
+      b.push(blk({lbl:'Papers',fig:'0',state:'never read',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Claims',fig:'0',state:'none kept',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Trial',fig:dash,figcls:'mono',state:'struck',go:`stage:${r.id}:simulate`}));
+      b.push(blk({lbl:'Verdict',fig:dash,figcls:'mono',state:'struck',go:`stage:${r.id}:record`}));
+      b.push(blk({lbl:'Digest',fig:dash,figcls:'mono',state:'kept on book',go:`stage:${r.id}:close`}));
+    } else if(r.status==='booked'){
+      const s=held?'held':'booked';
+      b.push(blk({lbl:'Sources',fig:dash,state:s,go:`stage:${r.id}:open`}));
+      b.push(blk({lbl:'Papers',fig:dash,state:s,go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Claims',fig:dash,state:s,go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Trial',fig:dash,figcls:'mono',state:s,go:`stage:${r.id}:simulate`}));
+      b.push(blk({lbl:'Verdict',fig:dash,figcls:'mono',state:s,go:`stage:${r.id}:record`}));
+      b.push(blk({lbl:'Digest',fig:dash,figcls:'mono',state:s,go:`stage:${r.id}:close`}));
+    } else {
+      b.push(blk({lbl:'Sources',fig:String(r.sources),state:'scouted',go:`stage:${r.id}:open`}));
+      b.push(blk({lbl:'Papers',fig:String(r.papersN),state:'in the stack',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Claims',fig:String(r.claims),state:'kept to lineage',go:`stage:${r.id}:read`}));
+      b.push(blk({lbl:'Trial',fig:r.status==='live'?dash:r.result,figcls:'mono',
+        state:r.status==='live'?'<span class="sage">season 2 of 3</span>':`${r.seasons} seasons · ${r.conf}`,go:`stage:${r.id}:simulate`}));
+      b.push(blk({lbl:'Verdict',fig:r.verdict?r.verdict:dash,figcls:'mono',
+        state:r.verdict?`${r.kind} · ${r.vote}`:'records 17:34',go:`stage:${r.id}:record`}));
+      b.push(blk({lbl:'Digest',fig:r.digest?r.digest:dash,figcls:'mono',
+        state:r.digest?`posted ${r.closedAt}`:'books 17:41',go:`stage:${r.id}:close`}));
+    }
+    return b.join('');
+  })();
+  let control='';
+  if(r.status==='closed'||r.status==='struck'){
+    control=S.rerun[r.id]
+      ? `<section class="control"><span class="chip sage">Re-run queued ${S.rerun[r.id]}</span><p class="cons">books after cycle 16 · course as set · allot unchanged</p></section>`
+      : `<section class="control"><button class="btn" data-act="rerun:${r.id}" style="border-color:var(--line2)">Re-run cycle</button><p class="cons">books after cycle 16 · course as set · allot unchanged</p></section>`;
+  } else if(r.status==='live'){
+    control=`<section class="control"><span class="chip sage">Live</span><p class="cons">Simulate live · <span class="tmono" data-live-elapsed>${liveEl()}</span> · record books 17:34 · runs to 17:41</p></section>`;
+  } else {
+    control=`<section class="control"><span class="chip ${held?'clay':'mut'}">${held?'Held':'Booked'}</span><p class="cons">${held?'held by order · resume reopens next booked hour':`opens ${r.open}:00 · course ${esc(S.course.topic)} · strike past +25`}</p></section>`;
+  }
+  const incidents=r.incidents.length?`
+    <div class="bandcap"><span class="lbl">Log</span><span class="capnote">this run</span><span class="capline"></span></div>
+    <section class="panel">${r.incidents.map(e=>`
+      <div class="row logrow cols-log"><span class="t">${e.t}</span><span class="txt">${esc(e.text)}</span>
+      <span class="right"><span class="mins${e.mins>=1?' clay':''}">${e.mins.toFixed(1)}</span></span></div>`).join('')}
+    </section>`:'';
+  return `
+    <p class="lede">${runLede(r)}</p>
+    ${chips}
+    <div class="bandcap"><span class="lbl">Ledger</span><span class="capnote">this run · six services</span><span class="capline"></span></div>
+    <div class="grid7">${runBlk}${r.stages.map(st=>svcBlockRun(r,st)).join('')}</div>
+    <div class="bandcap"><span class="lbl">Stages</span><span class="capnote">click a stage to open its page</span><span class="capline"></span></div>
+    ${stageTable(r)}
+    <div class="bandcap"><span class="lbl">Record</span><span class="capnote">what this run holds</span><span class="capline"></span></div>
+    <div class="grid6">${summary}</div>
+    ${incidents}
+    ${control}`;
+}
+
+/* ---------- stage ---------- */
+function stageLede(r,st){
+  if(isHeld(r)) return `The ${st.service} is held on book by order — resume reopens the next booked hour.`;
+  return esc(st.lede);
+}
+function stageCenter(r,st){
+  const d=st.detail||{};
+  if(st.k==='read'&&r.papers.length){
+    const rows=r.papers.map((p,i)=>{
+      const ck=r.id+':'+i;
+      const open=!!S.ui.expandClaims[ck];
+      const main=`<div class="row click cols-pp" data-go="paper:${r.id}:${i}" role="button" tabindex="0">
+        <span class="cell-mono mut">p${i+1}</span>
+        <span class="eltitle" title="${esc(p.t)}">${esc(p.t)}</span>
+        <span class="mut">${esc(p.j)}</span>
+        <span class="cell-mono mut">${p.y}</span>
+        <span class="num claimsCell" data-act="toggleClaims:${r.id}:${i}" role="button" tabindex="0" aria-label="toggle kept claims preview">${p.claims.length}<span class="chev">${open?'▴':'▾'}</span></span>
+        <span class="num">${money(p.cost)}</span>
+        <span class="cuecell">▸</span>
+      </div>`;
+      const prev=open?`<div class="claimprev">${p.claims.slice(0,2).map(c=>`<span class="cline">“${esc(c.text)}” <span class="mut tmono" style="font-size:12px">${esc(c.loc)}</span></span>`).join('')}</div>`:'';
+      return main+prev;
+    }).join('');
+    return `<section class="panel">
+      <div class="phead"><span class="lbl">Papers ingested</span><span class="pstate">each row a receipt · click claims to preview</span>
+        <span class="pnum">${r.papersN} papers · ${r.claims} claims · ${money(r.costs.read)}</span></div>
+      <div class="thead cols-pp"><span></span><span>Title</span><span>Journal</span><span>Year</span><span style="text-align:right">Claims</span><span style="text-align:right">Cost</span><span></span></div>
+      ${rows}
+    </section>`;
+  }
+  let label='Record', line='', clay=false;
+  if(st.state==='booked'||isHeld(r)){
+    label=st.name; line=`<span class="mut">${isHeld(r)?'held by order':'books '+st.booked} · nothing recorded yet</span>`;
+  } else if(st.state==='struck'){
+    label=st.name; clay=true; line=`never ran · cycle ${String(r.cycle).padStart(2,'0')} struck at open · kept on book`;
+  } else if(st.k==='open'){
+    label='Docket';
+    line=d.note?`<span class="clay">${esc(d.note)}</span>`:`${d.sources} sources scouted · <b>${d.admitted}</b> admitted to the stack`;
+  } else if(st.k==='deliberate'){
+    label='Vote';
+    line=d.pending?`${d.claims} claims weighed · vote ${d.vote} · <span class="mut">verdict records 17:34</span>`
+                  :`${d.claims} claims weighed · vote ${d.vote} · ${d.kind} recorded`;
+  } else if(st.k==='simulate'){
+    label='Trial';
+    line=d.live?`season 2 of 3 · <span class="tmono sage" data-live-elapsed>${liveEl()}</span> · result pending`
+               :`${d.seasons} seasons run · result <span class="tmono">${d.result}</span> · confidence ${d.conf}`;
+  } else if(st.k==='record'){
+    label='Lineage';
+    line=`${d.claims} claims linked · evidence <span class="tmono">${d.ev0} … ${d.evN}</span> · verdict <span class="tmono">${d.verdict}</span> recorded ${d.at}`;
+  } else if(st.k==='close'){
+    label='Digest';
+    line=`digest <span class="tmono">${d.digest}</span> posted ${d.at} · book closed`;
+  } else if(st.k==='read'){
+    label='Stack'; line=`<span class="mut">no papers held</span>`;
+  }
+  const inc=(st.k==='simulate'&&r.incidents.length&&r.status!=='struck')?r.incidents.map(e=>`
+      <div class="row logrow cols-log" style="border-top:1px solid var(--line)"><span class="t">${e.t}</span><span class="txt">${esc(e.text)}</span>
+      <span class="right"><span class="mins${e.mins>=1?' clay':''}">${e.mins.toFixed(1)}</span></span></div>`).join(''):'';
+  return `<section class="panel">
+    <div class="phead"><span class="lbl">${label}</span><span class="pstate">${st.name} · ${st.service}</span></div>
+    <div class="bigline${clay?' claytone':''}">${line}</div>${inc}
+  </section>`;
+}
+function stageHTML(r,k){
+  const st=stOf(r,k);
+  const held=isHeld(r);
+  const cost=r.costs[k]||0;
+  const ran=st.state==='done'||st.state==='live';
+  let actFig='—', actSub='';
+  if(held){actFig='—';actSub='held by order';}
+  else if(st.state==='booked'){actFig='—';actSub=`books ${st.booked}`;}
+  else if(st.state==='struck'){actFig='—';actSub='<span class="clay">never ran</span>';}
+  else if(st.state==='live'){actFig=`${st.actual} –`;actSub=`<span class="sage">running · </span><span class="sage tmono" data-live-elapsed>${liveEl()}</span>`;}
+  else {actFig=`${st.actual}–${st.actualEnd}`;actSub=st.slip>0?`<span class="clay">+${st.slip} late</span>`:'on book';}
+  const blocks=[
+    blk({lbl:'Service',fig:st.service,state:st.job}),
+    blk({lbl:'Cost',fig:(ran||cost>0)?money(cost):'<span class="dim">—</span>',subs:`<div class="sub">of run ${r.status==='booked'?'—':money(runTotal(r))}</div>`,state:(ran||cost>0)?'computed':'no spend'}),
+    blk({lbl:'Window',fig:`${st.booked}–${st.bookedEnd}`,figcls:'mono',subs:`<div class="sub">booked +${st.off} → +${st.offEnd}</div>`,state:`${st.offEnd-st.off} min booked`}),
+    blk({lbl:'Actual',fig:actFig,figcls:'mono',subs:`<div class="sub">${actSub}</div>`,state:st.state==='done'?'closed':st.state})
+  ].join('');
+  return `
+    <p class="lede">${stageLede(r,st)}</p>
+    <div class="ledechips">${runChip(r)}<span class="idchip">${r.id} · ${st.name.toLowerCase()}</span></div>
+    <div class="bandcap"><span class="lbl">${st.name}</span><span class="capnote">${r.id} · stage ${STAGE_ORDER.indexOf(k)+1} of 6</span><span class="capline"></span></div>
+    <div class="grid4x">${blocks}</div>
+    <div class="bandcap"><span class="lbl">${st.k==='read'?'Stack':'Record'}</span><span class="capnote">${st.k==='read'?'click a paper for its receipt':'what this stage wrote'}</span><span class="capline"></span></div>
+    ${stageCenter(r,st)}`;
+}
+
+/* ---------- paper ---------- */
+function paperHTML(r,i){
+  const p=r.papers[i];
+  const claims=p.claims.map((c,j)=>`<div class="crow"><span class="cid">c${j+1}</span><span>${esc(c.text)}</span><span class="cloc">${esc(c.loc)}</span></div>`).join('');
+  const blocks=[
+    blk({lbl:'Claims',fig:String(p.claims.length),state:'kept to lineage'}),
+    blk({lbl:'Cost',fig:money(p.cost),subs:`<div class="sub">of Read ${money(r.costs.read)}</div>`,state:'computed at read'}),
+    blk({lbl:'Evidence',fig:p.ev,figcls:'mono',state:'lineage record'}),
+    blk({lbl:'Run',fig:r.id,figcls:'mono',subs:`<div class="sub">${r.verdict?'verdict '+r.verdict:'live'}</div>`,state:r.closedAt?('closed '+r.closedAt):'mid-Simulate',go:'run:'+r.id})
+  ].join('');
+  return `
+    <h1 class="paperhead">${esc(p.t)}</h1>
+    <p class="papersub">${esc(p.j)} · ${p.y} · read by the ${stOf(r,'read').service} in ${r.id}</p>
+    <p class="lede">${p.claims.length} claims kept to <span class="tmono">${p.ev}</span> for ${money(p.cost)}.</p>
+    <div class="bandcap"><span class="lbl">Receipt</span><span class="capnote">paper p${i+1} of ${r.papersN}</span><span class="capline"></span></div>
+    <div class="grid4x">${blocks}</div>
+    <div class="bandcap"><span class="lbl">Claims kept</span><span class="capnote">${p.ev} · source line or section beside each claim</span><span class="capline"></span></div>
+    <section class="panel">${claims}</section>`;
+}
+
+/* ---------- render + events ---------- */
+function mainHTML(){
+  const v=S.view;
+  if(v.level==='day') return dayHTML();
+  if(v.level==='run') return runHTML(runOf(v.run));
+  if(v.level==='stage') return stageHTML(runOf(v.run),v.stage);
+  return paperHTML(runOf(v.run),v.paper);
+}
+function render(){
+  document.getElementById('app').innerHTML=
+    mastHTML()+`<main class="wrap pagein" id="pg">`+mainHTML()+`</main>`+
+    `<footer class="foot">Every claim sourced · every cost computed · every verdict recorded</footer>`;
+}
+function nav(go){
+  const p=go.split(':');
+  if(p[0]==='day') S.view={level:'day'};
+  else if(p[0]==='run') S.view={level:'run',run:p[1]+(p[2]?':'+p[2]:'')};
+  else if(p[0]==='stage') S.view={level:'stage',run:p[1],stage:p[2]};
+  else if(p[0]==='paper') S.view={level:'paper',run:p[1],stage:'read',paper:parseInt(p[2],10)};
+  S.courseOpen=false;S.editSO=null;S.armed=false;S.seedPaperOpen=false;S.seedQuestionOpen=false;
+  render();window.scrollTo({top:0});
+}
+function closeTransientUI(){
+  let closed=false;
+  Object.values(S.ui.allot).forEach(u=>{if(u.open){u.open=false;closed=true;}});
+  Object.values(S.ui.depth).forEach(u=>{if(u.open){u.open=false;closed=true;}});
+  Object.values(S.ui.hold).forEach(u=>{if(u.open){u.open=false;closed=true;}});
+  if(S.ui.preset.draft){S.ui.preset.draft=null;closed=true;}
+  if(S.seedPaperOpen){S.seedPaperOpen=false;closed=true;}
+  if(S.seedQuestionOpen){S.seedQuestionOpen=false;closed=true;}
+  return closed;
+}
+function up(){
+  const v=S.view;
+  if(v.level==='paper') nav('stage:'+v.run+':read');
+  else if(v.level==='stage') nav('run:'+v.run);
+  else if(v.level==='run') nav('day');
+}
+function traceRow(k){
+  const els=document.querySelectorAll('[data-strow="'+k+'"]');
+  if(!els.length) return;
+  els.forEach(n=>n.classList.add('rowflash'));
+  els[0].scrollIntoView({block:'nearest',behavior:'smooth'});
+  setTimeout(()=>{els.forEach(n=>n.classList.remove('rowflash'));},1500);
+}
+document.addEventListener('click',function(e){
+  const a=e.target.closest('[data-act],[data-go]');
+  if(!a){ if(S.armed){S.armed=false;clearTimeout(armT);render();} return; }
+  const act=a.dataset.act, go=a.dataset.go;
+  if(go&&!act){ nav(go); return; }
+  const parts=(act||'').split(':');
+  switch(parts[0]){
+    case 'courseToggle':{S.courseOpen=!S.courseOpen;S.seedPaperOpen=false;S.seedQuestionOpen=false;render();const t=document.getElementById('cTopic');if(t)t.focus();break;}
+    case 'courseCancel':{S.courseOpen=false;render();break;}
+    case 'courseSet':{
+      const t=document.getElementById('cTopic').value.trim();
+      const cy=document.getElementById('cCycles').value.trim();
+      if(!t||!cy){document.getElementById(t?'cCycles':'cTopic').focus();break;}
+      const prev=Object.assign({},S.course);
+      S.course={topic:t,cycles:cy,at:hm(S.clock),by:'Erik'};
+      pushOrder('course set: '+t+' × cycles '+cy, ()=>{S.course=prev;});
+      S.courseOpen=false;render();break;}
+    case 'seedPaperToggle':{S.seedPaperOpen=!S.seedPaperOpen;S.seedQuestionOpen=false;S.courseOpen=false;render();const el=document.getElementById('seedDoi');if(el)el.focus();break;}
+    case 'seedPaperCancel':{S.seedPaperOpen=false;render();break;}
+    case 'seedPaperSet':{
+      const doi=document.getElementById('seedDoi').value.trim();
+      if(!doi){document.getElementById('seedDoi').focus();break;}
+      const id=S.docketSeq++;
+      S.docket.push({id,kind:'paper',text:`seeded · ${doi} · next cycle`});
+      pushOrder(`seeded paper ${doi} · next cycle`, ()=>{S.docket=S.docket.filter(x=>x.id!==id);});
+      S.seedPaperOpen=false;render();break;}
+    case 'seedQuestionToggle':{S.seedQuestionOpen=!S.seedQuestionOpen;S.seedPaperOpen=false;S.courseOpen=false;render();const el=document.getElementById('seedQuestion');if(el)el.focus();break;}
+    case 'seedQuestionCancel':{S.seedQuestionOpen=false;render();break;}
+    case 'seedQuestionSet':{
+      const q=document.getElementById('seedQuestion').value.trim();
+      if(!q){document.getElementById('seedQuestion').focus();break;}
+      const id=S.docketSeq++;
+      S.docket.push({id,kind:'question',text:'question · next cycle'});
+      const short=q.length>60?q.slice(0,59).trimEnd()+'…':q;
+      pushOrder(`seeded question "${short}" · next cycle`, ()=>{S.docket=S.docket.filter(x=>x.id!==id);});
+      S.seedQuestionOpen=false;render();break;}
+    case 'trace':{traceRow(parts[1]);break;}
+    case 'soEdit':{S.editSO=parts[1];render();const i=document.getElementById('soInput');if(i){i.focus();i.select();}break;}
+    case 'soCancel':{S.editSO=null;render();break;}
+    case 'soSet':{
+      const v=document.getElementById('soInput').value.trim();
+      if(!v)break;
+      const so=S.standing.find(o=>o.k===parts[1]);
+      const prev={val:so.val,by:so.by,at:so.at};
+      so.val=v;so.by='Erik';so.at=hm(S.clock);
+      pushOrder('standing order — '+so.label+': '+v, ()=>{so.val=prev.val;so.by=prev.by;so.at=prev.at;});
+      S.editSO=null;render();break;}
+    case 'rerun':{
+      const rid=act.slice(6);
+      if(S.rerun[rid])break;
+      S.rerun[rid]=hm(S.clock);
+      pushOrder('re-run '+rid+' queued — books after cycle 16', ()=>{delete S.rerun[rid];});
+      render();break;}
+    case 'suspend':{
+      if(!S.armed){S.armed=true;render();armT=setTimeout(function(){S.armed=false;render();},5000);}
+      else{clearTimeout(armT);S.armed=false;S.suspended=true;
+        pushOrder('generation suspended — cycles 13–16 held on book', ()=>{S.suspended=false;});
+        render();}
+      break;}
+    case 'resume':{S.suspended=false;pushOrder('generation resumed — cycles 13–16 rebooked', ()=>{S.suspended=true;});render();break;}
+    case 'revertLog':{doRevert(parseInt(parts[1],10));break;}
+    case 'toggleClaims':{
+      const key=parts[1]+':'+parts[2];
+      S.ui.expandClaims[key]=!S.ui.expandClaims[key];
+      render();break;}
+    case 'wstop':{
+      const key=parts[1]; const svc=SVC.find(s=>s.key===key); const w=S.wheels[key];
+      const prevState=w.state, prevHold=w.holdUntil;
+      const goingStop = w.state!=='stopped';
+      w.state = goingStop?'stopped':'running'; w.holdUntil=null;
+      pushOrder(`${svc.name} ${goingStop?'stopped':'started'}`, ()=>{w.state=prevState;w.holdUntil=prevHold;});
+      render();break;}
+    case 'wsolo':{
+      const key=parts[1]; const svc=SVC.find(s=>s.key===key);
+      if(S.soloKey===key){
+        const before=snapshotWheels();
+        applyWheelSnapshot(S.soloSnapshot);
+        S.soloKey=null;
+        pushOrder(`${svc.name} solo cleared`, ()=>{applyWheelSnapshot(before);S.soloKey=key;});
+        S.soloSnapshot=null;
+      } else {
+        const before=snapshotWheels();
+        S.soloSnapshot=before;
+        SVC.forEach(s=>{S.wheels[s.key].state = s.key===key?'running':'parked'; S.wheels[s.key].holdUntil=null;});
+        S.soloKey=key;
+        pushOrder(`${svc.name} solo — others parked`, ()=>{applyWheelSnapshot(before);S.soloKey=null;S.soloSnapshot=null;});
+      }
+      render();break;}
+    case 'wdepthOpen':{const key=parts[1];const ui=S.ui.depth[key];ui.open=!ui.open;if(ui.open)ui.draftVal=S.depth[key];render();break;}
+    case 'wdepthStep':{
+      const key=parts[1], dir=parts[2]; const d=DEPTH_DEF[key]; const ui=S.ui.depth[key];
+      let nxt=ui.draftVal+(dir==='up'?d.step:-d.step);
+      nxt=Math.max(d.min,Math.min(d.max,nxt));
+      ui.draftVal=nxt; render();break;}
+    case 'wdepthSet':{
+      const key=parts[1]; const ui=S.ui.depth[key]; const svc=SVC.find(s=>s.key===key); const d=DEPTH_DEF[key];
+      const prev=S.depth[key];
+      if(ui.draftVal===prev){ui.open=false;render();break;}
+      S.depth[key]=ui.draftVal;
+      pushOrder(`${svc.name} ${d.unit} ${prev}→${ui.draftVal}`, ()=>{S.depth[key]=prev;});
+      ui.open=false;render();break;}
+    case 'wdepthCancel':{S.ui.depth[parts[1]].open=false;render();break;}
+    case 'wallotOpen':{const key=parts[1];const ui=S.ui.allot[key];ui.open=!ui.open;if(ui.open){ui.draftAllot=S.allot[key];ui.draftCeiling=S.ceiling[key];}render();break;}
+    case 'wallotStep':{
+      const key=parts[1], dir=parts[2]; const ui=S.ui.allot[key]; const svc=SVC.find(s=>s.key===key);
+      let nxt=ui.draftAllot+(dir==='up'?500:-500);
+      const min=Math.max(500,Math.ceil(svc.spent/500)*500);
+      if(nxt<min) nxt=min;
+      ui.draftAllot=nxt; render();break;}
+    case 'wallotSet':{
+      const key=parts[1]; const ui=S.ui.allot[key]; const svc=SVC.find(s=>s.key===key);
+      const prevAllot=S.allot[key], prevCeiling=S.ceiling[key];
+      const newAllot=ui.draftAllot, newCeiling=ui.draftCeiling;
+      if(newAllot===prevAllot && newCeiling===prevCeiling){ui.open=false;render();break;}
+      S.allot[key]=newAllot; S.ceiling[key]=newCeiling;
+      let text=`${svc.name} allot ${newAllot>prevAllot?'raised':(newAllot<prevAllot?'lowered':'held')} ${money(prevAllot)}→${money(newAllot)}`;
+      if(newCeiling!==prevCeiling) text+=` · ceiling: ${prevCeiling}→${newCeiling}`;
+      pushOrder(text, ()=>{S.allot[key]=prevAllot;S.ceiling[key]=prevCeiling;});
+      ui.open=false;render();break;}
+    case 'wallotCancel':{S.ui.allot[parts[1]].open=false;render();break;}
+    case 'wholdOpen':{S.ui.hold[parts[1]].open=!S.ui.hold[parts[1]].open;render();break;}
+    case 'wholdSet':{
+      const key=parts[1]; const svc=SVC.find(s=>s.key===key);
+      const el=document.getElementById('holdInput_'+key);
+      const val=el?el.value:'';
+      if(!val)break;
+      const w=S.wheels[key]; const prevState=w.state, prevHold=w.holdUntil;
+      w.state='held'; w.holdUntil=val;
+      pushOrder(`${svc.name} held · until ${val}`, ()=>{w.state=prevState;w.holdUntil=prevHold;});
+      S.ui.hold[key].open=false; render();break;}
+    case 'wholdCancel':{S.ui.hold[parts[1]].open=false;render();break;}
+    case 'presetOpen':{S.ui.preset.draft=(S.ui.preset.draft===parts[1]?null:parts[1]);render();break;}
+    case 'presetCancel':{S.ui.preset.draft=null;render();break;}
+    case 'presetSet':{
+      const key=S.ui.preset.draft; if(!key)break;
+      const map=PRESETS[key];
+      const before=snapshotWheels();
+      SVC.forEach(s=>{S.wheels[s.key].state=map[s.key];S.wheels[s.key].holdUntil=null;});
+      S.soloKey=null; S.soloSnapshot=null;
+      pushOrder(`wheel-set: ${PRESET_LABEL[key]}`, ()=>{applyWheelSnapshot(before);});
+      S.ui.preset.draft=null; render();break;}
+    case 'runOneNow':{
+      const n=RUNS.length;
+      const cycle=n+1;
+      const id='r-'+(2201+n);
+      const openSec=Math.ceil(S.clock/1800)*1800;
+      const openStr=hm(openSec);
+      const stageTmpl=RUNS[0].stages.map(s=>({k:s.k,name:s.name,service:s.service,job:s.job,off:s.off,offEnd:s.offEnd}));
+      const stages=stageTmpl.map(t=>({
+        k:t.k,name:t.name,service:t.service,job:t.job,off:t.off,offEnd:t.offEnd,
+        booked:hm(openSec+t.off*60), bookedEnd:hm(openSec+t.offEnd*60),
+        slip:0, actual:null, actualEnd:null, state:'booked',
+        lede:`The ${t.service} books ${hm(openSec+t.off*60)} — not yet run.`, detail:null
+      }));
+      const newRun={id,cycle,open:openStr,status:'booked',theme:'',lede:'',vote:null,kind:null,seasons:null,conf:null,
+        verdict:null,digest:null,result:null,closedAt:null,sources:0,papersN:0,claims:0,
+        costs:{open:0,read:0,deliberate:0,simulate:0,record:0,close:0}, stages, papers:[], incidents:[], manual:true};
+      RUNS.push(newRun);
+      pushOrder(`cycle ${cycle} ${id} booked · ${openStr} · manual`, ()=>{const idx=RUNS.findIndex(x=>x.id===id); if(idx>=0) RUNS.splice(idx,1);});
+      render();break;}
+  }
+});
+document.addEventListener('change',function(e){
+  const el=e.target.closest('[data-ceiling]');
+  if(el){ S.ui.allot[el.dataset.ceiling].draftCeiling=el.value; render(); }
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){
+    if(S.courseOpen){S.courseOpen=false;render();return;}
+    if(S.editSO){S.editSO=null;render();return;}
+    if(S.armed){S.armed=false;clearTimeout(armT);render();return;}
+    if(closeTransientUI()){render();return;}
+    if(S.view.level!=='day') up();
+    return;
+  }
+  if(e.key==='Enter'){
+    const id=e.target&&e.target.id;
+    if(id==='cTopic'||id==='cCycles'){e.preventDefault();const b=document.getElementById('courseSetBtn');if(b)b.click();}
+    else if(id==='soInput'){e.preventDefault();const b=document.getElementById('soSetBtn');if(b)b.click();}
+    else if(id==='seedDoi'){e.preventDefault();const b=document.getElementById('seedPaperSetBtn');if(b)b.click();}
+    else if(id==='seedQuestion'){e.preventDefault();const b=document.getElementById('seedQuestionSetBtn');if(b)b.click();}
+    else if(id&&id.indexOf('holdInput_')===0){e.preventDefault();const key=id.slice('holdInput_'.length);const b=document.getElementById('holdSetBtn_'+key);if(b)b.click();}
+    else if(e.target&&e.target.closest){const el=e.target.closest('[data-go],[data-act]');if(el&&el.tagName!=='BUTTON'&&el.tagName!=='INPUT'){e.preventDefault();el.click();}}
+  }
+});
+document.addEventListener('mouseover',function(e){
+  document.querySelectorAll('.ttg .hov').forEach(n=>n.classList.remove('hov'));
+  const c=e.target.closest('.ttg [data-run]');
+  if(c){const id=c.dataset.run;document.querySelectorAll('.ttg [data-run="'+id+'"]').forEach(n=>n.classList.add('hov'));}
+});
+setInterval(function(){
+  S.clock++;
+  const c=document.getElementById('clock');
+  if(c) c.textContent=hms(S.clock)+' · farm local UTC−05';
+  document.querySelectorAll('[data-live-elapsed]').forEach(n=>{n.textContent=liveEl();});
+},1000);
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis — Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700&family=Source+Sans+3:wght@400..700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1B1917; --lift:#211E1B; --lift2:#272320;
+  --ink:#E7E3DA; --muted:#A69D90; --faint:#6E675E; --ghost:#4E4841;
+  --line:rgba(231,227,218,0.14); --line2:rgba(231,227,218,0.28); --line3:rgba(231,227,218,0.08);
+  --fill-90:rgba(231,227,218,0.09); --fill-50:rgba(231,227,218,0.22);
+  --sage:hsl(158,30%,55%); --sageD:hsl(158,22%,19%);
+  --clay:hsl(12,42%,58%); --clayD:hsl(12,26%,17%);
+  --serif:'Source Serif 4',Georgia,serif;
+  --sans:'Source Sans 3',-apple-system,'Helvetica Neue',sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);width:1440px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+.wrap{width:1440px;padding:0 44px}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12.5px}
+.sage{color:var(--sage)} .clay{color:var(--clay)} .mut{color:var(--muted)} .fnt{color:var(--faint)}
+.lbl{font:600 11.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.dr{text-decoration:underline dotted rgba(231,227,218,.3);text-underline-offset:3px;text-decoration-thickness:1px;cursor:pointer}
+.dr:hover{color:var(--ink);text-decoration-color:var(--sage)}
+
+/* nav */
+nav{height:52px;display:flex;align-items:center;border-bottom:1px solid var(--line)}
+.brand{font:600 19px var(--serif);letter-spacing:.02em}
+.rooms{margin-left:auto;display:flex;gap:26px}
+.rooms a{display:inline-flex;align-items:center;height:52px;margin-bottom:-1px;border-bottom:2px solid transparent;font:600 12px var(--sans);text-transform:uppercase;letter-spacing:.13em;color:var(--muted)}
+.rooms a.active{color:var(--ink);border-bottom-color:var(--sage)}
+
+/* masthead */
+.mast{padding:18px 0 0}
+.mast-title{display:flex;align-items:baseline;gap:18px}
+.mast-title h1{font:400 40px/1.05 var(--serif);letter-spacing:.01em}
+.mast-title .date{font:13px var(--sans);color:var(--muted);letter-spacing:.06em}
+.mast-title .bookline{margin-left:auto;display:flex;align-items:baseline;gap:9px;font:13px var(--sans);color:var(--muted);white-space:nowrap}
+.mast-title .bookline b{color:var(--ink);font-weight:600}
+.mastrule{height:5px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:14px}
+
+/* book band */
+.band{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
+.cell{background:var(--bg);padding:14px 16px 14px 0;min-height:150px}
+.cell + .cell{padding-left:16px}
+.cell .lbl{display:block;margin-bottom:10px}
+.cell .lbl .sub{color:var(--faint);letter-spacing:.06em;text-transform:none;font-weight:400;margin-left:8px}
+.cell.span2{grid-column:span 2}
+.fig{font:600 26px/1.1 var(--serif);font-variant-numeric:tabular-nums}
+.fig small{font:13px var(--sans);color:var(--muted);margin-left:7px;font-weight:400}
+.kv{display:flex;justify-content:space-between;gap:12px;font:13px/1.7 var(--sans);color:var(--muted)}
+.kv b{color:var(--ink);font-weight:400;text-align:right;font-variant-numeric:tabular-nums}
+.kv b.clay{color:var(--clay)}
+.kvs{margin-top:6px}
+.basis{font:italic 12px/1.4 var(--serif);color:var(--faint);margin-top:8px}
+.inline{display:flex;flex-wrap:wrap;gap:0 10px;font:13px var(--sans);color:var(--muted)}
+.inline b{color:var(--ink);font-weight:400;font-variant-numeric:tabular-nums}
+.inline .dot{color:var(--faint)}
+
+/* stage mix bar */
+.mixbar{display:flex;height:8px;margin:10px 0 6px;position:relative;background:var(--line3)}
+.mixbar i{display:block;height:100%}
+.mixbar em{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--ink)}
+.mixrows{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.mixrows .kv{line-height:1.6}
+.sw{display:inline-block;width:9px;height:9px;margin-right:7px;vertical-align:-1px}
+
+/* concentration bars */
+.cbar{height:6px;background:var(--line3);position:relative;margin:4px 0 8px}
+.cbar i{position:absolute;left:0;top:0;bottom:0;background:var(--clay)}
+.cbar em{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--ink)}
+.cbar .capl{position:absolute;top:9px;font:11px var(--mono);color:var(--muted);transform:translateX(-50%)}
+
+/* small tables */
+table{border-collapse:collapse;width:100%}
+th{text-align:left;font:600 11px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:0 10px 5px 0;border-bottom:1px solid var(--line)}
+td{padding:5px 10px 5px 0;font:13px var(--sans);color:var(--muted);border-bottom:1px solid var(--line3);vertical-align:top}
+td.n,th.n{text-align:right;padding-right:0;font-variant-numeric:tabular-nums}
+td.mono{white-space:nowrap}
+th.n{padding-left:12px}
+td.ink{color:var(--ink)}
+tr:last-child td{border-bottom:0}
+
+/* machine lines */
+.machine{display:flex;gap:0;border-bottom:1px solid var(--line)}
+.machine p{flex:1;padding:12px 18px 12px 0;font:italic 14px/1.45 var(--serif);color:var(--muted);border-right:1px solid var(--line)}
+.machine p + p{padding-left:18px}
+.machine p:last-child{border-right:0;padding-right:0}
+.machine p::before{content:"";display:inline-block;width:6px;height:6px;background:var(--clay);margin-right:10px;vertical-align:2px}
+
+/* positions: publication entries */
+.sect{display:flex;align-items:baseline;gap:12px;padding:20px 0 8px}
+.sect .lbl{color:var(--ink);letter-spacing:.16em}
+.sect .cnt{font:12.5px var(--mono);color:var(--sage)}
+.sect .cols{margin-left:auto;font:12px var(--sans);color:var(--faint)}
+.thead{display:grid;grid-template-columns:330px 86px 86px 224px 92px 100px 1fr 176px;gap:0 14px;padding:0 0 7px;border-bottom:1px solid var(--line)}
+.thead span{font:600 11px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.thead span.n{text-align:right}
+.entry{display:grid;grid-template-columns:330px 86px 86px 224px 92px 100px 1fr 176px;gap:0 14px;padding:13px 0 12px;border-bottom:1px solid var(--line);align-items:start}
+.entry .name{font:400 16.5px/1.25 var(--serif);color:var(--ink)}
+.entry .meta{display:flex;flex-wrap:wrap;gap:0 8px;margin-top:4px;font:12px var(--sans);color:var(--faint)}
+.entry .meta .num{color:var(--muted)}
+.entry .closed{margin-top:5px;font:italic 12.5px var(--serif);color:var(--faint)}
+.entry .word{font:13px var(--sans);color:var(--ink);padding-top:3px}
+.entry .vs{padding-top:3px}
+.entry .vs .w{font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase}
+.entry .vs .d{font:12.5px var(--mono);color:var(--muted);margin-top:2px}
+.entry .money{font:13px var(--mono);text-align:right;color:var(--ink);padding-top:3px}
+.entry .next{font:13px/1.45 var(--sans);color:var(--ink);padding-top:2px}
+.entry .pub{padding-top:2px}
+.pubstate{font:12.5px var(--sans);color:var(--sage)}
+.ctl{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px}
+.ctl a{font:600 11px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid transparent;padding-bottom:1px}
+.ctl a:hover{color:var(--sage);border-bottom-color:var(--sage)}
+.acts{margin-top:4px;font:11px var(--sans);letter-spacing:.04em;color:var(--ghost)}
+.acts::before{content:"▸ ";color:var(--ghost)}
+.entry.dead .name,.entry.dead .word,.entry.dead .next,.entry.dead .money{color:var(--faint)}
+.entry.dead .vs .w{color:var(--faint)}
+.entry.dead .vs .d{color:var(--ghost)}
+.entry.dead .meta{color:var(--ghost)}
+.entry.dead .ctl a{color:var(--ghost)}
+.vs-on .w,.vs-beat .w{color:var(--sage)} .vs-below .w{color:var(--clay)} .vs-unp .w{color:var(--muted)}
+
+/* selected entry: the published page */
+.entry.sel{border-left:2px solid var(--sage);margin-left:-16px;padding-left:14px;background:var(--lift);border-bottom:0}
+.entry.sel .name{font-size:13px;font-family:var(--sans);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--sage)}
+.entry.sel .thesis-head{grid-column:1/-1;font:400 25px/1.35 var(--serif);color:var(--ink);max-width:1120px;margin:2px 0 10px}
+.entry.sel .frozen{font:12.5px var(--sans);color:var(--muted);margin-top:0}
+.page{margin-left:-16px;padding:0 0 22px 14px;border-left:2px solid var(--sage);background:var(--lift);border-bottom:1px solid var(--line)}
+.blk{display:grid;grid-template-columns:1fr 208px;gap:0 24px;padding:16px 0 16px;border-top:1px solid var(--line)}
+.blk .rec{min-width:0}
+.blk .rail{padding-top:1px;border-left:1px solid var(--line3);padding-left:16px}
+.blk .rail .lbl{display:block;color:var(--ghost);font-size:10.5px;margin-bottom:8px}
+.blk .rail .ctl{gap:7px 12px}
+.blk .rail .ctl a{color:var(--faint)}
+.blk .rail .ctl a:hover{color:var(--sage)}
+.blk .rail .ctl + .ctl{margin-top:10px;padding-top:10px;border-top:1px solid var(--line3);width:100%}
+.blk .rail .acts{margin-top:12px}
+.blk .rail:empty{border-left:0}
+.blk .bh{display:flex;align-items:baseline;gap:12px;margin-bottom:10px}
+.blk .bh .lbl{color:var(--ink);letter-spacing:.16em}
+.blk .bh .state{font:13px var(--sans);color:var(--muted)}
+.blk .bh .state b{color:var(--ink);font-weight:400}
+.standing-word{font:600 22px var(--serif);color:var(--sage)}
+
+/* arc: dated record */
+.arc{display:grid;grid-template-columns:repeat(8,1fr);position:relative;margin-top:14px}
+.arc::before{content:"";position:absolute;left:6px;right:6px;top:5px;height:1px;background:var(--line2)}
+.arc .node{position:relative;padding:0 10px 0 0}
+.arc .node::before{content:"";position:absolute;left:0;top:0;width:11px;height:11px;border:1px solid var(--ink);background:var(--bg);border-radius:50%}
+.arc .node.now::before{background:var(--sage);border-color:var(--sage)}
+.arc .node .nd{margin-top:20px;font:12px var(--mono);color:var(--muted)}
+.arc .node .nn{font:500 14px/1.3 var(--serif);color:var(--ink);margin-top:2px}
+.arc .node .nt{font:12px/1.4 var(--sans);color:var(--muted);margin-top:3px}
+
+/* thesis vs reality */
+.tvr{display:grid;grid-template-columns:560px 1fr;gap:0 28px;align-items:start}
+.tvr svg{display:block;width:100%;height:auto}
+.legend{display:flex;gap:18px;margin-top:6px;font:12px var(--sans);color:var(--muted)}
+.legend .it{display:flex;align-items:center;gap:6px}
+.legend .ln{display:inline-block;width:16px;height:0;border-top:2px solid var(--sage)}
+.legend .ln.cl{border-top:1px dashed var(--ink)}
+.legend .bx{display:inline-block;width:14px;height:10px;background:var(--fill-90);border:1px solid var(--line)}
+td.cov{color:var(--sage)}
+
+/* reality */
+.reality{display:grid;grid-template-columns:repeat(7,1fr);gap:0 12px}
+.reality .r .lbl{display:block;margin-bottom:5px;font-size:10.5px}
+.reality .r .fig{font-size:22px}
+.reality .r .s{font:12px var(--sans);color:var(--muted);margin-top:3px}
+
+/* estate rows */
+.erow{display:grid;grid-template-columns:96px 1fr 120px 110px 110px 1fr;gap:0 12px;padding:7px 0;border-bottom:1px solid var(--line3);font:13px var(--sans);color:var(--muted);align-items:baseline}
+.erow:last-child{border-bottom:0}
+.erow .t{color:var(--ink);font-family:var(--serif);font-size:14px}
+.erow .st{font:600 11.5px var(--sans);letter-spacing:.08em;text-transform:uppercase}
+
+/* money */
+.money{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr 1.4fr;gap:0 20px}
+.money .m .lbl{display:block;margin-bottom:5px;font-size:10.5px}
+.money .m .fig{font-size:22px}
+.money .m .s{font:12px var(--sans);color:var(--muted);margin-top:3px}
+.stagebars{margin-top:8px}
+.stagebars .kv{line-height:1.6;font-size:12.5px}
+
+/* world */
+.world .lbl{color:var(--ink)}
+.wrow{display:grid;grid-template-columns:110px 1fr 300px 100px 110px 80px 250px;gap:0 14px;padding:11px 0;border-bottom:1px solid var(--line);align-items:start}
+.wrow:last-child{border-bottom:0}
+.wrow .ty{font:600 11.5px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+.wrow .tx{font:400 15px/1.3 var(--serif);color:var(--ink)}
+.wrow .tc{font:12.5px/1.4 var(--sans);color:var(--muted)}
+.wrow .st{font:12.5px var(--sans);padding-top:2px}
+.wrow .dt{font:12.5px var(--mono);color:var(--muted);padding-top:2px}
+.wrow .pr{font:12.5px var(--sans);color:var(--muted);padding-top:2px}
+.wrow .pr.hi{color:var(--clay)}
+.wrow .ctl{margin-top:2px}
+
+footer{border-top:1px solid var(--line);margin-top:26px;padding:14px 0 18px;text-align:center}
+footer .lbl{letter-spacing:.16em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <span class="brand">Palingenesis</span>
+  <span class="rooms">
+    <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#" class="active">Portfolio</a><a href="#">Simulation</a><a href="#">Engine&nbsp;Room</a>
+  </span>
+</nav>
+
+<header class="mast">
+  <div class="mast-title">
+    <h1>Portfolio</h1>
+    <span class="date">Tue 15 Sep 2026</span>
+    <span class="bookline num">
+      <span class="lbl" style="color:var(--ink)">Book</span>
+      <a class="dr" href="#"><b>9</b> positions</a><span class="fnt">·</span>
+      <a class="dr" href="#"><b>6</b> active</a><span class="fnt">·</span>
+      <a class="dr" href="#"><b>1</b> exited</a><span class="fnt">·</span>
+      <a class="dr" href="#"><b>1</b> retired</a><span class="fnt">·</span>
+      <a class="dr" href="#"><b>1</b> failed</a><span class="fnt">·</span>
+      <a class="dr" href="#"><b>2</b> unproven</a>
+    </span>
+  </div>
+  <div class="mastrule"></div>
+</header>
+
+<!-- BOOK instruments: masthead band -->
+<section class="band">
+  <div class="cell">
+    <span class="lbl">Positions <span class="sub">target</span></span>
+    <div class="mixbar">
+      <i style="width:22.2%;background:var(--fill-90)"></i>
+      <i style="width:22.2%;background:var(--fill-50)"></i>
+      <i style="width:22.2%;background:var(--muted)"></i>
+      <i style="width:33.4%;background:var(--ghost)"></i>
+      <em style="left:20%"></em><em style="left:60%"></em><em style="left:90%"></em>
+    </div>
+    <div class="mixrows">
+      <div class="kv"><span><i class="sw" style="background:var(--fill-90)"></i>piloting</span><b><a class="dr" href="#">2</a> <span class="fnt">· 20%</span></b></div>
+      <div class="kv"><span><i class="sw" style="background:var(--ghost)"></i>exited</span><b><a class="dr" href="#">1</a></b></div>
+      <div class="kv"><span><i class="sw" style="background:var(--fill-50)"></i>launched</span><b><a class="dr" href="#">2</a> <span class="fnt">· 40%</span></b></div>
+      <div class="kv"><span><i class="sw" style="background:var(--ghost)"></i>retired</span><b><a class="dr" href="#">1</a></b></div>
+      <div class="kv"><span><i class="sw" style="background:var(--muted)"></i>scaling</span><b><a class="dr" href="#">2</a> <span class="fnt">· 30%</span></b></div>
+      <div class="kv"><span><i class="sw" style="background:var(--ghost)"></i>failed</span><b><a class="dr" href="#">1</a></b></div>
+      <div class="kv"><span></span><b></b></div>
+      <div class="kv"><span>closed</span><b><a class="dr" href="#">3</a> <span class="fnt">· 10%</span></b></div>
+    </div>
+  </div>
+
+  <div class="cell">
+    <span class="lbl">Thesis vs reality <span class="sub">41 claims scored</span></span>
+    <div style="display:grid;grid-template-columns:1fr 150px;gap:0 12px">
+      <div>
+        <div class="fig"><a class="dr" href="#">84%</a><small>90% interval coverage</small></div>
+        <div class="kvs">
+          <div class="kv"><span>on or above</span><b class="sage"><a class="dr" href="#">29</a></b></div>
+          <div class="kv"><span>below</span><b class="clay"><a class="dr" href="#">8</a></b></div>
+          <div class="kv"><span>unproven</span><b><a class="dr" href="#">4</a></b></div>
+        </div>
+      </div>
+      <div>
+        <span class="lbl" style="font-size:10.5px;margin-bottom:4px;color:var(--faint)">Calibration</span>
+        <svg viewBox="0 0 150 104" role="img" aria-label="calibration">
+          <line x1="22" y1="88" x2="146" y2="88" stroke="var(--line2)" stroke-width="1"/>
+          <line x1="22" y1="88" x2="22" y2="6" stroke="var(--line2)" stroke-width="1"/>
+          <line x1="22" y1="88" x2="146" y2="6" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>
+          <polyline points="34.4,81.4 59.2,66.7 84,49.4 108.8,33.9 133.6,19.1" fill="none" stroke="var(--sage)" stroke-width="1.6"/>
+          <circle cx="34.4" cy="81.4" r="2.2" fill="var(--sage)"/><circle cx="59.2" cy="66.7" r="2.2" fill="var(--sage)"/><circle cx="84" cy="49.4" r="2.2" fill="var(--sage)"/><circle cx="108.8" cy="33.9" r="2.2" fill="var(--sage)"/><circle cx="133.6" cy="19.1" r="2.2" fill="var(--sage)"/>
+          <text x="34.4" y="100" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="ui-monospace,monospace">10%</text>
+          <text x="84" y="100" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="ui-monospace,monospace">50%</text>
+          <text x="133.6" y="100" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="ui-monospace,monospace">90%</text>
+          <text x="18" y="22" text-anchor="end" font-size="9.5" fill="var(--sage)" font-family="ui-monospace,monospace">84%</text>
+          <text x="18" y="84" text-anchor="end" font-size="9.5" fill="var(--muted)" font-family="ui-monospace,monospace">8%</text>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="cell">
+    <span class="lbl">Concentration <span class="sub">cap</span></span>
+    <div class="kv"><span>Top 3 share</span><b class="clay"><a class="dr" href="#">71%</a></b></div>
+    <div class="cbar"><i style="width:71%"></i><em style="left:60%"></em><span class="capl" style="left:60%">60%</span></div>
+    <div class="kv" style="margin-top:8px"><span>Single max</span><b class="clay"><a class="dr" href="#">38%</a></b></div>
+    <div class="cbar"><i style="width:38%"></i><em style="left:25%"></em><span class="capl" style="left:25%">25%</span></div>
+    <div class="kv" style="margin-top:8px"><span>HHI</span><b class="clay"><a class="dr" href="#">0.21</a></b></div>
+    <div class="cbar"><i style="width:21%"></i><em style="left:15%"></em><span class="capl" style="left:15%">0.15</span></div>
+    <div class="basis" style="margin-top:14px">revenue, trailing 12 months</div>
+  </div>
+
+  <div class="cell">
+    <span class="lbl">Capital in <span class="sub">Returned</span></span>
+    <div style="display:grid;grid-template-columns:128px 1fr;gap:0 16px">
+      <div>
+        <div class="fig"><a class="dr" href="#">$1.94M</a></div>
+        <div class="kvs">
+          <div class="kv"><span>Returned</span><b><a class="dr" href="#">$1.21M</a></b></div>
+          <div class="kv"><span>Revenue TTM</span><b><a class="dr" href="#">$0.86M</a></b></div>
+          <div class="kv"><span>Licensing TTM</span><b><a class="dr" href="#">$0.14M</a></b></div>
+          <div class="kv"><span>Burn / month</span><b><a class="dr" href="#">$41K</a></b></div>
+        </div>
+      </div>
+      <div>
+        <span class="lbl" style="font-size:10.5px;margin-bottom:4px;color:var(--faint)">Vintages</span>
+        <table>
+          <tr><th>Vintage</th><th class="n">In</th><th class="n">Returned</th></tr>
+          <tr><td class="mono"><a class="dr" href="#">2025 Q3</a></td><td class="n mono">$0.62M</td><td class="n mono ink">$0.71M</td></tr>
+          <tr><td class="mono"><a class="dr" href="#">2025 Q4</a></td><td class="n mono">$0.48M</td><td class="n mono ink">$0.33M</td></tr>
+          <tr><td class="mono"><a class="dr" href="#">2026 Q1</a></td><td class="n mono">$0.51M</td><td class="n mono ink">$0.17M</td></tr>
+          <tr><td class="mono"><a class="dr" href="#">2026 Q2</a></td><td class="n mono">$0.33M</td><td class="n mono ink">$0.00M</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="basis">metered, Engine Room ledger</div>
+  </div>
+
+  <div class="cell" style="min-height:0">
+    <span class="lbl">Time to evidence</span>
+    <div class="fig"><a class="dr" href="#">74 days</a><small>Median time to evidence</small></div>
+    <div class="kvs">
+      <div class="kv"><span>Longest waiting</span><b class="clay num"><a class="dr" href="#">61 days</a></b></div>
+      <div style="font:13px/1.4 var(--serif);color:var(--ink);margin-top:2px"><a class="dr" href="#">Shell thickness via calcium timing</a></div>
+    </div>
+  </div>
+
+  <div class="cell span2" style="min-height:0">
+    <span class="lbl">Clusters</span>
+    <table>
+      <tr><td class="ink" style="width:220px;font-family:var(--serif);font-size:14px"><a class="dr" href="#">Litter mechanism</a></td><td><a class="dr" href="#">Fungal ammonia reduction</a> · <a class="dr" href="#">Litter moisture control</a></td><td class="n fnt" style="width:160px">bedding chemistry</td></tr>
+      <tr><td class="ink" style="font-family:var(--serif);font-size:14px"><a class="dr" href="#">Barn climate</a></td><td><a class="dr" href="#">Heat stress ventilation timing</a> · <a class="dr" href="#">Litter moisture control</a></td><td class="n fnt">ventilation schedule</td></tr>
+      <tr><td class="ink" style="font-family:var(--serif);font-size:14px"><a class="dr" href="#">Feed</a></td><td><a class="dr" href="#">Feed-cost proxy blending</a> · <a class="dr" href="#">Shell thickness via calcium timing</a></td><td class="n fnt">ration supplier</td></tr>
+      <tr><td class="ink" style="font-family:var(--serif);font-size:14px"><a class="dr" href="#">Regulatory: EU cage-free 2027</a></td><td><a class="dr" href="#">Fungal ammonia reduction</a> · <a class="dr" href="#">Enrichment perch layout</a></td><td class="n fnt">regulation</td></tr>
+    </table>
+  </div>
+
+  <div class="cell" style="min-height:0">
+    <span class="lbl">Estate</span>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px">
+      <div>
+        <div class="fig"><a class="dr" href="#">7</a><small>Patents</small></div>
+        <div class="kvs">
+          <div class="kv"><span>granted</span><b><a class="dr" href="#">3</a></b></div>
+          <div class="kv"><span>pending</span><b><a class="dr" href="#">2</a></b></div>
+          <div class="kv"><span>office action</span><b class="clay"><a class="dr" href="#">1</a></b></div>
+          <div class="kv"><span>abandoned</span><b><a class="dr" href="#">1</a></b></div>
+        </div>
+      </div>
+      <div style="padding-top:2px">
+        <div class="kv"><span>Licences out</span><b><a class="dr" href="#">2</a></b></div>
+        <div class="kv"><span>Licences in</span><b><a class="dr" href="#">1</a></b></div>
+        <div class="kv"><span>Next expiry</span><b class="mono"><a class="dr" href="#">2041-03</a></b></div>
+        <div class="kv"><span>Income TTM</span><b class="mono"><a class="dr" href="#">$0.14M</a></b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="machine">
+  <p>Standing review due 30 Sep: Feed-cost proxy blending below thesis two quarters.</p>
+  <p>EU office action on Mycelial bedding amendment: response due 27 Nov.</p>
+  <p>First field reading for Shell thickness via calcium timing due 3 Oct, Site B.</p>
+</section>
+
+<!-- POSITIONS: the published book -->
+<div class="sect">
+  <span class="lbl">Positions</span><span class="cnt num">9</span>
+</div>
+<div class="thead">
+  <span>Position</span><span>Stage</span><span>Standing</span><span>Thesis vs reality</span><span class="n">Capital in</span><span class="n">Revenue TTM</span><span>Next act</span><span>Public · Private</span>
+</div>
+
+<!-- selected entry: Fungal ammonia reduction -->
+<div class="entry sel">
+  <div style="grid-column:1/-1;display:flex;align-items:baseline;gap:12px">
+    <span class="name"><a class="dr" href="#">Fungal ammonia reduction</a></span>
+    <span class="mono fnt">pos-0417</span>
+  </div>
+  <div class="thesis-head">Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) at no change in litter moisture, paying back in one flock.</div>
+  <div>
+    <div class="frozen">Approved 2025-08-19 · Dossier v4</div>
+    <div class="meta"><span class="num">2025 Q3</span><span>·</span><span><a class="dr num" href="#">14</a> Sites</span><span>·</span><span>cage-free layers</span></div>
+  </div>
+  <div class="word">scaling</div>
+  <div class="word sage">scale</div>
+  <div class="vs vs-beat"><div class="w">beating thesis</div><div class="d"><a class="dr" href="#">−31% NH₃ vs −24% claimed</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.41M</a></div>
+  <div class="money"><a class="dr" href="#">$0.33M</a></div>
+  <div class="next"><a class="dr" href="#">Licence out · Big Dutchman · term sheet 22 Sep</a></div>
+  <div class="pub">
+    <div class="pubstate">Public · since 2026-04-08</div>
+    <div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div>
+    <div class="acts">Reason · Effective date · Actor</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- STANDING -->
+  <div class="blk" style="border-top:0">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Standing</span></div>
+      <div style="display:flex;align-items:baseline;gap:16px">
+        <span class="standing-word">scale</span>
+        <span class="mut" style="font-size:13px">2026-05-04 · Erik · <i style="font-family:var(--serif)">"field readings hold across 12 sites"</i></span>
+      </div>
+    </div>
+    <div class="rail">
+      <span class="lbl">Controls</span>
+      <div class="ctl"><a href="#">Hold</a><a href="#">Scale</a><a href="#">Pause</a><a href="#">Exit</a><a href="#">Retire</a><a href="#">Release</a><a href="#">Spin out</a></div>
+      <div class="acts">Reason · Effective date · Actor</div>
+    </div>
+  </div>
+
+  <!-- ARC -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Arc</span><span class="state"><b>8</b> acts · 2025-06-02 → 2026-05-04</span></div>
+      <div class="arc">
+        <div class="node"><div class="nd">2025-06-02</div><div class="nn"><a class="dr" href="#">Seed sources</a></div><div class="nt"><a class="dr" href="#">3 papers</a> · Library</div></div>
+        <div class="node"><div class="nd">2025-06-14</div><div class="nn"><a class="dr" href="#">Embryo</a></div><div class="nt">gen <a class="dr" href="#">212</a> · fitness <a class="dr" href="#">0.81</a></div></div>
+        <div class="node"><div class="nd">2025-07-30</div><div class="nn"><a class="dr" href="#">Council verdict</a></div><div class="nt"><span class="sage">GREENLIGHT</span> · <a class="dr" href="#">5 of 6</a> judges</div></div>
+        <div class="node"><div class="nd">2025-08-11</div><div class="nn"><a class="dr" href="#">Simulation</a></div><div class="nt"><a class="dr" href="#">sim-2107</a> · skill <a class="dr" href="#">0.79</a> · 90% coverage <a class="dr" href="#">88%</a></div></div>
+        <div class="node"><div class="nd">2025-08-19</div><div class="nn"><a class="dr" href="#">Approved</a></div><div class="nt"><a class="dr" href="#">Dossier v4</a> · Erik</div></div>
+        <div class="node"><div class="nd">2025-09-03</div><div class="nn"><a class="dr" href="#">Pilot</a></div><div class="nt"><a class="dr" href="#">Site A</a> · House 2 · 1 flock</div></div>
+        <div class="node"><div class="nd">2025-12-15</div><div class="nn"><a class="dr" href="#">Launched</a></div><div class="nt"><a class="dr" href="#">4</a> sites</div></div>
+        <div class="node now"><div class="nd">2026-05-04</div><div class="nn"><a class="dr" href="#">Scaling</a></div><div class="nt"><a class="dr" href="#">14</a> sites</div></div>
+      </div>
+    </div>
+    <div class="rail">
+      <span class="lbl">Controls</span>
+      <div class="ctl"><a href="#">Re-forecast</a><a href="#">Watch topic</a><a href="#">Breed variants</a></div>
+      <div class="acts">Reason · Effective date · Actor</div>
+    </div>
+  </div>
+
+  <!-- THESIS VS REALITY -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Thesis vs reality</span><span class="state"><b class="sage">beating thesis</b> · <a class="dr" href="#">612</a> Readings · last 2026-09-14 06:00</span></div>
+      <div class="tvr">
+        <div>
+          <svg viewBox="0 0 580 218" role="img" aria-label="House NH3 claimed vs observed, by flock">
+            <text x="56" y="16" font-size="11.5" fill="var(--muted)" font-family="ui-monospace,monospace">House NH₃ · claimed vs observed, by flock</text>
+            <text x="18" y="16" text-anchor="middle" font-size="11" fill="var(--faint)" font-family="ui-monospace,monospace">%</text>
+            <!-- interval envelope −18…−30 -->
+            <rect x="56" y="42.4" width="484" height="110.7" fill="var(--fill-90)"/>
+            <text x="536" y="38" text-anchor="end" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">−18…−30%</text>
+            <!-- claimed line −24 -->
+            <line x1="56" y1="97.8" x2="540" y2="97.8" stroke="var(--ink)" stroke-width="1" stroke-dasharray="4 4"/>
+            <text x="536" y="93" text-anchor="end" font-size="11" fill="var(--ink)" font-family="ui-monospace,monospace">−24 claimed</text>
+            <!-- gridlines -->
+            <line x1="56" y1="42.4" x2="540" y2="42.4" stroke="var(--line3)"/>
+            <line x1="56" y1="153.1" x2="540" y2="153.1" stroke="var(--line3)"/>
+            <!-- observed -->
+            <polyline points="80,70.1 172,107 264,125.4 356,143.9 448,162.3 540,162.3" fill="none" stroke="var(--sage)" stroke-width="2.2"/>
+            <circle cx="80" cy="70.1" r="3" fill="var(--sage)"/><circle cx="172" cy="107" r="3" fill="var(--sage)"/><circle cx="264" cy="125.4" r="3" fill="var(--sage)"/><circle cx="356" cy="143.9" r="3" fill="var(--sage)"/><circle cx="448" cy="162.3" r="3" fill="var(--sage)"/><circle cx="540" cy="162.3" r="3.4" fill="var(--sage)" stroke="var(--bg)" stroke-width="1"/>
+            <text x="532" y="180" text-anchor="end" font-size="11.5" fill="var(--sage)" font-family="ui-monospace,monospace">−31 observed</text>
+            <!-- axes -->
+            <line x1="56" y1="190" x2="540" y2="190" stroke="var(--line2)" stroke-width="1"/>
+            <line x1="50" y1="42.4" x2="56" y2="42.4" stroke="var(--muted)"/><line x1="50" y1="97.8" x2="56" y2="97.8" stroke="var(--muted)"/><line x1="50" y1="153.1" x2="56" y2="153.1" stroke="var(--muted)"/>
+            <text x="46" y="46" text-anchor="end" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">−18</text>
+            <text x="46" y="101.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">−24</text>
+            <text x="46" y="156.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">−30</text>
+            <line x1="80" y1="190" x2="80" y2="195" stroke="var(--muted)"/><line x1="172" y1="190" x2="172" y2="195" stroke="var(--muted)"/><line x1="264" y1="190" x2="264" y2="195" stroke="var(--muted)"/><line x1="356" y1="190" x2="356" y2="195" stroke="var(--muted)"/><line x1="448" y1="190" x2="448" y2="195" stroke="var(--muted)"/><line x1="540" y1="190" x2="540" y2="195" stroke="var(--muted)"/>
+            <text x="80" y="210" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">2025-10</text>
+            <text x="172" y="210" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">2025-12</text>
+            <text x="264" y="210" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">2026-02</text>
+            <text x="356" y="210" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">2026-04</text>
+            <text x="448" y="210" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">2026-06</text>
+            <text x="540" y="210" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="ui-monospace,monospace">2026-08</text>
+          </svg>
+          <div class="legend">
+            <span class="it"><span class="ln"></span>Observed</span>
+            <span class="it"><span class="ln cl"></span>Claimed</span>
+            <span class="it"><span class="bx"></span>Interval</span>
+          </div>
+        </div>
+        <table>
+          <tr><th>Quantity</th><th>Claimed</th><th>Interval</th><th>Observed</th><th>Covered</th><th class="n">n</th></tr>
+          <tr><td class="ink"><a class="dr" href="#">House NH₃</a></td><td class="mono">−24%</td><td class="mono">−18…−30%</td><td class="mono ink"><a class="dr" href="#">−31%</a></td><td class="cov">✗ beat</td><td class="n mono"><a class="dr" href="#">41</a></td></tr>
+          <tr><td class="ink"><a class="dr" href="#">Litter moisture</a></td><td class="mono">0%</td><td class="mono">−2…+2%</td><td class="mono ink"><a class="dr" href="#">+0.6%</a></td><td class="cov">✓</td><td class="n mono"><a class="dr" href="#">41</a></td></tr>
+          <tr><td class="ink"><a class="dr" href="#">Payback</a></td><td class="mono">1 flock</td><td class="mono">1–2 flocks</td><td class="mono ink"><a class="dr" href="#">1 flock</a></td><td class="cov">✓</td><td class="n mono"><a class="dr" href="#">23</a></td></tr>
+          <tr><td class="ink"><a class="dr" href="#">Mortality</a></td><td class="mono">−0.3%</td><td class="mono">−0.6…0%</td><td class="mono ink"><a class="dr" href="#">−0.4%</a></td><td class="cov">✓</td><td class="n mono"><a class="dr" href="#">23</a></td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="rail"></div>
+  </div>
+
+  <!-- REALITY -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Reality</span></div>
+      <div class="reality">
+        <div class="r"><span class="lbl">Sites</span><div class="fig"><a class="dr" href="#">14</a></div></div>
+        <div class="r"><span class="lbl">Houses</span><div class="fig"><a class="dr" href="#">41</a></div></div>
+        <div class="r"><span class="lbl">Flocks</span><div class="fig"><a class="dr" href="#">23</a></div></div>
+        <div class="r"><span class="lbl">Adoption</span><div class="fig"><a class="dr" href="#">14 of 22</a></div><div class="s">offered</div></div>
+        <div class="r"><span class="lbl">Readings</span><div class="fig"><a class="dr" href="#">612</a></div><div class="s mono">2026-09-14 06:00</div></div>
+        <div class="r" style="grid-column:span 2"><span class="lbl">Incidents</span><div class="fig"><a class="dr" href="#">1</a></div><div class="s"><a class="dr" href="#">Site D · moisture spike · 2026-02 · resolved</a></div></div>
+      </div>
+    </div>
+    <div class="rail"></div>
+  </div>
+
+  <!-- ESTATE -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Estate</span><span class="state">Income TTM <b class="mono"><a class="dr" href="#">$0.09M</a></b></span></div>
+      <div class="erow"><span class="lbl" style="font-size:10.5px;color:var(--muted)">Patent</span><span class="t"><a class="dr" href="#">Mycelial bedding amendment</a></span><span class="st sage">granted</span><span>US</span><span class="mono">2026-03-11</span><span class="mono">expiry 2045-03</span></div>
+      <div class="erow"><span class="lbl" style="font-size:10.5px;color:var(--muted)">Patent</span><span class="t"><a class="dr" href="#">Mycelial bedding amendment</a></span><span class="st clay">office action</span><span>EU</span><span class="mono">2026-08-27</span><span class="mono clay">due 2026-11-27</span></div>
+      <div class="erow"><span class="lbl" style="font-size:10.5px;color:var(--muted)">Licence out</span><span class="t"><a class="dr" href="#">Big Dutchman</a></span><span class="st">term sheet</span><span>EU</span><span class="mono">2026-09-22</span><span></span></div>
+      <div class="erow"><span class="lbl" style="font-size:10.5px;color:var(--muted)">Licence out</span><span class="t"><a class="dr" href="#">Hy-Line distribution</a></span><span class="st sage">active</span><span>US Midwest</span><span></span><span class="mono">Income TTM <a class="dr" href="#">$0.09M</a></span></div>
+    </div>
+    <div class="rail">
+      <span class="lbl">Controls</span>
+      <div class="ctl"><a href="#">File</a><a href="#">Respond</a><a href="#">Abandon</a><a href="#">License out</a><a href="#">License in</a><a href="#">Assign</a><a href="#">Renew</a></div>
+      <div class="ctl"><a href="#">Open</a><a href="#">Term sheet</a><a href="#">Sign</a><a href="#">Amend</a><a href="#">Terminate</a></div>
+      <div class="acts">Reason · Effective date · Actor</div>
+    </div>
+  </div>
+
+  <!-- GO-TO-MARKET -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Go-to-market</span><span class="state"><b>5</b> acts</span></div>
+      <table>
+        <tr><th style="width:110px">Date</th><th style="width:190px">Act</th><th>Detail</th><th class="n" style="width:150px">Response</th></tr>
+        <tr><td class="mono">2025-11-20</td><td class="ink"><a class="dr" href="#">Positioning set</a></td><td><i style="font-family:var(--serif)">"Ammonia down, litter unchanged"</i> · cage-free integrators</td><td class="n">—</td></tr>
+        <tr><td class="mono">2025-12-01</td><td class="ink"><a class="dr" href="#">Price set</a></td><td class="mono">$0.11 per bird per flock</td><td class="n ink"><a class="dr" href="#">adoption 14 of 22</a></td></tr>
+        <tr><td class="mono">2026-04-08</td><td class="ink"><a class="dr" href="#">Case study published</a></td><td>Site A · 3 flocks</td><td class="n ink"><a class="dr" href="#">6 inbound</a></td></tr>
+        <tr><td class="mono">2026-06-15</td><td class="ink"><a class="dr" href="#">Channel opened</a></td><td>Hy-Line distribution</td><td class="n ink mono"><a class="dr" href="#">$0.09M TTM</a></td></tr>
+        <tr><td class="mono">2026-09-01</td><td class="ink"><a class="dr" href="#">Campaign</a></td><td>EU cage-free 2027</td><td class="n ink"><a class="dr" href="#">2 inbound</a></td></tr>
+      </table>
+    </div>
+    <div class="rail">
+      <span class="lbl">Controls</span>
+      <div class="ctl"><a href="#">Set positioning</a><a href="#">Set price</a><a href="#">Open channel</a><a href="#">Schedule launch</a><a href="#">Run campaign</a><a href="#">Publish case study</a></div>
+      <div class="acts">Reason · Effective date · Actor</div>
+    </div>
+  </div>
+
+  <!-- MONEY -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Money</span><span class="state">metered, Engine Room ledger</span></div>
+      <div class="money">
+        <div class="m">
+          <span class="lbl">Capital in</span>
+          <div class="fig mono" style="font-family:var(--serif)"><a class="dr" href="#">$0.41M</a></div>
+          <div class="stagebars">
+            <div class="kv"><span>Pilot</span><b class="mono"><a class="dr" href="#">$0.09M</a></b></div>
+            <div class="kv"><span>Launch</span><b class="mono"><a class="dr" href="#">$0.14M</a></b></div>
+            <div class="kv"><span>Scale</span><b class="mono"><a class="dr" href="#">$0.18M</a></b></div>
+          </div>
+        </div>
+        <div class="m"><span class="lbl">Revenue TTM</span><div class="fig"><a class="dr" href="#">$0.33M</a></div><div class="s">Margin <b class="num" style="color:var(--ink);font-weight:400">58%</b></div></div>
+        <div class="m"><span class="lbl">Licensing TTM</span><div class="fig"><a class="dr" href="#">$0.09M</a></div></div>
+        <div class="m"><span class="lbl">Burn / month</span><div class="fig"><a class="dr" href="#">$9K</a></div><div class="s">Runway —</div></div>
+        <div class="m"><span class="lbl">Expected value</span><div class="fig"><a class="dr" href="#">$2.1M</a></div><div class="s">Interval <span class="mono" style="color:var(--ink)">$1.4M–$3.0M</span></div><div class="basis" style="margin-top:4px">36-month forecast · <a class="dr" href="#">sim-2107</a> rerun 2026-08</div></div>
+      </div>
+    </div>
+    <div class="rail"></div>
+  </div>
+
+  <!-- ATTEMPTS -->
+  <div class="blk">
+    <div class="rec">
+      <div class="bh"><span class="lbl">Attempts</span><span class="state"><b>4</b> Sites</span></div>
+      <table style="max-width:640px">
+        <tr><th>Site</th><th>Started</th><th>State</th><th class="n">Readings</th></tr>
+        <tr><td class="ink"><a class="dr" href="#">Site A</a></td><td class="mono">2025-09-03</td><td class="sage">scaling</td><td class="n mono"><a class="dr" href="#">186</a></td></tr>
+        <tr><td class="ink"><a class="dr" href="#">Site C</a></td><td class="mono">2025-12-15</td><td class="sage">scaling</td><td class="n mono"><a class="dr" href="#">141</a></td></tr>
+        <tr><td class="ink"><a class="dr" href="#">Site D</a></td><td class="mono">2026-01-10</td><td class="clay">paused</td><td class="n mono"><a class="dr" href="#">62</a></td></tr>
+        <tr><td class="ink"><a class="dr" href="#">Site F</a></td><td class="mono">2026-07-02</td><td>piloting</td><td class="n mono"><a class="dr" href="#">19</a></td></tr>
+      </table>
+    </div>
+    <div class="rail">
+      <span class="lbl">Controls</span>
+      <div class="ctl"><a href="#">Start pilot</a><a href="#">Advance</a><a href="#">Widen</a><a href="#">Stop</a></div>
+      <div class="acts">Reason · Effective date · Actor</div>
+    </div>
+  </div>
+</div>
+
+<!-- other entries -->
+<div class="entry">
+  <div><div class="name"><a class="dr" href="#">Litter moisture control</a></div><div class="meta"><span class="mono">pos-0388</span><span>·</span><span class="num">2025 Q3</span><span>·</span><span><a class="dr num" href="#">9</a> Sites</span><span>·</span><span>cage-free layers</span></div></div>
+  <div class="word">scaling</div>
+  <div class="word">hold</div>
+  <div class="vs vs-on"><div class="w">on thesis</div><div class="d"><a class="dr" href="#">−11% vs −12% claimed</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.29M</a></div>
+  <div class="money"><a class="dr" href="#">$0.21M</a></div>
+  <div class="next"><a class="dr" href="#">Re-forecast · winter ventilation</a></div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry">
+  <div><div class="name"><a class="dr" href="#">Heat stress ventilation timing</a></div><div class="meta"><span class="mono">pos-0452</span><span>·</span><span class="num">2025 Q4</span><span>·</span><span><a class="dr num" href="#">5</a> Sites</span><span>·</span><span>broilers</span></div></div>
+  <div class="word">launched</div>
+  <div class="word sage">scale</div>
+  <div class="vs vs-on"><div class="w">on thesis</div><div class="d"><a class="dr" href="#">−19 h vs −22 h claimed</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.22M</a></div>
+  <div class="money"><a class="dr" href="#">$0.14M</a></div>
+  <div class="next"><a class="dr" href="#">Widen pilot · House 7</a></div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry">
+  <div><div class="name"><a class="dr" href="#">Feed-cost proxy blending</a></div><div class="meta"><span class="mono">pos-0471</span><span>·</span><span class="num">2025 Q4</span><span>·</span><span><a class="dr num" href="#">4</a> Sites</span><span>·</span><span>layers</span></div></div>
+  <div class="word">launched</div>
+  <div class="word clay">pause</div>
+  <div class="vs vs-below"><div class="w">below thesis</div><div class="d"><a class="dr" href="#">−3.1% vs −6% claimed</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.26M</a></div>
+  <div class="money"><a class="dr" href="#">$0.09M</a></div>
+  <div class="next clay"><a class="dr" href="#">Standing review · 30 Sep</a></div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry">
+  <div><div class="name"><a class="dr" href="#">Shell thickness via calcium timing</a></div><div class="meta"><span class="mono">pos-0509</span><span>·</span><span class="num">2026 Q1</span><span>·</span><span><a class="dr num" href="#">2</a> Sites</span><span>·</span><span>layers</span></div></div>
+  <div class="word">piloting</div>
+  <div class="word">hold</div>
+  <div class="vs vs-unp"><div class="w">unproven</div><div class="d"><a class="dr" href="#">first reading due 3 Oct</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.18M</a></div>
+  <div class="money"><a class="dr" href="#">$0.00M</a></div>
+  <div class="next"><a class="dr" href="#">Field reading · Site B · 3 Oct</a></div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry">
+  <div><div class="name"><a class="dr" href="#">Enrichment perch layout</a></div><div class="meta"><span class="mono">pos-0523</span><span>·</span><span class="num">2026 Q2</span><span>·</span><span><a class="dr num" href="#">1</a> Sites</span><span>·</span><span>cage-free layers</span></div></div>
+  <div class="word">piloting</div>
+  <div class="word">hold</div>
+  <div class="vs vs-unp"><div class="w">unproven</div><div class="d"><a class="dr" href="#">first reading due 11 Oct</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.15M</a></div>
+  <div class="money"><a class="dr" href="#">$0.00M</a></div>
+  <div class="next"><a class="dr" href="#">File patent · perch geometry</a></div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry dead">
+  <div><div class="name"><a class="dr" href="#">Manure valorization pellets</a></div><div class="meta"><span class="mono">pos-0299</span><span>·</span><span class="num">2025 Q3</span><span>·</span><span><span class="num">0</span> Sites</span><span>·</span><span>layers</span></div><div class="closed">Licensed to AgriCycle · 2026-06-30</div></div>
+  <div class="word">exited</div>
+  <div class="word">exit</div>
+  <div class="vs vs-beat"><div class="w">beating thesis</div><div class="d"><a class="dr" href="#">$0.48 vs $0.40 per kg claimed</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.21M</a></div>
+  <div class="money"><a class="dr" href="#">$0.00M</a></div>
+  <div class="next">—</div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry dead">
+  <div><div class="name"><a class="dr" href="#">Static ventilation schedule</a></div><div class="meta"><span class="mono">pos-0311</span><span>·</span><span class="num">2025 Q3</span><span>·</span><span><a class="dr num" href="#">3</a> Sites</span><span>·</span><span>broilers</span></div><div class="closed">Superseded by <a class="dr" href="#">Heat stress ventilation timing</a> · 2026-03-02</div></div>
+  <div class="word">retired</div>
+  <div class="word">retire</div>
+  <div class="vs vs-on"><div class="w">on thesis</div><div class="d">superseded</div></div>
+  <div class="money"><a class="dr" href="#">$0.12M</a></div>
+  <div class="money"><a class="dr" href="#">$0.05M</a></div>
+  <div class="next">—</div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<div class="entry dead">
+  <div><div class="name"><a class="dr" href="#">Probiotic water dosing</a></div><div class="meta"><span class="mono">pos-0344</span><span>·</span><span class="num">2025 Q4</span><span>·</span><span><span class="num">0</span> Sites</span><span>·</span><span>layers</span></div><div class="closed">Failed · below thesis 2 quarters · 2026-07-15</div></div>
+  <div class="word">failed</div>
+  <div class="word">exit</div>
+  <div class="vs vs-below"><div class="w">below thesis</div><div class="d"><a class="dr" href="#">+0.2% mortality vs −0.8% claimed</a></div></div>
+  <div class="money"><a class="dr" href="#">$0.10M</a></div>
+  <div class="money"><a class="dr" href="#">$0.04M</a></div>
+  <div class="next">—</div>
+  <div class="pub"><div class="ctl"><a href="#">Publish position</a><a href="#">Unpublish</a></div><div class="acts">Reason · Effective date · Actor</div></div>
+</div>
+
+<!-- WORLD -->
+<section class="world">
+  <div class="sect">
+    <span class="lbl">World</span><span class="lbl" style="color:var(--faint)">Signals</span><span class="cnt num">4</span>
+    <span class="cols">awaiting <b class="num" style="color:var(--muted);font-weight:400">3</b> · acted on <b class="num" style="color:var(--muted);font-weight:400">1</b></span>
+  </div>
+  <div class="thead" style="grid-template-columns:110px 1fr 300px 100px 110px 80px 250px">
+    <span>Type</span><span>Signal</span><span>Touches</span><span>State</span><span>Detected</span><span>Priority</span><span>Controls</span>
+  </div>
+  <div class="wrow">
+    <span class="ty">regulatory</span>
+    <span class="tx"><a class="dr" href="#">EU cage-free transition deadline 2027</a></span>
+    <span class="tc"><a class="dr" href="#">Fungal ammonia reduction</a> · <a class="dr" href="#">Enrichment perch layout</a></span>
+    <span class="st clay">awaiting</span>
+    <span class="dt">2026-09-14</span>
+    <span class="pr hi">high</span>
+    <span><div class="ctl"><a href="#">Act on</a><a href="#">Route to Pipeline</a><a href="#">Dismiss</a></div><div class="acts">Reason · Effective date · Actor</div></span>
+  </div>
+  <div class="wrow">
+    <span class="ty">competitor</span>
+    <span class="tx"><a class="dr" href="#">Big Dutchman litter-drying retrofit</a></span>
+    <span class="tc"><a class="dr" href="#">Litter moisture control</a></span>
+    <span class="st clay">awaiting</span>
+    <span class="dt">2026-09-12</span>
+    <span class="pr">medium</span>
+    <span><div class="ctl"><a href="#">Act on</a><a href="#">Route to Pipeline</a><a href="#">Dismiss</a></div><div class="acts">Reason · Effective date · Actor</div></span>
+  </div>
+  <div class="wrow">
+    <span class="ty">demand</span>
+    <span class="tx"><a class="dr" href="#">Kroger pasture-raised sourcing tender</a></span>
+    <span class="tc"><a class="dr" href="#">Enrichment perch layout</a></span>
+    <span class="st sage">acted on</span>
+    <span class="dt">2026-09-09</span>
+    <span class="pr hi">high</span>
+    <span><div class="ctl"><a href="#">Act on</a><a href="#">Route to Pipeline</a><a href="#">Dismiss</a></div><div class="acts">Reason · Effective date · Actor</div></span>
+  </div>
+  <div class="wrow">
+    <span class="ty">trend</span>
+    <span class="tx"><a class="dr" href="#">Calcium-timing feed premix adoption</a></span>
+    <span class="tc"><a class="dr" href="#">Shell thickness via calcium timing</a></span>
+    <span class="st clay">awaiting</span>
+    <span class="dt">2026-09-08</span>
+    <span class="pr">low</span>
+    <span><div class="ctl"><a href="#">Act on</a><a href="#">Route to Pipeline</a><a href="#">Dismiss</a></div><div class="acts">Reason · Effective date · Actor</div></span>
+  </div>
+</section>
+
+<footer><span class="lbl">Every claim sourced · every cost computed · every verdict recorded</span></footer>
+
+</div>
+</body>
+</html>
