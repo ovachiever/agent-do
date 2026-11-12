@@ -417,46 +417,6 @@ overrides:
       confidence: high
       reason: "--help: 'start <name> Start container' \u2014 brings a stopped container to running; mutates\
         \ world state. Not destructive."
-  dpt:
-    baseline:
-      attributes:
-      - composite
-      beats:
-      - snapshot
-      - save
-      confidence: high
-      reason: cmd_baseline injects the engine to scan the live page (snapshot) then 'cp $DPT_RESULT_FILE
-        /tmp/dpt-baseline.json' (save) so a later diff can compare. One call does both beats.
-    build:
-      beats:
-      - interact
-      confidence: high
-      reason: "cmd_build runs bin/build to rebuild the scoring engine from source \u2014 an A->B compile/transform\
-        \ producing dist artifacts. Idempotent rebuild, not destructive."
-    report:
-      beats:
-      - snapshot
-      confidence: high
-      reason: "--help: 'report Narrative design critique report' \u2014 runs the engine read-only over\
-        \ the live page via page.evaluate and emits a critique; no side effects."
-    scan:
-      beats:
-      - snapshot
-      confidence: high
-      reason: "--help: 'scan Full scan -> structured JSON' \u2014 read-only structured dump of the page's\
-        \ design metrics."
-    score:
-      beats:
-      - snapshot
-      confidence: high
-      reason: "--help: 'score score + grade + dimensions' \u2014 read-only quality read of the current\
-        \ page. The score is a USABLE metric, not a purposive pass/fail gate, so snapshot not verify."
-    violations:
-      beats:
-      - snapshot
-      confidence: high
-      reason: "--help: 'violations Violations sorted by impact' \u2014 read-only extraction of failing\
-        \ checks from the scan; no side effects."
   email:
     code:
       attributes:

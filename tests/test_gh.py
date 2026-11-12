@@ -866,9 +866,282 @@ else:
     test_graphql_inbox()
     test_next_action_mapping()
     test_stage_fixture()
+    test_issue_and_pr_creation()
 
     print("gh tests passed")
     return 0
+
+
+def test_issue_and_pr_creation() -> None:
+    """Exercise the real dispatcher, local Git, and a recording gh transport."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        repo = tmp / "repo"
+        repo.mkdir()
+        calls_file = tmp / "calls.jsonl"
+        state_file = tmp / "issue.json"
+        fixture = {"number": 12, "title": "Fix export", "body": "Details", "state": "open",
+                   "html_url": "https://github.com/acme/widgets/issues/12", "user": {"login": "erik"},
+                   "assignees": [{"login": "someone"}], "labels": [{"name": "ready"}]}
+        state_file.write_text(json.dumps(fixture))
+        fake_gh = tmp / "gh"
+        make_exec(fake_gh, '''#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+body = sys.stdin.read() if "--body-file" in args else None
+log = Path(os.environ["GH_TEST_CALLS"])
+with log.open("a") as stream:
+    stream.write(json.dumps({"args": args, "body": body}) + "\\n")
+state_file = Path(os.environ["GH_TEST_STATE"])
+state = json.loads(state_file.read_text())
+mode = os.environ.get("GH_TEST_MODE")
+
+def values(flag):
+    return [args[i + 1] for i, arg in enumerate(args) if arg == flag]
+
+if args[:3] == ["api", "--paginate", "--slurp"]:
+    if mode == "bad-pages":
+        print(json.dumps({"message": "not a collection"}))
+    elif mode == "empty-pages":
+        print("[[]]")
+    else:
+        pr = {"number": 99, "pull_request": {"url": "a PR"}}
+        second = dict(state, number=13, html_url="https://github.com/acme/widgets/issues/13")
+        print(json.dumps([[state, pr], [second]]))
+elif args == ["api", "user"]:
+    print(json.dumps({"login": "erik"}))
+elif args[0] == "api" and "/git/ref/heads/" in args[1]:
+    print(json.dumps({"object": {"sha": "different" if mode == "remote-diverged" else os.environ["GH_TEST_HEAD"]}}))
+elif args[0] == "api" and args[1].startswith("repos/acme/widgets/issues/"):
+    if mode == "readback-failure" and state.get("mutated"):
+        print("read-back unavailable", file=sys.stderr)
+        sys.exit(1)
+    if args[1].endswith("/99"):
+        print(json.dumps({"number": 99, "pull_request": {}}))
+    else:
+        print(json.dumps(state))
+elif args[:2] in (["issue", "create"], ["issue", "edit"], ["issue", "close"], ["issue", "comment"]):
+    if mode == "write-failure":
+        print("permission denied", file=sys.stderr)
+        sys.exit(1)
+    if args[1] == "create":
+        state["title"] = values("--title")[0]
+        state["body"] = body
+        state["assignees"] = [{"login": v} for v in values("--assignee")]
+        state["labels"] = [{"name": v} for v in values("--label")]
+    elif args[1] == "edit":
+        for field, key, add, remove in (("assignees", "login", "--add-assignee", "--remove-assignee"),
+                                         ("labels", "name", "--add-label", "--remove-label")):
+            existing = {item[key] for item in state[field]}
+            resolve = lambda value: "erik" if value == "@me" else value
+            existing.update(resolve(v) for v in values(add))
+            existing.difference_update(resolve(v) for v in values(remove))
+            state[field] = [{key: v} for v in sorted(existing)]
+    elif args[1] == "close" and mode != "still-open":
+        state["state"] = "closed"
+    state["mutated"] = True
+    state_file.write_text(json.dumps(state))
+    suffix = "#issuecomment-34" if args[1] == "comment" else ""
+    print(state["html_url"] + suffix)
+elif args[:2] == ["pr", "create"]:
+    if mode == "write-failure":
+        print("PR creation denied", file=sys.stderr)
+        sys.exit(1)
+    state["pr_body"] = body
+    state_file.write_text(json.dumps(state))
+    print("https://github.com/acme/widgets/pull/21")
+elif args[:2] == ["pr", "view"]:
+    print(json.dumps({"headRefOid": "different" if mode == "head-raced" else os.environ["GH_TEST_HEAD"],
+                      "body": "changed" if mode == "body-raced" else state["pr_body"]}))
+else:
+    print("unexpected gh invocation: " + repr(args), file=sys.stderr)
+    sys.exit(2)
+''')
+        env = dict(os.environ, AGENT_DO_HOME=str(tmp / "agent-home"), AGENT_GH_BIN=str(fake_gh),
+                   GH_TEST_CALLS=str(calls_file), GH_TEST_STATE=str(state_file))
+        command_count = 0
+
+        def calls():
+            return [json.loads(line) for line in calls_file.read_text().splitlines()] if calls_file.exists() else []
+
+        def cli(*args, code=0, input_text=None, mode=None, cwd=repo):
+            nonlocal command_count
+            command_count += 1
+            test_env = dict(env)
+            test_env.pop("GH_TEST_MODE", None)
+            if mode:
+                test_env["GH_TEST_MODE"] = mode
+            result = subprocess.run([str(AGENT_DO), "gh", *args], cwd=cwd, env=test_env,
+                                    input=input_text, text=True, capture_output=True, check=False)
+            require(result.returncode == code, f"{args}: expected {code}, got {result.returncode}: {result.stderr}")
+            return result
+
+        def git(*args):
+            result = run(["git", *args], cwd=repo, env=env)
+            require(result.returncode == 0, f"fixture git {args}: {result.stderr}")
+            return result.stdout.strip()
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.name", "GH Test")
+        git("config", "user.email", "gh-test@example.invalid")
+        # The fixture is independent of machine-wide commit hooks.
+        git("config", "core.hooksPath", str(tmp / "fixture-hooks"))
+        git("remote", "add", "origin", "git@github.com:acme/widgets.git")
+        git("commit", "-q", "--allow-empty", "-m", "base")
+        base_oid = git("rev-parse", "HEAD")
+        git("checkout", "-q", "-b", "feature")
+        git("commit", "-q", "--allow-empty", "-m",
+            "first\n\nWork-Item: mn-90b694\nModel: model-a\nEffort: high\nSession: session-a")
+        first_oid = git("rev-parse", "HEAD")
+        git("commit", "-q", "--allow-empty", "-m",
+            "second\n\nManna: mn-90b694\nModel: model-b\nEffort: xhigh\nSession: session-b")
+        head_oid = git("rev-parse", "HEAD")
+        env["GH_TEST_HEAD"] = head_oid
+
+        listed = json.loads(cli("issue", "list", "--json", "--limit", "1", "--state", "all",
+                                "--label", "help wanted", "--assignee", "@me").stdout)
+        require(listed["count"] == 1 and listed["total"] == 2, f"bad issue totals: {listed}")
+        require(listed["issues"][0]["ref"] == "acme/widgets#12", "issue ref missing")
+        query = calls()[-1]["args"]
+        require(query == ["api", "--paginate", "--slurp",
+                          "repos/acme/widgets/issues?state=all&assignee=erik&labels=help+wanted"],
+                f"issue query did not encode filters: {query}")
+        require(json.loads(cli("issue", "list", "--json").stdout)["count"] == 2, "default list was capped")
+        require("1 of 2 shown" in cli("issue", "list", "--limit", "1").stdout, "text truncation missing")
+        cli("issue", "list", "--json", mode="bad-pages", code=1)
+        empty = json.loads(cli("issue", "list", "--json", mode="empty-pages").stdout)
+        require(empty["issues"] == [] and empty["count"] == empty["total"] == 0, "empty list must remain valid")
+
+        body = "First line\n\nLiteral `code` and $(not-a-command); \\\\n stays literal.\n"
+        body_file = tmp / "body.md"
+        body_file.write_text(body)
+        created = json.loads(cli("issue", "create", "--title", "Fix export", "--body-file", str(body_file),
+                                 "--assignee", "someone", "--label", "ready", "--json").stdout)
+        require(created["issue"]["body"] == body, "created issue body changed")
+        creation_call = calls()[-2]
+        require(creation_call["body"] == body and "--body" not in creation_call["args"], "body must travel over stdin")
+        assigned = json.loads(cli("issue", "assign", "acme/widgets#12", "--json").stdout)
+        require(assigned["issue"]["assignees"] == ["erik", "someone"], "assignment must preserve existing assignees")
+        unassigned = json.loads(cli("issue", "unassign", "12", "--repo", "acme/widgets", "--json").stdout)
+        require(unassigned["issue"]["assignees"] == ["someone"], "unassign removed another user")
+        cli("issue", "assign", "12", "--assignee", "alice", "--assignee", "bob")
+        require(calls()[-2]["args"][-4:] == ["--add-assignee", "alice", "--add-assignee", "bob"], "repeatable assignees lost")
+        labeled = json.loads(cli("issue", "label", "https://github.com/acme/widgets/issues/12#issuecomment-1",
+                                 "--add", "in progress", "--add", "bug", "--remove", "ready", "--json").stdout)
+        require(labeled["issue"]["labels"] == ["bug", "in progress"], "label edit failed")
+        commented = json.loads(cli("issue", "comment", "12", "--body-file", "-", "--json", input_text=body).stdout)
+        require(commented["result"].endswith("#issuecomment-34") and calls()[-2]["body"] == body,
+                "comment receipt or stdin changed")
+        cli("issue", "comment", "12", "--body", body)
+        require(calls()[-2]["body"] == body, "inline comment body changed")
+        closed = json.loads(cli("issue", "close", "12", "--reason", "not planned", "--json").stdout)
+        require(closed["issue"]["state"] == "closed", "close not read back")
+        require(calls()[-2]["args"][-2:] == ["--reason", "not planned"], "close reason lost")
+
+        for args, code in [
+            (("issue", "create", "--title", "missing body"), 2),
+            (("issue", "create", "--title", "  ", "--body", "details"), 2),
+            (("issue", "create", "--title", "x", "--body", "a", "--body-file", "b"), 2),
+            (("issue", "comment", "12", "--body", "  \n"), 1),
+            (("issue", "comment", "12", "--body-file", str(tmp / "missing")), 1),
+            (("issue", "label", "12"), 1),
+            (("issue", "assign", "acme/widgets#12", "--repo", "other/repo"), 1),
+            (("issue", "assign", "https://evilgithub.com/acme/widgets/issues/12"), 1),
+            (("issue", "assign", "https://github.com/acme/widgets/pull/12"), 1),
+            (("issue", "assign", "0"), 1),
+            (("issue", "list", "--repo", "acme/../widgets"), 1),
+            (("issue", "list", "--limit", "0"), 2),
+            (("issue", "list", "--limit", "-1"), 2),
+        ]:
+            before = len(calls())
+            cli(*args, code=code)
+            require(len(calls()) == before, f"invalid input reached GitHub: {args}")
+        before = len(calls())
+        cli("issue", "close", "99", code=1)
+        require(len(calls()) == before + 1 and calls()[-1]["args"][0] == "api", "PR was mutated through issue close")
+        before = len(calls())
+        cli("issue", "comment", "12", "--body", body, mode="write-failure", code=1)
+        require(len(calls()) == before + 2, "write failure triggered read-back or retry")
+        state_file.write_text(json.dumps(fixture))
+        result = cli("issue", "create", "--title", "x", "--body", body, mode="readback-failure", code=1)
+        require("creation succeeded" in result.stderr and "Do not recreate" in result.stderr,
+                "partial success must prevent accidental duplicate creation")
+        state_file.write_text(json.dumps(fixture))
+        result = cli("issue", "close", "12", mode="still-open", code=1)
+        require("Issue remains open" in result.stderr, "false close success escaped verification")
+
+        create_args = ("pr", "create", "--title", "Fix export", "--base", "main", "--body-file", str(body_file))
+        before = len(calls())
+        preview = json.loads(cli(*create_args, "--declare", "--dry-run", "--json").stdout)
+        require(len(calls()) == before, "local PR preview contacted GitHub")
+        declaration = preview["pr"]["declaration"]
+        require(declaration["base_commit"] == base_oid and declaration["head_commit"] == head_oid, "wrong declaration range")
+        require([entry["commit"] for entry in declaration["contributions"]] == [first_oid, head_oid], "lost contribution")
+        require([entry["model"] for entry in declaration["contributions"]] == ["model-a", "model-b"], "provenance was guessed or collapsed")
+        require(all(entry["work_item"] == "mn-90b694" for entry in declaration["contributions"]), "Manna alias not honored")
+        require(preview["pr"]["body"].startswith(body), "declaration changed supplied body")
+        published = json.loads(cli(*create_args, "--declare", "--draft", "--reviewer", "alice", "--label", "bug", "--json").stdout)
+        require(published["url"].endswith("/pull/21"), "PR URL receipt missing")
+        require(calls()[-2]["body"] == preview["pr"]["body"], "preview differs from sent body")
+        require(calls()[-2]["args"] == ["pr", "create", "--repo", "acme/widgets", "--title", "Fix export",
+                                       "--body-file", "-", "--base", "main", "--head", "feature",
+                                       "--draft", "--label", "bug", "--reviewer", "alice"], "PR flags drifted")
+        before = len(calls())
+        result = cli(*create_args, "--declare", mode="remote-diverged", code=1)
+        require("Published head differs" in result.stderr and len(calls()) == before + 1,
+                "diverged published branch reached PR creation")
+        for mode in ("head-raced", "body-raced"):
+            before = len(calls())
+            result = cli(*create_args, "--declare", mode=mode, code=1)
+            require("PR creation succeeded" in result.stderr and "/pull/21" in result.stderr,
+                    "post-create mismatch lost the PR receipt")
+            require(len(calls()) == before + 3, "post-create mismatch retried the write")
+        cli(*create_args, mode="write-failure", code=1)
+        plain = json.loads(cli(*create_args, "--dry-run", "--json").stdout)
+        require(plain["pr"]["body"] == body and plain["pr"]["declaration"] is None, "plain create fabricated stamps")
+        before = len(calls())
+        cli("pr", "create", "--title", "x", "--base", "main", "--body", "<!-- agent-do:declaration:v1 -->",
+            "--declare", code=1)
+        cli(*create_args, "--declare", "--head", "fork:branch", code=1)
+        cli(*create_args, "--declare", "--head", "main", code=1)
+        cli(*create_args, "--declare", "--base", "missing", code=1)
+        git("checkout", "-q", "-b", "unstamped")
+        git("commit", "-q", "--allow-empty", "-m", "missing provenance")
+        missing = cli(*create_args, "--declare", code=1)
+        require("requires one work-item trailer" in missing.stderr, "missing stamps did not fail closed")
+        explicit = json.loads(cli(*create_args, "--declare", "--head", "feature", "--dry-run", "--json").stdout)
+        require(explicit["pr"]["declaration"] == declaration, "declaration read unrelated current HEAD")
+        require(len(calls()) == before, "invalid declaration reached GitHub")
+        git("checkout", "-q", "feature")
+        git("commit", "-q", "--allow-empty", "-m",
+            "ambiguous\n\nWork-Item: mn-90b694\nManna: mn-ffffff\nModel: model-a\nEffort: high\nSession: s")
+        cli(*create_args, "--declare", code=1)
+        for missing_field in ("Model", "Effort", "Session"):
+            git("checkout", "-q", "-b", f"missing-{missing_field.lower()}", head_oid)
+            stamps = {"Work-Item": "mn-90b694", "Model": "model-a", "Effort": "high", "Session": "s"}
+            del stamps[missing_field]
+            git("commit", "-q", "--allow-empty", "-m", "missing field\n\n" + "\n".join(f"{k}: {v}" for k, v in stamps.items()))
+            result = cli(*create_args, "--declare", code=1)
+            require(f"requires one {missing_field.lower()} trailer" in result.stderr, f"missing {missing_field} was invented")
+        git("checkout", "-q", "-b", "escaped-stamps", head_oid)
+        git("commit", "-q", "--allow-empty", "-m",
+            "escaped\n\nWork-Item: mn-90b694\nModel: model-a\nEffort: high\nSession: ``` </agent-do> café")
+        escaped = json.loads(cli(*create_args, "--declare", "--dry-run", "--json").stdout)
+        encoded_block = escaped["pr"]["body"].split("```json\n", 1)[1].split("\n```", 1)[0]
+        require(json.loads(encoded_block)["contributions"][-1]["session"] == "``` </agent-do> café",
+                "declaration escaping changed trailer values")
+        require("</agent-do>" not in encoded_block and "```" not in encoded_block, "trailer escaped its declaration block")
+        before = len(calls())
+        cli("issue", "list", cwd=tmp, code=1)
+        cli("pr", "create", "--title", "x", "--base", "main", "--body", "x", "--repo", "acme/widgets", cwd=tmp, code=1)
+        require(len(calls()) == before, "missing local repository reached GitHub")
+        cli("pr", "create", "--help")
+        cli("issue", "--help")
+        print(f"gh issue/declaration command scenarios passed: {command_count}")
 
 
 def test_stage_fixture() -> None:
