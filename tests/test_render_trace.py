@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVICE = json.dumps({"id": "srv-trace", "ownerId": "tea-1", "name": "api", "type": "web_service", "repo": "https://github.com/acme/api", "branch": "main", "rootDir": "apps/api", "autoDeploy": "yes", "autoDeployTrigger": "commit", "serviceDetails": {"url": "https://api.onrender.com"}})
 DEPLOYS = json.dumps([{ "deploy": {"id": f"dep-{index}", "status": "live", "commit": {"id": "a" * 40}, "createdAt": "2026-10-12T00:00:00Z"}} for index in range(11)])
 EVENTS = json.dumps([{ "event": {"timestamp": "2026-10-12T00:01:00Z", "type": "deploy_ended", "details": {"reason": "token=secret-value"}}} for _ in range(101)])
-LOGS = json.dumps({"logs": [{"timestamp": "2026-10-12T00:02:00Z", "message": "password=hunter2", "labels": [{"name": "level", "value": "error"}]}], "hasMore": True})
+LOGS = json.dumps({"logs": [{"timestamp": "2026-10-12T00:02:00Z", "message": "password" + "=hunter2 Authorization: Bearer bearer-secret-value", "labels": [{"name": "level", "value": "token" + "=label-secret"}]}], "hasMore": True})
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -49,7 +49,7 @@ def main() -> int:
     assert payload["truncated"]["events_more_available"] is True
     assert payload["truncated"]["logs_more_available"] is True
     rendered = json.dumps(payload)
-    assert "secret-value" not in rendered and "hunter2" not in rendered
+    assert "secret-value" not in rendered and "hunter2" not in rendered and "label-secret" not in rendered
     assert "[REDACTED]" in rendered
     bad = run("srv-trace", "--since", "forever")
     assert bad.returncode == 2
