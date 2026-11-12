@@ -108,7 +108,7 @@ MAINTENANCE
 
 OBSERVABILITY
   logs <svc> [opts]             Recent logs (`logs --help` for filters)
-  metrics <svc> [--type T]      Service metrics (cpu|memory|bandwidth)
+  metrics <res> [opts]          Metrics for a service/cron/Postgres/KV (`metrics --help`)
   snapshot                      Full account state as JSON
 
 Services can be referenced by name or ID (srv-xxx, crn-xxx).
@@ -904,58 +904,169 @@ for item in items:
 "
 }
 
+metrics_usage() {
+    cat <<'EOF'
+Usage: agent-render metrics <resource> [options]
+
+Resource: a service, cron, Postgres or Key Value — by name or by id
+(srv-/crn-/dpg-/red-). Names are looked up as services, then Postgres, then Key Value.
+
+Options:
+  --type, -t <metric>     cpu (default), memory, bandwidth, http-requests,
+                          http-latency, disk-usage, disk-capacity,
+                          active-connections, instance-count, cpu-limit,
+                          memory-limit … (any /v1/metrics/<metric> name;
+                          Render rejects unknown ones with a reason)
+  --since <window|time>   Start: 30m, 6h, 2d, or ISO 8601 (default: 1h)
+  --until <time>          End: ISO 8601 (default: now)
+  --resolution <seconds>  Point spacing (default: ~60 points over the window)
+  --json                  Raw API response (list of series)
+
+Each series is printed with its labels (instance, status code, host …).
+EOF
+}
+
+# GET a Render endpoint; print the body and return 0 on 2xx. On any other
+# status print "HTTP <code>: <API message>" to stderr and return 1, so a
+# 404 page or a 400 reason is never parsed as data.
+render_get_or_fail() {
+    local endpoint="$1"
+    local token="${RENDER_API_KEY:-}"
+    if [[ -z "$token" ]]; then
+        echo "Error: RENDER_API_KEY not set" >&2
+        return 1
+    fi
+    local tmp code
+    tmp="$(mktemp)"
+    code=$(curl -sS --max-time 30 --connect-timeout 10 -o "$tmp" -w '%{http_code}' \
+        -H "Authorization: Bearer $token" -H "Accept: application/json" \
+        "${RENDER_API}${endpoint}" 2>/dev/null) || code="000"
+    if [[ "$code" == 2* ]]; then
+        cat "$tmp"
+        rm -f "$tmp"
+        return 0
+    fi
+    local message
+    message=$(python3 -c '
+import json, sys
+raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+try:
+    print(json.loads(raw).get("message") or raw.strip()[:200])
+except Exception:
+    print(raw.strip()[:200] or "no response body")
+' "$tmp")
+    rm -f "$tmp"
+    if [[ "$code" == "000" ]]; then
+        echo "Error: request to Render failed (no HTTP response: network or timeout)" >&2
+    else
+        echo "Error: HTTP $code: $message" >&2
+    fi
+    return 1
+}
+
 cmd_metrics() {
-    local name_or_id=""
-    local metric_type="cpu"
+    local name_or_id="" metric_type="cpu" since="1h" until="" resolution=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --type|-t) metric_type="$2"; shift 2 ;;
-            *) name_or_id="$1"; shift ;;
+            -h|--help) metrics_usage; return 0 ;;
+            --type|-t) metric_type="${2:?--type needs a value}"; shift 2 ;;
+            --since) since="${2:?--since needs a value}"; shift 2 ;;
+            --until) until="${2:?--until needs a value}"; shift 2 ;;
+            --resolution) resolution="${2:?--resolution needs a value}"; shift 2 ;;
+            -*) echo "Error: unknown option '$1' (see: agent-render metrics --help)" >&2; return 2 ;;
+            *)
+                if [[ -n "$name_or_id" ]]; then
+                    echo "Error: unexpected argument '$1'" >&2
+                    return 2
+                fi
+                name_or_id="$1"; shift ;;
         esac
     done
 
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render metrics <service> [--type cpu|memory|bandwidth]"
-        return 1
+        metrics_usage >&2
+        return 2
+    fi
+    if [[ ! "$metric_type" =~ ^[a-z][a-z-]*$ ]]; then
+        echo "Error: invalid metric name '$metric_type'" >&2
+        return 2
+    fi
+    if [[ -n "$resolution" && ! "$resolution" =~ ^[0-9]+$ ]]; then
+        echo "Error: --resolution takes whole seconds" >&2
+        return 2
     fi
 
-    local sid
-    sid=$(resolve_service "$name_or_id") || return 1
+    local rid
+    case "$name_or_id" in
+        srv-*|crn-*|dpg-*|red-*) rid="$name_or_id" ;;
+        *)
+            rid=$(resolve_service "$name_or_id" 2>/dev/null) \
+                || rid=$(resolve_postgres "$name_or_id" 2>/dev/null) \
+                || rid=$(resolve_kv "$name_or_id" 2>/dev/null) \
+                || { echo "Error: no service, Postgres or Key Value named '$name_or_id'" >&2; return 1; }
+            ;;
+    esac
 
-    # Compute time range: last 1 hour
-    local end_time start_time
-    end_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    # macOS vs Linux date compat
-    start_time=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d '1 hour ago' +"%Y-%m-%dT%H:%M:%SZ")
+    # Window → ISO 8601 (Render rejects epoch seconds for startTime/endTime).
+    local window
+    window=$(python3 -c '
+import re, sys
+from datetime import datetime, timedelta, timezone
+since, until, res = sys.argv[1], sys.argv[2], sys.argv[3]
+def parse(t):
+    m = re.fullmatch(r"(\d+)([mhd])", t)
+    if m:
+        n, u = int(m.group(1)), m.group(2)
+        unit_name = {"m": "minutes", "h": "hours", "d": "days"}[u]
+        return datetime.now(timezone.utc) - timedelta(**{unit_name: n})
+    return datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(timezone.utc)
+try:
+    end = parse(until) if until else datetime.now(timezone.utc)
+    start = parse(since)
+except ValueError:
+    sys.exit("bad time")
+if start >= end:
+    sys.exit("start not before end")
+span = int((end - start).total_seconds())
+res = res or str(max(60, span // 60))
+fmt = "%Y-%m-%dT%H:%M:%SZ"
+print(start.strftime(fmt), end.strftime(fmt), res)
+' "$since" "$until" "$resolution" 2>&1) || {
+        echo "Error: cannot use --since '$since' / --until '$until' ($window)" >&2
+        return 2
+    }
+    local start_iso end_iso res
+    read -r start_iso end_iso res <<< "$window"
 
     local result
-    result=$(render_request GET "/services/$sid/metrics/${metric_type}?start=${start_time}&end=${end_time}&resolution=300")
+    result=$(render_get_or_fail "/metrics/${metric_type}?resource=${rid}&startTime=${start_iso}&endTime=${end_iso}&resolutionSeconds=${res}") || return 1
 
-    echo "$result" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    if isinstance(data, list):
-        for point in data:
-            ts = point.get('time', point.get('timestamp', ''))
-            val = point.get('value', point.get('avg', ''))
-            print(f'{ts}  {val}')
-    elif isinstance(data, dict):
-        # May be wrapped
-        items = data.get('metrics', data.get('data', []))
-        if items:
-            for point in items:
-                ts = point.get('time', point.get('timestamp', ''))
-                val = point.get('value', point.get('avg', ''))
-                print(f'{ts}  {val}')
-        else:
-            print(json.dumps(data, indent=2))
-    else:
-        print('No metrics data')
-except Exception as e:
-    print(f'Error: {e}')
-"
+    if [[ "${RENDER_JSON:-0}" == "1" ]]; then
+        printf '%s\n' "$result"
+        return 0
+    fi
+
+    printf '%s' "$result" | python3 -c '
+import json, sys
+metric, rid, start, end = sys.argv[1:5]
+series = json.load(sys.stdin)
+if not isinstance(series, list):
+    sys.exit("Error: unexpected metrics response shape")
+print(f"{metric} for {rid}  {start} → {end}")
+if not series:
+    print("  (no data in this window)")
+    sys.exit(0)
+for s in series:
+    unit = s.get("unit") or ""
+    labels = ["%s=%s" % (l.get("field"), l.get("value")) for l in s.get("labels", [])
+              if l.get("field") not in ("service", "resource")]
+    print("\n  [%s] %s" % (unit, ", ".join(labels) if labels else "(all)"))
+    for p in s.get("values", []):
+        v = p.get("value")
+        shown = "%.1f MiB" % (v / 1048576) if unit == "bytes" and isinstance(v, (int, float)) else v
+        print("    %s  %s" % (p.get("timestamp", ""), shown))
+' "$metric_type" "$rid" "$start_iso" "$end_iso"
 }
 
 cmd_projects() {
