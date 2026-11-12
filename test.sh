@@ -144,6 +144,7 @@ check_cmd "record age rendering tests" python3 "$SCRIPT_DIR/tests/test_record_ag
 check_cmd "context retrieve authority tests" python3 "$SCRIPT_DIR/tests/test_context_retrieve_authority.py"
 check_cmd "api template tests" python3 "$SCRIPT_DIR/tests/test_api_templates.py"
 check_cmd "supabase management tests" python3 "$SCRIPT_DIR/tests/test_supabase_management.py"
+check_cmd "render db allowlist tests" python3 "$SCRIPT_DIR/tests/test_render_db_allowlist.py"
 check_cmd "credential tests" python3 "$SCRIPT_DIR/tests/test_creds.py"
 check_cmd "notion tests" python3 "$SCRIPT_DIR/tests/test_notion.py"
 check_cmd "bash runtime tests" python3 "$SCRIPT_DIR/tests/test_bash_runtime.py"

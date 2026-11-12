@@ -68,6 +68,8 @@ POSTGRES
   db backups <db>               List exports
   db recover <db> [--target-time ISO]   Point-in-time recovery (or window check)
   db creds {list|add|del} <db> [user]
+  db allowlist <db> [add <cidr> --label T [--allow-everywhere] | remove <cidr>] [--dry-run]
+                                IP allow list; changes send the full list and are read back
 
 KEY VALUE (Redis-compatible)
   kv {list|show|create|update|delete|connect-info|suspend|resume}
@@ -2003,6 +2005,131 @@ for item in items:
     esac
 }
 
+# IP allow list for a Postgres instance. Render replaces the whole list on
+# PATCH, so add/remove read the current list, change exactly one entry, send
+# the full list, then read it back and fail if it differs from the intended
+# list. Everywhere rules (0.0.0.0/0, ::/0) need --allow-everywhere.
+cmd_db_allowlist() {
+    local usage="Usage: agent-render db allowlist <db> [add <cidr> --label <text> [--allow-everywhere] | remove <cidr>] [--dry-run] [--json]"
+    local name_or_id="" action="list" cidr="" label="" dry_run=0 allow_everywhere=0
+    if [[ $# -lt 1 || "$1" == -* ]]; then echo "$usage" >&2; return 2; fi
+    name_or_id="$1"; shift
+    if [[ $# -gt 0 && "$1" != -* ]]; then
+        case "$1" in
+            add|remove) action="$1"; shift ;;
+            *) echo "Error: unknown allowlist action '$1'" >&2; echo "$usage" >&2; return 2 ;;
+        esac
+        if [[ $# -lt 1 || "$1" == -* ]]; then echo "Error: $action needs a CIDR" >&2; return 2; fi
+        cidr="$1"; shift
+    fi
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --label) [[ $# -ge 2 ]] || { echo "Error: --label needs a value" >&2; return 2; }; label="$2"; shift 2 ;;
+            --dry-run) dry_run=1; shift ;;
+            --allow-everywhere) allow_everywhere=1; shift ;;
+            *) echo "Error: unknown option '$1'" >&2; echo "$usage" >&2; return 2 ;;
+        esac
+    done
+    if [[ "$action" == "add" && -z "$label" ]]; then
+        echo "Error: add needs --label <text> (Render requires a description for every entry)" >&2; return 2
+    fi
+
+    local dbid current
+    dbid=$(resolve_postgres "$name_or_id") || return 1
+    # $(...) keeps render_request_checked's RETURN trap out of this function.
+    current=$(render_request_checked GET "/postgres/$dbid") || return 1
+
+    local plan plan_rc=0
+    plan=$(printf '%s' "$current" | ALW_ACTION="$action" ALW_CIDR="$cidr" ALW_LABEL="$label" \
+        ALW_EVERYWHERE="$allow_everywhere" python3 -c '
+import ipaddress, json, os, sys
+db = json.load(sys.stdin)
+entries = db.get("ipAllowList") or []
+action, raw, label = os.environ["ALW_ACTION"], os.environ["ALW_CIDR"], os.environ["ALW_LABEL"]
+def norm(c):
+    return str(ipaddress.ip_network(c.strip(), strict=False))
+out = {"id": db.get("id", ""), "name": db.get("name", ""), "before": entries, "after": entries, "changed": False, "note": ""}
+if action != "list":
+    try:
+        target = ipaddress.ip_network(raw.strip(), strict=False)
+    except ValueError as e:
+        print(f"Error: invalid CIDR {raw!r}: {e}", file=sys.stderr); sys.exit(2)
+    if target.prefixlen == 0 and action == "add" and os.environ["ALW_EVERYWHERE"] != "1":
+        print(f"Error: {target} allows connections from anywhere; pass --allow-everywhere if that is really intended", file=sys.stderr); sys.exit(2)
+    present = [e for e in entries if norm(e["cidrBlock"]) == str(target)]
+    if action == "add":
+        if present:
+            existing = present[0].get("description", "")
+            out["note"] = f"{target} is already on the list ({existing}); nothing to change"
+        else:
+            out["after"] = entries + [{"cidrBlock": str(target), "description": label}]
+            out["changed"] = True
+    else:
+        if not present:
+            print(f"Error: {target} is not on the allow list", file=sys.stderr); sys.exit(3)
+        out["after"] = [e for e in entries if norm(e["cidrBlock"]) != str(target)]
+        out["changed"] = True
+        if not out["after"]:
+            out["note"] = "the list will be empty: no outside connections will be allowed"
+print(json.dumps(out))
+') || plan_rc=$?
+    [[ $plan_rc -eq 0 ]] || return "$plan_rc"
+
+    local changed
+    changed=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["changed"]))')
+    local state="$plan" verified=""
+    if [[ "$action" != "list" && "$changed" == "1" && "$dry_run" -eq 0 ]]; then
+        local body patch_out after_read
+        body=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.dumps({"ipAllowList": json.load(sys.stdin)["after"]}))')
+        patch_out=$(render_request_checked PATCH "/postgres/$dbid" "$body" 2>&1) || {
+            echo "Error: Render rejected the allow-list update; nothing was changed:" >&2
+            printf '%s\n' "$patch_out" >&2
+            return 1
+        }
+        after_read=$(render_request_checked GET "/postgres/$dbid") || return 1
+        verified=$(printf '%s' "$plan" | ALW_READ="$after_read" python3 -c '
+import ipaddress, json, os, sys
+plan = json.load(sys.stdin)
+got = json.loads(os.environ["ALW_READ"]).get("ipAllowList") or []
+key = lambda es: sorted((str(ipaddress.ip_network(e["cidrBlock"], strict=False)), e.get("description", "")) for e in es)
+if key(got) != key(plan["after"]):
+    print(json.dumps({"intended": plan["after"], "read_back": got}))
+    sys.exit(1)
+plan["after"] = got
+print(json.dumps(plan))
+') || {
+            echo "Error: allow-list read-back mismatch — the list on Render is not what was sent (concurrent change or rejected write). Intended vs read back:" >&2
+            printf '%s\n' "$verified" >&2
+            return 1
+        }
+        state="$verified"
+    fi
+
+    printf '%s' "$state" | ALW_JSON="${RENDER_JSON:-0}" ALW_ACTION="$action" ALW_DRY="$dry_run" python3 -c '
+import json, os, sys
+s = json.load(sys.stdin)
+action, dry = os.environ["ALW_ACTION"], os.environ["ALW_DRY"] == "1"
+if os.environ["ALW_JSON"] == "1":
+    out = {"id": s["id"], "name": s["name"], "ipAllowList": s["after"]}
+    if action != "list":
+        out.update({"action": action, "changed": s["changed"], "dry_run": dry, "before": s["before"], "note": s["note"] or None})
+    print(json.dumps(out, indent=2)); sys.exit(0)
+def show(es):
+    if not es: print("  (empty — no outside connections allowed)")
+    for e in es:
+        block, desc = e["cidrBlock"], e.get("description", "")
+        print(f"  {block:<20} {desc}")
+if action == "list":
+    name, dbid = s["name"], s["id"]
+    print(f"IP allow list for {name} ({dbid}):"); show(s["after"]); sys.exit(0)
+if s["note"]: print(s["note"])
+if not s["changed"]: sys.exit(0)
+name = s["name"]
+print(("Dry run — would change" if dry else "Changed and read back") + f" the IP allow list for {name}:")
+print("Before:"); show(s["before"]); print("After:"); show(s["after"])
+'
+}
+
 # =====================================================================
 # Key Value (Redis-compatible)
 # =====================================================================
@@ -3254,6 +3381,7 @@ case "${1:-help}" in
             backups) shift; cmd_db_backups "$@" ;;
             recover|recovery) shift; cmd_db_recover "$@" ;;
             creds|credentials) shift; cmd_db_creds "$@" ;;
+            allowlist|allow-list|ip-allowlist) shift; cmd_db_allowlist "$@" ;;
             *) cmd_db "$@" ;;
         esac
         ;;
