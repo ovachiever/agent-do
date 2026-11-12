@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --card:#211E1B;
+    --card-hover:#26221E;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --line:rgba(231,227,218,0.14);
+    --line-strong:rgba(231,227,218,0.26);
+    --sage:hsl(158,30%,55%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--ground)}
+  body{
+    color:var(--ink);
+    font:14px/1.5 var(--sans);
+    min-width:1440px;
+  }
+  ::selection{background:var(--sage);color:var(--ground)}
+  a{color:var(--ink);text-decoration:none}
+  a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--sage);outline-offset:2px}
+
+  .page{width:1440px;margin:0 auto;padding:0 48px}
+
+  /* ---------- labels & shared type ---------- */
+  .lbl{
+    font:600 12px/1.3 var(--sans);
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--faint);
+  }
+  .lbl .hi{color:var(--muted)}
+  .serif{font-family:var(--serif)}
+  .mono{font-family:var(--mono)}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* inline link affordance: underlined, ≥24px tall */
+  .lk{
+    display:inline-flex;align-items:center;min-height:24px;
+    color:var(--muted);
+    text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px;
+    font-size:12px;
+  }
+  .lk:hover{color:var(--ink);text-decoration-color:var(--muted)}
+  .lk.sage{color:var(--sage);text-decoration-color:var(--sage)}
+  .lk.sage:hover{color:var(--sage)}
+
+  /* ---------- top nav ---------- */
+  .nav{
+    display:flex;align-items:center;gap:36px;
+    height:58px;border-bottom:1px solid var(--line);
+  }
+  .wordmark{font:400 18px/1 var(--serif);letter-spacing:.02em;color:var(--ink)}
+  .wordmark em{font-style:normal;color:var(--sage)}
+  .nav-links{display:flex;gap:8px;margin-left:16px}
+  .nav-links a{
+    display:inline-flex;align-items:center;
+    height:34px;padding:0 12px;
+    font-size:13px;color:var(--muted);
+    border-bottom:2px solid transparent;
+  }
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.active{color:var(--sage);border-bottom-color:var(--sage)}
+  .nav-time{margin-left:auto;font:12px var(--mono);color:var(--faint);letter-spacing:.06em}
+
+  /* ---------- page header ---------- */
+  .pagehead{
+    display:flex;align-items:flex-end;justify-content:space-between;gap:48px;
+    padding:30px 0 26px;border-bottom:1px solid var(--line);
+  }
+  .pagehead h1{
+    font:400 30px/1.2 var(--serif);letter-spacing:.005em;margin:10px 0 8px;
+  }
+  .pagehead .sub{font-size:13px;color:var(--muted);max-width:640px}
+  .pagehead .sub b{font-weight:600;color:var(--ink)}
+  .overnight{min-width:330px;text-align:right;flex:none}
+  .overnight .row{font-size:13px;color:var(--muted);padding:3px 0}
+  .overnight .row .v{color:var(--ink)}
+  .overnight .row .s{color:var(--sage)}
+
+  /* ---------- main grid ---------- */
+  .main{
+    display:grid;grid-template-columns:276px 700px 316px;gap:26px;
+    padding:26px 0 8px;
+    align-items:start;
+  }
+
+  /* ---------- left rail: atlas index ---------- */
+  .rail-head{padding:2px 0 12px;border-bottom:1px solid var(--line)}
+  .rail-head .census{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6}
+  .rail-head .census .n{color:var(--ink);font-variant-numeric:tabular-nums}
+  .rail-head .census .prov{color:var(--faint)}
+
+  .panel-row{
+    display:flex;gap:12px;align-items:flex-start;
+    padding:12px 10px 12px 12px;
+    border-bottom:1px solid var(--line);
+    border-left:2px solid transparent;
+  }
+  a.panel-row:hover{background:var(--card)}
+  .panel-row.active{background:var(--card);border-left-color:var(--sage)}
+  .glyph{position:relative;width:40px;height:26px;flex:none;margin-top:4px}
+  .glyph .dots,.glyph .keydot{position:absolute;border-radius:50%}
+  .glyph .dots{width:3px;height:3px;background:var(--faint)}
+  .glyph .keydot{width:5px;height:5px;background:var(--muted)}
+  .panel-row.active .glyph .keydot{background:var(--sage)}
+  .panel-row .pr-body{min-width:0}
+  .panel-row .pr-name{font:400 15px/1.25 var(--serif);color:var(--ink)}
+  .panel-row .pr-name .rn{color:var(--faint);font-size:13px}
+  .panel-row .pr-q{font-size:12px;color:var(--muted);margin:3px 0 4px;line-height:1.45}
+  .panel-row .pr-meta{font-size:12px;color:var(--faint)}
+  .panel-row.active .pr-meta .today{color:var(--sage)}
+  .rail-foot{padding:14px 2px 0}
+  .rail-foot .law{font:italic 13px/1.5 var(--serif);color:var(--faint);margin-top:14px}
+
+  /* ---------- center: the panel ---------- */
+  .panelhead .toprow{display:flex;justify-content:space-between;align-items:baseline}
+  .panelhead h2{font:400 26px/1.25 var(--serif);margin:10px 0 6px;max-width:620px}
+  .panelhead .meta{font-size:13px;color:var(--muted)}
+  .panelhead .meta .n{color:var(--ink);font-variant-numeric:tabular-nums}
+  .arrnote{
+    margin:16px 0 6px;padding:10px 16px;
+    border-left:2px solid var(--sage);
+    font:italic 14px/1.55 var(--serif);color:var(--muted);
+    max-width:640px;
+  }
+  .arrnote .who{font-style:normal;font-family:var(--sans);font-size:12px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase}
+  .legend{display:flex;justify-content:flex-end;gap:18px;font-size:12px;color:var(--faint);padding:8px 2px 2px}
+  .legend .sw{display:inline-block;width:18px;height:0;vertical-align:middle;margin-right:6px;position:relative;top:-3px}
+  .legend .sw.solid{border-top:1px solid var(--line-strong)}
+  .legend .sw.dash{border-top:1px dashed var(--line-strong)}
+  .legend .sw.dot{border-top:1px dotted var(--line-strong)}
+
+  /* the constellation canvas */
+  .canvas-wrap{overflow-x:auto}
+  .canvas{position:relative;width:700px;height:692px;margin:4px 0 2px}
+  .tie{position:absolute;left:334px;top:360px;height:0;border-top:1px solid var(--line);transform-origin:0 0;z-index:0}
+  .tie.dash{border-top-style:dashed;border-top-color:var(--line-strong)}
+  .tie.dot{border-top-style:dotted;border-top-color:var(--line-strong)}
+  .tie-lbl{position:absolute;z-index:2;font-size:12px;color:var(--faint);background:var(--ground);padding:1px 6px}
+
+  .cl{position:absolute;z-index:1;background:var(--card);border:1px solid var(--line);padding:11px 14px 8px}
+  .cl-cap{font:600 12px/1.3 var(--sans);letter-spacing:.11em;text-transform:uppercase;color:var(--faint)}
+  .cl-cap .role{color:var(--muted)}
+  .cl-note{font:italic 12px/1.45 var(--serif);color:var(--faint);margin:5px 0 4px}
+  .rec{padding:8px 0 7px;border-top:1px solid var(--line)}
+  .rec:first-of-type{border-top:0}
+  .rec-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+  .rid{font:12px var(--mono);color:var(--faint);letter-spacing:.03em}
+  .rtag{font:600 12px var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  .rti{font:400 13px/1.4 var(--serif);color:var(--ink);margin:3px 0 2px}
+  .rme{font-size:12px;color:var(--faint)}
+  .rme .prov{color:var(--muted)}
+  .seated{color:var(--sage);font-size:12px}
+
+  .keyst{position:absolute;z-index:1;background:var(--card);border:1px solid var(--line);border-top:2px solid var(--sage);padding:13px 16px 12px}
+  .keyst .cl-cap .role{color:var(--sage)}
+  .keyst .kti{font:400 18px/1.35 var(--serif);color:var(--ink);margin:7px 0 6px}
+  .keyst .ksrc{font:12px var(--mono);color:var(--muted);line-height:1.6}
+  .keyst .kme{font-size:12px;color:var(--faint);margin-top:6px;line-height:1.6}
+  .keyst .kme .prov{color:var(--muted)}
+
+  .vac{position:absolute;z-index:1;background:transparent;border:1px dashed var(--line-strong);padding:12px 14px}
+  .vac .vti{font:italic 14px/1.4 var(--serif);color:var(--muted);margin:6px 0 4px}
+  .vac .vme{font-size:12px;color:var(--faint);line-height:1.6}
+
+  /* below canvas: ledger + underwrites */
+  .below{display:grid;grid-template-columns:1fr 264px;gap:26px;border-top:1px solid var(--line);padding-top:16px;margin-top:8px}
+  .ledger-row{display:flex;gap:14px;padding:8px 0;border-bottom:1px solid var(--line);align-items:baseline}
+  .ledger-row .v{font:12px var(--mono);color:var(--sage);flex:none;width:34px}
+  .ledger-row .d{font:12px var(--sans);color:var(--faint);flex:none;width:104px;font-variant-numeric:tabular-nums}
+  .ledger-row .what{font-size:13px;color:var(--muted);line-height:1.45}
+  .ledger-row .what .em{color:var(--ink)}
+  .uw-row{padding:8px 0;border-bottom:1px solid var(--line)}
+  .uw-row .uwn{font:400 14px/1.3 var(--serif);color:var(--ink)}
+  .uw-row .uwm{font-size:12px;color:var(--faint);margin-top:2px}
+  .uw-row .uwm .n{color:var(--muted);font-variant-numeric:tabular-nums}
+  .uw-note{font:italic 12px/1.5 var(--serif);color:var(--faint);margin-top:10px}
+
+  /* ---------- right rail ---------- */
+  .rsec{border-bottom:1px solid var(--line);padding:0 0 16px;margin-bottom:16px}
+  .rsec:first-child{padding-top:2px}
+  .rsec .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .rsec h3{font:400 17px/1.3 var(--serif);margin:8px 0 2px}
+  .rsec .submeta{font-size:12px;color:var(--faint)}
+  .rsec .submeta .prov{color:var(--muted)}
+  .rsec .note{font:italic 12px/1.5 var(--serif);color:var(--faint);margin:6px 0 2px}
+
+  .acc-row{padding:9px 0 8px;border-top:1px solid var(--line)}
+  .acc-row .at{font:400 13px/1.4 var(--serif);color:var(--ink)}
+  .acc-row .am{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--faint);margin-top:3px}
+  .acc-row .am .to{color:var(--sage);flex:none}
+  .acc-row .am .unp{color:var(--faint);flex:none}
+
+  .sig-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0 8px;border-top:1px solid var(--line);align-items:baseline}
+  .sig-row .sn{font-size:13px;color:var(--ink)}
+  .sig-row .sm{font-size:12px;color:var(--faint);margin-top:2px}
+  .sig-row .sm .prov{color:var(--muted)}
+  .sig-row .sv{font:500 14px var(--sans);color:var(--ink);font-variant-numeric:tabular-nums;text-align:right;flex:none}
+  .sig-row .sd{display:block;font-weight:400;font-size:12px;color:var(--faint)}
+
+  .sweep-row{padding:10px 0 9px;border-top:1px solid var(--line)}
+  .sweep-row .swn{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .sweep-row .swname{font:400 14px/1.3 var(--serif);color:var(--ink)}
+  .sweep-row .swstate{font:600 12px var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  .sweep-row .swstate.live{color:var(--sage)}
+  .sweep-row .swq{font-size:12px;color:var(--muted);margin:3px 0 2px}
+  .sweep-row .swm{font-size:12px;color:var(--faint)}
+  .bar{height:4px;background:var(--card-hover);margin:7px 0 3px}
+  .bar .fill{height:4px;background:var(--sage)}
+
+  .commission{border:1px solid var(--line-strong);background:var(--card);padding:14px 16px 16px}
+  .commission .note{font:italic 12px/1.5 var(--serif);color:var(--faint);margin:8px 0 10px}
+  .commission input{
+    width:100%;height:38px;padding:0 12px;
+    background:var(--ground);border:1px solid var(--line-strong);
+    color:var(--ink);font:13px var(--sans);
+  }
+  .commission input::placeholder{color:var(--faint)}
+  .commission input:hover{border-color:var(--muted)}
+  .commission button{
+    margin-top:10px;width:100%;height:36px;
+    background:var(--sage);color:var(--ground);
+    border:1px solid var(--sage);
+    font:600 13px var(--sans);letter-spacing:.03em;cursor:pointer;
+  }
+  .commission button:hover{background:hsl(158,30%,61%)}
+  .commission .fine{font-size:12px;color:var(--faint);margin-top:8px;text-align:center}
+
+  /* ---------- trace band ---------- */
+  .trace{border-top:1px solid var(--line);padding:24px 0 26px;margin-top:18px}
+  .trace-grid{display:flex;gap:0;align-items:stretch;margin-top:14px}
+  .trace-intro{flex:0 0 214px;padding-right:22px}
+  .trace-intro .ti{font:400 17px/1.4 var(--serif);margin-top:6px}
+  .trace-intro .tm{font-size:12px;color:var(--faint);margin-top:6px;line-height:1.55}
+  .tnode{flex:1;background:var(--card);border:1px solid var(--line);padding:12px 14px;min-width:0}
+  .tnode.ev{border-top:2px solid var(--sage)}
+  .tnode .tl{font:600 12px var(--sans);letter-spacing:.11em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between;gap:8px}
+  .tnode.ev .tl .t{color:var(--sage)}
+  .tnode .tb{font:400 13px/1.45 var(--serif);color:var(--ink);margin:6px 0 5px}
+  .tnode .tm{font-size:12px;color:var(--faint);line-height:1.6}
+  .tnode .tm .prov{color:var(--muted)}
+  .tnode .tm .mono{font-size:12px}
+  .tarr{flex:0 0 34px;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:17px}
+
+  /* ---------- footer ---------- */
+  .foot{
+    display:flex;justify-content:space-between;align-items:center;
+    border-top:1px solid var(--line);
+    padding:18px 0 30px;margin-top:4px;
+  }
+  .foot .creed{font-size:12px;color:var(--muted);letter-spacing:.02em}
+  .foot .ver{font:12px var(--mono);color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ══════════ NAV ══════════ -->
+  <nav class="nav">
+    <span class="wordmark">Palingenesis</span>
+    <div class="nav-links">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#" class="active">Library</a>
+      <a href="#">Engine Room</a>
+    </div>
+    <span class="nav-time">22 AUG 2026 · 06:41</span>
+  </nav>
+
+  <!-- ══════════ PAGE HEADER ══════════ -->
+  <header class="pagehead">
+    <div>
+      <span class="lbl">The Library</span>
+      <h1>What the machine has read, and where it has placed it.</h1>
+      <p class="sub">Reading is not knowing until it is <b>seated</b>. Each panel is one question; what sits together is claimed together; every arrangement is signed and dated by the machine.</p>
+    </div>
+    <div class="overnight">
+      <span class="lbl">Since you left · 22:10 → 06:41</span>
+      <p class="row" style="margin-top:8px"><span class="v num">43 papers</span> read on manure valorization — <span class="v num">$6.02</span></p>
+      <p class="row"><span class="s num">9 seated</span> on Panel VII · <span class="v num">34</span> await a seat</p>
+      <p class="row">Keystone of VII replaced — <span class="v">arrangement v.9 signed 04:12</span></p>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- ══════════ LEFT RAIL: THE ATLAS INDEX ══════════ -->
+    <aside>
+      <div class="rail-head">
+        <span class="lbl">The Atlas — <span class="hi">one panel per question</span></span>
+        <p class="census">
+          <span class="n">14</span> panels · <span class="n">391</span> evidence records · <span class="n">2,847</span> papers<br>
+          <span class="prov">counted 04:12 · </span><a class="lk" href="#">accession log</a>
+        </p>
+      </div>
+
+      <a class="panel-row" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:6px;top:18px;box-shadow:8px -10px 0 var(--faint),18px -2px 0 var(--faint),26px -12px 0 var(--faint)"></span>
+          <span class="keydot" style="left:31px;top:10px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Scaffold <span class="rn">· Panel I</span></span>
+          <span class="pr-q" style="display:block">Does pullet bone priming decide late-lay shell?</span>
+          <span class="pr-meta num" style="display:block">21 records · arranged 4 Aug</span>
+        </span>
+      </a>
+
+      <a class="panel-row" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:4px;top:6px;box-shadow:8px 12px 0 var(--faint),24px -2px 0 var(--faint),30px 8px 0 var(--faint)"></span>
+          <span class="keydot" style="left:20px;top:9px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Threshold <span class="rn">· Panel II</span></span>
+          <span class="pr-q" style="display:block">Where does added lysine stop paying?</span>
+          <span class="pr-meta num" style="display:block">18 records · arranged 19 Aug</span>
+        </span>
+      </a>
+
+      <a class="panel-row" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:8px;top:4px;box-shadow:0 16px 0 var(--faint),22px 4px 0 var(--faint),26px 16px 0 var(--faint),12px 20px 0 var(--faint)"></span>
+          <span class="keydot" style="left:17px;top:10px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Swelter <span class="rn">· Panel III</span></span>
+          <span class="pr-q" style="display:block">Can heat stress be fed against, not cooled against?</span>
+          <span class="pr-meta num" style="display:block">26 records · arranged 15 Aug</span>
+        </span>
+      </a>
+
+      <a class="panel-row" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:6px;top:10px;box-shadow:10px -6px 0 var(--faint),22px 8px 0 var(--faint),28px -2px 0 var(--faint)"></span>
+          <span class="keydot" style="left:13px;top:16px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Second Wind <span class="rn">· Panel V</span></span>
+          <span class="pr-q" style="display:block">What does a molt return when nothing is withheld?</span>
+          <span class="pr-meta num" style="display:block">14 records · arranged 2 Aug</span>
+        </span>
+      </a>
+
+      <a class="panel-row active" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:8px;top:6px;box-shadow:25px 2px 0 var(--faint),13px -3px 0 var(--faint),25px 16px 0 var(--faint),0 16px 0 var(--faint)"></span>
+          <span class="keydot" style="left:19px;top:13px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Nightsoil <span class="rn">· Panel VII</span></span>
+          <span class="pr-q" style="display:block">Does manure leave the farm as a cost, or as a product?</span>
+          <span class="pr-meta num" style="display:block">17 records · <span class="today">re-arranged today 04:12</span></span>
+        </span>
+      </a>
+
+      <a class="panel-row" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:6px;top:6px;box-shadow:8px 14px 0 var(--faint),20px 0 0 var(--faint),28px 12px 0 var(--faint)"></span>
+          <span class="keydot" style="left:23px;top:11px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Homeborn <span class="rn">· Panel IX</span></span>
+          <span class="pr-q" style="display:block">Is on-farm hatching worth the hatchery's margin?</span>
+          <span class="pr-meta num" style="display:block">12 records · arranged 28 Jul</span>
+        </span>
+      </a>
+
+      <a class="panel-row" href="#">
+        <span class="glyph">
+          <span class="dots" style="left:4px;top:14px;box-shadow:14px -8px 0 var(--faint),26px 6px 0 var(--faint),32px -6px 0 var(--faint)"></span>
+          <span class="keydot" style="left:11px;top:7px"></span>
+        </span>
+        <span class="pr-body">
+          <span class="pr-name">Auspex <span class="rn">· Panel XI</span></span>
+          <span class="pr-q" style="display:block">Can a shell's failure be heard before it breaks?</span>
+          <span class="pr-meta num" style="display:block">9 records · arranged 11 Aug</span>
+        </span>
+      </a>
+
+      <div class="rail-foot">
+        <a class="lk" href="#">7 more panels →</a><br>
+        <a class="lk" href="#" style="margin-top:4px">Unplaced — 34 papers &amp; 12 records await seats →</a>
+        <p class="law">To move between panels is to move between questions.</p>
+      </div>
+    </aside>
+
+    <!-- ══════════ CENTER: PANEL VII ══════════ -->
+    <section>
+      <div class="panelhead">
+        <div class="toprow">
+          <span class="lbl">Panel VII · <span class="hi">Nightsoil</span></span>
+          <span class="lbl">Arrangement v.9 · <span class="hi">signed 22 Aug, 04:12</span></span>
+        </div>
+        <h2>Does manure leave the farm as a cost, or as a product?</h2>
+        <p class="meta"><span class="n">17</span> evidence records · <span class="n">3</span> clusters · <span class="n">1</span> seat reserved · underwrites <span class="n">3</span> dossiers</p>
+        <div class="arrnote">
+          Re-arranged at 04:12, after sweep &lsquo;Nightsoil&rsquo; pass 4. The overnight meta-analysis moved the center of gravity: EV&#8209;0871 takes the keystone from EV&#8209;0512; the ammonia cluster tightens to three corroborants with no dissent; the acceptance record stays held apart until &lsquo;Rookery&rsquo; reports.
+          <span class="who">&nbsp;— arranged by the machine</span>
+        </div>
+        <div class="legend">
+          <span><span class="sw solid"></span>kinship claimed</span>
+          <span><span class="sw dash"></span>kinship unresolved</span>
+          <span><span class="sw dot"></span>seat reserved</span>
+          <span>distance&nbsp;=&nbsp;doubt</span>
+        </div>
+      </div>
+
+      <div class="canvas-wrap">
+      <div class="canvas">
+
+        <!-- ties (drawn from the keystone's center) -->
+        <span class="tie"      style="width:301px;transform:rotate(-133.8deg)"></span>
+        <span class="tie"      style="width:289px;transform:rotate(-31.6deg)"></span>
+        <span class="tie"      style="width:293px;transform:rotate(-81.8deg)"></span>
+        <span class="tie dash" style="width:329px;transform:rotate(42.9deg)"></span>
+        <span class="tie dot"  style="width:292px;transform:rotate(130.4deg)"></span>
+        <span class="tie-lbl" style="left:436px;top:462px">kinship unresolved</span>
+        <span class="tie-lbl" style="left:186px;top:472px">seat reserved</span>
+
+        <!-- cluster: ammonia -->
+        <div class="cl" style="left:8px;top:24px;width:252px">
+          <div class="cl-cap"><span class="role">Placed together</span> · the ammonia cluster</div>
+          <div class="cl-note">Three measures of one pathway; they agree within 8%.</div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">EV-0862</span><span class="rtag">corroborant</span></div>
+            <div class="rti">NH₃ loss falls 47% when larvae work litter within 48 h</div>
+            <div class="rme"><span class="prov">Chen et al. 2023 · J. Environ. Qual.</span> · extr. $0.12</div>
+          </div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">EV-0903</span><span class="rtag">corroborant</span></div>
+            <div class="rti">Volatilization down 41% under larval aeration, pilot scale</div>
+            <div class="rme"><span class="prov">Parodi et al. 2021 · Waste Manag.</span> · extr. $0.12</div>
+          </div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">EV-1131</span><span class="rtag">corroborant</span></div>
+            <div class="rti">Meta-analysis: median NH₃ reduction 44% (n = 19 trials)</div>
+            <div class="rme"><span class="prov">Miranda et al. 2025 · Agric. Systems</span> · <span class="seated">seated 04:12</span></div>
+          </div>
+        </div>
+
+        <!-- ground: regulatory floor -->
+        <div class="cl" style="left:292px;top:18px;width:168px">
+          <div class="cl-cap"><span class="role">Ground</span></div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">EV-0788</span></div>
+            <div class="rti">Larval meal lawful in layer feed since 2021</div>
+            <div class="rme"><span class="prov">AAFCO OP §T40.117</span> · uncontested</div>
+          </div>
+        </div>
+
+        <!-- cluster: biology beside its price -->
+        <div class="cl" style="left:468px;top:96px;width:224px">
+          <div class="cl-cap"><span class="role">Placed together</span> · biology beside its price</div>
+          <div class="cl-note">The substitution claim is seated next to the prices that decide it; the loop closes in dollars or not at all.</div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">EV-0914</span><span class="rtag">corroborant</span></div>
+            <div class="rti">Larval meal replaces 24% of soybean meal; lay rate holds (n = 1,440 hens)</div>
+            <div class="rme"><span class="prov">Star et al. 2020 · J. Appl. Poult. Res.</span> · extr. $0.31</div>
+          </div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">SG-114</span><span class="rtag">price</span></div>
+            <div class="rti">Soybean meal, Decatur — $412/t</div>
+            <div class="rme"><span class="prov">Feedinfo · 22 Aug, 05:30</span> · −$9 wk</div>
+          </div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">SG-131</span><span class="rtag">price</span></div>
+            <div class="rti">BSFL meal, EU spot — €1,240/t</div>
+            <div class="rme"><span class="prov">IPIFF panel · 19 Aug</span> · spread 2.6× — was 3.0× in May</div>
+          </div>
+        </div>
+
+        <!-- keystone -->
+        <div class="keyst" style="left:210px;top:268px;width:248px">
+          <div class="cl-cap"><span class="role">Keystone</span> · <span class="seated">seated 04:12</span> — was EV-0512</div>
+          <div class="kti">Larvae take 61% of layer-manure mass in 14 days — and leave a feed behind.</div>
+          <div class="ksrc">EV-0871 · Beskin et al. 2018 · Waste Management 74<br>doi 10.1016/j.wasman.2017.12.019</div>
+          <div class="kme">replicated ×4 · extraction $0.42 · cited by <span class="prov">Vespers ×5, Tithe ×2</span></div>
+        </div>
+
+        <!-- held apart -->
+        <div class="cl" style="left:462px;top:500px;width:226px">
+          <div class="cl-cap"><span class="role">Held apart</span></div>
+          <div class="cl-note">Acceptance may gate the loop; the distance is the doubt.</div>
+          <div class="rec">
+            <div class="rec-top"><span class="rid">EV-0967</span><span class="rtag">dissent</span></div>
+            <div class="rti">Only 41% of EU consumers accept insect-fed eggs (n = 2,410)</div>
+            <div class="rme"><span class="prov">Bazoche &amp; Poret 2021 · Ecol. Econ.</span> · extr. $0.17</div>
+          </div>
+          <div class="rme" style="padding-top:6px;border-top:1px solid var(--line)">waiting on &lsquo;Rookery&rsquo; + a US panel — commissioned</div>
+        </div>
+
+        <!-- reserved seat -->
+        <div class="vac" style="left:30px;top:512px;width:230px">
+          <div class="cl-cap"><span class="role">Seat reserved</span> · since v.7</div>
+          <div class="vti">Odor at industrial scale — nothing held yet.</div>
+          <div class="vme num">&lsquo;Rookery&rsquo; reading 61 of 214 · est. $28.40 · due Sat</div>
+          <a class="lk" href="#">follow the sweep →</a>
+        </div>
+
+      </div>
+      </div>
+
+      <!-- arrangement ledger + underwrites -->
+      <div class="below">
+        <div>
+          <span class="lbl">The arrangement, dated</span>
+          <div class="ledger-row">
+            <span class="v">v.9</span><span class="d">22 Aug, 04:12</span>
+            <span class="what"><span class="em">Keystone replaced;</span> ammonia cluster tightened; nine accessions seated — after &lsquo;Nightsoil&rsquo; pass 4.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="v">v.8</span><span class="d">9 Aug</span>
+            <span class="what">Prices seated beside EV-0914 — <span class="em">the loop restated in dollars.</span></span>
+          </div>
+          <div class="ledger-row">
+            <span class="v">v.7</span><span class="d">21 Jul</span>
+            <span class="what">EV-0967 moved outward; a seat reserved for odor evidence.</span>
+          </div>
+          <div class="ledger-row">
+            <span class="v">v.6</span><span class="d">3 Jul</span>
+            <span class="what">Panel cut from Panel IV; the question sharpened to cost-or-product.</span>
+          </div>
+          <div style="padding-top:9px"><a class="lk" href="#">full ledger — 9 arrangements since 3 Jun →</a></div>
+        </div>
+        <div>
+          <span class="lbl">Underwrites</span>
+          <div class="uw-row">
+            <div class="uwn">Vespers</div>
+            <div class="uwm">manure → larvae → feed loop · <span class="n">12 claims</span> resolve here · <a class="lk" href="#">open in Pipeline →</a></div>
+          </div>
+          <div class="uw-row">
+            <div class="uwn">Tithe</div>
+            <div class="uwm">frass as fertilizer revenue · <span class="n">4 claims</span></div>
+          </div>
+          <div class="uw-row">
+            <div class="uwn">Quern</div>
+            <div class="uwm">feed-mill particle economics · <span class="n">1 claim</span></div>
+          </div>
+          <p class="uw-note">A dossier may not cite what the Library does not hold.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ RIGHT RAIL ══════════ -->
+    <aside>
+
+      <div class="rsec">
+        <span class="lbl">Read overnight</span>
+        <h3 class="num">43 papers on manure valorization</h3>
+        <p class="submeta"><span class="prov">sweep &lsquo;Nightsoil&rsquo; · pass 4 · finished 04:12</span> · $6.02</p>
+        <p class="note">Nine were seated at once; the rest wait for a place.</p>
+
+        <div class="acc-row">
+          <div class="at">A meta-analysis of ammonia abatement in larval bioconversion</div>
+          <div class="am"><span>Miranda et al. · Agric. Systems 2025 · $0.14</span><span class="to">→ VII · ammonia</span></div>
+        </div>
+        <div class="acc-row">
+          <div class="at">Layer performance on graded larval-meal inclusion, second cycle</div>
+          <div class="am"><span>Patterson et al. · Poult. Sci. 2025 · $0.14</span><span class="to">→ VII</span></div>
+        </div>
+        <div class="acc-row">
+          <div class="at">Full-scale BSF facilities: odor complaint records, 2019–2024</div>
+          <div class="am"><span>Højberg · Environ. Technol. 2024 · $0.14</span><span class="to">→ VII · reserved seat</span></div>
+        </div>
+        <div class="acc-row">
+          <div class="at">Frass as nitrogen fertilizer: field trials in maize</div>
+          <div class="am"><span>Beesigamukama et al. · Field Crops Res. 2023 · $0.14</span><span class="unp">unplaced</span></div>
+        </div>
+        <div class="acc-row">
+          <div class="at">Regulatory divergence on processed animal protein, EU/US</div>
+          <div class="am"><span>Verbeke &amp; Lähteenmäki · Food Policy 2024 · $0.14</span><span class="unp">unplaced</span></div>
+        </div>
+        <div style="padding-top:8px"><a class="lk" href="#">38 more in the accession log →</a></div>
+      </div>
+
+      <div class="rsec">
+        <span class="lbl">Market &amp; data signals</span>
+        <p class="note">A signal is shelved like a paper: dated, sourced, seated on the panels that watch it.</p>
+        <div class="sig-row">
+          <div>
+            <div class="sn">Corn, No. 2 yellow</div>
+            <div class="sm"><span class="prov">USDA ERS · 21 Aug</span> · public, $0 · watched by II, VII</div>
+          </div>
+          <div class="sv num">$4.87/bu<span class="sd num">+$0.06 wk</span></div>
+        </div>
+        <div class="sig-row">
+          <div>
+            <div class="sn">Soybean meal, Decatur</div>
+            <div class="sm"><span class="prov">Feedinfo · 22 Aug, 05:30</span> · watched by II, VII</div>
+          </div>
+          <div class="sv num">$412/t<span class="sd num">−$9 wk</span></div>
+        </div>
+        <div class="sig-row">
+          <div>
+            <div class="sn">BSFL meal, EU spot</div>
+            <div class="sm"><span class="prov">IPIFF panel · 19 Aug</span> · watched by VII</div>
+          </div>
+          <div class="sv num">€1,240/t<span class="sd num">spread 2.6×</span></div>
+        </div>
+        <div class="sig-row">
+          <div>
+            <div class="sn">Table-egg layers in production</div>
+            <div class="sm"><span class="prov">USDA NASS · 1 Aug</span> · watched by I, IX</div>
+          </div>
+          <div class="sv num">328.1M<span class="sd num">−0.4% m/m</span></div>
+        </div>
+      </div>
+
+      <div class="rsec">
+        <span class="lbl">Commissioned reading</span>
+        <div class="sweep-row">
+          <div class="swn"><span class="swname">&lsquo;Rookery&rsquo;</span><span class="swstate live">reading now</span></div>
+          <div class="swq">Odor at industrial scale — fills the reserved seat on VII.</div>
+          <div class="bar"><div class="fill" style="width:29%"></div></div>
+          <div class="swm num">61 of 214 papers · est. $28.40 · due Sat</div>
+        </div>
+        <div class="sweep-row">
+          <div class="swn"><span class="swname">&lsquo;Auspex&rsquo;</span><span class="swstate">queued</span></div>
+          <div class="swq">Acoustic prediction of shell failure — feeds Panel XI.</div>
+          <div class="swm num">128 papers scoped · est. $17.10 · starts after &lsquo;Rookery&rsquo;</div>
+        </div>
+        <div class="sweep-row">
+          <div class="swn"><span class="swname">&lsquo;Nightsoil&rsquo; pass 4</span><span class="swstate">finished 04:12</span></div>
+          <div class="swm num">43 papers · $6.02 · 9 seated · keystone replaced</div>
+        </div>
+      </div>
+
+      <div class="commission">
+        <span class="lbl">Commission new reading</span>
+        <p class="note">Name the question. The machine scopes the corpus, prices it, and queues it — the estimate comes before a page is turned.</p>
+        <input type="text" placeholder="What should the machine read next?">
+        <button type="button">Scope &amp; queue the sweep</button>
+        <p class="fine">recent estimates ran $6–$29 per sweep</p>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- ══════════ TRACE BAND ══════════ -->
+  <section class="trace">
+    <span class="lbl">The contract</span>
+    <div class="trace-grid">
+      <div class="trace-intro">
+        <p class="ti serif">Every claim in a dossier resolves here.</p>
+        <p class="tm">One resolution, end to end — claim to evidence to source to the night it was read.</p>
+      </div>
+      <div class="tnode">
+        <div class="tl"><span>Claim</span><span class="mono">VSP-C3</span></div>
+        <div class="tb">&ldquo;Larval meal can replace 24% of soybean meal; lay rate holds.&rdquo;</div>
+        <div class="tm">Dossier <span class="prov">&lsquo;Vespers&rsquo;</span> · claim 3 · verdict: advanced</div>
+      </div>
+      <div class="tarr">→</div>
+      <div class="tnode ev">
+        <div class="tl"><span class="t">Evidence record</span><span class="mono">EV-0914</span></div>
+        <div class="tb">Extracted from p. 6, Table 3 — checked against 2 replications.</div>
+        <div class="tm">extracted <span class="prov">14 Aug</span> · extraction $0.31</div>
+      </div>
+      <div class="tarr">→</div>
+      <div class="tnode">
+        <div class="tl"><span>Source</span><span class="mono">doi</span></div>
+        <div class="tb">Star, L., et al. (2020). J. Applied Poultry Research 29(4), 1163–1176.</div>
+        <div class="tm mono">10.1016/j.japr.2020.03.002</div>
+      </div>
+      <div class="tarr">→</div>
+      <div class="tnode">
+        <div class="tl"><span>Ingestion</span><span class="mono">sha·9f2c</span></div>
+        <div class="tb">Read 12 Aug, sweep &lsquo;Nightsoil&rsquo; pass 2 — full text held, checksum kept.</div>
+        <div class="tm">ingest $0.14 · <span class="prov">open the page it came from →</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ FOOTER ══════════ -->
+  <footer class="foot">
+    <span class="creed">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="ver">LIBRARY · ATLAS OF 14 QUESTIONS · 22 AUG 2026, 06:41</span>
+  </footer>
+
+</div>
+</body>
+</html>

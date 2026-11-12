@@ -12,7 +12,7 @@ use fs2::FileExt;
 use rand::{rngs::OsRng, RngCore};
 
 use crate::error::{MannaError, Result};
-use crate::issue::{Issue, SessionEvent, SessionIdentity};
+use crate::issue::{Issue, IssueStatus, SessionEvent, SessionIdentity};
 
 /// Directory name for Manna storage.
 const MANNA_DIR: &str = ".manna";
@@ -35,6 +35,12 @@ const BOARD_IDENTITY_FILE: &str = "board.yaml";
 pub struct MannaStore {
     /// Base directory containing `.manna/`.
     base_dir: PathBuf,
+}
+
+/// The completed row and dependents that became unblocked in the same write.
+pub struct CompletedIssue {
+    pub issue: Issue,
+    pub released: Vec<String>,
 }
 
 impl MannaStore {
@@ -106,7 +112,17 @@ impl MannaStore {
                         issue.id
                     )));
                 }
-                crate::issue::IssueType::Track | crate::issue::IssueType::Dream
+                // A track's handoff is optional, but never half: a pointer
+                // without a binding (or the reverse) is a broken pair.
+                crate::issue::IssueType::Track
+                    if issue.prompt.is_some() != issue.handoff_digest.is_some() =>
+                {
+                    return Err(MannaError::MutationRejected(format!(
+                        "strict workflow track {} carries half a handoff pair",
+                        issue.id
+                    )));
+                }
+                crate::issue::IssueType::Dream
                     if issue.prompt.is_some() || issue.handoff_digest.is_some() =>
                 {
                     return Err(MannaError::MutationRejected(format!(
@@ -410,7 +426,19 @@ impl MannaStore {
             .iter_mut()
             .find(|issue| issue.id == id)
             .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        let was_done = issue.status == IssueStatus::Done;
         mutation(issue, &snapshot).map_err(MannaError::MutationRejected)?;
+        // Every transition to done that arrives by this primitive, repair
+        // included, meets the track gate against the rows as they are under
+        // the lock: an item created under or moved into the track after a
+        // caller inspected the board is open work this write would orphan
+        // (mn-9b4359 review). `finish_issue_unlocked` runs the same gate for
+        // the lifecycle close paths.
+        if !was_done && issue.status == IssueStatus::Done {
+            if let Some(reason) = crate::track::track_close_refusal(issue, &snapshot) {
+                return Err(MannaError::MutationRejected(reason));
+            }
+        }
         issue.validate().map_err(MannaError::MutationRejected)?;
         let updated = issue.clone();
         if self.board_is_strict()? {
@@ -447,27 +475,228 @@ impl MannaStore {
     /// Complete a claimed issue only for the session that owns it.
     pub fn complete_issue(&self, id: &str, session: &SessionIdentity) -> Result<Issue> {
         self.complete_issue_checked(id, session, |_, _| Ok(()))
+            .map(|completed| completed.issue)
     }
 
     /// Complete only after rechecking an external integrity precondition under
     /// the same board lock as the lifecycle transition. Strict workflows use
     /// this to prevent `done` from hiding a handoff edit made after claim.
+    /// Removing the completed blocker from every dependent shares that lock
+    /// and atomic write, so readers never observe a half-completed cascade.
     pub fn complete_issue_checked<F>(
         &self,
         id: &str,
         session: &SessionIdentity,
         precondition: F,
-    ) -> Result<Issue>
+    ) -> Result<CompletedIssue>
     where
         F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
     {
-        self.mutate_issue_locked(id, |issue, issues| {
+        self.finish_issue_locked(id, precondition, |issue| {
             if issue.issue_type == crate::issue::IssueType::Dream {
                 issue.close_dream(session)
             } else {
-                precondition(issue, issues)?;
                 issue.complete(session)
             }
+        })
+    }
+
+    /// Close on landed evidence (commits carrying the item's trailer that
+    /// touched real source). The evidence authorizes, so no owner check runs;
+    /// dependents release in the same locked write as any other close.
+    pub fn complete_issue_on_evidence(
+        &self,
+        id: &str,
+        evidence: &[String],
+    ) -> Result<CompletedIssue> {
+        self.finish_issue_locked(
+            id,
+            |_, _| Ok(()),
+            |issue| issue.complete_on_evidence(evidence),
+        )
+    }
+
+    /// Close a managed item whose acceptance is complete. The precondition
+    /// runs under the board lock over the reloaded row and board, so the
+    /// caller re-reads the managed sidecar inside it and refuses when the
+    /// assessment it acted on no longer matches what is on disk.
+    pub fn complete_issue_on_acceptance<F>(
+        &self,
+        id: &str,
+        precondition: F,
+    ) -> Result<CompletedIssue>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+    {
+        self.finish_issue_locked(id, precondition, |issue| issue.complete_on_acceptance())
+    }
+
+    /// Close a managed item with a post-write step under the same lock: the
+    /// precondition sees the reloaded row, the transition writes it, and
+    /// `after_write` (the lifecycle audit) runs before the lock drops. An
+    /// audit failure after the row is durable is reported, never hidden, and
+    /// never un-closes the row.
+    pub fn complete_issue_on_acceptance_with<F, A>(
+        &self,
+        id: &str,
+        precondition: F,
+        after_write: A,
+    ) -> Result<(CompletedIssue, Option<String>)>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        A: FnOnce(&CompletedIssue) -> std::result::Result<(), String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+        let _board_lock = self.lock_board()?;
+        let completed =
+            self.finish_issue_unlocked(id, precondition, |issue| issue.complete_on_acceptance())?;
+        let audit_warning = after_write(&completed).err();
+        Ok((completed, audit_warning))
+    }
+
+    /// Release a claim as one locked transaction with sidecar steps on both
+    /// sides of the row write. `before` runs over the reloaded row (expected
+    /// owner, attempt, authority rechecked; the sidecar's pending phase and
+    /// audit written); the row's claim is then released and written; then
+    /// `after` runs (the sidecar's released phase) before the lock drops.
+    /// An unclaimed row passes through `before`/`after` without a row write.
+    pub fn release_claim_with<B, A>(&self, id: &str, before: B, after: A) -> Result<Issue>
+    where
+        B: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        A: FnOnce(&Issue) -> std::result::Result<(), String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+        let _board_lock = self.lock_board()?;
+        let mut issues = self.load_issues()?;
+        let snapshot = issues.clone();
+        let index = issues
+            .iter()
+            .position(|issue| issue.id == id)
+            .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        before(&issues[index], &snapshot).map_err(MannaError::MutationRejected)?;
+        if issues[index].claimed_by.is_some() {
+            issues[index]
+                .release_dead_claim()
+                .map_err(MannaError::MutationRejected)?;
+            issues[index]
+                .validate()
+                .map_err(MannaError::MutationRejected)?;
+            if self.board_is_strict()? {
+                Self::validate_strict_row_shapes(&issues)?;
+            }
+            self.write_issues_locked(&issues)?;
+        }
+        after(&issues[index]).map_err(MannaError::MutationRejected)?;
+        Ok(issues[index].clone())
+    }
+
+    /// Run a managed-sidecar mutation under the board lock with the current
+    /// row in hand. The closure receives the live row (reloaded after the
+    /// lock) so expected-owner and expected-attempt checks see the truth.
+    pub fn with_locked_issue<T, F>(&self, id: &str, operation: F) -> Result<T>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<T, String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+        let _board_lock = self.lock_board()?;
+        let issues = self.load_issues()?;
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == id)
+            .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        operation(issue, &issues).map_err(MannaError::MutationRejected)
+    }
+
+    /// Close by the operator: the human at the terminal owns every claim.
+    pub fn complete_issue_as_operator(
+        &self,
+        id: &str,
+        session: &SessionIdentity,
+    ) -> Result<CompletedIssue> {
+        self.finish_issue_locked(
+            id,
+            |_, _| Ok(()),
+            |issue| issue.complete_as_operator(session),
+        )
+    }
+
+    /// One locked close: precondition over the row and board, then the
+    /// transition, then every dependent's blocker edge in the same write.
+    fn finish_issue_locked<F, T>(
+        &self,
+        id: &str,
+        precondition: F,
+        transition: T,
+    ) -> Result<CompletedIssue>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        T: FnOnce(&mut Issue) -> std::result::Result<(), String>,
+    {
+        if !self.issues_path().exists() {
+            return Err(MannaError::NotInitialized);
+        }
+
+        let _board_lock = self.lock_board()?;
+        self.finish_issue_unlocked(id, precondition, transition)
+    }
+
+    /// The body of `finish_issue_locked`; the caller holds the board lock.
+    fn finish_issue_unlocked<F, T>(
+        &self,
+        id: &str,
+        precondition: F,
+        transition: T,
+    ) -> Result<CompletedIssue>
+    where
+        F: FnOnce(&Issue, &[Issue]) -> std::result::Result<(), String>,
+        T: FnOnce(&mut Issue) -> std::result::Result<(), String>,
+    {
+        let mut issues = self.load_issues()?;
+        let index = issues
+            .iter()
+            .position(|issue| issue.id == id)
+            .ok_or_else(|| MannaError::IssueNotFound(id.to_string()))?;
+        let mut issue = issues[index].clone();
+        // A track closes only when every item in it is done. The gate runs
+        // under the lock on every close path (owner, evidence, operator,
+        // acceptance), so no authority closes a track over open work.
+        if let Some(reason) = crate::track::track_close_refusal(&issue, &issues) {
+            return Err(MannaError::MutationRejected(reason));
+        }
+        if issue.issue_type != crate::issue::IssueType::Dream {
+            precondition(&issue, &issues).map_err(MannaError::MutationRejected)?;
+        }
+        transition(&mut issue).map_err(MannaError::MutationRejected)?;
+        issue.validate().map_err(MannaError::MutationRejected)?;
+        issues[index] = issue.clone();
+
+        let mut released = Vec::new();
+        for dependent in &mut issues {
+            if !dependent.blocked_by.iter().any(|blocker| blocker == id) {
+                continue;
+            }
+            let was_blocked = dependent.status == IssueStatus::Blocked;
+            dependent.blocked_by.retain(|blocker| blocker != id);
+            dependent.update_blocked_status();
+            dependent.updated_at = issue.updated_at;
+            dependent.validate().map_err(MannaError::MutationRejected)?;
+            if was_blocked && dependent.blocked_by.is_empty() {
+                released.push(dependent.id.clone());
+            }
+        }
+        if self.board_is_strict()? {
+            Self::validate_strict_row_shapes(&issues)?;
+        }
+        self.write_issues_locked(&issues)?;
+        Ok(CompletedIssue {
+            issue: issues[index].clone(),
+            released,
         })
     }
 
@@ -734,7 +963,7 @@ impl MannaStore {
             .require_owner(session)
             .map_err(MannaError::MutationRejected)?;
         if self.board_is_strict()?
-            && issues[index].issue_type == crate::issue::IssueType::Item
+            && crate::track::pairable(issues[index].issue_type)
             && (issues[index].prompt.is_some() || issues[index].handoff_digest.is_some())
         {
             return Err(MannaError::MutationRejected(
@@ -1124,6 +1353,157 @@ mod tests {
         assert_eq!(store.load_issues().unwrap()[0].title, "Owned");
     }
 
+    fn completion_board() -> (TempDir, MannaStore, SessionIdentity) {
+        let (temp, store) = setup_store();
+        let owner = session("ses_completion");
+        for id in ["mn-first", "mn-second", "mn-single", "mn-multi", "mn-other"] {
+            store
+                .append_issue(&Issue::new(id.to_string(), id.to_string()).unwrap())
+                .unwrap();
+        }
+        for id in ["mn-first", "mn-second"] {
+            store.claim_issue(id, &owner).unwrap();
+        }
+        for (dependent, blocker) in [
+            ("mn-single", "mn-first"),
+            ("mn-multi", "mn-first"),
+            ("mn-multi", "mn-second"),
+        ] {
+            store.add_blocker(dependent, blocker, &owner).unwrap();
+        }
+        (temp, store, owner)
+    }
+
+    #[test]
+    fn completion_releases_only_dependents_with_no_remaining_blockers() {
+        let (_temp, store, owner) = completion_board();
+        let before = store.load_issues().unwrap();
+        let first = store
+            .complete_issue_checked("mn-first", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(first.issue.status, IssueStatus::Done);
+        assert_eq!(first.released, ["mn-single"]);
+
+        let after = store.load_issues().unwrap();
+        assert_eq!(after[2].status, IssueStatus::Open);
+        assert!(after[2].blocked_by.is_empty());
+        assert_eq!(after[3].status, IssueStatus::Blocked);
+        assert_eq!(after[3].blocked_by, ["mn-second"]);
+        assert_eq!(after[2].updated_at, first.issue.updated_at);
+        assert_eq!(after[3].updated_at, first.issue.updated_at);
+        assert_eq!(after[1], before[1]);
+        assert_eq!(after[4], before[4]);
+
+        let second = store
+            .complete_issue_checked("mn-second", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(second.released, ["mn-multi"]);
+        let after_second = store.load_issues().unwrap();
+        assert_eq!(after_second[3].status, IssueStatus::Open);
+        assert!(after_second[3].blocked_by.is_empty());
+        assert_eq!(after_second[2], after[2]);
+        assert_eq!(after_second[4], before[4]);
+        store.claim_issue("mn-multi", &owner).unwrap();
+    }
+
+    #[test]
+    fn completion_preserves_dependent_ownership_and_closed_status() {
+        let (_temp, store, owner) = completion_board();
+        let other_owner = session("ses_other_owner");
+        store.claim_issue("mn-other", &other_owner).unwrap();
+        let claimed = store
+            .add_blocker("mn-other", "mn-first", &other_owner)
+            .unwrap();
+        store.complete_issue("mn-second", &owner).unwrap();
+        store.add_blocker("mn-second", "mn-first", &owner).unwrap();
+
+        let completed = store
+            .complete_issue_checked("mn-first", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(completed.released, ["mn-single", "mn-multi", "mn-other"]);
+        let after = store.load_issues().unwrap();
+        assert_eq!(after[1].status, IssueStatus::Done);
+        assert!(after[1].blocked_by.is_empty());
+        assert_eq!(after[4].status, IssueStatus::InProgress);
+        assert!(after[4].blocked_by.is_empty());
+        assert_eq!(after[4].claimed_by, claimed.claimed_by);
+        assert_eq!(after[4].claimed_at, claimed.claimed_at);
+        assert_eq!(after[4].claim_token_hash, claimed.claim_token_hash);
+    }
+
+    #[test]
+    fn completion_refusals_leave_the_entire_board_unchanged() {
+        let (_temp, store, owner) = completion_board();
+        let before = fs::read(store.issues_path()).unwrap();
+        let refused = store.complete_issue("mn-first", &session("ses_intruder"));
+        assert!(matches!(refused, Err(MannaError::MutationRejected(_))));
+        assert_eq!(fs::read(store.issues_path()).unwrap(), before);
+
+        let refused = store.complete_issue_checked("mn-first", &owner, |_, _| {
+            Err("handoff binding is stale".to_string())
+        });
+        assert!(matches!(refused, Err(MannaError::MutationRejected(_))));
+        assert_eq!(fs::read(store.issues_path()).unwrap(), before);
+
+        let refused = store.complete_issue("mn-other", &owner);
+        assert!(matches!(refused, Err(MannaError::MutationRejected(_))));
+        assert_eq!(fs::read(store.issues_path()).unwrap(), before);
+    }
+
+    #[test]
+    fn completion_removes_all_occurrences_without_sweeping_missing_blockers() {
+        let (_temp, store, owner) = completion_board();
+        let mut rows = store.load_issues().unwrap();
+        rows[2].blocked_by.push("mn-first".to_string());
+        rows[3].blocked_by.push("mn-missing".to_string());
+        // Legacy or hand-edited board fixture, never a production mutation.
+        store.write_issues_locked(&rows).unwrap();
+
+        let completed = store
+            .complete_issue_checked("mn-first", &owner, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(completed.released, ["mn-single"]);
+        store.complete_issue("mn-second", &owner).unwrap();
+        let after = store.load_issues().unwrap();
+        assert!(after[2].blocked_by.is_empty());
+        assert_eq!(after[3].blocked_by, ["mn-missing"]);
+        assert_eq!(after[3].status, IssueStatus::Blocked);
+    }
+
+    #[test]
+    fn completion_of_concurrent_blockers_releases_shared_dependent_once() {
+        let (_temp, store, owner) = completion_board();
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = ["mn-first", "mn-second"]
+            .into_iter()
+            .map(|id| {
+                let store = store.clone();
+                let owner = owner.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    store
+                        .complete_issue_checked(id, &owner, |_, _| Ok(()))
+                        .unwrap()
+                        .released
+                })
+            })
+            .collect();
+        let mut released: Vec<_> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        released.sort();
+        assert_eq!(released, ["mn-multi", "mn-single"]);
+        let after = store.load_issues().unwrap();
+        assert_eq!(after[0].status, IssueStatus::Done);
+        assert_eq!(after[1].status, IssueStatus::Done);
+        for dependent in &after[2..4] {
+            assert!(dependent.blocked_by.is_empty());
+            assert_eq!(dependent.status, IssueStatus::Open);
+        }
+    }
+
     #[test]
     fn transaction_create_replay_requires_the_complete_row() {
         let (_temp, store) = setup_store();
@@ -1278,5 +1658,137 @@ mod tests {
 
         let events = store.load_sessions().unwrap();
         assert_eq!(events.len(), 5);
+    }
+
+    #[test]
+    fn complete_issue_on_evidence_closes_foreign_claim_and_releases_dependents() {
+        let (_temp, store) = setup_store();
+        let landed = Issue::new("mn-ev1001".to_string(), "Landed".to_string()).unwrap();
+        store.append_issue(&landed).unwrap();
+        let mut dependent = Issue::new("mn-ev1002".to_string(), "Waits".to_string()).unwrap();
+        dependent.blocked_by.push(landed.id.clone());
+        dependent.update_blocked_status();
+        store.append_issue(&dependent).unwrap();
+        store
+            .claim_issue(&landed.id, &session("ses_builder"))
+            .unwrap();
+
+        let completed = store
+            .complete_issue_on_evidence(&landed.id, &["abc123def456".to_string()])
+            .unwrap();
+        assert_eq!(completed.issue.status, IssueStatus::Done);
+        assert_eq!(completed.issue.claimed_by.as_deref(), Some("ses_builder"));
+        assert_eq!(completed.released, vec!["mn-ev1002".to_string()]);
+
+        let rows = store.load_issues().unwrap();
+        let dependent = rows.iter().find(|row| row.id == "mn-ev1002").unwrap();
+        assert_eq!(dependent.status, IssueStatus::Open);
+        assert!(dependent.blocked_by.is_empty());
+    }
+
+    #[test]
+    fn complete_issue_on_evidence_needs_a_receipt() {
+        let (_temp, store) = setup_store();
+        let issue = Issue::new("mn-ev1003".to_string(), "Bare".to_string()).unwrap();
+        store.append_issue(&issue).unwrap();
+        assert!(store.complete_issue_on_evidence(&issue.id, &[]).is_err());
+        let rows = store.load_issues().unwrap();
+        assert_eq!(rows[0].status, IssueStatus::Open);
+    }
+
+    #[test]
+    fn complete_issue_as_operator_closes_over_a_stranded_claim() {
+        let (_temp, store) = setup_store();
+        let issue = Issue::new("mn-op1001".to_string(), "Stranded".to_string()).unwrap();
+        store.append_issue(&issue).unwrap();
+        store.claim_issue(&issue.id, &session("ses_gone")).unwrap();
+
+        let agent = session("ses_agent");
+        assert!(store.complete_issue_as_operator(&issue.id, &agent).is_err());
+
+        let operator = session("operator-erik").into_operator();
+        let completed = store
+            .complete_issue_as_operator(&issue.id, &operator)
+            .unwrap();
+        assert_eq!(completed.issue.status, IssueStatus::Done);
+    }
+
+    fn track_with_item(store: &MannaStore, track: &str, item: Option<&str>) {
+        let mut row = Issue::new(track.to_string(), format!("track {}", track)).unwrap();
+        row.issue_type = crate::issue::IssueType::Track;
+        store.append_issue(&row).unwrap();
+        if let Some(item) = item {
+            let mut row = Issue::new(item.to_string(), format!("item {}", item)).unwrap();
+            row.track = Some(track.to_string());
+            store.append_issue(&row).unwrap();
+        }
+    }
+
+    fn close_by_repair(store: &MannaStore, id: &str) -> Result<Issue> {
+        store.repair_issue(id, |issue, _| {
+            issue.status = IssueStatus::Done;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn repair_never_closes_a_track_over_an_open_item() {
+        let (_temp, store) = setup_store();
+        track_with_item(&store, "mn-trk100", Some("mn-kid100"));
+
+        // The repair path carries no lifecycle precondition of its own; the
+        // primitive under it still refuses a transition to done that would
+        // close the track over the open item it finds under the lock.
+        let error = close_by_repair(&store, "mn-trk100")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("mn-kid100 (open)")
+                && error.contains("A track closes only when every item in it is done"),
+            "{}",
+            error
+        );
+        let rows = store.load_issues().unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.id == "mn-trk100")
+                .unwrap()
+                .status,
+            IssueStatus::Open
+        );
+
+        // The same repair closes once the item is done.
+        close_by_repair(&store, "mn-kid100").unwrap();
+        let closed = close_by_repair(&store, "mn-trk100").unwrap();
+        assert_eq!(closed.status, IssueStatus::Done);
+    }
+
+    #[test]
+    fn repair_never_closes_an_empty_track_and_leaves_done_rows_done() {
+        let (_temp, store) = setup_store();
+        track_with_item(&store, "mn-trk101", None);
+        let error = close_by_repair(&store, "mn-trk101")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("is a track with no items"), "{}", error);
+
+        // A row already done is not a transition, so a metadata repair on a
+        // done track with no items is not refused by the gate.
+        track_with_item(&store, "mn-trk102", Some("mn-kid102"));
+        close_by_repair(&store, "mn-kid102").unwrap();
+        close_by_repair(&store, "mn-trk102").unwrap();
+        store
+            .repair_issue("mn-kid102", |issue, _| {
+                issue.track = None;
+                Ok(())
+            })
+            .unwrap();
+        let touched = store
+            .repair_issue("mn-trk102", |issue, _| {
+                issue.title = "renamed after close".to_string();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(touched.status, IssueStatus::Done);
     }
 }

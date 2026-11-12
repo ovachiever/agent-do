@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------
+     GRID (declared)
+     page 1440 · margin 24 · frame border 1 · pane padding 24
+     panes: rail 240 | 1 | main 860 | 1 | inspector 288
+     content left-x: rail 49 (icon) / 73 (text) · main 290 · inspector 1151
+     main sub-grid (812): 176 | 144 | 128 | 128 | 236  → 290 466 610 738 866
+     arc sub-grid (5 × 160): 290 450 610 770 930
+     drill inset: sage 2 + 22 → 314 · two columns 356 | 408, gutter 24 → 314 694
+     book sub-grid (5 × 250, gutter 24): 49 323 597 871 1145
+     scorecard stats (5 × 160): 49 209 369 529 689 · calibration 871
+     type: 11/16 · 13/24 · 16/24 · 24/32   (four sizes, 8px baseline)
+     ------------------------------------------------------------ */
+  :root{
+    --bg: #1B1917;
+    --bg-raised: #201E1B;
+    --ink: #E7E3DA;
+    --ink-mid: #B7B2A6;
+    --ink-dim: #948F81;
+    --rule: rgba(231,227,218,0.35);
+    --rule-soft: rgba(231,227,218,0.14);
+    --rule-faint: rgba(231,227,218,0.08);
+    --sage: #9CB08C;
+    --clay: #C17A52;
+    --fill-90: rgba(231,227,218,0.09);
+    --fill-50: rgba(231,227,218,0.22);
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 13px;
+    line-height: 24px;
+    font-variant-numeric: tabular-nums;
+  }
+  .page{ width: 1440px; margin: 0 auto; padding: 24px; }
+
+  /* small / label register */
+  .s{ font-size: 11px; line-height: 16px; }
+  .lbl{ font-size: 11px; line-height: 16px; letter-spacing: 0.08em; font-weight: 700; color: var(--ink-mid); }
+  .dim{ color: var(--ink-dim); }
+  .mid{ color: var(--ink-mid); }
+  .ink{ color: var(--ink); }
+  .sage{ color: var(--sage); }
+  .clay{ color: var(--clay); }
+  .b{ font-weight: 700; }
+  .r{ text-align: right; }
+
+  /* ---------- nav ---------- */
+  .topnav{
+    display:flex; align-items:center; gap: 16px;
+    height: 32px; margin-bottom: 24px;
+    border-bottom: 1px solid var(--rule-soft);
+    letter-spacing: 0.04em; color: var(--ink-dim);
+  }
+  .topnav .brand{ color: var(--ink); font-weight: 600; }
+  .topnav .sep{ color: var(--rule); }
+  .topnav .active{ color: var(--ink); font-weight: 600; border-bottom: 1px solid var(--ink); line-height: 22px; }
+  .topnav .date{ margin-left: auto; color: var(--ink-mid); }
+
+  /* ---------- frame ---------- */
+  .workstation{ position: relative; border: 1px solid var(--rule); }
+  .corner{ position:absolute; width:10px; height:10px; }
+  .corner.tl{ top:-1px; left:-1px; border-top:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.tr{ top:-1px; right:-1px; border-top:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:1px solid var(--ink-dim); border-left:1px solid var(--ink-dim); }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:1px solid var(--ink-dim); border-right:1px solid var(--ink-dim); }
+  .hdiv{ height: 1px; background: var(--rule); }
+
+  /* ---------- scorecard ---------- */
+  .score{ padding: 24px; display: grid; grid-template-columns: 800px 520px; column-gap: 22px; row-gap: 24px; }
+  .stats{ display: grid; grid-template-columns: repeat(5, 160px); }
+  .stat .n{ font-size: 24px; line-height: 32px; font-weight: 700; color: var(--ink); }
+  .calib svg{ display:block; width: 520px; height: 32px; }
+  .capline{ grid-column: 1 / -1; color: var(--ink-mid); }
+  .capline .ink{ margin-right: 24px; }
+  .capline .dot{ color: var(--rule); }
+
+  /* ---------- panes ---------- */
+  .grid3{ display: grid; grid-template-columns: 240px 1px 860px 1px 288px; align-items: stretch; }
+  .vdiv{ background: var(--rule); }
+  .col{ padding: 24px; min-width: 0; }
+  .colhead{ font-size: 11px; line-height: 16px; letter-spacing: 0.08em; font-weight: 700; color: var(--ink); margin-bottom: 24px; }
+
+  /* rail */
+  .grp{ margin-top: 24px; margin-bottom: 8px; }
+  .grp:first-of-type{ margin-top: 0; }
+  .prow{ display:flex; gap: 8px; margin-left: -16px; padding: 8px 0 8px 14px; border-left: 2px solid transparent; }
+  .prow.sel{ background: var(--rule-faint); border-left-color: var(--ink); }
+  .prow .ic{ flex: 0 0 16px; color: var(--ink-mid); }
+  .prow .pn{ color: var(--ink); }
+  .filters{ margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--rule-soft); }
+  .filters .lbl{ margin-bottom: 8px; }
+  .filters div{ color: var(--ink-mid); }
+
+  /* selected position */
+  .title{ display:flex; align-items: baseline; justify-content: space-between; }
+  .title .nm{ font-size: 16px; line-height: 24px; font-weight: 700; color: var(--ink); }
+  .thesis{ margin-top: 24px; color: var(--ink-mid); }
+  .sec{ margin-top: 31px; border-top: 1px solid var(--rule-soft); padding-top: 24px; }
+  .sec .lbl{ margin-bottom: 16px; }
+  .chart svg{ display:block; width: 812px; height: 200px; }
+  .legend{ display:flex; gap: 24px; margin-top: 8px; color: var(--ink-mid); }
+  .legend span{ display:flex; align-items:center; gap: 8px; }
+  .legend i{ display:inline-block; width: 18px; height: 0; border-top: 2px solid var(--ink); }
+  .legend u{ display:inline-block; width: 14px; height: 12px; background: var(--fill-90); border: 1px solid var(--rule-soft); }
+  .legend o{ display:inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--sage); }
+
+  /* ledger */
+  .ledger{ display: grid; grid-template-columns: 176px 144px 128px 128px 236px; }
+  .ledger .h{ padding-bottom: 8px; border-bottom: 1px solid var(--rule-soft); }
+  .ledger .c{ padding: 16px 0; border-bottom: 1px solid var(--rule-faint); }
+  .ledger .c.open{ border-bottom: none; }
+  .ledger .last{ border-bottom: none; }
+  .ledger .r{ padding-right: 24px; }
+  .ledger .mk{ padding-left: 36px; }
+  .ledger .mk svg{ display:block; width: 200px; height: 24px; }
+  .ledger .res{ color: var(--ink-mid); }
+  .ledger .beat .res{ color: var(--sage); font-weight: 700; }
+  .drill{ grid-column: 1 / -1; margin-bottom: 8px; border-left: 2px solid var(--sage); background: var(--bg-raised); padding: 24px 24px 24px 22px; }
+  .drill .dh{ font-size: 11px; line-height: 16px; letter-spacing: 0.08em; font-weight: 700; color: var(--sage); }
+  .dcols{ display:grid; grid-template-columns: 356px 408px; column-gap: 24px; margin-top: 16px; }
+  .kv{ display:flex; justify-content: space-between; gap: 16px; }
+  .kv span:first-child{ color: var(--ink-dim); }
+  .kv span:last-child{ color: var(--ink); text-align: right; }
+  .btns{ display:flex; flex-wrap: wrap; gap: 8px; }
+  .drill .btns{ margin-top: 24px; }
+  .btn{ display:inline-flex; align-items:center; height: 32px; padding: 0 12px; border: 1px solid var(--ink-dim); color: var(--ink); white-space: nowrap; }
+
+  /* arc */
+  .arc svg{ display:block; width: 812px; height: 16px; }
+  .arcg{ display:grid; grid-template-columns: repeat(5, 160px); margin-top: 8px; }
+  .arcg .av{ color: var(--ink); font-weight: 700; }
+  .arcg .ad{ color: var(--ink-mid); }
+  .arrow{ margin-left: 640px; height: 24px; color: var(--ink-dim); }
+  .deploy{ margin-top: 8px; }
+  .deploy .lbl{ margin-bottom: 16px; }
+  .tbl{ display:grid; grid-template-columns: 176px 144px 128px 128px; }
+  .tbl .h{ padding-bottom: 8px; border-bottom: 1px solid var(--rule-soft); }
+  .tbl .c{ padding: 8px 0; border-bottom: 1px solid var(--rule-faint); color: var(--ink-mid); }
+  .tbl .c.site{ color: var(--ink); }
+  .tbl .last{ border-bottom: none; }
+  .tbl .r{ padding-right: 24px; }
+  .foot{ margin-top: 16px; }
+  .tabs{ margin-top: 24px; }
+
+  /* inspector */
+  .if{ margin-bottom: 24px; }
+  .if .lbl{ margin-bottom: 8px; }
+  .if .big{ font-size: 16px; line-height: 24px; font-weight: 700; color: var(--ink); }
+  .if .v{ color: var(--ink); }
+  .if .d{ color: var(--ink-mid); }
+  .if .btns{ margin-top: 8px; }
+  .if:last-child{ margin-bottom: 0; }
+
+  /* book */
+  .book{ padding: 24px; }
+  .bookhead{ display:flex; justify-content: space-between; align-items:center; }
+  .bgrid{ display:grid; grid-template-columns: repeat(5, 250px); column-gap: 24px; row-gap: 32px; margin-top: 24px; }
+  .bcol .bt{ color: var(--ink); font-weight: 700; margin-bottom: 8px; }
+  .bcol div{ color: var(--ink-mid); }
+  .bcol .kv span:last-child{ color: var(--ink); }
+  .bcol.w2{ grid-column: span 2; }
+  .book .tabs{ margin-top: 32px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav class="topnav">
+    <span class="brand">Palingenesis</span>
+    <span class="sep">·</span>
+    <span>Today</span>
+    <span class="sep">·</span>
+    <span>Pipeline</span>
+    <span class="sep">·</span>
+    <span>Library</span>
+    <span class="sep">·</span>
+    <span class="active">Portfolio</span>
+    <span class="sep">·</span>
+    <span>Simulation</span>
+    <span class="sep">·</span>
+    <span>Engine Room</span>
+    <span class="date">Tue 15 Sep 2026</span>
+  </nav>
+
+  <div class="workstation">
+    <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+
+    <!-- ===== scorecard strip ===== -->
+    <section class="score">
+      <div class="stats">
+        <div class="stat"><div class="lbl">CLAIMS SCORED</div><div class="n">41</div></div>
+        <div class="stat"><div class="lbl">ON OR ABOVE</div><div class="n sage">29</div></div>
+        <div class="stat"><div class="lbl">BELOW</div><div class="n clay">8</div></div>
+        <div class="stat"><div class="lbl">UNPROVEN</div><div class="n">4</div></div>
+        <div class="stat"><div class="lbl">COVERAGE</div><div class="n">84%</div></div>
+      </div>
+      <div class="calib">
+        <div class="lbl">Calibration</div>
+        <svg viewBox="0 0 520 32" role="img" aria-label="Calibration">
+          <text x="0" y="20" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">10%</text>
+          <line x1="32" y1="10" x2="32" y2="22" stroke="var(--ink-mid)" stroke-width="1"/>
+          <line x1="32" y1="16" x2="488" y2="16" stroke="var(--ink-mid)" stroke-width="1"/>
+          <line x1="488" y1="10" x2="488" y2="22" stroke="var(--ink-mid)" stroke-width="1"/>
+          <circle cx="453.8" cy="16" r="4" fill="var(--ink)"/>
+          <text x="500" y="20" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">90%</text>
+        </svg>
+      </div>
+      <div class="capline">
+        Capital in <span class="ink">$1.94M</span>
+        Returned <span class="ink">$1.21M</span>
+        <span class="ink">9 positions</span><span class="dot">·</span> 6 active <span class="dot">·</span> 2 unproven <span class="dot">·</span> 3 closed
+      </div>
+    </section>
+
+    <div class="hdiv"></div>
+
+    <div class="grid3">
+      <!-- ===== POSITIONS rail ===== -->
+      <section class="col">
+        <div class="colhead">POSITIONS</div>
+
+        <div class="grp lbl">Active</div>
+        <div class="prow sel"><span class="ic">●</span><div><div class="pn">Fungal ammonia</div><div class="s mid">scaling · scale</div><div class="s sage">beating thesis</div></div></div>
+        <div class="prow"><span class="ic">●</span><div><div class="pn">Litter moisture</div><div class="s mid">scaling · hold</div><div class="s mid">on thesis</div></div></div>
+        <div class="prow"><span class="ic">●</span><div><div class="pn">Heat stress</div><div class="s mid">launched · scale</div><div class="s mid">on thesis</div></div></div>
+        <div class="prow"><span class="ic">◐</span><div><div class="pn">Feed-cost proxy</div><div class="s mid">launched · pause</div><div class="s clay">below thesis</div></div></div>
+
+        <div class="grp lbl">Unproven</div>
+        <div class="prow"><span class="ic">○</span><div><div class="pn">Shell thickness</div><div class="s mid">piloting · hold</div><div class="s dim">first read Oct 3</div></div></div>
+        <div class="prow"><span class="ic">○</span><div><div class="pn">Perch layout</div><div class="s mid">piloting · hold</div><div class="s dim">first read Oct 11</div></div></div>
+
+        <div class="grp lbl">Closed</div>
+        <div class="prow"><span class="ic">×</span><div><div class="pn">Manure pellets</div><div class="s mid">exited · <span class="sage">beating</span></div></div></div>
+        <div class="prow"><span class="ic">◇</span><div><div class="pn">Static ventilation</div><div class="s mid">retired · on thesis</div></div></div>
+        <div class="prow"><span class="ic">×</span><div><div class="pn">Probiotic dosing</div><div class="s mid">failed · <span class="clay">below</span></div></div></div>
+
+        <div class="filters">
+          <div class="lbl">Filters</div>
+          <div>Stage: All</div>
+          <div>Standing: All</div>
+          <div>Mechanism: All</div>
+          <div>Vintage: All</div>
+          <div>Regulation: All</div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- ===== SELECTED POSITION ===== -->
+      <section class="col">
+        <div class="colhead">SELECTED POSITION</div>
+        <div class="mid">Approved 19 Aug 2025 · Dossier v4</div>
+        <div class="title"><span class="nm">FUNGAL AMMONIA REDUCTION</span><span class="dim">POS-0417</span></div>
+        <div class="mid">Scaling · <span class="sage">Beating thesis</span></div>
+        <p class="thesis" style="margin:24px 0 0">Fungal-network-inspired bedding amendment cuts house ammonia 24% (18–30%) with no change in litter moisture, paying back within one flock.</p>
+
+        <!-- THESIS VS REALITY, half height -->
+        <div class="sec chart">
+          <div class="lbl">THESIS VS REALITY</div>
+          <svg viewBox="0 0 812 200" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Thesis vs reality">
+            <line x1="56" y1="16" x2="780" y2="16" stroke="var(--rule-faint)" stroke-width="1"/>
+            <line x1="56" y1="160" x2="780" y2="160" stroke="var(--rule-faint)" stroke-width="1"/>
+            <rect x="56" y="88" width="724" height="48" fill="var(--fill-90)"/>
+            <line x1="56" y1="88" x2="780" y2="88" stroke="var(--ink-mid)" stroke-width="1"/>
+            <line x1="56" y1="112" x2="780" y2="112" stroke="var(--ink)" stroke-width="2"/>
+            <line x1="56" y1="136" x2="780" y2="136" stroke="var(--ink-mid)" stroke-width="1"/>
+            <text x="776" y="83" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">claimed low</text>
+            <text x="776" y="107" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">claimed center</text>
+            <text x="60" y="131" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">claimed high</text>
+
+            <path d="M56,100 L200.8,116 L345.6,124 L490.4,132 L635.2,140 L780,140" fill="none" stroke="var(--sage)" stroke-width="2"/>
+            <circle cx="56" cy="100" r="3" fill="var(--sage)"/>
+            <circle cx="200.8" cy="116" r="3" fill="var(--sage)"/>
+            <circle cx="345.6" cy="124" r="3" fill="var(--sage)"/>
+            <circle cx="490.4" cy="132" r="3" fill="var(--sage)"/>
+            <circle cx="635.2" cy="140" r="3" fill="var(--sage)"/>
+            <circle cx="780" cy="140" r="4" fill="var(--sage)" stroke="var(--bg)" stroke-width="1"/>
+            <text x="774" y="157" text-anchor="end" font-size="11" fill="var(--sage)" font-family="'JetBrains Mono',monospace">−31% observed</text>
+
+            <line x1="56" y1="172" x2="780" y2="172" stroke="var(--ink-mid)" stroke-width="1"/>
+            <line x1="50" y1="16" x2="56" y2="16" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="50" y1="88" x2="56" y2="88" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="50" y1="112" x2="56" y2="112" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="50" y1="136" x2="56" y2="136" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="50" y1="160" x2="56" y2="160" stroke="var(--ink-dim)" stroke-width="1"/>
+            <text x="44" y="20" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">0%</text>
+            <text x="44" y="92" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">−18%</text>
+            <text x="44" y="116" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">−24%</text>
+            <text x="44" y="140" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">−30%</text>
+            <text x="44" y="164" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">−36%</text>
+            <line x1="56" y1="172" x2="56" y2="178" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="345.6" y1="172" x2="345.6" y2="178" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="635.2" y1="172" x2="635.2" y2="178" stroke="var(--ink-dim)" stroke-width="1"/>
+            <line x1="780" y1="172" x2="780" y2="178" stroke="var(--ink-dim)" stroke-width="1"/>
+            <text x="56" y="192" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">Oct 25</text>
+            <text x="345.6" y="192" text-anchor="middle" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">Feb 26</text>
+            <text x="635.2" y="192" text-anchor="middle" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">Jun 26</text>
+            <text x="780" y="192" text-anchor="end" font-size="11" fill="var(--ink-mid)" font-family="'JetBrains Mono',monospace">Aug 26</text>
+          </svg>
+          <div class="legend">
+            <span><i></i>Claimed</span>
+            <span><u></u>Approved interval</span>
+            <span><o></o>Observed</span>
+          </div>
+        </div>
+
+        <!-- CLAIM LEDGER: primary instrument -->
+        <div class="sec">
+          <div class="lbl">CLAIM LEDGER</div>
+          <div class="ledger">
+            <div class="h lbl">Measure</div>
+            <div class="h lbl r">Claimed</div>
+            <div class="h lbl r">Field</div>
+            <div class="h lbl">Result</div>
+            <div class="h"></div>
+
+            <!-- House NH3 · beat -->
+            <div class="c open beat ink b">House NH₃</div>
+            <div class="c open r"><div class="ink">−24%</div><div class="s dim">−18…−30%</div></div>
+            <div class="c open r ink">−31%</div>
+            <div class="c open beat"><div class="res">Beat</div><div class="s dim">n=41</div></div>
+            <div class="c open mk"><svg viewBox="0 0 200 24"><line x1="0" y1="12" x2="200" y2="12" stroke="var(--rule-faint)" stroke-width="1"/><rect x="33.3" y="8" width="66.7" height="8" fill="var(--fill-90)"/><rect x="65.7" y="4" width="2" height="16" fill="var(--ink)"/><circle cx="27.8" cy="12" r="4" fill="var(--sage)"/></svg></div>
+
+            <!-- opened drill of the first row -->
+            <div class="drill">
+              <div class="dh">HOUSE AMMONIA</div>
+              <div class="dcols">
+                <div>
+                  <div class="kv"><span>Approved claim</span><span>−24%</span></div>
+                  <div class="kv"><span>Approved interval</span><span>−18% to −30%</span></div>
+                  <div class="kv"><span>Current field result</span><span>−31%</span></div>
+                  <div class="kv"><span>Field interval</span><span>available in detailed reading</span></div>
+                  <div class="kv"><span>Verdict</span><span class="sage b">Beat approved interval</span></div>
+                </div>
+                <div>
+                  <div class="kv"><span>Sites</span><span>14</span></div>
+                  <div class="kv"><span>Valid observations</span><span>41 scored site/flock periods</span></div>
+                  <div class="kv"><span>Latest reading</span><span>14 Sep 2026, 06:00</span></div>
+                  <div class="kv"><span>Reference</span><span>Matched untreated houses</span></div>
+                  <div class="kv"><span>Instrument status</span><span>38 current · 3 readings excluded</span></div>
+                </div>
+              </div>
+              <div class="btns">
+                <span class="btn">View by site</span><span class="btn">View by flock</span><span class="btn">Inspect exclusions</span><span class="btn">Open approved claim</span>
+              </div>
+            </div>
+
+            <!-- Litter moisture -->
+            <div class="c ink">Litter moisture</div>
+            <div class="c r"><div class="ink">0%</div><div class="s dim">−2…+2%</div></div>
+            <div class="c r ink">+0.6%</div>
+            <div class="c"><div class="res">Covered</div><div class="s dim">n=41</div></div>
+            <div class="c mk"><svg viewBox="0 0 200 24"><line x1="0" y1="12" x2="200" y2="12" stroke="var(--rule-faint)" stroke-width="1"/><rect x="50" y="8" width="100" height="8" fill="var(--fill-90)"/><rect x="99" y="4" width="2" height="16" fill="var(--ink)"/><circle cx="115" cy="12" r="4" fill="var(--ink)"/></svg></div>
+
+            <!-- Payback -->
+            <div class="c ink">Payback</div>
+            <div class="c r"><div class="ink">1 flock</div><div class="s dim">1–2 flocks</div></div>
+            <div class="c r ink">1 flock</div>
+            <div class="c"><div class="res">Covered</div><div class="s dim">n=23</div></div>
+            <div class="c mk"><svg viewBox="0 0 200 24"><line x1="0" y1="12" x2="200" y2="12" stroke="var(--rule-faint)" stroke-width="1"/><rect x="66.7" y="8" width="66.6" height="8" fill="var(--fill-90)"/><rect x="65.7" y="4" width="2" height="16" fill="var(--ink)"/><circle cx="66.7" cy="12" r="4" fill="var(--ink)"/></svg></div>
+
+            <!-- Mortality -->
+            <div class="c last ink">Mortality</div>
+            <div class="c last r"><div class="ink">−0.3%</div><div class="s dim">−0.6…0%</div></div>
+            <div class="c last r ink">−0.4%</div>
+            <div class="c last"><div class="res">Covered</div><div class="s dim">n=23</div></div>
+            <div class="c last mk"><svg viewBox="0 0 200 24"><line x1="0" y1="12" x2="200" y2="12" stroke="var(--rule-faint)" stroke-width="1"/><rect x="66.7" y="8" width="66.6" height="8" fill="var(--fill-90)"/><rect x="99" y="4" width="2" height="16" fill="var(--ink)"/><circle cx="88.9" cy="12" r="4" fill="var(--ink)"/></svg></div>
+          </div>
+        </div>
+
+        <!-- POSITION ARC -->
+        <div class="sec arc">
+          <div class="lbl">POSITION ARC</div>
+          <svg viewBox="0 0 812 16" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Position arc">
+            <line x1="4" y1="8" x2="644" y2="8" stroke="var(--rule)" stroke-width="1"/>
+            <circle cx="4" cy="8" r="3.5" fill="var(--ink)"/>
+            <circle cx="164" cy="8" r="3.5" fill="var(--ink)"/>
+            <circle cx="324" cy="8" r="3.5" fill="var(--ink)"/>
+            <circle cx="484" cy="8" r="3.5" fill="var(--ink)"/>
+            <circle cx="644" cy="8" r="3.5" fill="var(--sage)"/>
+          </svg>
+          <div class="arcg">
+            <div><div class="lbl">Papers</div><div class="av">9</div><div class="ad">Sources</div></div>
+            <div><div class="lbl">Review</div><div class="av sage">PASS</div><div class="ad">Aug 19</div></div>
+            <div><div class="lbl">Simulation</div><div class="av">−24% ±6%</div><div class="ad">Run 1842</div></div>
+            <div><div class="lbl">Pilot</div><div class="av">4 sites</div><div class="ad">2025</div></div>
+            <div><div class="lbl">Scaling</div><div class="av">14 sites</div><div class="ad">2026</div></div>
+          </div>
+          <div class="arrow s">▼</div>
+
+          <!-- RECENT SITE DEPLOYMENTS -->
+          <div class="deploy">
+            <div class="lbl">RECENT SITE DEPLOYMENTS</div>
+            <div class="tbl">
+              <div class="h lbl">Site</div><div class="h lbl">Started</div><div class="h lbl">State</div><div class="h lbl r">Readings</div>
+              <div class="c site">Site A</div><div class="c">3 Sep 2025</div><div class="c">scaling</div><div class="c r ink">186</div>
+              <div class="c site">Site C</div><div class="c">15 Dec 2025</div><div class="c">scaling</div><div class="c r ink">141</div>
+              <div class="c site">Site D</div><div class="c">10 Jan 2026</div><div class="c clay">paused</div><div class="c r ink">62</div>
+              <div class="c site last">Site F</div><div class="c last">2 Jul 2026</div><div class="c last">piloting</div><div class="c last r ink">19</div>
+            </div>
+            <div class="foot s dim">4 deployments shown · 14 sites total</div>
+          </div>
+
+          <div class="btns tabs">
+            <span class="btn">Thesis</span><span class="btn">Reality</span><span class="btn">Sites</span><span class="btn">Economics</span><span class="btn">Acts</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="vdiv"></div>
+
+      <!-- ===== POSITION INSPECTOR ===== -->
+      <section class="col">
+        <div class="colhead">POSITION INSPECTOR</div>
+
+        <div class="if">
+          <div class="lbl">STANDING</div>
+          <div class="big">SCALE</div>
+          <div class="d">Since 4 May 2026</div>
+          <div class="d">Erik</div>
+          <div class="btns"><span class="btn">Hold</span><span class="btn">Scale</span><span class="btn">Pause</span></div>
+          <div class="btns"><span class="btn">Exit</span><span class="btn">Retire</span></div>
+          <div class="btns"><span class="btn">Release</span><span class="btn">Spin out</span></div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">LAST DECISION</div>
+          <div class="v">4 May 2026 · Scale</div>
+          <div class="d">"Field readings hold across 12 sites."</div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">NEXT REVIEW</div>
+          <div class="v">27 Nov 2026</div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">FIELD DOMAIN</div>
+          <div class="v">14 laying sites</div>
+          <div class="d">612 readings</div>
+          <div class="d">Cutoff: 14 Sep, 06:00</div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">CAPITAL &amp; RETURN</div>
+          <div class="kv"><span>Capital in</span><span>$0.41M</span></div>
+          <div class="kv"><span>Revenue TTM</span><span>$0.33M</span></div>
+          <div class="kv"><span>Margin</span><span>58%</span></div>
+          <div class="kv"><span>Expected value</span><span>$2.1M</span></div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">ESTATE</div>
+          <div class="v">4 patent matters</div>
+          <div class="d">Office action due</div>
+          <div class="clay">27 Nov 2026</div>
+          <div class="kv"><span>Income TTM</span><span>$0.09M</span></div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">GO-TO-MARKET</div>
+          <div class="v">Public since 8 Apr 2026</div>
+          <div class="d">Adoption: 14 of 22</div>
+          <div class="d">Campaign: 1 Sep 2026</div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">PROVENANCE</div>
+          <div class="v">Thesis v1 · frozen</div>
+          <div class="d">Dossier v4</div>
+          <div class="d">Simulation run 1842</div>
+          <div class="d">Evidence cutoff</div>
+          <div class="d">28 Feb 2026</div>
+        </div>
+
+        <div class="if">
+          <div class="lbl">ACTS</div>
+          <div class="d"><span class="ink">May 04</span> · Scale</div>
+          <div class="d"><span class="ink">Mar 11</span> · Widen pilot</div>
+          <div class="d"><span class="ink">Feb 14</span> · File patent</div>
+          <div class="d"><span class="ink">Sep 03</span> · Start pilot</div>
+        </div>
+      </section>
+    </div>
+
+    <div class="hdiv"></div>
+
+    <!-- ===== BOOK ===== -->
+    <section class="book">
+      <div class="bookhead"><div class="colhead" style="margin:0">BOOK</div><div class="s dim">▲</div></div>
+      <div class="bgrid">
+        <div class="bcol">
+          <div class="bt">Stage mix</div>
+          <div class="kv"><span>Piloting</span><span>2</span></div>
+          <div class="kv"><span>Launched</span><span>2</span></div>
+          <div class="kv"><span>Scaling</span><span>2</span></div>
+          <div class="kv"><span>Closed</span><span>3</span></div>
+        </div>
+        <div class="bcol">
+          <div class="bt">Concentration</div>
+          <div class="kv"><span>Top 3 share</span><span class="clay">71%</span></div>
+          <div class="kv"><span>Limit</span><span>60%</span></div>
+          <div class="kv"><span>HHI</span><span class="clay">0.21</span></div>
+          <div class="kv"><span>HHI cap</span><span>0.15</span></div>
+        </div>
+        <div class="bcol">
+          <div class="bt">Vintages</div>
+          <div class="kv"><span>Vintage</span><span>2025 Q3</span></div>
+          <div class="kv"><span>In</span><span>$0.62M</span></div>
+          <div class="kv"><span>Returned</span><span>$0.71M</span></div>
+        </div>
+        <div class="bcol">
+          <div class="bt">Calibration</div>
+          <div class="kv"><span>Claims scored</span><span>41</span></div>
+          <div class="kv"><span>On or above</span><span class="sage">29</span></div>
+          <div class="kv"><span>Below</span><span class="clay">8</span></div>
+          <div class="kv"><span>Unproven</span><span>4</span></div>
+        </div>
+        <div class="bcol">
+          <div class="bt">Time to evidence</div>
+          <div class="kv"><span>Median</span><span>74 days</span></div>
+          <div class="kv"><span>Longest</span><span>61 days</span></div>
+          <div>Shell thickness</div>
+        </div>
+
+        <div class="bcol">
+          <div class="bt">Estate</div>
+          <div>7 patents</div>
+          <div>3 granted</div>
+          <div>1 office action</div>
+        </div>
+        <div class="bcol w2">
+          <div class="bt">Coupled exposures</div>
+          <div>Litter mechanism · Barn climate</div>
+          <div>Feed · EU cage-free 2027</div>
+        </div>
+        <div class="bcol w2">
+          <div class="bt">World signals</div>
+          <div>4 signals · 3 awaiting</div>
+          <div>1 acted on</div>
+        </div>
+      </div>
+      <div class="btns tabs">
+        <span class="btn">Stage mix</span><span class="btn">Concentration</span><span class="btn">Vintages</span><span class="btn">Calibration</span><span class="btn">Shared risks</span><span class="btn">Estate</span><span class="btn">Closed book</span>
+      </div>
+    </section>
+  </div>
+
+</div>
+</body>
+</html>
