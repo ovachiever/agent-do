@@ -3300,6 +3300,7 @@ tools:
     - create pull requests with committed provenance declarations and a local preview
     - list actionable pull requests across repos
     - inspect pull request details, diffs, checks, and unresolved review threads
+    - correlate a deployed commit with GitHub-declared pull requests and closing issues
     - classify changed files by review-risk tier (critical/elevated/standard)
     - audit PR review risks and generate fix-oriented engineering review replies
     - surface the built-in review doctrine on every review
@@ -3313,6 +3314,7 @@ tools:
       awaiting: Show open PRs likely awaiting your review by broad review heuristics
       prs: Search pull requests
       pr: Show PR details
+      commit: Correlate a commit with GitHub-declared pull requests and closing issues
       pr create: Create a PR with explicit title, body and base; --declare copies every branch commit's provenance, --dry-run previews locally without pushing
       issue create: Create an issue with --title and --body or --body-file, then read it back
       issue list: List all repository issues with exact totals; optional state, assignee, author, label filters and display limit
@@ -3361,6 +3363,8 @@ tools:
       command: agent-gh audit ovachiever/agent-do#3 --reply --probe-deploys
     - intent: review pull request 3 in agent-do
       command: agent-gh review ovachiever/agent-do#3 --summary
+    - intent: find the pull request and linked issues for a deployed commit
+      command: agent-gh commit abc123def --repo owner/repo --json
     - intent: show unresolved GitHub review comments
       command: agent-gh threads ovachiever/agent-do#3
     - intent: approve this GitHub PR
@@ -3421,6 +3425,7 @@ tools:
       - awaiting
       - prs
       - pr
+      - commit
       - issue list
       - diff
       - threads
