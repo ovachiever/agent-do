@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Dossier · PG-2209</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper: hsl(45, 50%, 95%);
+    --paper-deep: hsl(44, 38%, 89%);
+    --panel: hsl(45, 55%, 97%);
+    --ink: hsl(140, 22%, 13%);
+    --ink-soft: hsl(140, 10%, 30%);
+    --line: hsl(44, 22%, 78%);
+    --leaf: hsl(132, 33%, 34%);
+    --leaf-deep: hsl(138, 37%, 20%);
+    --leaf-wash: hsl(95, 36%, 90%);
+    --butter: hsl(45, 84%, 62%);
+    --butter-pale: hsl(46, 75%, 88%);
+    --clay: hsl(17, 63%, 45%);
+    --clay-text: hsl(17, 66%, 36%);
+    --clay-wash: hsl(20, 48%, 91%);
+
+    --serif: "Fraunces", "Georgia", serif;
+    --sans: "Inter", "Helvetica Neue", sans-serif;
+    --mono: "IBM Plex Mono", "Menlo", monospace;
+
+    --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px; --s7: 96px;
+    --r-s: 8px; --r-m: 16px; --r-l: 24px;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html{ background: var(--paper); }
+  body{
+    font-family: var(--sans);
+    font-size: 16px; line-height: 1.55;
+    color: var(--ink);
+    background: var(--paper);
+  }
+  a{ color: inherit; text-decoration: none; }
+  .wrap{ max-width: 1240px; margin: 0 auto; padding: 0 40px; }
+  .mono{ font-family: var(--mono); }
+
+  /* ---------- masthead ---------- */
+  .masthead{ padding-top: var(--s3); }
+  .bar{ display:flex; align-items:center; justify-content:space-between; gap: var(--s4); }
+  .wordmark{
+    display:flex; align-items:center; gap:10px;
+    font-family: var(--serif); font-weight: 500; font-size: 26px; letter-spacing: -0.01em;
+  }
+  .wordmark svg{ display:block; }
+  nav{ display:flex; align-items:center; gap: 4px; }
+  nav a{
+    display:inline-block; padding: 8px 14px; border-radius: 999px;
+    font-size: 15px; font-weight: 500; color: var(--ink-soft);
+  }
+  nav a.current{ background: var(--butter); color: var(--ink); font-weight: 600; }
+  .masthead-rule{ border:0; border-top: 1px solid var(--line); margin: var(--s3) 0 0; }
+  .dateline{
+    display:flex; justify-content:space-between; align-items:baseline;
+    padding-top: 14px; padding-bottom: 14px;
+  }
+  .dateline .date{ font-size: 14px; font-weight: 500; color: var(--ink-soft); }
+  .dateline .date .crumb-sep{ margin: 0 8px; color: var(--line); }
+  .dateline .date .here{ color: var(--ink); font-weight: 600; }
+  .dateline .edition{ font-family: var(--mono); font-size: 13px; color: var(--ink-soft); }
+
+  /* ---------- shared small parts ---------- */
+  .kicker{
+    display:inline-block; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft);
+    margin-bottom: var(--s2);
+  }
+  .pill{
+    display:inline-block; padding: 6px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .pill-butter{ background: var(--butter); color: var(--ink); }
+  .chip{
+    display:inline-flex; align-items:center; min-height: 26px; padding: 2px 12px;
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 13px; font-weight: 500; color: var(--ink-soft); background: var(--panel);
+  }
+  .chip.mono{ font-family: var(--mono); }
+  .drill{
+    display:inline-flex; align-items:center; min-height: 26px;
+    font-size: 14px; font-weight: 600; color: var(--clay-text);
+    border-bottom: 1px dashed var(--clay);
+  }
+  .drill::after{ content: " \2192"; white-space: pre; }
+  section.block{ padding-top: var(--s6); padding-bottom: var(--s6); }
+  section.block.tight{ padding-bottom: var(--s3); }
+
+  /* ---------- lot header ---------- */
+  .lot-head{
+    display:grid; grid-template-columns: 1.12fr 0.88fr;
+    gap: var(--s6); align-items: center;
+    padding-top: var(--s5); padding-bottom: var(--s6);
+  }
+  .lot-id-row{ display:flex; align-items:baseline; gap: 12px; flex-wrap: wrap; margin: 10px 0 var(--s2); }
+  .lot-id-row .lot-meta{ font-size: 14px; color: var(--ink-soft); }
+  .lot-id-row .lot-meta a{ margin-left: 4px; }
+  .lot-head h1{
+    font-family: var(--serif);
+    font-size: 46px; font-weight: 380; line-height: 1.14; letter-spacing: -0.012em;
+    margin: 0 0 var(--s3);
+    font-variation-settings: "opsz" 60;
+    max-width: 20ch;
+  }
+  .tagrow{ display:flex; flex-wrap:wrap; align-items:center; gap: 12px; margin-top: var(--s3); }
+  .tagrow .sep{ width:1px; height:20px; background: var(--line); }
+  .lot-art{ border-radius: var(--r-l); overflow:hidden; }
+  .lot-art svg{ display:block; width:100%; height:auto; }
+
+  /* ---------- verdict ---------- */
+  .verdict-sec{ background: var(--leaf-wash); }
+  .verdict-top{ display:flex; align-items:center; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
+  .verdict-pill{
+    font-size: 16px; padding: 11px 22px; letter-spacing: 0.08em;
+  }
+  .vote{ font-size: 15px; color: var(--leaf-deep); font-weight: 600; }
+  .verdict-sentence{
+    font-family: var(--serif); font-size: 24px; font-weight: 400; line-height: 1.4;
+    color: var(--leaf-deep); max-width: 52ch; margin-bottom: var(--s4);
+  }
+  .reservation{
+    background: var(--panel); border-radius: var(--r-m);
+    padding: var(--s4); max-width: 62ch;
+  }
+  .reservation .kicker{ color: var(--clay-text); margin-bottom: 10px; }
+  .reservation p{
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: 19px; line-height: 1.5; color: var(--ink);
+  }
+  .reservation cite{
+    display:block; margin-top: 12px; font-style: normal;
+    font-size: 13px; color: var(--ink-soft); font-family: var(--mono);
+  }
+
+  /* ---------- case grid: figures beside margin citations ---------- */
+  .case-grid{ display:grid; grid-template-columns: 1fr 300px; gap: var(--s6); align-items:start; }
+
+  .figrid{ display:grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+  .fitfig{
+    position: relative; display:block;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-m);
+    padding: var(--s3);
+  }
+  .fitfig .go{
+    position:absolute; top: 14px; right: 16px;
+    color: var(--clay-text); font-weight: 600; font-size: 14px;
+  }
+  .fitfig b{
+    display:inline-block; font-family: var(--serif); font-weight: 500;
+    font-size: 32px; line-height: 1.1; letter-spacing: -0.01em;
+    border-bottom: 2px dotted var(--clay);
+    padding-bottom: 2px;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+  .fitfig .flabel{ display:block; margin-top: 8px; font-size: 14px; color: var(--ink); font-weight: 500; }
+  .fitfig .flag{ display:block; color: var(--clay-text); font-weight: 600; font-size: 13px; margin-top: 2px; }
+  .fitfig .stamp{
+    display:block; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.5; color: var(--ink-soft);
+  }
+
+  .lineage-block{ margin-top: var(--s5); }
+  .lineage{ display:flex; align-items:center; flex-wrap: wrap; gap: 12px; }
+  .lnode{
+    display:inline-flex; align-items:center; min-height: 26px;
+    font-size: 14px; font-weight: 600; color: var(--clay-text);
+    border-bottom: 1px dashed var(--clay);
+  }
+  .larr{ color: var(--ink-soft); font-size: 15px; }
+
+  .margin-rail{
+    position: sticky; top: var(--s4);
+    display:flex; flex-direction:column; gap: var(--s3);
+  }
+  .citation{
+    display:block; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r-m); padding: var(--s3);
+  }
+  .citation.flagged{ border-color: var(--clay); background: var(--clay-wash); }
+  .citation .ctitle{
+    font-family: var(--serif); font-style: italic; font-size: 15px; line-height: 1.4;
+    color: var(--ink); margin-bottom: 8px;
+  }
+  .citation .csrc{ font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; }
+  .citation .note{
+    display:block; margin-top: 10px; font-size: 12.5px; color: var(--clay-text); font-weight: 600;
+  }
+
+  /* ---------- decision ---------- */
+  .decision-sec{ background: var(--paper-deep); }
+  .decision-row{ display:grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }
+  .decision-item{ display:flex; flex-direction:column; gap: var(--s2); }
+  .dbtn{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-height: 64px; padding: 14px 20px; border-radius: var(--r-s);
+    border: 2px solid var(--ink); color: var(--ink); background: var(--panel);
+    cursor: pointer; font-family: var(--sans);
+    font-size: 15px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .dbtn.primary{ background: var(--butter-pale); }
+  .decision-item .consequence{ font-size: 14px; color: var(--ink-soft); max-width: 34ch; }
+
+  /* ---------- footer ---------- */
+  footer{ background: var(--leaf-deep); margin-top: var(--s6); }
+  .foot{
+    display:flex; align-items:center; justify-content:space-between; gap: var(--s4);
+    padding-top: var(--s5); padding-bottom: var(--s5);
+    color: hsl(45, 50%, 95%);
+  }
+  .foot .motto{
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: 20px; letter-spacing: 0.01em;
+  }
+  .foot .mark{ display:flex; align-items:center; gap:10px; font-family: var(--serif); font-size: 18px; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap bar">
+    <a class="wordmark" href="#">
+      <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="9.1" y="9" width="1.8" height="10" fill="hsl(138, 37%, 20%)"/>
+        <path d="M10 10 C4.5 10 1.2 6 1 1.2 C6.5 1.6 10 5 10 10 Z" fill="hsl(132, 33%, 34%)"/>
+        <path d="M10 10 C15.5 10 18.8 6 19 1.2 C13.5 1.6 10 5 10 10 Z" fill="hsl(101, 30%, 54%)"/>
+      </svg>
+      Palingenesis
+    </a>
+    <nav aria-label="Primary">
+      <a href="#">Today</a>
+      <a class="current" href="#" aria-current="page">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#">Portfolio</a>
+      <a href="#">Simulation</a>
+      <a href="#">Engine Room</a>
+    </nav>
+  </div>
+  <div class="wrap"><hr class="masthead-rule"></div>
+  <div class="wrap dateline">
+    <span class="date">Pipeline<span class="crumb-sep">/</span><span class="here">Lot PG-2209</span></span>
+    <span class="edition mono">Docket 22 Aug 2026</span>
+  </div>
+</header>
+
+<main>
+  <!-- ======================= LOT HEADER ======================= -->
+  <section class="wrap lot-head">
+    <div class="lot-copy">
+      <span class="kicker">Lot</span>
+      <div class="lot-id-row">
+        <span class="chip mono">PG-2209</span>
+        <span class="lot-meta">generation 12 &middot; parent <a class="drill mono" href="#">PG-2188</a></span>
+      </div>
+      <h1>Biochar at 12&nbsp;t/ha stretches the irrigation interval 1.8&nbsp;days</h1>
+      <div class="tagrow">
+        <span class="chip mono">run r-2209</span>
+        <span class="sep" aria-hidden="true"></span>
+        <a class="drill" href="#">sources</a>
+        <a class="drill" href="#">trial</a>
+      </div>
+    </div>
+
+    <figure class="lot-art">
+      <svg viewBox="0 0 560 480" role="img" aria-label="Flat illustration: a soil specimen cross-section with crop sprigs above, a dark char seam holding pooled water at mid-depth, and deep soil below">
+        <rect width="560" height="480" rx="24" fill="hsl(46, 72%, 90%)"/>
+        <!-- stamp sun -->
+        <circle cx="466" cy="80" r="42" fill="hsl(45, 84%, 62%)"/>
+        <circle cx="466" cy="80" r="28" fill="hsl(42, 76%, 58%)"/>
+        <!-- crop row -->
+        <g fill="hsl(93, 42%, 66%)">
+          <g transform="translate(84 168)"><path d="M0 0 C -8 -4 -12 -12 -11 -22 C -5 -17 -1 -11 0 -4 C 1 -11 5 -17 11 -22 C 12 -12 8 -4 0 0 Z"/></g>
+          <g transform="translate(178 172) scale(0.8)"><path d="M0 0 C -8 -4 -12 -12 -11 -22 C -5 -17 -1 -11 0 -4 C 1 -11 5 -17 11 -22 C 12 -12 8 -4 0 0 Z"/></g>
+          <g transform="translate(272 166)"><path d="M0 0 C -8 -4 -12 -12 -11 -22 C -5 -17 -1 -11 0 -4 C 1 -11 5 -17 11 -22 C 12 -12 8 -4 0 0 Z"/></g>
+          <g transform="translate(366 172) scale(0.8)"><path d="M0 0 C -8 -4 -12 -12 -11 -22 C -5 -17 -1 -11 0 -4 C 1 -11 5 -17 11 -22 C 12 -12 8 -4 0 0 Z"/></g>
+          <g transform="translate(460 167)"><path d="M0 0 C -8 -4 -12 -12 -11 -22 C -5 -17 -1 -11 0 -4 C 1 -11 5 -17 11 -22 C 12 -12 8 -4 0 0 Z"/></g>
+        </g>
+        <!-- topsoil -->
+        <path d="M0 190 C 160 176 400 176 560 190 L560 264 L0 264 Z" fill="hsl(20, 50%, 33%)"/>
+        <!-- char seam -->
+        <path d="M0 264 C 180 250 380 250 560 264 L560 320 C 380 306 180 306 0 320 Z" fill="hsl(35, 26%, 17%)"/>
+        <g fill="hsl(33, 30%, 9%)">
+          <rect x="60" y="272" width="10" height="6" rx="2"/>
+          <rect x="150" y="280" width="9" height="6" rx="2"/>
+          <rect x="242" y="270" width="10" height="6" rx="2"/>
+          <rect x="332" y="282" width="9" height="6" rx="2"/>
+          <rect x="420" y="272" width="10" height="6" rx="2"/>
+          <rect x="500" y="282" width="9" height="6" rx="2"/>
+        </g>
+        <!-- water pooled in the seam -->
+        <ellipse cx="196" cy="298" rx="30" ry="7" fill="hsl(158, 26%, 62%)"/>
+        <ellipse cx="380" cy="294" rx="24" ry="6" fill="hsl(158, 26%, 62%)"/>
+        <!-- deep soil -->
+        <path d="M0 320 C 190 306 370 306 560 320 L560 432 Q560 456 536 456 L24 456 Q0 456 0 432 Z" fill="hsl(19, 52%, 48%)"/>
+        <path d="M0 380 C 200 368 360 368 560 380 L560 432 Q560 456 536 456 L24 456 Q0 456 0 432 Z" fill="hsl(20, 50%, 33%)" opacity="0.55"/>
+      </svg>
+    </figure>
+  </section>
+
+  <!-- ======================= VERDICT ======================= -->
+  <section class="verdict-sec block">
+    <div class="wrap">
+      <span class="kicker" style="color: var(--leaf-deep);">Verdict</span>
+      <div class="verdict-top">
+        <span class="pill pill-butter verdict-pill">Advance to field trial</span>
+        <span class="vote mono">council 5&ndash;1</span>
+      </div>
+      <p class="verdict-sentence">The council votes to advance PG-2209 to field trial, with one reservation on the record.</p>
+      <div class="reservation">
+        <span class="kicker">Reservation recorded</span>
+        <p>&ldquo;Feedstock hydrophobicity may reverse the interval gain on sandy loams.&rdquo;</p>
+        <cite>&mdash; dissent, council seat 4</cite>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= FITNESS FIGURES + MARGIN CITATIONS ======================= -->
+  <section class="block tight">
+    <div class="wrap case-grid">
+      <div class="case-main">
+        <span class="kicker">Fitness figures</span>
+        <div class="figrid">
+          <a class="fitfig" href="#">
+            <span class="go" aria-hidden="true">&rarr;</span>
+            <b>+18%</b>
+            <span class="flabel">water holding</span>
+            <span class="stamp">Simulator T2 &middot; 40 seasons<br>22 Aug 14:43</span>
+          </a>
+          <a class="fitfig" href="#">
+            <span class="go" aria-hidden="true">&rarr;</span>
+            <b>+1.8&nbsp;days</b>
+            <span class="flabel">irrigation interval</span>
+            <span class="stamp">Simulator T2<br>22 Aug 14:43</span>
+          </a>
+          <a class="fitfig" href="#">
+            <span class="go" aria-hidden="true">&rarr;</span>
+            <b>0.82</b>
+            <span class="flabel">hindcast skill</span>
+            <span class="stamp">Simulator calibration record c-118<br>19 Aug</span>
+          </a>
+          <a class="fitfig" href="#">
+            <span class="go" aria-hidden="true">&rarr;</span>
+            <b>40</b>
+            <span class="flabel">claims support<span class="flag">3 contradict</span></span>
+            <span class="stamp">Library<br>22 Aug 14:04</span>
+          </a>
+          <a class="fitfig" href="#">
+            <span class="go" aria-hidden="true">&rarr;</span>
+            <b>Yes</b>
+            <span class="flabel">in-domain<span class="flag">Majella loam</span></span>
+            <span class="stamp">Simulator domain guard<br>22 Aug</span>
+          </a>
+          <a class="fitfig" href="#">
+            <span class="go" aria-hidden="true">&rarr;</span>
+            <b>&plusmn;4%</b>
+            <span class="flabel">yield stability</span>
+            <span class="stamp">Council synthesis<br>22 Aug 14:12</span>
+          </a>
+        </div>
+
+        <div class="lineage-block">
+          <span class="kicker">Lineage</span>
+          <div class="lineage">
+            <a class="lnode mono" href="#">v-2209</a>
+            <span class="larr" aria-hidden="true">&rarr;</span>
+            <a class="lnode mono" href="#">r-2209</a>
+            <span class="larr" aria-hidden="true">&rarr;</span>
+            <a class="lnode" href="#">6 papers</a>
+            <span class="larr" aria-hidden="true">&rarr;</span>
+            <a class="lnode" href="#">40 claims</a>
+          </div>
+        </div>
+      </div>
+
+      <aside class="margin-rail">
+        <span class="kicker">Margin citations</span>
+        <a class="citation" href="#">
+          <p class="ctitle">&ldquo;Biochar at 12 t/ha and plant-available water&rdquo;</p>
+          <p class="csrc">Geoderma 2025</p>
+          <span class="chip mono">8 kept</span>
+        </a>
+        <a class="citation" href="#">
+          <p class="ctitle">&ldquo;Irrigation interval stretch after char amendment&rdquo;</p>
+          <p class="csrc">Agric Water Manag 2025</p>
+          <span class="chip mono">7 kept</span>
+        </a>
+        <a class="citation flagged" href="#">
+          <p class="ctitle">&ldquo;Char feedstock and hydrophobicity risk&rdquo;</p>
+          <p class="csrc">Pedosphere 2023</p>
+          <span class="chip mono">5 kept</span>
+          <span class="note">&#8618; source of the reservation</span>
+        </a>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ======================= DECISION ======================= -->
+  <section class="decision-sec block">
+    <div class="wrap">
+      <span class="kicker">Decision</span>
+      <div class="decision-row">
+        <div class="decision-item">
+          <button class="dbtn primary" type="button">Advance</button>
+          <p class="consequence">Opens field calibration at Majella; first hindcast due 30 Sep.</p>
+        </div>
+        <div class="decision-item">
+          <button class="dbtn" type="button">Hold</button>
+          <p class="consequence">Parks the lot; council re-votes when new evidence lands.</p>
+        </div>
+        <div class="decision-item">
+          <button class="dbtn" type="button">Decline</button>
+          <p class="consequence">Archives with reasons; claims stay in the Library.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span class="motto">Every claim sourced &middot; every cost computed &middot; every verdict recorded.</span>
+    <span class="mark">
+      <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="9.1" y="9" width="1.8" height="10" fill="hsl(46, 75%, 88%)"/>
+        <path d="M10 10 C4.5 10 1.2 6 1 1.2 C6.5 1.6 10 5 10 10 Z" fill="hsl(45, 84%, 62%)"/>
+        <path d="M10 10 C15.5 10 18.8 6 19 1.2 C13.5 1.6 10 5 10 10 Z" fill="hsl(101, 30%, 54%)"/>
+      </svg>
+      Palingenesis
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>
