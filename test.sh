@@ -140,6 +140,7 @@ check_cmd "session-start read tests" python3 "$SCRIPT_DIR/tests/test_session_sta
 check_cmd "now stamp hook tests" python3 "$SCRIPT_DIR/tests/test_now_stamp.py"
 check_cmd "quantity write-check hook tests" python3 "$SCRIPT_DIR/tests/test_quantity_write_check.py"
 check_cmd "prose lint hook tests" python3 "$SCRIPT_DIR/tests/test_prose_lint_hook.py"
+check_cmd "gh pr detail tests" python3 "$SCRIPT_DIR/tests/test_gh_pr_detail.py"
 check_cmd "record age rendering tests" python3 "$SCRIPT_DIR/tests/test_record_ages.py"
 check_cmd "context retrieve authority tests" python3 "$SCRIPT_DIR/tests/test_context_retrieve_authority.py"
 check_cmd "api template tests" python3 "$SCRIPT_DIR/tests/test_api_templates.py"

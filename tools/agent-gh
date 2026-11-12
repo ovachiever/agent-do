@@ -31,7 +31,9 @@ PR_VIEW_FIELDS = ",".join(
         "assignees",
         "author",
         "baseRefName",
+        "body",
         "changedFiles",
+        "closedAt",
         "comments",
         "commits",
         "createdAt",
@@ -45,6 +47,9 @@ PR_VIEW_FIELDS = ",".join(
         "maintainerCanModify",
         "mergeStateStatus",
         "mergeable",
+        "mergeCommit",
+        "mergedAt",
+        "mergedBy",
         "number",
         "reviewDecision",
         "reviewRequests",
@@ -534,6 +539,12 @@ def normalize_pr_detail(ref: PrRef, payload: dict[str, Any]) -> dict[str, Any]:
         "updated_at": payload.get("updatedAt"),
         "created_at": payload.get("createdAt"),
         "url": payload.get("url"),
+        "closed_at": payload.get("closedAt"),
+        "merged_at": payload.get("mergedAt"),
+        "merged_by": (payload.get("mergedBy") or {}).get("login"),
+        "merge_commit": (payload.get("mergeCommit") or {}).get("oid"),
+        # Last, so the text view ends with the PR description.
+        "body": payload.get("body"),
     }
 
 
