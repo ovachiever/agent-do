@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --sage:hsl(158,30%,55%);
+    --raise:#232019;
+    --band:#201D1A;
+    --hover:#211E1B;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1360px;margin:0 auto;padding:0 40px}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  .lbl,.sec-title{
+    font-size:12px;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--muted);font-weight:500;margin:0
+  }
+  a{cursor:pointer}
+
+  /* ---------- nav ---------- */
+  header.nav{border-bottom:1px solid var(--hair)}
+  .nav-in{display:flex;align-items:stretch;height:54px}
+  .brand{
+    font-family:Georgia,"Times New Roman",serif;font-size:19px;
+    display:flex;align-items:center;margin-right:30px;letter-spacing:.005em
+  }
+  .links{display:flex}
+  .links a{
+    display:flex;align-items:center;padding:0 14px;
+    color:var(--muted);text-decoration:none;font-size:13px;
+    border-top:2px solid transparent;border-bottom:2px solid transparent
+  }
+  .links a:hover{color:var(--ink)}
+  .links a.active{color:var(--ink);border-bottom-color:var(--ink)}
+  .navtime{
+    margin-left:auto;display:flex;align-items:center;
+    font-size:12px;color:var(--muted);letter-spacing:.06em
+  }
+
+  /* ---------- hero ---------- */
+  .hero-in{display:flex;align-items:flex-end;justify-content:space-between;gap:48px;padding:22px 0 20px}
+  h1{font-family:Georgia,"Times New Roman",serif;font-weight:400;font-size:30px;margin:0}
+  .sub1{margin:7px 0 0;font-size:13px;color:var(--muted)}
+  .sub2{margin:3px 0 0;font-size:14px;color:var(--faint)}
+  .ask{width:560px;flex:none}
+  .ask .lbl{display:block;margin-bottom:7px}
+  .ask-row{
+    display:flex;align-items:center;gap:10px;height:44px;
+    background:var(--raise);border:1px solid var(--hair);border-radius:8px;
+    padding:0 6px 0 14px
+  }
+  .ask-row:focus-within{border-color:rgba(231,227,218,0.38)}
+  .ask-row input{
+    flex:1;min-width:0;background:transparent;border:0;outline:none;
+    color:var(--ink);font:inherit;font-size:13px
+  }
+  .ask-row input::placeholder{color:var(--muted)}
+  .kbd{font-size:12px;color:var(--muted);border:1px solid var(--hair);border-radius:4px;padding:2px 6px;background:var(--ground)}
+  .ask-btn{
+    font:inherit;font-size:13px;font-weight:600;color:#1B1917;background:var(--ink);
+    border:0;height:32px;padding:0 16px;border-radius:6px;cursor:pointer
+  }
+  .ask-btn:hover{background:#D8D2C4}
+
+  /* ---------- delta band ---------- */
+  .band{border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);background:var(--band)}
+  .band-in{display:grid;grid-template-columns:repeat(6,1fr)}
+  .cell{padding:14px 20px 15px;border-left:1px solid var(--hair)}
+  .cell:first-child{border-left:0;padding-left:0}
+  .cell:last-child{padding-right:0}
+  .num{font-size:26px;font-weight:600;letter-spacing:-.01em;margin:7px 0 5px}
+  .dlt{font-size:13px;color:var(--ink)}
+  .mark{color:var(--muted);font-size:12px}
+  .dn{font-weight:500}
+  .dctx{color:var(--muted)}
+  .attn,.attn .mark,.attn .dn{color:var(--sage)}
+  .ctx{font-size:12px;color:var(--muted);margin-top:3px}
+
+  /* ---------- main grid ---------- */
+  main{display:grid;grid-template-columns:1.55fr 1fr 1fr;padding-top:20px;padding-bottom:28px}
+  .col{padding:0 22px;min-width:0}
+  .col:first-child{padding-left:0}
+  .col:last-child{padding-right:0}
+  .col + .col{border-left:1px solid var(--hair)}
+
+  .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 8px}
+  .syl{
+    font-size:13px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink);font-weight:600;margin:0
+  }
+  .syl .win{font-weight:500}
+  .sec-meta{font-size:12px;color:var(--muted);white-space:nowrap}
+  .subsec{margin-top:18px;padding-top:14px;border-top:1px solid var(--hair)}
+
+  /* ---------- reading log ---------- */
+  .grp{display:flex;align-items:baseline;gap:10px;border-top:1px solid var(--hair);margin-top:10px;padding:9px 0 5px}
+  .gid{font-size:12px;color:var(--muted)}
+  .gname{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink);font-weight:500}
+  .gmeta{margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap}
+  .row{display:grid;grid-template-columns:42px minmax(0,1fr) auto 46px;gap:12px;padding:6px 0;border-radius:4px}
+  .row:hover{background:var(--hover)}
+  .t{font-size:12px;color:var(--muted);padding-top:2px}
+  .pt{display:block;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ps{display:block;font-size:12px;color:var(--muted);margin-top:1px}
+  .oc{font-size:12px;color:var(--ink);text-align:right;padding-top:2px;white-space:nowrap}
+  .oc.flag{color:var(--sage)}
+  .oc.q{color:var(--muted)}
+  .cost{font-size:12px;color:var(--muted);text-align:right;padding-top:2px}
+  .more{
+    display:flex;align-items:center;justify-content:center;gap:8px;height:36px;margin-top:12px;
+    border:1px solid var(--hair);border-radius:6px;color:var(--ink);font-size:13px;text-decoration:none
+  }
+  .more:hover{background:var(--raise)}
+
+  /* ---------- signals ---------- */
+  .sig{padding:7px 0}
+  .sig + .sig{border-top:1px solid var(--hair)}
+  .l1{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .sn{font-size:13px;color:var(--ink);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sv{font-size:13px;color:var(--ink);white-space:nowrap}
+  .sd{color:var(--muted);margin-left:6px}
+  .sd.attn{color:var(--sage)}
+  .l2{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);margin-top:1px}
+  .al{color:var(--sage);letter-spacing:.05em;font-size:12px}
+
+  /* ---------- corpus composition ---------- */
+  .cc{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;font-size:13px}
+  .cc + .cc{border-top:1px solid var(--hair)}
+  .cn{color:var(--muted)}
+  .cv{color:var(--ink);white-space:nowrap}
+  .cd{color:var(--muted);font-size:12px;margin-left:6px}
+
+  /* ---------- contradictions ---------- */
+  .con{border-left:2px solid var(--hair);padding:3px 0 4px 10px;margin:9px 0}
+  .con.new{border-left-color:var(--sage)}
+  .cid{font-size:12px;color:var(--ink)}
+  .ctag{font-size:12px;color:var(--muted);letter-spacing:.04em}
+  .ctag.attn{color:var(--sage)}
+  .con .desc{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+  .con.new .desc{color:var(--ink)}
+
+  /* ---------- evidence ---------- */
+  .ev{padding:7px 0}
+  .ev + .ev{border-top:1px solid var(--hair)}
+  .eid{font-size:12px;color:var(--ink)}
+  .grade{font-size:12px;color:var(--muted);border:1px solid var(--hair);border-radius:3px;padding:0 5px}
+  .ev .desc{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+
+  /* ---------- sweeps ---------- */
+  .sw{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;padding:6px 0;align-items:baseline}
+  .sw + .sw{border-top:1px solid var(--hair)}
+  .sid{font-size:12px;color:var(--muted)}
+  .swn{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .swm{font-size:12px;color:var(--muted);white-space:nowrap}
+
+  /* ---------- module feet ---------- */
+  .mrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:4px}
+  .mnote{font-size:12px;color:var(--muted)}
+  .mfoot{
+    display:inline-block;padding:7px 0 2px;color:var(--ink);font-size:12px;
+    text-decoration:underline;text-underline-offset:3px;
+    text-decoration-color:rgba(231,227,218,0.35)
+  }
+  .mfoot:hover{text-decoration-color:var(--ink)}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--hair)}
+  .foot-in{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:16px 0 20px}
+  .motto{font-size:13px;color:var(--muted)}
+  .fmeta{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <span class="brand">Palingenesis</span>
+    <nav class="links">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#" class="active" aria-current="page">Library</a>
+      <a href="#">Engine Room</a>
+    </nav>
+    <span class="navtime mono">FRI 22 AUG · 07:02</span>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap hero-in">
+    <div>
+      <h1>Library</h1>
+      <p class="sub1">12,847 documents · 806 claims in force · 14 signals on watch</p>
+      <p class="sub2">Baseline: your last visit — Thu 21 Aug, 22:10 · unattended 8 h 31 m</p>
+    </div>
+    <div class="ask">
+      <label class="lbl" for="q">Ask the Library</label>
+      <div class="ask-row">
+        <input id="q" type="text" placeholder="What changed on nitrogen efficiency since Monday?">
+        <span class="kbd mono">⌘K</span>
+        <button class="ask-btn" type="button">Ask</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap band-in">
+    <div class="cell">
+      <div class="lbl">Corpus</div>
+      <div class="num">12,847</div>
+      <div class="dlt"><span class="mark">▴</span> <span class="dn">+70</span> <span class="dctx">overnight</span></div>
+      <div class="ctx">5 source classes</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Claims in force</div>
+      <div class="num">806</div>
+      <div class="dlt"><span class="mark">▴</span> <span class="dn">+9</span> <span class="dctx">extracted</span></div>
+      <div class="ctx">mean 3.9 evidence / claim</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Evidence records</div>
+      <div class="num">3,158</div>
+      <div class="dlt"><span class="mark">▴</span> <span class="dn">+38</span> <span class="dctx">filed</span></div>
+      <div class="ctx">806 / 806 claims resolve</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Contradictions</div>
+      <div class="num">31</div>
+      <div class="dlt"><span class="attn"><span class="mark">▴</span> <span class="dn">+1</span></span> <span class="dctx">flagged · 1 resolved ✓</span></div>
+      <div class="ctx">median open 9 d</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Signals on watch</div>
+      <div class="num">14</div>
+      <div class="dlt"><span class="dn attn">1 alert</span> <span class="dctx">· 13 nominal</span></div>
+      <div class="ctx">6 moved ≥ 1% w/w</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Overnight spend</div>
+      <div class="num">$4.91</div>
+      <div class="dlt"><span class="dctx">70 papers ·</span> <span class="mark">▴</span> <span class="dn">+$0.31</span> <span class="dctx">vs avg night</span></div>
+      <div class="ctx">$0.070 / paper · Aug $151.06</div>
+    </div>
+  </div>
+</section>
+
+<main class="wrap">
+
+  <!-- ============ reading record ============ -->
+  <section class="col">
+    <div class="sec-head">
+      <h2 class="syl">Since you left <span class="win">— 22:10 → 06:41</span></h2>
+      <span class="sec-meta">70 read · 2 sweeps + watch · $4.91</span>
+    </div>
+
+    <div class="grp">
+      <span class="gid mono">S-0448</span>
+      <span class="gname">Nitrogen use efficiency</span>
+      <span class="gmeta">22:10 → 01:32 · 31 read · $2.14</span>
+    </div>
+    <div class="row">
+      <span class="t mono">22:14</span>
+      <span><span class="pt">Late-split urea and flag-leaf N uptake in HRW wheat</span><span class="ps">Field Crops Research · 2026</span></span>
+      <span class="oc mono">+EV-3117 → CL-0644</span>
+      <span class="cost mono">$0.07</span>
+    </div>
+    <div class="row">
+      <span class="t mono">22:41</span>
+      <span><span class="pt">Nitrification inhibitors across 14 site-years, west Corn Belt</span><span class="ps">Agronomy Journal · 2025</span></span>
+      <span class="oc mono">+EV-3121 → CL-0702</span>
+      <span class="cost mono">$0.08</span>
+    </div>
+    <div class="row">
+      <span class="t mono">23:19</span>
+      <span><span class="pt">Sensor-based variable-rate N under 2024–25 price ratios</span><span class="ps">Precision Agriculture · 2026</span></span>
+      <span class="oc mono">CL-0808 · NEW CLAIM</span>
+      <span class="cost mono">$0.09</span>
+    </div>
+    <div class="row">
+      <span class="t mono">00:03</span>
+      <span><span class="pt">Residue C:N and spring N immobilization risk</span><span class="ps">Soil Sci. Soc. of America Journal · 2025</span></span>
+      <span class="oc mono">+EV-3126 → CL-0655</span>
+      <span class="cost mono">$0.07</span>
+    </div>
+
+    <div class="grp">
+      <span class="gid mono">S-0449</span>
+      <span class="gname">Biostimulant field efficacy</span>
+      <span class="gmeta">01:40 → 04:55 · 27 read · $1.92</span>
+    </div>
+    <div class="row">
+      <span class="t mono">02:36</span>
+      <span><span class="pt">Azospirillum response in irrigated maize, 3-yr KS strips</span><span class="ps">Crop Science · 2025</span></span>
+      <span class="oc mono">+EV-3138 → CL-0761</span>
+      <span class="cost mono">$0.07</span>
+    </div>
+    <div class="row">
+      <span class="t mono">03:27</span>
+      <span><span class="pt">Humic seed treatments: 41-trial meta-analysis, null effect</span><span class="ps">European Journal of Agronomy · 2026</span></span>
+      <span class="oc mono flag">C-0312 · FLAGGED</span>
+      <span class="cost mono">$0.09</span>
+    </div>
+
+    <div class="grp">
+      <span class="gid mono">WATCH</span>
+      <span class="gname">New issues &amp; preprints</span>
+      <span class="gmeta">05:00 → 06:41 · 12 read · $0.85</span>
+    </div>
+    <div class="row">
+      <span class="t mono">05:23</span>
+      <span><span class="pt">CRISPR-edited RuBisCO variant: first field season</span><span class="ps">Nature Plants · 2026</span></span>
+      <span class="oc mono">CL-0812 · NEW CLAIM</span>
+      <span class="cost mono">$0.08</span>
+    </div>
+    <div class="row">
+      <span class="t mono">05:47</span>
+      <span><span class="pt">Reprint of 23:19 VR-N study (publisher duplicate)</span><span class="ps">Precision Agriculture · 2026</span></span>
+      <span class="oc mono q">DUP · SKIPPED</span>
+      <span class="cost mono">$0.01</span>
+    </div>
+    <div class="row">
+      <span class="t mono">06:02</span>
+      <span><span class="pt">Drone multispectral yield prediction across 210 fields</span><span class="ps">agriRxiv · preprint · 2026</span></span>
+      <span class="oc mono q">FILED · WATCH</span>
+      <span class="cost mono">$0.05</span>
+    </div>
+    <div class="row">
+      <span class="t mono">06:38</span>
+      <span><span class="pt">Corrigendum: split-N effect size estimates (2024)</span><span class="ps">Agronomy Journal · 2026</span></span>
+      <span class="oc mono">C-0288 · RESOLVED ✓</span>
+      <span class="cost mono">$0.04</span>
+    </div>
+
+    <a class="more" href="#">▸ 60 more read overnight — open the full sweep log</a>
+  </section>
+
+  <!-- ============ signals + corpus ============ -->
+  <section class="col">
+    <div class="sec-head">
+      <h2 class="sec-title">Market signals</h2>
+      <span class="sec-meta">w/w unless noted</span>
+    </div>
+
+    <div class="sig">
+      <div class="l1"><span class="sn">Urea · Black Sea FOB</span><span class="sv">$348 / t<span class="sd attn">▴ +4.1%</span></span></div>
+      <div class="l2"><span>Argus fertilizer wk 34 · Aug 21</span><span class="al mono">ALERT ≥ +3.5%</span></div>
+    </div>
+    <div class="sig">
+      <div class="l1"><span class="sn">DAP · NOLA barge</span><span class="sv">$612 / st<span class="sd">▴ +1.8%</span></span></div>
+      <div class="l2"><span>Green Markets · Aug 20</span></div>
+    </div>
+    <div class="sig">
+      <div class="l1"><span class="sn">HRW wheat · KC Dec</span><span class="sv">$6.42 / bu<span class="sd">▾ −2.3%</span></span></div>
+      <div class="l2"><span>CME close · Aug 21</span></div>
+    </div>
+    <div class="sig">
+      <div class="l1"><span class="sn">Corn · CBOT Dec</span><span class="sv">$4.18 / bu<span class="sd">▾ −1.1%</span></span></div>
+      <div class="l2"><span>CME close · Aug 21</span></div>
+    </div>
+    <div class="sig">
+      <div class="l1"><span class="sn">Diesel · Midwest farm</span><span class="sv">$3.61 / gal<span class="sd">▴ +0.9%</span></span></div>
+      <div class="l2"><span>EIA weekly · Aug 18</span></div>
+    </div>
+    <div class="sig">
+      <div class="l1"><span class="sn">Topsoil short / very short · Corn Belt</span><span class="sv">38%<span class="sd">▴ +6 pp</span></span></div>
+      <div class="l2"><span>USDA Crop Progress · Aug 18</span></div>
+    </div>
+    <div class="sig">
+      <div class="l1"><span class="sn">La Niña probability · DJF</span><span class="sv">71%<span class="sd">▴ +5 pp</span></span></div>
+      <div class="l2"><span>CPC / IRI · Aug 14 · m/m</span></div>
+    </div>
+    <div class="mrow"><span class="mnote">7 shown of 14</span><a class="mfoot" href="#">All 14 signals ▸</a></div>
+
+    <div class="subsec">
+      <div class="sec-head">
+        <h2 class="sec-title">Corpus composition</h2>
+        <span class="sec-meta">12,847 · ▴ +70</span>
+      </div>
+      <div class="cc"><span class="cn">Peer-reviewed</span><span class="cv">9,412<span class="cd">▴ +41</span></span></div>
+      <div class="cc"><span class="cn">Preprints</span><span class="cv">1,286<span class="cd">▴ +12</span></span></div>
+      <div class="cc"><span class="cn">Extension bulletins</span><span class="cv">947<span class="cd">▴ +9</span></span></div>
+      <div class="cc"><span class="cn">Patents</span><span class="cv">663<span class="cd">▴ +5</span></span></div>
+      <div class="cc"><span class="cn">Trial records</span><span class="cv">539<span class="cd">▴ +3</span></span></div>
+    </div>
+  </section>
+
+  <!-- ============ contradictions + evidence + sweeps ============ -->
+  <section class="col">
+    <div class="sec-head">
+      <h2 class="sec-title">Contradictions</h2>
+      <span class="sec-meta">31 open · <span class="attn">▴ +1</span></span>
+    </div>
+    <div class="con new">
+      <div class="l1"><span class="cid mono">C-0312</span><span class="ctag mono attn">NEW · 03:27</span></div>
+      <span class="desc">41-trial humic meta (null) vs CL-0757: +1.8% stand establishment</span>
+    </div>
+    <div class="con">
+      <div class="l1"><span class="cid mono">C-0288</span><span class="ctag mono">RESOLVED · 06:38 ✓</span></div>
+      <span class="desc">Split-N effect held after corrigendum · CI narrowed · CL-0644 stands</span>
+    </div>
+    <div class="mrow"><span class="mnote">oldest open 41 d</span><a class="mfoot" href="#">All 31 open ▸</a></div>
+
+    <div class="subsec">
+      <div class="sec-head">
+        <h2 class="sec-title">Evidence records</h2>
+        <span class="sec-meta">3,158 · ▴ +38</span>
+      </div>
+      <div class="ev">
+        <div class="l1"><span class="eid mono">EV-3154 → CL-0791</span><span class="grade mono">B+</span></div>
+        <span class="desc">Foliar Zn at boot stage · grain protein +0.4 pp</span>
+      </div>
+      <div class="ev">
+        <div class="l1"><span class="eid mono">EV-3149 → CL-0702</span><span class="grade mono">A−</span></div>
+        <span class="desc">DCD inhibitor · NH₃ loss −31% median, 14 site-yr</span>
+      </div>
+      <div class="ev">
+        <div class="l1"><span class="eid mono">EV-3144 → CL-0771</span><span class="grade mono">B</span></div>
+        <span class="desc">Seaweed extract · canopy −1.2 °C under heat</span>
+      </div>
+      <div class="ev">
+        <div class="l1"><span class="eid mono">EV-3138 → CL-0761</span><span class="grade mono">B−</span></div>
+        <span class="desc">Azospirillum · +2.1 bu / ac, irrigated maize</span>
+      </div>
+      <div class="mrow"><span class="mnote">806 / 806 claims resolve</span><a class="mfoot" href="#">All records ▸</a></div>
+    </div>
+
+    <div class="subsec">
+      <div class="sec-head">
+        <h2 class="sec-title">Research sweeps</h2>
+        <span class="sec-meta">2 overnight · next 22:00</span>
+      </div>
+      <div class="sw">
+        <span class="sid mono">S-0450</span>
+        <span class="swn">Canopy temp × irrigation triggers</span>
+        <span class="swm">queued 214 · est $14.98</span>
+      </div>
+      <div class="sw">
+        <span class="sid mono">S-0449</span>
+        <span class="swn">Biostimulant field efficacy</span>
+        <span class="swm">done 04:55 · 27 · $1.92</span>
+      </div>
+      <div class="sw">
+        <span class="sid mono">S-0448</span>
+        <span class="swn">Nitrogen use efficiency</span>
+        <span class="swm">done 01:32 · 31 · $2.14</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <span class="motto">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="fmeta">Library updated Fri 06:41 · next sweep 22:00 · Aug metered $151.06</span>
+  </div>
+</footer>
+
+</body>
+</html>

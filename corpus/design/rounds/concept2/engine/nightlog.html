@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Palingenesis — Engine Room, Day 247</title>
+<style>
+  :root{
+    --bg:#1B1917;
+    --panel:#1F1C1A;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --hair:rgba(231,227,218,0.14);
+    --hairsoft:rgba(231,227,218,0.08);
+    --dots:rgba(231,227,218,0.22);
+    --sage:hsl(158,30%,55%);
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font:15px/1.6 var(--sans);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  ::selection{background:hsl(158,30%,55%);color:#1B1917}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 40px}
+
+  /* ---------- top navigation ---------- */
+  .topnav{border-bottom:1px solid var(--hair)}
+  .topnav .wrap{display:flex;align-items:stretch;gap:40px}
+  .brand{
+    font-family:var(--serif);font-size:18px;letter-spacing:.02em;color:var(--ink);
+    display:flex;align-items:center;text-decoration:none;padding:18px 0;
+  }
+  .navlinks{display:flex;gap:6px;align-items:stretch}
+  .navlinks a{
+    display:flex;align-items:center;padding:0 14px;min-height:24px;
+    font:500 14px var(--sans);color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;
+  }
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.active{color:var(--ink);border-bottom-color:var(--sage)}
+  .navmeta{
+    margin-left:auto;display:flex;align-items:center;
+    font:12px var(--mono);letter-spacing:.08em;color:var(--faint);text-transform:uppercase;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead{padding:44px 0 8px;display:grid;grid-template-columns:1fr 360px;gap:64px;align-items:end}
+  .kicker{font:600 12px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .masthead h1{
+    font-family:var(--serif);font-weight:400;font-size:32px;line-height:1.2;
+    letter-spacing:.005em;margin:14px 0 10px;
+  }
+  .masthead .sub{font-family:var(--serif);font-size:15px;color:var(--muted);line-height:1.6;max-width:620px}
+  .masthead .sub .m{font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .figs{display:grid;gap:20px;padding-bottom:6px}
+  .fig .flabel{font:600 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .fig .fval{font:400 21px var(--sans);color:var(--ink);margin:6px 0 8px;font-variant-numeric:tabular-nums}
+  .fig .fval small{font-size:14px;color:var(--muted)}
+  .fig .fsrc{font-size:12px;color:var(--faint);line-height:1.5;margin-top:7px}
+  .bar{height:6px;background:var(--hairsoft)}
+  .bar i{display:block;height:100%;background:var(--sage)}
+  .bar.quiet i{background:var(--muted)}
+
+  /* ---------- section bands ---------- */
+  .band{margin-top:60px;border-top:1px solid var(--hair);padding-top:13px;
+    display:flex;justify-content:space-between;align-items:baseline;gap:24px}
+  .band .kick{font:600 12px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .band .gloss{font:12px var(--sans);letter-spacing:.04em;color:var(--faint);text-align:right}
+
+  h2.colhead{font-family:var(--serif);font-weight:400;font-size:19px;letter-spacing:.005em;margin-bottom:14px}
+
+  /* ---------- opening ---------- */
+  .opening{display:grid;grid-template-columns:1fr 384px;gap:64px;margin-top:28px}
+  .lede{font-family:var(--serif);font-size:17px;line-height:1.75;color:var(--ink);max-width:700px}
+  .lede em{color:var(--muted)}
+  .conds{margin-top:26px;border-top:1px solid var(--hairsoft)}
+  .cond{display:grid;grid-template-columns:120px 1fr;gap:20px;padding:11px 0;border-bottom:1px solid var(--hairsoft);align-items:baseline}
+  .cond .cl{font:600 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .cond .cv{font-size:14px;color:var(--muted);line-height:1.55}
+  .cond .cv b{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+
+  .instrument{margin-top:34px}
+  .svc{display:grid;grid-template-columns:16px 1fr;gap:12px;padding:13px 0;border-bottom:1px solid var(--hairsoft)}
+  .svc:last-child{border-bottom:none}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--sage);margin-top:7px;justify-self:center}
+  .svc .sname{font:600 15px var(--sans);color:var(--ink)}
+  .svc .srole{font:600 12px var(--sans);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);margin-left:10px}
+  .svc .ssent{font-family:var(--serif);font-size:14px;color:var(--muted);line-height:1.6;margin-top:3px}
+  .svc .ssent b{font-weight:400;color:var(--ink);font-variant-numeric:tabular-nums;font-family:var(--sans);font-size:13.5px}
+
+  /* ---------- plan card ---------- */
+  .card{border:1px solid var(--hair);background:var(--panel);border-radius:6px;padding:24px 26px}
+  .card .kicker{color:var(--muted)}
+  .planrows{margin-top:16px;border-top:1px solid var(--hairsoft)}
+  .prow{display:grid;grid-template-columns:52px 1fr auto;gap:14px;align-items:baseline;
+    padding:8px 0;border-bottom:1px solid var(--hairsoft)}
+  .prow .pt{font:13px var(--mono);color:var(--faint)}
+  .prow .pn{font-size:14px;color:var(--ink)}
+  .prow .ps{font:600 12px var(--sans);letter-spacing:.11em;text-transform:uppercase;color:var(--muted);text-align:right;white-space:nowrap}
+  .prow.done .pn{color:var(--muted)}
+  .prow.live .ps{color:var(--sage)}
+  .prow.live .pn{color:var(--ink)}
+  .prow.todo .pn,.prow.todo .pt{color:var(--faint)}
+  .prow.todo .ps{color:var(--faint)}
+  .nextline{font-family:var(--serif);font-size:15.5px;color:var(--ink);margin:18px 0 8px;line-height:1.55}
+  .authority{font-family:var(--serif);font-size:13.5px;color:var(--muted);line-height:1.65}
+  .btnrow{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-height:34px;padding:0 16px;border-radius:4px;cursor:pointer;
+    font:500 13.5px var(--sans);letter-spacing:.02em;
+    background:transparent;border:1px solid var(--hair);color:var(--ink);
+  }
+  .btn:hover{border-color:var(--muted)}
+  .btn.primary{border-color:var(--sage);color:var(--sage)}
+  .btn.primary:hover{background:var(--sage);color:#1B1917}
+  a.quietlink{font:13px var(--sans);color:var(--muted);text-decoration:underline;
+    text-underline-offset:3px;text-decoration-color:var(--faint);padding:5px 0;display:inline-block}
+  a.quietlink:hover{color:var(--ink)}
+
+  .queue{margin-top:26px;padding-top:18px;border-top:1px solid var(--hair)}
+  .qrow{display:grid;grid-template-columns:52px 1fr;gap:14px;padding:8px 0;border-bottom:1px solid var(--hairsoft);align-items:baseline}
+  .qrow .qid{font:12.5px var(--mono);color:var(--faint)}
+  .qrow .qt{font-size:13.5px;color:var(--ink);line-height:1.5}
+  .qrow .qm{font-size:12px;color:var(--faint);margin-top:2px}
+  .qsent{font-family:var(--serif);font-size:13.5px;color:var(--muted);line-height:1.6;margin-top:12px}
+  .qsent b{font-weight:400;color:var(--ink)}
+
+  /* ---------- the log ---------- */
+  table.log{width:100%;border-collapse:collapse;margin-top:26px}
+  table.log th{
+    font:600 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+    text-align:left;padding:0 12px 11px;border-bottom:1px solid var(--hair);
+  }
+  table.log th.num{text-align:right}
+  table.log th.ctr{text-align:center}
+  table.log td{padding:17px 12px;border-bottom:1px solid var(--hairsoft);vertical-align:top}
+  td.time{font:13px var(--mono);color:var(--ink);white-space:nowrap;width:64px;padding-top:20px}
+  .elabel{font:600 12px var(--sans);letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
+  .etitle{font-family:var(--serif);font-weight:400;font-size:16.5px;line-height:1.45;color:var(--ink);margin:6px 0 5px}
+  .edetail{font-size:13.5px;color:var(--muted);line-height:1.6;max-width:580px}
+  td.num{font-size:14px;text-align:right;white-space:nowrap;color:var(--ink);font-variant-numeric:tabular-nums;padding-top:20px}
+  td.num .sub{display:block;font-size:12px;color:var(--faint);margin-top:3px}
+  td.grade{font-family:var(--serif);font-size:17px;text-align:center;color:var(--ink);width:76px;padding-top:19px}
+  td.grade span.pend{font-family:var(--sans);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  td.filed{width:168px;padding-top:20px}
+  td.filed .fid{font:12.5px var(--mono);color:var(--ink)}
+  td.filed .shelf{font-size:12px;color:var(--faint);margin-top:4px;line-height:1.45}
+  .chip{
+    display:inline-block;border:1px solid var(--hair);border-radius:3px;padding:2px 9px;
+    font:600 12px/18px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+  }
+  tr.interruption .etitle{margin-top:9px}
+  tr.active td.time{border-left:2px solid var(--sage);padding-left:10px}
+  tr.active td.time{color:var(--sage)}
+  tr.nowrow td{padding:12px 12px}
+  .nowline{display:flex;align-items:center;gap:16px}
+  .nowlabel{font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--sage);white-space:nowrap}
+  .nowrule{flex:1;height:1px;background:var(--sage)}
+  .nowtext{font-size:12.5px;color:var(--muted);white-space:nowrap}
+  tr.planned td{color:var(--faint)}
+  tr.planned td.time{color:var(--faint)}
+  tr.planned .elabel{color:var(--faint)}
+  tr.planned .etitle{font-style:italic;color:var(--faint);font-size:15.5px}
+  tr.planned td.num,tr.planned td.grade{color:var(--faint)}
+  .tablefoot{font-size:12.5px;color:var(--faint);line-height:1.65;margin-top:14px;max-width:960px}
+  .tablefoot b{font-weight:500;color:var(--muted)}
+
+  /* ---------- accounts ---------- */
+  .accounts{display:grid;grid-template-columns:1.12fr 1fr 1.18fr;gap:56px;margin-top:30px}
+  .lrow{display:flex;align-items:baseline;gap:12px;padding:9px 0}
+  .lrow .lname{font-size:14.5px;color:var(--ink);white-space:nowrap}
+  .lrow .lrole{font-size:12px;color:var(--faint)}
+  .lrow .ldots{flex:1;border-bottom:1px dotted var(--dots);transform:translateY(-4px);min-width:24px}
+  .lrow .lamt{font-size:14.5px;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ltotal{border-top:1px solid var(--hair);margin-top:6px;padding-top:13px;
+    display:flex;justify-content:space-between;align-items:baseline}
+  .ltotal .tl{font:600 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .ltotal .tv{font:500 16px var(--sans);color:var(--ink);font-variant-numeric:tabular-nums}
+  .allocline{display:flex;justify-content:space-between;align-items:baseline;margin:10px 0 8px}
+  .allocline span{font-size:12.5px;color:var(--faint)}
+  .allocline b{font-weight:400;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .projection{font-family:var(--serif);font-size:13.5px;color:var(--muted);line-height:1.65;margin-top:14px}
+  .projection b{font-weight:400;color:var(--ink)}
+  .provenance{font-size:12.5px;color:var(--faint);line-height:1.6;margin-top:12px;border-top:1px solid var(--hairsoft);padding-top:10px}
+
+  .fblock{padding:13px 0 15px;border-bottom:1px solid var(--hairsoft)}
+  .fblock:last-of-type{border-bottom:none}
+  .fblock .fl{font:600 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .fblock p{font-family:var(--serif);font-size:14px;color:var(--muted);line-height:1.7;margin-top:7px}
+  .fblock p b{font-weight:400;color:var(--ink);font-variant-numeric:tabular-nums}
+  .fblock p .m{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+  .fblock .bar{margin-top:10px}
+
+  .incident{margin-top:4px;padding:14px 0 16px;border-bottom:1px solid var(--hairsoft)}
+  .incident p{font-family:var(--serif);font-size:14px;color:var(--muted);line-height:1.7;margin-top:10px}
+  .incident p b{font-weight:400;color:var(--ink);font-variant-numeric:tabular-nums}
+  .priorrow{display:grid;grid-template-columns:104px 1fr;gap:14px;padding:10px 0;border-bottom:1px solid var(--hairsoft);align-items:baseline}
+  .priorrow:last-child{border-bottom:none}
+  .priorrow .pid{font:12.5px var(--mono);color:var(--faint)}
+  .priorrow .ptext{font-size:13px;color:var(--muted);line-height:1.55}
+  .sevenday{font-family:var(--serif);font-size:13.5px;color:var(--muted);line-height:1.65;margin-top:14px}
+  .sevenday b{font-weight:400;color:var(--ink);font-variant-numeric:tabular-nums}
+
+  /* ---------- close ---------- */
+  .close{display:grid;grid-template-columns:1fr 384px;gap:64px;margin-top:28px}
+  .closeprose{font-family:var(--serif);font-size:17.5px;line-height:1.8;color:var(--ink);max-width:700px}
+  .closeprose .n{font-variant-numeric:tabular-nums}
+  .closeprose .fin{display:block;margin-top:18px;color:var(--muted);font-size:15.5px}
+  .vol{display:grid;grid-template-columns:64px 1fr auto;gap:14px;align-items:baseline;
+    padding:11px 0;border-bottom:1px solid var(--hairsoft)}
+  .vol .vd{font:12.5px var(--mono);color:var(--ink)}
+  .vol .vs{font-size:13px;color:var(--muted);line-height:1.5;font-variant-numeric:tabular-nums}
+  .vol .vs i{font-style:normal;color:var(--faint)}
+  .vol a{font:13px var(--sans);color:var(--sage);text-decoration:none;padding:4px 0;display:inline-block}
+  .vol a:hover{text-decoration:underline;text-underline-offset:3px}
+  .volfoot{margin-top:16px}
+
+  /* ---------- footer ---------- */
+  footer{margin-top:76px;border-top:1px solid var(--hair)}
+  footer .wrap{display:grid;grid-template-columns:1fr auto 1fr;gap:24px;align-items:center;padding-top:24px;padding-bottom:44px}
+  footer .fedge{font:12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  footer .fedge.right{text-align:right}
+  footer .fcreed{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="wrap">
+    <a class="brand" href="#">Palingenesis</a>
+    <div class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#">Library</a>
+      <a href="#" class="active">Engine Room</a>
+    </div>
+    <div class="navmeta">Day 247 · Sat 22 Aug · 14:42 CT</div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- ============ masthead ============ -->
+  <header class="masthead">
+    <div>
+      <div class="kicker">Engine Room · The Day’s Log</div>
+      <h1>The Log of Operating Day 247</h1>
+      <p class="sub">Saturday, 22 August 2026 · opened 00:00 CT · rendered 14:42 CT — still being written.
+      One machine, one day, one page; every hour and every dollar accounted below. Engine <span class="m">v3.2.1</span>.</p>
+    </div>
+    <div class="figs">
+      <div class="fig">
+        <div class="flabel">Spent, metered</div>
+        <div class="fval">$237.85 <small>of $500.00</small></div>
+        <div class="bar" role="img" aria-label="47.6 percent of allocation spent"><i style="width:47.6%"></i></div>
+        <div class="fsrc">47.6% — metered per call at the gateway; reconciled 14:00, drift $0.00.</div>
+      </div>
+      <div class="fig">
+        <div class="flabel">Hours usable</div>
+        <div class="fval">14 h 20 m <small>of 14 h 42 m elapsed</small></div>
+        <div class="fsrc">97.5% — from the hour ledger; 22 m lost, entered in the log below.</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ the opening ============ -->
+  <div class="band">
+    <span class="kick">The Opening · 00:00 CT</span>
+    <span class="gloss">conditions &amp; instrument, as the day found them</span>
+  </div>
+
+  <section class="opening">
+    <div>
+      <p class="lede">The day opened at 00:00 with all six services answering the roll, the allocation
+      reset, and the plan drawn. Conditions have held since: providers answer inside their normal band,
+      the feeds run current to the hour, and one interruption of twenty-two minutes — <em>found, repaired,
+      and entered below</em> — is the only mark against a clean sheet.</p>
+
+      <div class="conds">
+        <div class="cond">
+          <span class="cl">Providers</span>
+          <span class="cv">All three answering — p95 <b>2.1 s</b> against a normal band of <b>1.4–3.0 s</b>, measured on the last 100 calls.</span>
+        </div>
+        <div class="cond">
+          <span class="cl">Feeds</span>
+          <span class="cv"><b>4 of 4</b> literature feeds current to <b>13:58 CT</b>.</span>
+        </div>
+        <div class="cond">
+          <span class="cl">Advisories</span>
+          <span class="cv">None standing. The last — a provider brownout — lifted Wednesday, 19 Aug at 10:45.</span>
+        </div>
+      </div>
+
+      <div class="instrument">
+        <h2 class="colhead">The instrument — six services</h2>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <span class="sname">Reader</span><span class="srole">Ingest</span>
+            <p class="ssent">Running since <b>Aug 14, 06:02</b> — eight days unbroken; feeds current to 13:58.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <span class="sname">Scribe</span><span class="srole">Draft</span>
+            <p class="ssent">Running since <b>Aug 14, 06:02</b> — eight days unbroken; four dossiers drafted today.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <span class="sname">Council</span><span class="srole">Verdict</span>
+            <p class="ssent">Running; its third reviewer was restarted at <b>09:24</b> after the morning fault and has answered every call since — 61 of 61.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <span class="sname">Simulator</span><span class="srole">Trial</span>
+            <p class="ssent">Running since <b>Aug 20, 17:11</b> — restarted for the v3.2.1 build, clean since.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <span class="sname">Archivist</span><span class="srole">File &amp; Keep</span>
+            <p class="ssent">Running since <b>Aug 14, 06:03</b> — both vaults answering; last write verified 13:30.</p>
+          </div>
+        </div>
+        <div class="svc">
+          <span class="dot"></span>
+          <div>
+            <span class="sname">Meter</span><span class="srole">Account</span>
+            <p class="ssent">Running since <b>Aug 14, 06:02</b> — reconciled hourly against provider statements; today’s drift <b>$0.00</b>.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- plan card -->
+    <aside class="card">
+      <div class="kicker">The Plan for the Day</div>
+      <div class="planrows">
+        <div class="prow done"><span class="pt">00:30</span><span class="pn">Cycle 1</span><span class="ps">Filed</span></div>
+        <div class="prow done"><span class="pt">04:30</span><span class="pn">Cycle 2</span><span class="ps">Filed</span></div>
+        <div class="prow done"><span class="pt">06:00</span><span class="pn">Morning sweep</span><span class="ps">Filed</span></div>
+        <div class="prow done"><span class="pt">08:30</span><span class="pn">Cycle 3</span><span class="ps">Filed · 22 m late</span></div>
+        <div class="prow done"><span class="pt">12:30</span><span class="pn">Cycle 4</span><span class="ps">Filed</span></div>
+        <div class="prow live"><span class="pt">14:00</span><span class="pn">Afternoon sweep</span><span class="ps">Exposing</span></div>
+        <div class="prow todo"><span class="pt">16:30</span><span class="pn">Cycle 5</span><span class="ps">To come</span></div>
+        <div class="prow todo"><span class="pt">20:30</span><span class="pn">Cycle 6</span><span class="ps">To come</span></div>
+        <div class="prow todo"><span class="pt">23:30</span><span class="pn">Closing snapshot</span><span class="ps">To come</span></div>
+      </div>
+      <p class="nextline">Cycle 5 exposes at 16:30 CT — in 1 h 48 m.</p>
+      <p class="authority">Pausing lets the exposing sweep finish and file, then holds the engine at the
+      boundary. Resume is the same switch, the other way. Only the owner holds it, and both acts are
+      entered in this log like any other.</p>
+      <div class="btnrow">
+        <button class="btn primary" type="button">Pause at the 16:30 boundary</button>
+        <a class="quietlink" href="#">Change the cadence</a>
+      </div>
+
+      <div class="queue">
+        <div class="kicker">Standing Requests · Queue of 3</div>
+        <div class="qrow"><span class="qid">Q-118</span><div><div class="qt">Cover-crop termination timing under a wet spring — northern plains</div><div class="qm">the owner · filed 12:38</div></div></div>
+        <div class="qrow"><span class="qid">Q-119</span><div><div class="qt">Poultry litter as a phosphorus bridge — transport-radius economics</div><div class="qm">the Council · filed 13:12</div></div></div>
+        <div class="qrow"><span class="qid">Q-120</span><div><div class="qt">Sensor-free irrigation scheduling from satellite evapotranspiration</div><div class="qm">the owner · filed 14:05</div></div></div>
+        <p class="qsent">The deepest request has waited <b>2 h 04 m</b>; at the plan’s pace the queue clears by <b>19:00</b>.</p>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ============ the log ============ -->
+  <div class="band">
+    <span class="kick">The Log</span>
+    <span class="gloss">entered as each exposure files · nothing summarized after the fact</span>
+  </div>
+
+  <table class="log">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Entry</th>
+        <th class="num">Exposure</th>
+        <th class="num">Cost</th>
+        <th class="ctr">Grade</th>
+        <th>Filed as</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="time">00:00</td>
+        <td>
+          <span class="elabel">Opening</span>
+          <p class="etitle">The day opened; all six services answered the roll.</p>
+          <p class="edetail">Allocation reset to $500.00. The plan was drawn: six generation cycles on the
+          four-hour cadence, two sweeps, one closing snapshot.</p>
+        </td>
+        <td class="num">—</td><td class="num">—</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">—</span></td>
+      </tr>
+
+      <tr>
+        <td class="time">00:30</td>
+        <td>
+          <span class="elabel">Cycle 1 · Scribe &amp; Council</span>
+          <p class="etitle">Vetch understories for continuous maize — the nitrogen credit against the harvest-window cost.</p>
+          <p class="edetail">Drafted, simulated at three seeding rates, and advanced by a full Council. Filed 01:17.</p>
+        </td>
+        <td class="num">47 m</td><td class="num">$52.40</td><td class="grade">A−</td>
+        <td class="filed"><span class="fid">D-0247-01</span><div class="shelf">Library · Soil &amp; Rotation</div></td>
+      </tr>
+
+      <tr>
+        <td class="time">01:00</td>
+        <td>
+          <span class="elabel">Backfill · Archivist</span>
+          <p class="etitle">The 2019–2021 field-trial archive, volumes 198 through 214.</p>
+          <p class="edetail">Ran in held hours, 01:00–05:48. The shelf now holds 214 of 261 volumes; the
+          remainder resumes at 01:00 tonight.</p>
+        </td>
+        <td class="num">4 h 48 m</td><td class="num">$6.00</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">vols 198–214</span><div class="shelf">Trial Archive · Vault B</div></td>
+      </tr>
+
+      <tr>
+        <td class="time">04:30</td>
+        <td>
+          <span class="elabel">Cycle 2 · Scribe &amp; Council</span>
+          <p class="etitle">Low-lignin sorghum stover as winter forage — digestibility against standability.</p>
+          <p class="edetail">Advanced with a reservation: two claims rest on a single 2019 trial, and the
+          Reader has been asked for corroboration. Filed 05:14.</p>
+        </td>
+        <td class="num">44 m</td><td class="num">$47.15</td><td class="grade">B+</td>
+        <td class="filed"><span class="fid">D-0247-02</span><div class="shelf">Library · Forage</div></td>
+      </tr>
+
+      <tr>
+        <td class="time">06:05</td>
+        <td>
+          <span class="elabel">Sweep · Reader</span>
+          <p class="etitle">Morning sweep — 312 items across four feeds; 28 admitted.</p>
+          <p class="edetail">Three items marked for Council attention. Digest filed 06:27.</p>
+        </td>
+        <td class="num">22 m</td><td class="num">$14.20</td><td class="grade">A</td>
+        <td class="filed"><span class="fid">S-0247-01</span><div class="shelf">Library · Reading Room</div></td>
+      </tr>
+
+      <tr>
+        <td class="time">08:30</td>
+        <td>
+          <span class="elabel">Cycle 3 · Scribe &amp; Council</span>
+          <p class="etitle">Buried drip at 60 cm in alkaline soils — emitter scaling against evaporation saved.</p>
+          <p class="edetail">Interrupted mid-verdict at 09:02; finished by fallback quorum at 09:41. Verdict
+          sound; one simulation under-powered, its re-run set for 17:00.</p>
+        </td>
+        <td class="num">49 m</td><td class="num">$55.90</td><td class="grade">B</td>
+        <td class="filed"><span class="fid">D-0247-03</span><div class="shelf">Library · Irrigation</div></td>
+      </tr>
+
+      <tr class="interruption">
+        <td class="time">09:02</td>
+        <td>
+          <span class="chip">Interruption · Incident 247-1</span>
+          <p class="etitle">The Council’s third reviewer stopped answering mid-verdict.</p>
+          <p class="edetail">One retry, then the fallback quorum convened; nothing was filed under partial
+          quorum. The repair is entered under The Hours, below.</p>
+        </td>
+        <td class="num">22 m lost</td><td class="num">—</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">—</span></td>
+      </tr>
+
+      <tr>
+        <td class="time">12:30</td>
+        <td>
+          <span class="elabel">Cycle 4 · Scribe &amp; Council</span>
+          <p class="etitle">Virtual fencing on paddock rotations — collar economics at forty-head scale.</p>
+          <p class="edetail">Advanced without reservation; the Simulator and the literature agree within 4%. Filed 13:16.</p>
+        </td>
+        <td class="num">46 m</td><td class="num">$49.60</td><td class="grade">A</td>
+        <td class="filed"><span class="fid">D-0247-04</span><div class="shelf">Library · Grazing Systems</div></td>
+      </tr>
+
+      <tr>
+        <td class="time">13:30</td>
+        <td>
+          <span class="elabel">Snapshot · Archivist</span>
+          <p class="etitle">The half-day plate — 4.2 GB, checksum verified on write.</p>
+          <p class="edetail">Copied to both vaults; sha256 9f41…c2ae matches on each. Filed 13:36.</p>
+        </td>
+        <td class="num">6 m</td><td class="num">$2.10</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">V-0247-1330</span><div class="shelf">Vault A · Vault B</div></td>
+      </tr>
+
+      <tr class="active">
+        <td class="time">13:45</td>
+        <td>
+          <span class="elabel">Sweep · Reader</span>
+          <p class="etitle">Afternoon sweep — agronomy preprints and three extension services.</p>
+          <p class="edetail">Exposing, 57 m in: 208 items scanned, admissions pending the Reader’s grade.
+          Began ahead of its 14:00 mark; the queue ran deep.</p>
+        </td>
+        <td class="num">57 m<span class="sub">so far</span></td>
+        <td class="num">$10.50<span class="sub">so far</span></td>
+        <td class="grade"><span class="pend">pending</span></td>
+        <td class="filed"><span class="fid">—</span></td>
+      </tr>
+
+      <tr class="nowrow">
+        <td colspan="6">
+          <div class="nowline">
+            <span class="nowlabel">Now · 14:42 CT</span>
+            <span class="nowrule"></span>
+            <span class="nowtext">the log is open — next entry expected by 16:30</span>
+          </div>
+        </td>
+      </tr>
+
+      <tr class="planned">
+        <td class="time">16:30</td>
+        <td>
+          <span class="elabel">Planned · Cycle 5</span>
+          <p class="etitle">Cycle 5 — target drawn at exposure from the frontier queue.</p>
+        </td>
+        <td class="num">—</td><td class="num">—</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">—</span></td>
+      </tr>
+      <tr class="planned">
+        <td class="time">20:30</td>
+        <td>
+          <span class="elabel">Planned · Cycle 6</span>
+          <p class="etitle">Cycle 6 — target drawn at exposure.</p>
+        </td>
+        <td class="num">—</td><td class="num">—</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">—</span></td>
+      </tr>
+      <tr class="planned">
+        <td class="time">23:30</td>
+        <td>
+          <span class="elabel">Planned · Closing snapshot</span>
+          <p class="etitle">The closing plate; the log closes at 00:00 and binds to the shelf.</p>
+        </td>
+        <td class="num">—</td><td class="num">—</td><td class="grade">—</td>
+        <td class="filed"><span class="fid">—</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="tablefoot"><b>Exposure</b> is productive wall-clock, first call to filed plate; time lost to an
+  interruption is entered on its own line, never inside an exposure. <b>Grades</b> are the Council’s own,
+  reasons recorded inside each dossier: A — filed as-is · B — filed with flagged re-runs · C — held back
+  for want of evidence. <b>Costs</b> are per-entry composites from the gateway meter.</p>
+
+  <!-- ============ the accounts ============ -->
+  <div class="band">
+    <span class="kick">The Accounts</span>
+    <span class="gloss">every dollar metered · every minute accounted</span>
+  </div>
+
+  <section class="accounts">
+
+    <!-- allocation -->
+    <div>
+      <h2 class="colhead">The allocation</h2>
+      <div class="lrow"><span class="lname">Council</span><span class="lrole">verdicts &amp; reviews</span><span class="ldots"></span><span class="lamt">$86.20</span></div>
+      <div class="lrow"><span class="lname">Simulator</span><span class="lrole">trial runs</span><span class="ldots"></span><span class="lamt">$68.45</span></div>
+      <div class="lrow"><span class="lname">Scribe</span><span class="lrole">drafting</span><span class="ldots"></span><span class="lamt">$38.90</span></div>
+      <div class="lrow"><span class="lname">Reader</span><span class="lrole">ingest &amp; sweeps</span><span class="ldots"></span><span class="lamt">$34.60</span></div>
+      <div class="lrow"><span class="lname">Archivist</span><span class="lrole">filing &amp; plates</span><span class="ldots"></span><span class="lamt">$8.10</span></div>
+      <div class="lrow"><span class="lname">Meter</span><span class="lrole">its own accounting</span><span class="ldots"></span><span class="lamt">$1.60</span></div>
+      <div class="ltotal"><span class="tl">Metered today</span><span class="tv">$237.85</span></div>
+      <div class="allocline"><span>Allocation $500.00</span><b>$262.15 remains</b></div>
+      <div class="bar" role="img" aria-label="47.6 percent of allocation spent"><i style="width:47.6%"></i></div>
+      <p class="projection">On the plan’s arithmetic — two cycles, the sweep’s finish, the closing plate —
+      the day closes near <b>$350</b>, some $150 inside the allocation. A projection, not a promise;
+      the meter is the record.</p>
+      <p class="provenance">Metered per call at the gateway, priced at provider list; reconciled against
+      provider statements hourly. Last reconciliation 14:00 CT — drift $0.00.</p>
+    </div>
+
+    <!-- files -->
+    <div>
+      <h2 class="colhead">The files</h2>
+      <div class="fblock">
+        <span class="fl">Last plate</span>
+        <p>Taken <b>13:30 CT</b> — <b>4.2 GB</b>, <span class="m">sha256 9f41…c2ae</span>, verified on write
+        and on copy, held in Vault A (home) and Vault B (offsite).</p>
+      </div>
+      <div class="fblock">
+        <span class="fl">Recovery</span>
+        <p>Rehearsed Tuesday, 18 Aug: cold start to full recovery in <b>11 m 04 s</b>, every checksum
+        matching. Rehearsals are weekly and entered in this log; next, Tuesday, 25 Aug.</p>
+      </div>
+      <div class="fblock">
+        <span class="fl">Backfill</span>
+        <p>The 2019–2021 trial archive stands at <b>214 of 261</b> volumes — 82%. It runs only in held
+        hours and resumes at 01:00 tonight.</p>
+        <div class="bar quiet" role="img" aria-label="82 percent of backfill complete"><i style="width:82%"></i></div>
+      </div>
+      <div class="fblock">
+        <span class="fl">Filed today</span>
+        <p><b>4</b> dossiers · <b>1</b> sweep digest · <b>1</b> verified plate · <b>17</b> backfilled
+        volumes — each shelved under the mark shown in the log.</p>
+      </div>
+    </div>
+
+    <!-- hours -->
+    <div>
+      <h2 class="colhead">The hours</h2>
+      <div class="lrow"><span class="lname">Exposing</span><span class="lrole">cycles, sweeps, plates, backfill</span><span class="ldots"></span><span class="lamt">9 h 19 m</span></div>
+      <div class="lrow"><span class="lname">Held</span><span class="lrole">between boundaries, by plan</span><span class="ldots"></span><span class="lamt">5 h 01 m</span></div>
+      <div class="lrow"><span class="lname">Lost</span><span class="lrole">to interruption</span><span class="ldots"></span><span class="lamt">22 m</span></div>
+      <div class="ltotal"><span class="tl">Elapsed since 00:00</span><span class="tv">14 h 42 m</span></div>
+
+      <div class="incident">
+        <span class="chip">Incident 247-1 · 09:02 · resolved 09:41</span>
+        <p>At <b>09:02</b> the Council’s third reviewer stopped answering mid-verdict on Cycle 3. The engine
+        retried once, waited ninety seconds, then convened the fallback quorum — two reviewers, the
+        Archivist holding the tiebreak — and the verdict finished at <b>09:41</b>, twenty-two minutes late.
+        Nothing was filed under partial quorum. The reviewer was restarted at <b>09:24</b> and has answered
+        all <b>61</b> calls since; Cycle 3’s grade carries the note.</p>
+      </div>
+
+      <div class="priorrow"><span class="pid">244-1 · 19 Aug</span><span class="ptext">Provider brownout at 10:14, waited out; 31 m lost, and the day’s third cycle was skipped rather than rushed.</span></div>
+      <div class="priorrow"><span class="pid">241-2 · 16 Aug</span><span class="ptext">Vault pressure at the Archivist; duplicate plates pruned the same hour. No time lost.</span></div>
+
+      <p class="sevenday">Seven days: <b>3</b> interruptions, <b>53 m</b> lost of 9,522 elapsed —
+      <b>99.4%</b> of hours usable.</p>
+    </div>
+  </section>
+
+  <!-- ============ the close ============ -->
+  <div class="band">
+    <span class="kick">The Close</span>
+    <span class="gloss">provisional until the log binds at 00:00 CT</span>
+  </div>
+
+  <section class="close">
+    <p class="closeprose">By mid-afternoon the day reads so: four of six cycles filed — one interrupted and
+    made whole — with grades of <span class="n">A−, B+, B, and A</span>; the morning sweep digested and the
+    afternoon sweep exposing; four dossiers, a digest, seventeen backfilled volumes, and a verified plate
+    on the shelf. Twenty-two minutes lost, cause found, repair made. <span class="n">$237.85</span> of the
+    <span class="n">$500.00</span> allocation spent, closing near <span class="n">$350</span> on the plan’s
+    arithmetic. Two cycles and the closing plate remain.
+    <span class="fin">This paragraph rewrites itself until midnight. At 00:00 it stops, and becomes the record.</span></p>
+
+    <aside class="card">
+      <div class="kicker">The Shelf · Bound at 00:00</div>
+      <div class="planrows">
+        <div class="vol"><span class="vd">Day 246</span><span class="vs">6 of 6 · $448.20 · 0 m lost · 8 filed</span><a href="#">Open →</a></div>
+        <div class="vol"><span class="vd">Day 245</span><span class="vs">6 of 6 · $431.75 · 0 m lost · 7 filed</span><a href="#">Open →</a></div>
+        <div class="vol"><span class="vd">Day 244</span><span class="vs">5 of 6 · $362.10 · 31 m lost · 6 filed <i>— the brownout day</i></span><a href="#">Open →</a></div>
+      </div>
+      <div class="volfoot"><a class="quietlink" href="#">The full shelf of bound days →</a></div>
+    </aside>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="fedge">Palingenesis Engine v3.2.1</span>
+    <span class="fcreed">Every claim sourced · every cost computed · every verdict recorded</span>
+    <span class="fedge right">Log binds nightly at 00:00 CT</span>
+  </div>
+</footer>
+
+</body>
+</html>
