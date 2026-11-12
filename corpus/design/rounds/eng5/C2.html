@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<meta name="color-scheme" content="dark">
+<title>Palingenesis — Engine Room</title>
+<style>
+:root{
+  --bg:#1B1917; --cream:#E7E3DA; --mut:#A69D90; --fnt:#6E675E;
+  --hair:rgba(231,227,218,.14); --sage:#9DB48A; --clay:#C89272;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --serif:Georgia,"Times New Roman",serif;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Helvetica,Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:var(--bg)}
+body{color:var(--cream);font:13px/1.5 var(--sans);min-width:1440px;-webkit-font-smoothing:antialiased}
+.page{width:1360px;margin:0 auto}
+.lbl{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:400}
+.dr{border-bottom:1px dotted rgba(231,227,218,.38)}
+i{font-style:normal}
+
+/* ---------- nav ---------- */
+.nav{display:flex;align-items:baseline;gap:24px;padding:16px 0 13px;border-bottom:1px solid var(--hair)}
+.wordmark{font-family:var(--serif);font-size:17px;font-weight:600;letter-spacing:.02em;color:var(--cream);margin-right:8px}
+.nl{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.nl.on{color:var(--cream);border-bottom:2px solid var(--sage);padding-bottom:5px}
+.navmeta{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
+.navmeta b{font-weight:400;color:var(--cream)}
+
+/* ---------- verdict lede ---------- */
+.lede{font-family:var(--serif);font-size:20px;line-height:1.5;font-weight:400;padding:18px 0 14px;color:var(--cream)}
+.lede .m{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:17px;font-weight:600}
+.lede .soft{color:var(--mut)}
+
+/* ---------- section row ---------- */
+.secrow{display:flex;justify-content:space-between;align-items:baseline;margin:8px 0 10px}
+.legend{font-size:12px;color:var(--mut)}
+.legend b{font-weight:400;color:var(--cream)}
+.legend .sg{color:var(--sage)}
+.legend .cl{color:var(--clay)}
+.legend .st{text-decoration:line-through}
+
+/* ---------- the machine grid ---------- */
+.mach{display:grid;grid-template-columns:272px repeat(16,68px);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+.axis{border-bottom:1px solid var(--hair);display:flex;align-items:flex-end;padding:8px 12px 9px 0}
+.hcell{border-left:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:8px 3px 9px 6px;display:flex;flex-direction:column;justify-content:flex-end;gap:1px}
+.hcell span{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;display:block}
+.hcell .cy{color:var(--cream)}
+.hcell .tm{color:var(--mut)}
+.hcell .nw{color:var(--sage)}
+
+.shead{padding:12px 14px 12px 0}
+.srow1{display:flex;align-items:center}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:8px;flex:none}
+.d-ready{border:1.5px solid var(--sage);width:5px;height:5px}
+.d-run{background:var(--sage)}
+.d-idle{border:1.5px solid var(--mut);width:5px;height:5px}
+.d-watch{background:var(--clay)}
+.sid{font-family:var(--mono);font-size:12px;color:var(--mut);margin-right:8px}
+.snm{font-size:14px;font-weight:600;color:var(--cream)}
+.scost{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream)}
+.sjob{font-size:12px;color:var(--mut);margin:3px 0 4px}
+.snum{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream)}
+.sst{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut);margin-top:3px}
+.sst .ready{color:var(--sage)}
+.sst .running{color:var(--sage)}
+.sst .idle{color:var(--mut)}
+.sst .watch{color:var(--clay)}
+
+.c{border-left:1px solid var(--hair);padding:8px 3px 8px 6px;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;line-height:1.45}
+.c b{display:block;font-weight:400}
+.bk{color:var(--mut)}
+.ac{color:var(--cream)}
+.cxl{text-decoration:line-through}
+.dim{color:var(--mut)}
+.run{color:var(--sage)}
+.lt{color:var(--clay);margin-left:3px}
+.now{border-left:2px solid var(--sage)!important}
+
+.flowhead{display:flex;align-items:center;gap:10px;padding:2px 0 2px 1px;min-height:34px}
+.flowhead .cnt{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--sage)}
+.flowhead .fto{font-size:12px;color:var(--mut)}
+.fc{border-left:1px solid var(--hair);min-height:34px}
+
+.sphead{border-top:1px solid var(--hair);padding:9px 14px 10px 0}
+.sphead .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream)}
+.sp{border-top:1px solid var(--hair)}
+.spv{color:var(--cream)}
+
+/* ---------- grid foot: ledger meter ---------- */
+.foot{grid-column:1/-1;border-top:1px solid var(--hair);padding:14px 0 16px}
+.frow1{display:flex;align-items:baseline;gap:14px}
+.frow1 .m,.frow2 .m,.mlaba,.mlabb{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px}
+.frow1 .m{color:var(--cream)}
+.frow1 .hr{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream)}
+.mwrap{position:relative;margin:30px 0 34px}
+.mbar{height:8px;background:rgba(231,227,218,.10);position:relative}
+.mfill{position:absolute;left:0;top:0;height:8px;width:42.9%;background:var(--sage)}
+.tick{position:absolute;top:-5px;width:2px;height:18px}
+.tproj{left:61.6%;background:var(--cream)}
+.tmon{left:69.7%;background:var(--mut)}
+.mlaba{position:absolute;top:-24px;left:69.7%;transform:translateX(-50%);white-space:nowrap;color:var(--mut)}
+.mlabb{position:absolute;top:16px;left:61.6%;transform:translateX(-50%);white-space:nowrap;color:var(--cream)}
+.mlabb i{color:var(--mut)}
+.frow2{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
+.frow2 b{font-weight:400;color:var(--cream)}
+
+/* ---------- drill law ---------- */
+.law{border-left:2px solid var(--sage);padding:3px 0 3px 14px;margin-top:18px;font-size:12px;color:var(--mut)}
+.law b{font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--cream);font-size:12px;margin-right:8px}
+
+/* ---------- lower panels ---------- */
+.cols{display:grid;grid-template-columns:1fr 1fr 1.3fr;margin-top:26px}
+.panel{border-left:1px solid var(--hair);padding:0 0 0 22px;min-width:0}
+.panel:first-child{border-left:0;padding-left:0}
+.phead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--hair)}
+.phead .pm{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
+.kv{display:grid;grid-template-columns:76px 1fr;gap:0 10px;padding:5px 0;border-bottom:1px solid var(--hair);align-items:baseline}
+.kv:last-child{border-bottom:0}
+.kv .k{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream)}
+.kv .v i{color:var(--mut)}
+
+.dt{display:grid;grid-template-columns:96px 84px 74px 64px 48px;align-items:baseline}
+.dt span{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;padding:5px 0;border-bottom:1px solid var(--hair)}
+.dt .n{font-family:var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.dt .r{color:var(--cream)}
+.dt .g{color:var(--cream)}
+.dt .z{color:var(--mut)}
+.dt .w{color:var(--mut)}
+.dt .hd{border-bottom:1px solid var(--hair);color:var(--mut);font-family:var(--sans);letter-spacing:.08em;text-transform:uppercase}
+.bkline{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut);padding-top:8px}
+.bkline b{font-weight:400;color:var(--cream)}
+
+.inc{padding:7px 0;border-bottom:1px solid var(--hair)}
+.inc:last-child{border-bottom:0}
+.inc .l1{display:flex;align-items:baseline;gap:10px}
+.inc .t{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cream)}
+.inc .stn{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cream)}
+.inc .st{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--mut)}
+.inc .st.watch{color:var(--clay)}
+.inc .what{font-size:12px;color:var(--mut);margin-top:2px}
+.inc .act{font-size:12px;color:var(--cream);margin-top:2px}
+.inc .act i{color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-right:6px}
+
+/* ---------- control ---------- */
+.ctrl{display:flex;align-items:center;gap:20px;border:1px solid var(--hair);margin-top:24px;padding:14px 18px}
+.btn{border:1px solid var(--clay);background:transparent;color:var(--cream);font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:13px 24px;white-space:nowrap;cursor:pointer}
+.cons{font-size:12px;color:var(--mut);max-width:730px}
+.cons b{font-weight:400;color:var(--cream)}
+.when{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut);white-space:nowrap;text-align:right}
+.when b{font-weight:400;color:var(--cream)}
+
+/* ---------- footer ---------- */
+.ftr{display:flex;align-items:baseline;gap:24px;border-top:1px solid var(--hair);margin-top:30px;padding:14px 0 30px}
+.motto{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--fnt);margin:0 auto}
+.ftr .fm{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- nav -->
+  <div class="nav">
+    <span class="wordmark">Palingenesis</span>
+    <span class="nl">Today</span>
+    <span class="nl">Pipeline</span>
+    <span class="nl">Library</span>
+    <span class="nl">Portfolio</span>
+    <span class="nl">Simulation</span>
+    <span class="nl on">Engine Room</span>
+    <span class="navmeta">14:37:12 &middot; FRI 22 AUG 2026 &nbsp;&middot;&nbsp; <b class="dr">cap left $285.38</b></span>
+  </div>
+
+  <!-- verdict lede -->
+  <div class="lede">
+    Nominal, one watch item. Ten of sixteen cycles landed <span class="soft">(worst slip +4&nbsp;min)</span>;
+    <span class="m dr">$214.62</span> of the <span class="m">$500.00</span> cap is spent, and the pace &mdash;
+    <span class="m">$9.93</span> a day &mdash; closes August at <span class="m dr">$307.86</span>.
+    One feed is rate-limited, 214 papers held. Cycle 11 fires at <span class="m">15:00</span>, in 23 minutes.
+  </div>
+
+  <!-- machine section head -->
+  <div class="secrow">
+    <span class="lbl" style="color:var(--cream)">The line, down &mdash; the day, across</span>
+    <span class="legend">cell = <b>booked</b> over <b>actual</b> &middot; <span class="cl">+n</span> = min late &middot; <span class="st">struck</span> = cancelled, empty queue &middot; <span class="sg">sage time</span> = running &middot; &mdash; = not booked &middot; <span class="sg">&#9656; rule</span> = now 14:37</span>
+  </div>
+
+  <!-- ================= THE MACHINE ================= -->
+  <div class="mach">
+
+    <!-- header row -->
+    <div class="axis"><span class="lbl">Station &darr; &nbsp;&middot;&nbsp; Cycle &rarr;</span></div>
+    <div class="hcell"><span class="cy">C01</span><span class="tm">00:00</span></div>
+    <div class="hcell"><span class="cy">C02</span><span class="tm">01:30</span></div>
+    <div class="hcell"><span class="cy">C03</span><span class="tm">03:00</span></div>
+    <div class="hcell"><span class="cy">C04</span><span class="tm">04:30</span></div>
+    <div class="hcell"><span class="cy">C05</span><span class="tm">06:00</span></div>
+    <div class="hcell"><span class="cy">C06</span><span class="tm">07:30</span></div>
+    <div class="hcell"><span class="cy">C07</span><span class="tm">09:00</span></div>
+    <div class="hcell"><span class="cy">C08</span><span class="tm">10:30</span></div>
+    <div class="hcell"><span class="cy">C09</span><span class="tm">12:00</span></div>
+    <div class="hcell"><span class="cy">C10</span><span class="tm">13:30</span></div>
+    <div class="hcell now"><span class="nw">&#9656; now</span><span class="cy">C11</span><span class="tm">15:00</span></div>
+    <div class="hcell"><span class="cy">C12</span><span class="tm">16:30</span></div>
+    <div class="hcell"><span class="cy">C13</span><span class="tm">18:00</span></div>
+    <div class="hcell"><span class="cy">C14</span><span class="tm">19:30</span></div>
+    <div class="hcell"><span class="cy">C15</span><span class="tm">21:00</span></div>
+    <div class="hcell"><span class="cy">C16</span><span class="tm">22:30</span></div>
+
+    <!-- READER -->
+    <div class="shead">
+      <div class="srow1"><i class="dot d-watch"></i><span class="sid">PLG-01</span><span class="snm">Reader</span><span class="scost">$0.58</span></div>
+      <div class="sjob">Reads every new paper and patent in the field.</div>
+      <div class="snum"><span class="dr">1,284 papers</span> &middot; 3 feeds &middot; 214 held</div>
+      <div class="sst"><span class="watch">backoff</span> &middot; since 11:38 &middot; resumes c11</div>
+    </div>
+    <div class="c"><b class="bk">00:00</b><b class="ac">00:00</b></div>
+    <div class="c"><b class="bk">01:30</b><b class="ac">01:30</b></div>
+    <div class="c"><b class="bk">03:00</b><b class="ac">03:00</b></div>
+    <div class="c"><b class="bk">04:30</b><b class="ac">04:31<i class="lt">+1</i></b></div>
+    <div class="c"><b class="bk">06:00</b><b class="ac">06:00</b></div>
+    <div class="c"><b class="bk">07:30</b><b class="ac">07:30</b></div>
+    <div class="c"><b class="bk">09:00</b><b class="ac">09:00</b></div>
+    <div class="c"><b class="bk">10:30</b><b class="ac">10:30</b></div>
+    <div class="c"><b class="bk">12:00</b><b class="ac">12:02<i class="lt">+2</i></b></div>
+    <div class="c"><b class="bk">13:30</b><b class="ac">13:30</b></div>
+    <div class="c now"><b class="bk">15:00</b></div>
+    <div class="c"><b class="bk">16:30</b></div>
+    <div class="c"><b class="bk">18:00</b></div>
+    <div class="c"><b class="bk">19:30</b></div>
+    <div class="c"><b class="bk">21:00</b></div>
+    <div class="c"><b class="bk">22:30</b></div>
+
+    <!-- flow 1 -->
+    <div class="flowhead">
+      <svg width="12" height="30" viewBox="0 0 12 30" aria-hidden="true"><line x1="6" y1="0" x2="6" y2="21" stroke="#9DB48A" stroke-width="1.5"/><path d="M1.5 20 L6 29 L10.5 20 Z" fill="#9DB48A"/></svg>
+      <span class="cnt dr">1,284 papers</span><span class="fto">to Scout</span>
+    </div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc now"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+
+    <!-- SCOUT -->
+    <div class="shead">
+      <div class="srow1"><i class="dot d-ready"></i><span class="sid">PLG-02</span><span class="snm">Scout</span><span class="scost">$1.29</span></div>
+      <div class="sjob">Sifts the reading for ideas worth testing.</div>
+      <div class="snum">1,284 sifted &middot; <span class="dr">41 kept</span></div>
+      <div class="sst"><span class="ready">ready</span> &middot; since 13:47</div>
+    </div>
+    <div class="c"><b class="bk">00:12</b><b class="ac">00:12</b></div>
+    <div class="c"><b class="bk">01:42</b><b class="ac">01:42</b></div>
+    <div class="c"><b class="bk">03:12</b><b class="ac">03:12</b></div>
+    <div class="c"><b class="bk">04:42</b><b class="ac">04:42</b></div>
+    <div class="c"><b class="bk">06:12</b><b class="ac">06:12</b></div>
+    <div class="c"><b class="bk">07:42</b><b class="ac">07:42</b></div>
+    <div class="c"><b class="bk">09:12</b><b class="ac">09:12</b></div>
+    <div class="c"><b class="bk">10:42</b><b class="ac">10:42</b></div>
+    <div class="c"><b class="bk">12:12</b><b class="ac">12:12</b></div>
+    <div class="c"><b class="bk">13:42</b><b class="ac">13:42</b></div>
+    <div class="c now"><b class="bk">15:12</b></div>
+    <div class="c"><b class="bk">16:42</b></div>
+    <div class="c"><b class="bk">18:12</b></div>
+    <div class="c"><b class="bk">19:42</b></div>
+    <div class="c"><b class="bk">21:12</b></div>
+    <div class="c"><b class="bk">22:42</b></div>
+
+    <!-- flow 2 -->
+    <div class="flowhead">
+      <svg width="12" height="30" viewBox="0 0 12 30" aria-hidden="true"><line x1="6" y1="0" x2="6" y2="21" stroke="#9DB48A" stroke-width="1.5"/><path d="M1.5 20 L6 29 L10.5 20 Z" fill="#9DB48A"/></svg>
+      <span class="cnt dr">41 candidates</span><span class="fto">to Council</span>
+    </div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc now"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+
+    <!-- COUNCIL -->
+    <div class="shead">
+      <div class="srow1"><i class="dot d-ready"></i><span class="sid">PLG-03</span><span class="snm">Council</span><span class="scost">$3.64</span></div>
+      <div class="sjob">Argues each idea and hands down verdicts.</div>
+      <div class="snum">41 heard &middot; <span class="dr">6 approved</span> &middot; 35 declined</div>
+      <div class="sst"><span class="ready">ready</span> &middot; since 13:58</div>
+    </div>
+    <div class="c"><b class="bk">00:24</b><b class="ac">00:24</b></div>
+    <div class="c"><b class="bk">01:54</b><b class="ac">01:54</b></div>
+    <div class="c"><b class="bk">03:24</b><b class="ac">03:24</b></div>
+    <div class="c"><b class="bk">04:54</b><b class="ac">04:54</b></div>
+    <div class="c"><b class="bk">06:24</b><b class="ac">06:24</b></div>
+    <div class="c"><b class="bk">07:54</b><b class="ac">07:54</b></div>
+    <div class="c"><b class="bk">09:24</b><b class="ac">09:28<i class="lt">+4</i></b></div>
+    <div class="c"><b class="bk">10:54</b><b class="ac">10:54</b></div>
+    <div class="c"><b class="bk">12:24</b><b class="ac">12:24</b></div>
+    <div class="c"><b class="bk">13:54</b><b class="ac">13:54</b></div>
+    <div class="c now"><b class="bk">15:24</b></div>
+    <div class="c"><b class="bk">16:54</b></div>
+    <div class="c"><b class="bk">18:24</b></div>
+    <div class="c"><b class="bk">19:54</b></div>
+    <div class="c"><b class="bk">21:24</b></div>
+    <div class="c"><b class="bk">22:54</b></div>
+
+    <!-- flow 3 -->
+    <div class="flowhead">
+      <svg width="12" height="30" viewBox="0 0 12 30" aria-hidden="true"><line x1="6" y1="0" x2="6" y2="21" stroke="#9DB48A" stroke-width="1.5"/><path d="M1.5 20 L6 29 L10.5 20 Z" fill="#9DB48A"/></svg>
+      <span class="cnt dr">6 verdicts</span><span class="fto">to Simulator</span>
+    </div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc now"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+
+    <!-- SIMULATOR -->
+    <div class="shead">
+      <div class="srow1"><i class="dot d-run"></i><span class="sid">PLG-04</span><span class="snm">Simulator</span><span class="scost">$0.67</span></div>
+      <div class="sjob">Grows approved ideas in simulated plots first.</div>
+      <div class="snum">5 done &middot; 1 running 71% &middot; <span class="dr">12,732 runs</span></div>
+      <div class="sst"><span class="running">running</span> &middot; since 14:04</div>
+    </div>
+    <div class="c"><b class="bk">00:34</b><b class="ac">00:34</b></div>
+    <div class="c"><b class="bk cxl">02:04</b><b class="ac dim">&mdash;</b></div>
+    <div class="c"><b class="bk">03:34</b><b class="ac">03:34</b></div>
+    <div class="c"><b class="bk cxl">05:04</b><b class="ac dim">&mdash;</b></div>
+    <div class="c"><b class="bk cxl">06:34</b><b class="ac dim">&mdash;</b></div>
+    <div class="c"><b class="bk cxl">08:04</b><b class="ac dim">&mdash;</b></div>
+    <div class="c"><b class="bk">09:34</b><b class="ac">09:38<i class="lt">+4</i></b></div>
+    <div class="c"><b class="bk">11:04</b><b class="ac">11:04</b></div>
+    <div class="c"><b class="bk cxl">12:34</b><b class="ac dim">&mdash;</b></div>
+    <div class="c"><b class="bk">14:04</b><b class="ac run">14:04</b></div>
+    <div class="c now"><b class="bk">15:34</b></div>
+    <div class="c"><b class="bk">17:04</b></div>
+    <div class="c"><b class="bk">18:34</b></div>
+    <div class="c"><b class="bk">20:04</b></div>
+    <div class="c"><b class="bk">21:34</b></div>
+    <div class="c"><b class="bk">23:04</b></div>
+
+    <!-- flow 4 -->
+    <div class="flowhead">
+      <svg width="12" height="30" viewBox="0 0 12 30" aria-hidden="true"><line x1="6" y1="0" x2="6" y2="21" stroke="#9DB48A" stroke-width="1.5"/><path d="M1.5 20 L6 29 L10.5 20 Z" fill="#9DB48A"/></svg>
+      <span class="cnt dr">5 trial reports</span><span class="fto">to Archivist</span>
+    </div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc now"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+
+    <!-- ARCHIVIST -->
+    <div class="shead">
+      <div class="srow1"><i class="dot d-ready"></i><span class="sid">PLG-05</span><span class="snm">Archivist</span><span class="scost">$0.18</span></div>
+      <div class="sjob">Files every result where it can be found again.</div>
+      <div class="snum">40 records &middot; <span class="dr">5 dossiers</span> &middot; 1,912 rows</div>
+      <div class="sst"><span class="ready">ready</span> &middot; since 14:26</div>
+    </div>
+    <div class="c"><b class="bk">00:52</b><b class="ac">00:52</b></div>
+    <div class="c"><b class="bk">02:22</b><b class="ac">02:22</b></div>
+    <div class="c"><b class="bk">03:52</b><b class="ac">03:52</b></div>
+    <div class="c"><b class="bk">05:22</b><b class="ac">05:22</b></div>
+    <div class="c"><b class="bk">06:52</b><b class="ac">06:52</b></div>
+    <div class="c"><b class="bk">08:22</b><b class="ac">08:22</b></div>
+    <div class="c"><b class="bk">09:52</b><b class="ac">09:55<i class="lt">+3</i></b></div>
+    <div class="c"><b class="bk">11:22</b><b class="ac">11:22</b></div>
+    <div class="c"><b class="bk">12:52</b><b class="ac">12:52</b></div>
+    <div class="c"><b class="bk">14:22</b><b class="ac">14:22</b></div>
+    <div class="c now"><b class="bk">15:52</b></div>
+    <div class="c"><b class="bk">17:22</b></div>
+    <div class="c"><b class="bk">18:52</b></div>
+    <div class="c"><b class="bk">20:22</b></div>
+    <div class="c"><b class="bk">21:52</b></div>
+    <div class="c"><b class="bk">23:22</b></div>
+
+    <!-- flow 5 -->
+    <div class="flowhead">
+      <svg width="12" height="30" viewBox="0 0 12 30" aria-hidden="true"><line x1="6" y1="0" x2="6" y2="21" stroke="#9DB48A" stroke-width="1.5"/><path d="M1.5 20 L6 29 L10.5 20 Z" fill="#9DB48A"/></svg>
+      <span class="cnt dr">12 digest entries</span><span class="fto">to Courier</span>
+    </div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc now"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+
+    <!-- COURIER -->
+    <div class="shead">
+      <div class="srow1"><i class="dot d-idle"></i><span class="sid">PLG-06</span><span class="snm">Courier</span><span class="scost">$0.08</span></div>
+      <div class="sjob">Packs the day into one report and delivers it to you.</div>
+      <div class="snum">brief 07:00 &middot; 12 staged &middot; <span class="dr">next 19:00</span></div>
+      <div class="sst"><span class="idle">idle</span> &middot; since 07:02</div>
+    </div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">07:00</b><b class="ac">07:00</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c now"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">19:00</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+    <div class="c"><b class="bk">&mdash;</b></div>
+
+    <!-- SPEND / CYCLE -->
+    <div class="sphead"><span class="lbl">Spend / cycle ($)</span><br><span class="v">today <span class="dr">$6.44</span> so far</span></div>
+    <div class="c sp"><b class="spv">0.71</b></div>
+    <div class="c sp"><b class="spv">0.44</b></div>
+    <div class="c sp"><b class="spv">0.69</b></div>
+    <div class="c sp"><b class="spv">0.46</b></div>
+    <div class="c sp"><b class="spv">0.62</b></div>
+    <div class="c sp"><b class="spv">0.49</b></div>
+    <div class="c sp"><b class="spv">0.94</b></div>
+    <div class="c sp"><b class="spv">0.72</b></div>
+    <div class="c sp"><b class="spv">0.51</b></div>
+    <div class="c sp"><b class="spv">0.86</b></div>
+    <div class="c sp now"><b class="bk">&mdash;</b></div>
+    <div class="c sp"><b class="bk">&mdash;</b></div>
+    <div class="c sp"><b class="bk">&mdash;</b></div>
+    <div class="c sp"><b class="bk">&mdash;</b></div>
+    <div class="c sp"><b class="bk">&mdash;</b></div>
+    <div class="c sp"><b class="bk">&mdash;</b></div>
+
+    <!-- grid foot: cap meter + projected close -->
+    <div class="foot">
+      <div class="frow1">
+        <span class="lbl" style="color:var(--cream)">August ledger</span>
+        <span class="m"><span class="dr">$214.62</span> spent of $500.00 cap &middot; 42.9% used &middot; pace $9.93/day</span>
+        <span class="hr">headroom $285.38</span>
+      </div>
+      <div class="mwrap">
+        <span class="mlaba">day 22 of 31 &middot; 69.7% of month &#9662;</span>
+        <div class="mbar"><i class="mfill"></i></div>
+        <i class="tick tproj"></i><i class="tick tmon"></i>
+        <span class="mlabb">&#9652; projected close $307.86 <i>&mdash; clears the cap by $192.14</i></span>
+      </div>
+      <div class="frow2">today <b>$6.44</b> so far &middot; booked rest &asymp; <b>$3.10</b> &middot; day lands &asymp; <b>$9.54</b> &middot; <b>10/16</b> cycles landed &middot; 0 missed &middot; 5 late marks, worst <b>+4m</b> &middot; 5 slots cancelled (empty queue) &middot; c11 fires <b>15:00</b></div>
+    </div>
+  </div>
+
+  <!-- drill law -->
+  <div class="law"><b>Drill law</b>Every figure on this page is a door: papers open to abstracts, candidates to sources, verdicts to transcripts, runs to logs, dollars to metered calls &mdash; one level down, always. Dotted means it opens.</div>
+
+  <!-- lower panels -->
+  <div class="cols">
+
+    <div class="panel">
+      <div class="phead"><span class="lbl">Scheduler</span><span class="pm">c11 in 23m</span></div>
+      <div class="kv"><span class="k">Cadence</span><span class="v">16 cycles/day &middot; every 90m &middot; 00:00&rarr;22:30</span></div>
+      <div class="kv"><span class="k">Offsets</span><span class="v">R +0 &middot; S +12 &middot; C +24 &middot; SIM +34 &middot; ARC +52</span></div>
+      <div class="kv"><span class="k">Courier</span><span class="v">07:00 brief &middot; 19:00 digest</span></div>
+      <div class="kv"><span class="k">Guards</span><span class="v">3 retries &middot; 120s timeout &middot; 75m stop &middot; cap hard</span></div>
+      <div class="kv"><span class="k">Next</span><span class="v">c11 15:00 &middot; c12 16:30 &middot; c13 18:00+digest</span></div>
+      <div class="kv"><span class="k">Queue</span><span class="v">0 waiting &middot; 214 papers held for c11</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="phead"><span class="lbl">Data stores</span><span class="pm">41.2 GB &middot; snap ok 12:04</span></div>
+      <div class="dt">
+        <span class="hd">store</span><span class="hd">rows</span><span class="hd">today</span><span class="hd">size</span><span class="hd">wrote</span>
+        <span class="n">papers</span><span class="r dr">48,213</span><span class="g">+1,284</span><span class="z">18.4 GB</span><span class="w">13:41</span>
+        <span class="n">candidates</span><span class="r">2,391</span><span class="g">+41</span><span class="z">0.2 GB</span><span class="w">13:47</span>
+        <span class="n">verdicts</span><span class="r">8,914</span><span class="g">+41</span><span class="z">0.6 GB</span><span class="w">13:58</span>
+        <span class="n">trial runs</span><span class="r">1,942,308</span><span class="g">+12,732</span><span class="z">19.6 GB</span><span class="w">14:33</span>
+        <span class="n">dossiers</span><span class="r">3,842</span><span class="g">+5</span><span class="z">2.1 GB</span><span class="w">14:26</span>
+      </div>
+      <div class="bkline">backups &mdash; snapshot <b>12:00</b>, verified <b>12:04</b> &middot; next <b>18:00</b> &middot; 30 kept</div>
+    </div>
+
+    <div class="panel">
+      <div class="phead"><span class="lbl">Incidents</span><span class="pm">1 watching &middot; 2 resolved</span></div>
+      <div class="inc">
+        <div class="l1"><span class="t">11:38</span><span class="stn">Reader</span><span class="st watch">&#9679; watching</span></div>
+        <div class="what">AgriXiv feed answered 429 (rate limit); 214 papers held for cycle 11.</div>
+        <div class="act"><i>action</i>15-min backoff set, key rotated, retry booked into c11 15:00.</div>
+      </div>
+      <div class="inc">
+        <div class="l1"><span class="t">09:03</span><span class="stn">Council</span><span class="st">resolved 09:28</span></div>
+        <div class="what">Judge model timed out twice on <span class="dr">CAND-2214</span>; c07 verdicts +4m late.</div>
+        <div class="act"><i>action</i>Retried inside the 3-retry cap; verdict landed on retry, no queue spill.</div>
+      </div>
+      <div class="inc">
+        <div class="l1"><span class="t">THU 21:41</span><span class="stn">Archivist</span><span class="st">resolved 21:44</span></div>
+        <div class="what">Two writers hit dossier <span class="dr">D-3801</span> at once; checksum caught the lost write.</div>
+        <div class="act"><i>action</i>Re-queued and re-written clean 21:44; writer lock added in c15.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- control -->
+  <div class="ctrl">
+    <button class="btn" type="button">Suspend generation</button>
+    <div class="cons"><b>What it does:</b> halts Scout, Council and Simulator at the 15:00 boundary &mdash; running work finishes and is filed, nothing is cut off mid-thought. Reader keeps reading, Archivist keeps filing, Courier still sends the 19:00 digest. Spend stops at the halt. Resume starts cycle 12 whole; nothing is deleted.</div>
+    <div class="when">next boundary <b>15:00</b><br>takes effect in <b>23m</b></div>
+  </div>
+
+  <!-- footer -->
+  <div class="ftr">
+    <span class="lbl">Palingenesis &middot; Engine Room &middot; all times local</span>
+    <span class="motto">New growth from old ground.</span>
+    <span class="fm">engine v0.9.4 &middot; up 41 days &middot; rendered 14:37:12</span>
+  </div>
+
+</div>
+</body>
+</html>
