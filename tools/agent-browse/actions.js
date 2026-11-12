@@ -1511,7 +1511,7 @@ async function handleBringToFront(command, browser) {
 }
 async function handleWaitForFunction(command, browser) {
     const page = browser.getPage();
-    await page.waitForFunction(command.expression, { timeout: command.timeout });
+    await page.waitForFunction(command.expression, undefined, { timeout: command.timeout });
     return successResponse(command.id, { waited: true });
 }
 async function handleScrollIntoView(command, browser) {
