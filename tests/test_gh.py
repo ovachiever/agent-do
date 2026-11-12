@@ -95,11 +95,44 @@ def test_merge_gate() -> None:
     require(any(b["gate"] == "mergeable" for b in gate["blocks"]),
             f"dirty merge state should block: {gate}")
 
-    # No approval — blocked.
+    # Changes requested — blocked.
     patch(detail={**clean_detail, "review_decision": "CHANGES_REQUESTED"}, checks=[], threads=[])
     gate = gh.merge_gate(ref)
     require(any(b["gate"] == "approval" for b in gate["blocks"]),
-            f"missing approval should block: {gate}")
+            f"changes requested should block: {gate}")
+
+    # Branch requires a review and none is recorded — blocked.
+    patch(detail={**clean_detail, "review_decision": "REVIEW_REQUIRED"}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(any(b["gate"] == "approval" for b in gate["blocks"]),
+            f"required-but-missing review should block: {gate}")
+
+    # Branch requires no review (GitHub reports reviewDecision null) — the
+    # repo's own policy allows the merge; the gate notes it, never blocks.
+    for empty in (None, ""):
+        patch(detail={**clean_detail, "review_decision": empty}, checks=[], threads=[])
+        gate = gh.merge_gate(ref)
+        require(gate["allowed"], f"no-review-required repo should not block (decision={empty!r}): {gate}")
+        require(any(n["gate"] == "approval" for n in gate["notes"]),
+                f"unreviewed merge should be noted: {gate}")
+
+    # No decision published, but a latest review requests changes — blocked.
+    patch(detail={**clean_detail, "review_decision": None,
+                  "latest_reviews": [{"author": "grok", "state": "CHANGES_REQUESTED"}]}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(any(b["gate"] == "approval" and "grok" in b["reason"] for b in gate["blocks"]),
+            f"a changes request must block even when the decision is null: {gate}")
+
+    # No decision, an approving review — allowed, and the note names the approver.
+    patch(detail={**clean_detail, "review_decision": "",
+                  "latest_reviews": [{"author": "grok", "state": "APPROVED"}]}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(gate["allowed"] and "approved by grok" in gate["notes"][0]["reason"], f"approver note: {gate}")
+
+    # Anything the gate does not recognise blocks (fail closed).
+    patch(detail={**clean_detail, "review_decision": "SOMETHING_NEW"}, checks=[], threads=[])
+    gate = gh.merge_gate(ref)
+    require(not gate["allowed"], f"unknown decision must block: {gate}")
 
     # Critical-risk paths — warning, not block.
     patch(detail={**clean_detail, "files": [{"path": "apps/web/middleware.ts"}]},
@@ -794,13 +827,19 @@ else:
         require(review_payload["risk"]["tier"] == "critical",
                 f"PR 9 touches a .sql migration — risk should be critical: {review_payload['risk']}")
 
-        # PR 9 has reviewDecision="" — merge must block on the approval gate.
+        # PR 9 has reviewDecision="" (its branch requires no review) and
+        # touches a critical-tier path — merge must stop on the unconfirmed
+        # risk warning, and the missing review is a note, not a block.
         merge_blocked = run([str(AGENT_DO), "gh", "merge", "9", "--json"], cwd=ROOT, env=env)
         require(merge_blocked.returncode == 2,
-                f"merge of unapproved PR should exit 2: rc={merge_blocked.returncode}")
+                f"merge with unconfirmed critical risk should exit 2: rc={merge_blocked.returncode}")
         gate_payload = json.loads(merge_blocked.stdout)
-        require(any(b["gate"] == "approval" for b in gate_payload["blocks"]),
-                f"merge gate should block on approval: {gate_payload}")
+        require(any(w["gate"] == "risk" for w in gate_payload["warnings"]),
+                f"merge gate should hold on the risk warning: {gate_payload}")
+        require(not any(b["gate"] == "approval" for b in gate_payload["blocks"]),
+                f"no-review-required PR must not block on approval: {gate_payload}")
+        require(any(n["gate"] == "approval" for n in gate_payload.get("notes", [])),
+                f"the unreviewed state should be noted: {gate_payload}")
 
         # --force bypasses the block and reaches the gh merge call.
         merge_forced = run([str(AGENT_DO), "gh", "merge", "9", "--force"], cwd=ROOT, env=env)
