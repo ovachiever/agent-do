@@ -5565,6 +5565,7 @@ tools:
     - notification settings and per-service overrides
     - audit log retrieval and maintenance windows
     - structured logs and metrics with filters
+    - bounded, redacted deployment evidence for incident tracing
     - cross-account snapshot
     commands:
       owners: List workspaces (for --owner resolution)
@@ -5572,6 +5573,7 @@ tools:
       audit: Audit log entries
       services: List services
       show: Service details
+      trace: Read-only service, deploy, event, and bounded-log incident evidence
       create: 'Create service: create <web|worker|static|private|cron> <name> [opts]'
       update: Update service settings
       delete: Delete a service (--yes required)
@@ -5644,6 +5646,8 @@ tools:
       command: agent-render show my-api
     - intent: view render service logs
       command: agent-render logs my-api
+    - intent: collect render evidence for an incident
+      command: agent-render trace my-api --since 30m --json
     - intent: set env var on render
       command: agent-render env-set my-api DATABASE_URL postgres://...
     - intent: list render databases
@@ -5667,6 +5671,7 @@ tools:
       recommended_entrypoints:
       - agent-do render services
       - agent-do render logs <service>
+      - agent-do render trace <service> --since 30m --json
       - agent-do render deploy <service>
       default_command: services
       raw_cli_equivalents:
@@ -5692,6 +5697,7 @@ tools:
       - whoami
       - services
       - show
+      - trace
       - events
       - instances
       - autoscaling show

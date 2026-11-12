@@ -16,7 +16,8 @@ WORKSPACE
 
 SERVICES (web, worker, static, private, cron)
   services / ls                 List all services
-  show <svc>                    Detailed service info
+  show <svc> [--json]           Detailed service info (incl. rootDir, buildFilter, autoDeployTrigger)
+  trace <svc> [opts]            Read-only, bounded incident evidence as JSON
   create <type> <name> [opts]   Create a new service (`create --help` for opts)
   update <svc> [opts]           Update service settings
   delete <svc> --yes            Delete a service (destructive)
@@ -29,7 +30,7 @@ SERVICES (web, worker, static, private, cron)
 
 DEPLOYS
   deploy <svc> [--commit SHA]   Trigger deploy
-  deploys <svc>                 List recent deploys
+  deploys <svc> [--json]        List recent deploys (full commit ids)
   deploy show <svc> <deploy>    Deploy details
   deploy cancel <svc> <deploy>  Cancel in-progress deploy
   rollback <svc> <deploy>       Roll back to a prior deploy
@@ -135,6 +136,7 @@ Examples:
     --event deploy_ended --event deploy_started
   agent-render blueprint validate render.yaml
   agent-render audit --limit 50
+  agent-render trace my-api --since 30m --max-log-bytes 65536
 EOF
 }
 
@@ -201,6 +203,36 @@ render_request_checked() {
     if [[ -n "$body" ]]; then
         printf '%s\n' "$body" >&2
     fi
+    return 1
+}
+
+# Trace collection keeps provider responses out of argv and shell variables.
+# Callers own the output file and may pass it straight to a normalizer.
+render_request_checked_file() {
+    local method="$1"
+    local endpoint="$2"
+    local output_file="$3"
+    local data="${4:-}"
+    local max_file_bytes="${5:-}"
+    local token="${RENDER_API_KEY:-}"
+
+    if [[ -z "$token" ]]; then
+        echo "Error: RENDER_API_KEY not set" >&2
+        return 1
+    fi
+
+    local args=(-sS --max-time 30 --connect-timeout 10 -o "$output_file" -w "%{http_code}" -X "$method" "${RENDER_API}${endpoint}" \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json")
+    [[ -n "$data" ]] && args+=(-d "$data")
+    [[ -n "$max_file_bytes" ]] && args+=(--max-filesize "$max_file_bytes")
+    local status
+    status=$(curl "${args[@]}")
+    if [[ "$status" =~ ^2 ]]; then
+        return 0
+    fi
+    echo "Error: Render API ${method} ${endpoint} returned HTTP ${status}" >&2
     return 1
 }
 
@@ -391,7 +423,7 @@ for item in items:
 cmd_show() {
     local name_or_id="${1:-}"
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render show <service>"
+        echo "Usage: agent-render show <service> [--json]"
         return 1
     fi
 
@@ -399,19 +431,32 @@ cmd_show() {
     sid=$(resolve_service "$name_or_id") || return 1
 
     local result
-    result=$(render_request GET "/services/$sid")
+    result=$(render_request GET "/services/$sid") || return 1
 
+    if [[ "${RENDER_JSON:-0}" == "1" ]]; then printf '%s\n' "$result"; return 0; fi
+
+    # URL before Repo so a first-URL grep finds the service, not GitHub.
+    # rootDir / buildFilter / autoDeployTrigger decide whether a push deploys
+    # at all, so they are always shown.
     echo "$result" | python3 -c "
 import sys, json
 svc = json.load(sys.stdin)
+sd = svc.get('serviceDetails', {}) or {}
+bf = svc.get('buildFilter') or {}
+paths = ', '.join(bf.get('paths') or []) or '(all)'
+ignored = ', '.join(bf.get('ignoredPaths') or []) or '(none)'
 print(f\"ID:       {svc.get('id', '')}\")
 print(f\"Name:     {svc.get('name', '')}\")
 print(f\"Type:     {svc.get('type', '')}\")
+print(f\"URL:      {sd.get('url', '')}\")
 print(f\"Repo:     {svc.get('repo', '')}\")
 print(f\"Branch:   {svc.get('branch', '')}\")
-print(f\"Region:   {svc.get('serviceDetails', {}).get('region', '')}\")
-print(f\"Plan:     {svc.get('serviceDetails', {}).get('plan', '')}\")
-print(f\"URL:      {svc.get('serviceDetails', {}).get('url', '')}\")
+print(f\"Root dir: {svc.get('rootDir', '') or '.'}\")
+print(f\"Auto-deploy: {svc.get('autoDeploy', '')} (trigger: {svc.get('autoDeployTrigger', '')})\")
+print(f\"Build filter paths:   {paths}\")
+print(f\"Build filter ignored: {ignored}\")
+print(f\"Region:   {sd.get('region', '')}\")
+print(f\"Plan:     {sd.get('plan', '')}\")
 print(f\"Suspended: {svc.get('suspended', '')}\")
 print(f\"Created:  {svc.get('createdAt', '')}\")
 print(f\"Updated:  {svc.get('updatedAt', '')}\")
@@ -458,7 +503,7 @@ print(f\"Created:   {d.get('createdAt', '')}\")
 cmd_deploys() {
     local name_or_id="${1:-}"
     if [[ -z "$name_or_id" ]]; then
-        echo "Usage: agent-render deploys <service>"
+        echo "Usage: agent-render deploys <service> [--json]"
         return 1
     fi
 
@@ -466,8 +511,11 @@ cmd_deploys() {
     sid=$(resolve_service "$name_or_id") || return 1
 
     local result
-    result=$(render_request GET "/services/$sid/deploys?limit=10")
+    result=$(render_request GET "/services/$sid/deploys?limit=10") || return 1
 
+    if [[ "${RENDER_JSON:-0}" == "1" ]]; then printf '%s\n' "$result"; return 0; fi
+
+    # Full commit id: an 8-char prefix cannot prove live-commit equality.
     echo "$result" | python3 -c "
 import sys, json
 items = json.load(sys.stdin)
@@ -476,12 +524,43 @@ if not items:
     sys.exit(0)
 for item in items:
     d = item.get('deploy', item)
-    commit = d.get('commit', {}).get('id', '?')[:8] if d.get('commit') else '?'
+    commit = (d.get('commit') or {}).get('id') or '?'
     status = d.get('status', '?')
     created = d.get('createdAt', '?')
     did = d.get('id', '')
     print(f'{did}  {status}  commit:{commit}  {created}')
 "
+}
+
+cmd_trace() {
+    local name_or_id="" since="30m" max_bytes="65536"
+    trace_error() {
+        python3 -c 'import json, sys; print(json.dumps({"success": False, "provider": "render", "error": sys.argv[1], "code": int(sys.argv[2])}))' "$1" "${2:-1}"
+    }
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) since="${2:-}"; shift 2 ;;
+            --max-log-bytes) max_bytes="${2:-}"; shift 2 ;;
+            --json) shift ;;
+            --*) trace_error "Unknown trace option: $1" 2; return 2 ;;
+            *) [[ -z "$name_or_id" ]] || { trace_error "Unexpected argument: $1" 2; return 2; }; name_or_id="$1"; shift ;;
+        esac
+    done
+    [[ -n "$name_or_id" ]] || { trace_error "Usage: agent-render trace <service> [--since 30m] [--max-log-bytes 65536] --json" 2; return 2; }
+    [[ "$since" =~ ^[1-9][0-9]*[mhd]$ ]] || { trace_error "--since must be a positive duration such as 30m or 2h" 2; return 2; }
+    [[ "$max_bytes" =~ ^[1-9][0-9]*$ && "$max_bytes" -le 262144 ]] || { trace_error "--max-log-bytes must be between 1 and 262144" 2; return 2; }
+    local sid owner_id start_time tool_root trace_dir error_message
+    trace_dir=$(mktemp -d) || { trace_error "Unable to create temporary trace storage"; return 1; }
+    trap 'rm -rf "$trace_dir"' RETURN
+    if ! sid=$(resolve_service "$name_or_id" 2>&1); then trace_error "$sid"; return 1; fi
+    if ! render_request_checked_file GET "/services/$sid" "$trace_dir/service" 2>"$trace_dir/error"; then error_message=$(<"$trace_dir/error"); trace_error "${error_message:-Render service could not be read}"; return 1; fi
+    if ! owner_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("ownerId", ""))' "$trace_dir/service" 2>"$trace_dir/error"); then error_message=$(<"$trace_dir/error"); trace_error "${error_message:-Render service response was invalid}"; return 1; fi
+    [[ -n "$owner_id" ]] || { trace_error "Render service did not include ownerId"; return 1; }
+    if ! render_request_checked_file GET "/services/$sid/deploys?limit=11" "$trace_dir/deploys" 2>"$trace_dir/error" || ! render_request_checked_file GET "/services/$sid/events?limit=101" "$trace_dir/events" 2>"$trace_dir/error"; then error_message=$(<"$trace_dir/error"); trace_error "${error_message:-Render deployment evidence could not be read}"; return 1; fi
+    if ! start_time=$(normalize_log_time "$since" 2>"$trace_dir/error"); then error_message=$(<"$trace_dir/error"); trace_error "${error_message:-invalid --since value}" 2; return 2; fi
+    if ! render_request_checked_file GET "/logs?ownerId=$owner_id&resource=$sid&limit=100&direction=backward&startTime=$start_time" "$trace_dir/logs" "" 1048576 2>"$trace_dir/error"; then error_message=$(<"$trace_dir/error"); trace_error "${error_message:-Render logs could not be read}"; return 1; fi
+    tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    python3 "$tool_root/lib/render_trace.py" --service-file "$trace_dir/service" --deploys-file "$trace_dir/deploys" --events-file "$trace_dir/events" --logs-file "$trace_dir/logs" --since "$since" --max-bytes "$max_bytes"
 }
 
 cmd_logs() {
@@ -3184,6 +3263,7 @@ case "${1:-help}" in
     # --- services ---
     services|ls|list) cmd_services ;;
     show|get) shift; cmd_show "$@" ;;
+    trace) shift; cmd_trace "$@" ;;
     create) shift; cmd_create "$@" ;;
     update|patch) shift; cmd_update "$@" ;;
     delete|destroy|rm) shift; cmd_delete "$@" ;;
