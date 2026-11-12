@@ -175,6 +175,7 @@ check_cmd "psql tests" python3 "$SCRIPT_DIR/tests/test_psql.py"
 check_cmd "vector tests" python3 "$SCRIPT_DIR/tests/test_vector.py"
 check_output "vector --help" "today" "$AGENT_DO" vector --help
 check_cmd "gh tests" python3 "$SCRIPT_DIR/tests/test_gh.py"
+check_cmd "gh commit correlation tests" python3 "$SCRIPT_DIR/tests/test_gh_commit.py"
 check_cmd "coderabbit tests" python3 "$SCRIPT_DIR/tests/test_coderabbit.py"
 check_cmd "ci triage tests" python3 "$SCRIPT_DIR/tests/test_ci_triage.py"
 check_cmd "git guardrail tests" python3 "$SCRIPT_DIR/tests/test_git_guardrails.py"
