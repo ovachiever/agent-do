@@ -210,6 +210,10 @@ def configure_fake_security(tmpdir: Path, dump_text: str, dump_exit: int = 0) ->
                     sys.stdout.write("macsecret\\n")
                     raise SystemExit(0)
                 raise SystemExit(44)
+            if len(sys.argv) >= 2 and sys.argv[1] == "find-generic-password":
+                # Attribute-only probe (no -w): existence without revealing the value.
+                account = sys.argv[sys.argv.index("-a") + 1]
+                raise SystemExit(0 if account == "MAC_SECRET" else 44)
             print("unexpected security argv:", sys.argv, file=sys.stderr)
             raise SystemExit(2)
             """
