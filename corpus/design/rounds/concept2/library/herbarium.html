@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Library</title>
+<style>
+  :root{
+    --ground:#1B1917;
+    --sheet:#242019;      /* the held sheet */
+    --leaf:#1F1D1A;       /* sheets ranked behind */
+    --slip:#1E1C18;       /* annotation slips */
+    --label-bg:#282319;   /* determination label paper */
+    --under1:#16140F;     /* solid sheet-edges beneath the held sheet */
+    --under2:#121009;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --rule:rgba(231,227,218,0.14);
+    --rule-strong:rgba(231,227,218,0.32);
+    --sage:hsl(158,30%,55%);
+    --sage-dim:hsl(158,30%,42%);
+    --serif:Georgia,'Times New Roman',Times,serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{color-scheme:dark}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:14px;
+    line-height:1.5;
+  }
+  ::selection{background:var(--sage);color:var(--ground)}
+  a{color:inherit}
+  a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--sage);outline-offset:2px}
+
+  .wrap{max-width:1376px;margin:0 auto;padding:0 32px}
+
+  /* ---------- shared label voice ---------- */
+  .lbl{
+    font-family:var(--sans);
+    font-size:12px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.14em;
+    color:var(--faint);
+  }
+  .lbl strong{color:var(--muted);font-weight:600}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .num{font-family:var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+
+  /* ---------- top nav ---------- */
+  nav{border-bottom:1px solid var(--rule)}
+  .nav-in{display:flex;align-items:center;gap:28px;height:60px}
+  .wordmark{font-family:var(--serif);font-size:19px;letter-spacing:.01em;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:9px;padding:6px 0}
+  .wordmark .fleur{color:var(--sage);font-size:16px}
+  .navlinks{display:flex;gap:4px;height:100%}
+  .navlinks a{
+    display:inline-flex;align-items:center;
+    padding:0 12px;height:100%;
+    font-size:14px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px;
+  }
+  .navlinks a:hover{color:var(--ink)}
+  .navlinks a.active{color:var(--ink);border-bottom-color:var(--sage)}
+  .trace{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .trace input{
+    width:264px;height:34px;padding:0 12px;
+    background:var(--leaf);border:1px solid var(--rule-strong);
+    color:var(--ink);font-family:var(--sans);font-size:13px;
+  }
+  .trace input::placeholder{color:var(--faint);font-size:13px}
+  .btn-ghost{
+    height:34px;padding:0 16px;cursor:pointer;
+    background:none;border:1px solid var(--sage);color:var(--sage);
+    font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.02em;
+  }
+  .btn-ghost:hover{background:var(--sage);color:var(--ground)}
+
+  /* ---------- overnight ledger strip ---------- */
+  .ledger{border-bottom:1px solid var(--rule)}
+  .ledger-in{display:flex;align-items:baseline;gap:16px;padding:13px 0}
+  .ledger p{font-size:13.5px;color:var(--muted)}
+  .ledger p b{color:var(--ink);font-weight:600}
+  .ledger .when{margin-left:auto;font-size:12px;color:var(--faint);white-space:nowrap}
+
+  /* ---------- main composition ---------- */
+  main{display:grid;grid-template-columns:348px minmax(0,1fr);gap:44px;padding:30px 0 8px}
+
+  /* ----- left: the collection stack ----- */
+  .coll-head{margin-bottom:16px}
+  .coll-head .lbl{display:block;margin-bottom:10px}
+  .coll-head p{font-size:13px;color:var(--muted);margin-top:4px}
+  .coll-head p b{color:var(--ink);font-weight:600}
+
+  .stack{display:block}
+  .leaf{
+    display:block;position:relative;text-decoration:none;
+    background:var(--leaf);border:1px solid var(--rule);
+    padding:11px 14px 26px;margin-bottom:-14px;
+  }
+  .leaf:hover{z-index:30 !important;border-color:var(--rule-strong);background:#242019}
+  .stack .leaf:nth-child(1){z-index:9}
+  .stack .leaf:nth-child(2){z-index:8;margin-left:2px}
+  .stack .leaf:nth-child(3){z-index:7;margin-left:4px}
+  .stack .leaf:nth-child(4){z-index:6;margin-left:6px}
+  .stack .leaf:nth-child(5){z-index:5;margin-left:8px}
+  .stack .leaf:nth-child(6){z-index:4;margin-left:10px}
+  .stack .leaf:nth-child(7){z-index:3;margin-left:12px}
+  .stack .leaf:nth-child(8){z-index:2;margin-left:14px;margin-bottom:0;padding-bottom:14px}
+  .leaf-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+  .leaf-id{font-family:var(--mono);font-size:12px;color:var(--faint);white-space:nowrap}
+  .leaf-title{
+    font-family:var(--serif);font-size:14.5px;line-height:1.35;color:var(--muted);
+    margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .leaf:hover .leaf-title{color:var(--ink)}
+  .leaf-note{font-size:12px;color:var(--faint);white-space:nowrap}
+  .leaf-note b{color:var(--muted);font-weight:600}
+
+  .leaf.held{
+    background:var(--sheet);
+    border-left:3px solid var(--sage);
+    padding:12px 14px 24px 13px;
+    z-index:10 !important;
+  }
+  .leaf.held .tag-hand{
+    font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--sage);
+  }
+  .leaf.held .leaf-title{
+    white-space:normal;color:var(--ink);font-size:15px;margin-top:6px;
+  }
+  .leaf.held .leaf-meta{font-size:12.5px;color:var(--muted);margin-top:6px}
+
+  .stack-tail{margin-top:18px}
+  .stack-tail a{
+    display:inline-block;padding:5px 0;
+    font-size:13px;color:var(--sage);text-decoration:underline;text-underline-offset:3px;
+  }
+  .stack-tail a:hover{color:var(--ink)}
+  .rank-note{margin-top:10px;font-size:12px;color:var(--faint);line-height:1.55}
+
+  /* ----- right: the held sheet ----- */
+  .sheet{
+    background:var(--sheet);
+    border:1px solid var(--rule-strong);
+    box-shadow:10px 12px 0 0 var(--under1), 20px 24px 0 0 var(--under2);
+    padding:26px 32px 30px;
+  }
+  .sheet-head{
+    display:flex;justify-content:space-between;align-items:flex-start;gap:24px;
+    border-bottom:1px solid var(--rule);padding-bottom:16px;margin-bottom:24px;
+  }
+  .stamp{
+    font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--muted);
+    border:1px solid var(--rule-strong);padding:8px 12px;white-space:nowrap;
+  }
+  .sheet-head-meta{text-align:right}
+  .sheet-head-meta .lbl{display:block}
+  .sheet-head-meta p{font-size:12.5px;color:var(--faint);margin-top:5px}
+
+  .sheet-body{display:grid;grid-template-columns:minmax(0,1fr) 312px;column-gap:44px}
+
+  /* specimen (dominant) */
+  .specimen .eyebrow{display:flex;justify-content:space-between;gap:16px;align-items:baseline}
+  .specimen h1{
+    font-family:var(--serif);font-weight:400;font-size:31px;line-height:1.18;
+    letter-spacing:-0.01em;color:var(--ink);margin:12px 0 12px;
+  }
+  .byline{font-size:14px;color:var(--muted);line-height:1.6}
+  .byline .mono{font-size:13px;color:var(--muted)}
+  .byline i{font-family:var(--serif)}
+
+  .claims{margin-top:24px;border-top:1px solid var(--rule);padding-top:16px}
+  .claims-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+  .claims-head .mono-note{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.04em}
+  .claims-sub{font-size:13px;color:var(--faint);margin-top:6px}
+
+  .ev{padding:16px 0;border-bottom:1px solid var(--rule)}
+  .ev:last-of-type{border-bottom:0;padding-bottom:6px}
+  .ev-id{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.04em;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
+  .tag-v{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.12em;color:var(--sage)}
+  .tag-q{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.12em;color:var(--faint)}
+  .tag-d{font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--ink)}
+  .ev-claim{font-family:var(--serif);font-size:17px;line-height:1.5;color:var(--ink);margin-top:8px;max-width:62ch}
+  .ev-meta{font-size:13px;color:var(--muted);margin-top:7px}
+  .ev-meta .num{font-size:12.5px}
+  .ev-links{font-size:13px;color:var(--faint);margin-top:7px;display:flex;gap:18px;flex-wrap:wrap;align-items:baseline}
+  .ev-links a{
+    display:inline-block;padding:4px 0;color:var(--sage);
+    text-decoration:underline;text-underline-offset:3px;
+  }
+  .ev-links a:hover{color:var(--ink)}
+  .ev-links .plain{padding:4px 0}
+
+  .fieldnote{margin-top:14px;border-top:1px solid var(--rule);padding-top:14px}
+  .fieldnote p{font-size:13.5px;color:var(--muted);line-height:1.6;margin-top:7px;max-width:70ch}
+
+  /* margin rail: annotations + determination label */
+  .rail{display:flex;flex-direction:column;gap:12px}
+  .rail > .lbl{margin-bottom:2px}
+  .slip{background:var(--slip);border:1px solid var(--rule);padding:11px 13px}
+  .slip-head{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.04em;display:flex;justify-content:space-between;gap:10px}
+  .slip p{font-family:var(--serif);font-size:14px;line-height:1.5;color:var(--muted);margin-top:6px}
+  .slip p a{color:var(--sage);text-decoration:underline;text-underline-offset:3px;display:inline-block;padding:2px 0}
+  .slip p a:hover{color:var(--ink)}
+  .slip p b{color:var(--ink);font-weight:600}
+  .slip.divergence{border-left:2px solid var(--rule-strong)}
+  .slip.divergence .slip-head span:last-child{color:var(--ink);font-weight:700}
+  .slip.ghost{background:none;border:1px dashed rgba(231,227,218,0.2)}
+  .slip.ghost p{font-style:italic;color:var(--faint);font-size:13px;margin-top:0}
+
+  .det{
+    margin-top:auto;position:relative;
+    background:var(--label-bg);border:1px solid rgba(231,227,218,0.4);
+    padding:14px 15px 12px;
+  }
+  .det::after{content:"";position:absolute;inset:3px;border:1px solid rgba(231,227,218,0.16);pointer-events:none}
+  .det-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--rule-strong);padding-bottom:9px}
+  .det-head .lbl{color:var(--muted)}
+  .det-head .rev{font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .det dl{margin-top:2px}
+  .det .row{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--rule)}
+  .det .row:last-child{border-bottom:0}
+  .det dt{flex:0 0 78px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);padding-top:1px}
+  .det dd{font-size:13px;color:var(--muted);line-height:1.5}
+  .det dd b{color:var(--ink);font-weight:600}
+  .det dd .mono{font-size:12.5px}
+  .det dd .held-tag{color:var(--sage);font-weight:600;letter-spacing:.08em;font-size:12px}
+  .det-foot{margin-top:9px;font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.03em}
+
+  /* ---------- lower cases: signals + press ---------- */
+  .cases{display:grid;grid-template-columns:1fr 1fr;gap:44px;padding:40px 0 8px}
+  .case > .lbl{display:block}
+  .case-sub{font-size:13px;color:var(--faint);margin:7px 0 4px;line-height:1.55}
+
+  .sig{display:flex;gap:16px;align-items:baseline;border-top:1px solid var(--rule);padding:13px 0}
+  .sig:first-of-type{border-top:1px solid var(--rule)}
+  .sig-id{flex:0 0 86px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .sig-body{flex:1;min-width:0}
+  .sig-name{font-size:14px;font-weight:600;color:var(--ink)}
+  .sig-name span{font-weight:400;color:var(--muted)}
+  .sig-prov{font-size:12.5px;color:var(--faint);margin-top:3px;line-height:1.5}
+  .sig-val{text-align:right;white-space:nowrap}
+  .sig-val .v{font-family:var(--mono);font-size:16px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .sig-val .d{display:block;font-size:12.5px;color:var(--muted);margin-top:3px}
+  .case-tail{margin-top:10px}
+  .case-tail a{display:inline-block;padding:5px 0;font-size:13px;color:var(--sage);text-decoration:underline;text-underline-offset:3px}
+  .case-tail a:hover{color:var(--ink)}
+
+  .sweep{border-top:1px solid var(--rule);padding:14px 0}
+  .sweep-row{display:flex;justify-content:space-between;gap:16px;align-items:baseline}
+  .sweep-name{font-family:var(--serif);font-size:16px;color:var(--ink)}
+  .sweep-name .mono{font-size:12.5px;color:var(--faint);margin-right:8px}
+  .st{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;white-space:nowrap}
+  .st-pressing{color:var(--sage)}
+  .st-collecting{color:var(--muted)}
+  .st-queued{color:var(--faint)}
+  .st-filed{color:var(--faint)}
+  .sweep-scope{font-size:13px;color:var(--muted);margin-top:5px;line-height:1.55}
+  .sweep-ledger{font-family:var(--mono);font-size:12.5px;color:var(--faint);margin-top:6px;font-variant-numeric:tabular-nums}
+  .sweep-ledger b{color:var(--muted);font-weight:600}
+
+  .commission{border-top:1px solid var(--rule-strong);margin-top:16px;padding-top:16px}
+  .commission form{display:flex;gap:10px;margin-top:12px}
+  .commission input{
+    flex:1;height:38px;padding:0 13px;
+    background:var(--leaf);border:1px solid var(--rule-strong);
+    color:var(--ink);font-family:var(--sans);font-size:13.5px;
+  }
+  .commission input::placeholder{color:var(--faint);font-size:13.5px}
+  .btn-solid{
+    height:38px;padding:0 18px;cursor:pointer;white-space:nowrap;
+    background:var(--sage);border:1px solid var(--sage);color:var(--ground);
+    font-family:var(--sans);font-size:13.5px;font-weight:600;letter-spacing:.02em;
+  }
+  .btn-solid:hover{background:var(--sage-dim);border-color:var(--sage-dim);color:var(--ink)}
+  .commission .micro{font-size:12px;color:var(--faint);margin-top:9px}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--rule);margin-top:40px}
+  .foot-in{display:flex;justify-content:space-between;align-items:baseline;gap:24px;padding:18px 0 26px}
+  .foot-in .sig-line{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--faint)}
+  .foot-in .motto{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-in">
+    <a class="wordmark" href="#"><span class="fleur">&#10087;</span>Palingenesis</a>
+    <div class="navlinks">
+      <a href="#">Today</a>
+      <a href="#">Pipeline</a>
+      <a href="#" class="active">Library</a>
+      <a href="#">Engine Room</a>
+    </div>
+    <form class="trace" aria-label="Trace a claim to its source">
+      <input type="text" placeholder="Trace a claim — paste text or an EV-id">
+      <button type="submit" class="btn-ghost">Trace</button>
+    </form>
+  </div>
+</nav>
+
+<div class="ledger">
+  <div class="wrap ledger-in">
+    <span class="lbl">Overnight</span>
+    <p>Sweep SW-0142 &lsquo;Second Harvest&rsquo; came off the press: <b>43 sheets</b> on manure valorization, filed <span class="num">02:14&ndash;05:47</span> &middot; <span class="num">$31.07</span>, press ledger &middot; 4 signals refreshed at 06:00 &middot; 1 divergence flagged &rarr; queued as RS-013.</p>
+    <span class="when mono">SUN 24 AUG 2026 &middot; CATALOG AS OF 06:00</span>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <!-- ============ THE COLLECTION: one held, the rest ranked behind ============ -->
+  <aside>
+    <div class="coll-head">
+      <span class="lbl">The Collection</span>
+      <p><b class="num">4,182</b> sheets in the herbarium &mdash; catalog count, 24 Aug 06:00</p>
+      <p>Folder in hand: <b>Manure Valorization</b> &middot; <span class="num">143</span> sheets</p>
+    </div>
+
+    <div class="stack">
+      <a class="leaf held" href="#">
+        <div class="leaf-row">
+          <span class="tag-hand">In hand &mdash; sheet 01</span>
+          <span class="leaf-id">PPR-4117</span>
+        </div>
+        <div class="leaf-title">Phosphorus recovery from poultry litter leachate via struvite crystallization</div>
+        <div class="leaf-meta">Okafor &middot; Lindqvist &middot; Tran, 2026 &mdash; 4 claims &middot; cited by 2 dossiers &middot; 5 annotations</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">02 &middot; PPR-3892</span>
+          <span class="leaf-note"><b>diverges with 01</b></span>
+        </div>
+        <div class="leaf-title">Farm-scale struvite reactors on laying operations &mdash; Halvorsen &amp; Ude, 2025</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">03 &middot; PPR-4083</span>
+          <span class="leaf-note">5 claims</span>
+        </div>
+        <div class="leaf-title">Anaerobic co-digestion of layer manure and brewery spent grain &mdash; Meier, 2026</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">04 &middot; PPR-4102</span>
+          <span class="leaf-note">2 claims</span>
+        </div>
+        <div class="leaf-title">Vivianite formation in stored layer slurry &mdash; Sato &amp; Okonkwo, 2026</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">05 &middot; PPR-3511</span>
+          <span class="leaf-note">6 claims</span>
+        </div>
+        <div class="leaf-title">Life-cycle phosphorus flows in cage-free housing systems &mdash; Brandt, 2024</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">06 &middot; PPR-4121</span>
+          <span class="leaf-note">pressed overnight</span>
+        </div>
+        <div class="leaf-title">Ammonia-stripping membranes for manure liquor &mdash; Qin, 2026</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">07 &middot; PPR-4139</span>
+          <span class="leaf-note">pressed overnight</span>
+        </div>
+        <div class="leaf-title">Struvite granule slow-release performance in maize trials &mdash; Duarte, 2026</div>
+      </a>
+      <a class="leaf" href="#">
+        <div class="leaf-row">
+          <span class="leaf-id">08 &middot; PPR-2977</span>
+          <span class="leaf-note">3 claims</span>
+        </div>
+        <div class="leaf-title">Techno-economics of on-farm nutrient capture &mdash; Ellery, 2023</div>
+      </a>
+    </div>
+
+    <div class="stack-tail">
+      <a href="#">Open the catalog &mdash; 135 more sheets in this folder &rarr;</a>
+      <p class="rank-note">Ranked by citation pressure + recency &mdash; ranker &lsquo;Sexton&rsquo;, 24 Aug 06:00. Hold a sheet to bring it forward.</p>
+    </div>
+  </aside>
+
+  <!-- ============ THE HELD SHEET ============ -->
+  <section class="sheet" aria-label="Held specimen sheet PPR-4117">
+
+    <div class="sheet-head">
+      <span class="stamp">PALINGENESIS HERBARIUM &middot; ACC. PPR-4117</span>
+      <div class="sheet-head-meta">
+        <span class="lbl">Held sheet &mdash; opened 09:12, 24 Aug 2026</span>
+        <p>Sheet 01 of 143 in folder &lsquo;Manure Valorization&rsquo;</p>
+      </div>
+    </div>
+
+    <div class="sheet-body">
+
+      <!-- the specimen dominates -->
+      <article class="specimen">
+        <div class="eyebrow">
+          <span class="lbl"><strong>Specimen</strong> &mdash; scientific paper</span>
+          <span class="lbl">Filed 04 Aug 2026</span>
+        </div>
+        <h1>Phosphorus recovery from poultry litter leachate via struvite crystallization: pilot-scale yields and economics</h1>
+        <p class="byline">
+          C.&nbsp;Okafor &middot; M.&nbsp;Lindqvist &middot; H.&nbsp;Tran &mdash; <i>Waste Management</i> 189 (2026), pp.&nbsp;214&ndash;226 &middot;
+          DOI <span class="mono">10.1016/j.wasman.2026.03.114</span> &middot; publisher open access
+        </p>
+
+        <div class="claims">
+          <div class="claims-head">
+            <span class="lbl"><strong>Pressed claims</strong></span>
+            <span class="mono-note">4 EVIDENCE RECORDS &mdash; PRESS LEDGER</span>
+          </div>
+          <p class="claims-sub">What the machine took from this paper. Every claim in a dossier resolves to a record like these.</p>
+
+          <article class="ev">
+            <div class="ev-id">EV-4117-01 <span class="tag-v">Verified</span> <span class="tag-d">Divergence logged</span></div>
+            <p class="ev-claim">Struvite crystallization recovered <span class="num">83%</span> of dissolved phosphorus from litter leachate held at pH&nbsp;8.5.</p>
+            <p class="ev-meta">Table 3 &middot; <span class="num">n&nbsp;=&nbsp;12</span> pilot runs &middot; <span class="num">&plusmn;4.2%</span> &mdash; re-derived from full text by verifier &lsquo;Plumb&rsquo;, 05 Aug</p>
+            <p class="ev-links">
+              <a href="#">&rarr; DOS-0067 &lsquo;Litter-to-Struvite&rsquo; &middot; claim C2</a>
+              <span class="plain">EV-3892 reads <span class="num">61%</span> at farm scale &mdash; see annotation, 15 Aug</span>
+            </p>
+          </article>
+
+          <article class="ev">
+            <div class="ev-id">EV-4117-02 <span class="tag-v">Verified</span></div>
+            <p class="ev-claim">Reagent cost dominates the economics: magnesium chloride runs <span class="num">$412</span> per tonne of struvite, and break-even needs a fertilizer price at or above <span class="num">$580/t</span>.</p>
+            <p class="ev-meta">&sect;4.2, authors&rsquo; cost model, 2026 USD &mdash; verifier &lsquo;Plumb&rsquo;, 05 Aug</p>
+            <p class="ev-links">
+              <a href="#">&rarr; DOS-0067 &lsquo;Litter-to-Struvite&rsquo; &middot; claim C5</a>
+              <a href="#">&rarr; DOS-0071 &lsquo;Nutrient Ledger&rsquo; &middot; claim C1</a>
+            </p>
+          </article>
+
+          <article class="ev">
+            <div class="ev-id">EV-4117-03 <span class="tag-v">Verified</span></div>
+            <p class="ev-claim">An ammonia-stripping pre-step lifted phosphorus recovery to <span class="num">91%</span> and added <span class="num">$96/t</span> in operating cost.</p>
+            <p class="ev-meta">Fig. 5 &middot; single pilot run &mdash; marked thin evidence by &lsquo;Plumb&rsquo;; held, not yet cited</p>
+          </article>
+
+          <article class="ev">
+            <div class="ev-id">EV-4117-04 <span class="tag-q">Verification queued</span></div>
+            <p class="ev-claim">Substituting magnesium oxide for chloride cuts reagent cost by <span class="num">38%</span> at a <span class="num">0.3</span> pH-unit penalty.</p>
+            <p class="ev-meta">&sect;5 discussion estimate &mdash; pressed on re-read, 19 Aug, by reader &lsquo;Barrow&rsquo; &middot; <span class="num">$0.31</span>, press ledger</p>
+            <p class="ev-links"><a href="#">&rarr; feeding RS-011 &lsquo;Reagent Economics&rsquo;</a></p>
+          </article>
+        </div>
+
+        <div class="fieldnote">
+          <span class="lbl">Field note &mdash; collection</span>
+          <p>Flagged by crawler &lsquo;Vireo&rsquo; during SW-0142 for co-occurrence of &lsquo;litter leachate&rsquo; with &lsquo;crystallization yield&rsquo;; abstract relevance <span class="num">0.91</span>. Full text fetched 04 Aug, 02:31 &middot; 2.1&nbsp;MB.</p>
+        </div>
+      </article>
+
+      <!-- the margin: annotations accrete; the label keeps its corner -->
+      <aside class="rail">
+        <span class="lbl">Annotations &mdash; added, never removed</span>
+
+        <div class="slip">
+          <div class="slip-head"><span>04 AUG 2026</span><span>CLASSIFIER &lsquo;LINNEA&rsquo;</span></div>
+          <p>Mounted and filed: Manure Valorization &rarr; Nutrient Recovery.</p>
+        </div>
+
+        <div class="slip">
+          <div class="slip-head"><span>09 AUG 2026</span><span>DOSSIER ENGINE</span></div>
+          <p>Cited into <a href="#">DOS-0067 &lsquo;Litter-to-Struvite&rsquo;</a> &mdash; its claim C2 now resolves to EV-4117-01.</p>
+        </div>
+
+        <div class="slip divergence">
+          <div class="slip-head"><span>15 AUG 2026</span><span>DIVERGENCE &middot; SCOUT &lsquo;MAGPIE&rsquo;</span></div>
+          <p><b>EV-3892</b> (Halvorsen, 2025) reports <b>61%</b> recovery at farm scale against <b>83%</b> here. Scale effect suspected; sweep RS-013 commissioned.</p>
+        </div>
+
+        <div class="slip">
+          <div class="slip-head"><span>19 AUG 2026</span><span>READER &lsquo;BARROW&rsquo;</span></div>
+          <p>Re-read under RS-011 &lsquo;Reagent Economics&rsquo;. One further claim pressed: EV-4117-04. Cost <b>$0.31</b>, press ledger.</p>
+        </div>
+
+        <div class="slip">
+          <div class="slip-head"><span>20 AUG 2026</span><span>CLASSIFIER &lsquo;LINNEA&rsquo;</span></div>
+          <p>Determination revised, rev.&nbsp;2 &mdash; refiled Nutrient Recovery &rarr; Struvite (pilot scale) after the folder split.</p>
+        </div>
+
+        <div class="slip ghost">
+          <p>Room is left. Annotations accrete; none are removed.</p>
+        </div>
+
+        <div class="det" aria-label="Determination label">
+          <div class="det-head">
+            <span class="lbl">Determination label</span>
+            <span class="rev">REV. 2</span>
+          </div>
+          <dl>
+            <div class="row">
+              <dt>Filed as</dt>
+              <dd><b>Manure Valorization &rarr; Struvite (pilot scale)</b></dd>
+            </div>
+            <div class="row">
+              <dt>Determined</dt>
+              <dd>Classifier &lsquo;Linnea&rsquo; &middot; 20 Aug 2026 &middot; rev.&nbsp;2 <span class="mono">(rev.&nbsp;1: 04 Aug)</span></dd>
+            </div>
+            <div class="row">
+              <dt>Collected</dt>
+              <dd>Sweep SW-0142 &lsquo;Second Harvest&rsquo; &middot; 04 Aug 2026, 02:31</dd>
+            </div>
+            <div class="row">
+              <dt>Source</dt>
+              <dd><i>Waste Management</i> 189 (2026) &middot; <span class="mono">10.1016/j.wasman.2026.03.114</span></dd>
+            </div>
+            <div class="row">
+              <dt>Read</dt>
+              <dd>Reader &lsquo;Barrow&rsquo; &middot; 04 Aug &middot; <b>$0.84</b> <span class="mono">&mdash; 61,204 tok in / 8,911 out</span></dd>
+            </div>
+            <div class="row">
+              <dt>Verified</dt>
+              <dd>Verifier &lsquo;Plumb&rsquo; &middot; 05 Aug &middot; <span class="held-tag">3 of 3 claims held</span> &mdash; re-derived from full text</dd>
+            </div>
+          </dl>
+          <p class="det-foot">THE LABEL SITS IN THIS CORNER ON EVERY SHEET.</p>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+</main>
+
+<!-- ============ SMALL SHEETS AND THE PRESS ============ -->
+<div class="wrap cases">
+
+  <section class="case" aria-label="Signal accessions">
+    <span class="lbl">Signal accessions</span>
+    <p class="case-sub">Market and data signals, mounted as small sheets &mdash; same label discipline: source, series, date, hand.</p>
+
+    <div class="sig">
+      <span class="sig-id">SGN-0881</span>
+      <div class="sig-body">
+        <div class="sig-name">USDA ERS <span>&mdash; layer feed cost index</span></div>
+        <div class="sig-prov">Poultry Yearbook, table 8 &middot; Jul 2026 release &middot; pulled 24 Aug 06:00 by clerk &lsquo;Teal&rsquo; &middot; cited in 6 dossiers</div>
+      </div>
+      <div class="sig-val"><span class="v">121.4</span><span class="d">+3.1% m/m</span></div>
+    </div>
+
+    <div class="sig">
+      <span class="sig-id">SGN-0885</span>
+      <div class="sig-body">
+        <div class="sig-name">Feedinfo <span>&mdash; DL-methionine spot, EU</span></div>
+        <div class="sig-prov">Weekly wire, w/e 21 Aug &middot; pulled 24 Aug 06:01 by clerk &lsquo;Teal&rsquo; &middot; cited in 3 dossiers</div>
+      </div>
+      <div class="sig-val"><span class="v">$2.42/kg</span><span class="d">&minus;4.0% w/w</span></div>
+    </div>
+
+    <div class="sig">
+      <span class="sig-id">SGN-0890</span>
+      <div class="sig-body">
+        <div class="sig-name">USDA AMS <span>&mdash; breaking stock, Central States</span></div>
+        <div class="sig-prov">Daily egg report &middot; 23 Aug &middot; pulled 24 Aug 06:01 by clerk &lsquo;Teal&rsquo; &middot; cited in 2 dossiers</div>
+      </div>
+      <div class="sig-val"><span class="v">$1.18/doz</span><span class="d">+$0.03 d/d</span></div>
+    </div>
+
+    <div class="sig">
+      <span class="sig-id">SGN-0894</span>
+      <div class="sig-body">
+        <div class="sig-name">EIA <span>&mdash; Henry Hub natural gas</span></div>
+        <div class="sig-prov">Daily spot &middot; 22 Aug &middot; pulled 24 Aug 06:02 by clerk &lsquo;Teal&rsquo; &middot; feeds drying-cost models in 3 dossiers</div>
+      </div>
+      <div class="sig-val"><span class="v">$2.71/MMBtu</span><span class="d">unchanged</span></div>
+    </div>
+
+    <div class="case-tail"><a href="#">All 212 signal sheets &mdash; catalog, 06:00 &rarr;</a></div>
+  </section>
+
+  <section class="case" aria-label="Commissioned reading">
+    <span class="lbl">In the press</span>
+    <p class="case-sub">Commissioned reading &mdash; collected, pressed, verified, then filed. Nothing enters the herbarium unread.</p>
+
+    <div class="sweep">
+      <div class="sweep-row">
+        <span class="sweep-name"><span class="mono">RS-011</span>&lsquo;Reagent Economics&rsquo;</span>
+        <span class="st st-pressing">Pressing</span>
+      </div>
+      <p class="sweep-scope">Commissioned 17 Aug by DOS-0067 &lsquo;Litter-to-Struvite&rsquo; &middot; scope: magnesium oxide substitution economics</p>
+      <p class="sweep-ledger"><b>9 / 14</b> papers read &middot; $6.88 spent of est. $11.20 &mdash; press ledger</p>
+    </div>
+
+    <div class="sweep">
+      <div class="sweep-row">
+        <span class="sweep-name"><span class="mono">RS-012</span>&lsquo;Frass as Litter Amendment&rsquo;</span>
+        <span class="st st-collecting">Collecting</span>
+      </div>
+      <p class="sweep-scope">Commissioned 21 Aug from the Today desk &middot; scope: black-soldier-fly frass as a bedding amendment</p>
+      <p class="sweep-ledger"><b>31</b> candidates found &mdash; crawler &lsquo;Vireo&rsquo; &middot; est. $18.40</p>
+    </div>
+
+    <div class="sweep">
+      <div class="sweep-row">
+        <span class="sweep-name"><span class="mono">RS-013</span>&lsquo;Scale Divergence&rsquo;</span>
+        <span class="st st-queued">Queued</span>
+      </div>
+      <p class="sweep-scope">Auto-commissioned 15 Aug by divergence EV-4117-01 &harr; EV-3892 &middot; scope: pilot-to-farm phosphorus recovery gap</p>
+      <p class="sweep-ledger"><b>14</b> candidates &middot; est. $4.10 &middot; runs after RS-011</p>
+    </div>
+
+    <div class="sweep">
+      <div class="sweep-row">
+        <span class="sweep-name"><span class="mono">SW-0142</span>&lsquo;Second Harvest&rsquo;</span>
+        <span class="st st-filed">Filed 05:47</span>
+      </div>
+      <p class="sweep-scope">Standing sweep, weekly &middot; scope: manure valorization, new literature</p>
+      <p class="sweep-ledger"><b>43</b> sheets filed overnight &middot; $31.07 &mdash; press ledger</p>
+    </div>
+
+    <div class="commission">
+      <span class="lbl">Commission new reading</span>
+      <form aria-label="Commission a research sweep">
+        <input type="text" placeholder="Name the question &mdash; &lsquo;Does on-farm struvite pay at 100,000 birds?&rsquo;">
+        <button type="submit" class="btn-solid">Queue for the press</button>
+      </form>
+      <p class="micro">Scope and cost are estimated and shown before any reading is charged.</p>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap foot-in">
+    <span class="sig-line">PALINGENESIS &middot; LIBRARY</span>
+    <span class="motto">Every claim sourced &middot; every cost computed &middot; every verdict recorded</span>
+  </div>
+</footer>
+
+</body>
+</html>

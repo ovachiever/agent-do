@@ -147,6 +147,7 @@ exact:
   test: {beats: [verify]}
   verify: {beats: [verify]}
   audit: {beats: [verify]}
+  lint: {beats: [verify]}
 
   # ── interact: mutate state ──
   create: {beats: [interact]}
@@ -353,6 +354,11 @@ patterns:
 # These were seeded from the 2026-06-11 stress-test evidence and grow during
 # review. `skip: true` excludes a verb from proposing (manual review item).
 overrides:
+  deai:
+    packs: {beats: [snapshot]}
+    measure: {beats: [snapshot]}        # counts a local corpus; prints receipts without writing
+    guard check: {beats: [verify]}
+    guard install: {beats: [interact]}
   gh:
     portfolio add: {beats: [interact], attributes: [own_state]}     # writes only ~/.agent-do/gh/portfolio.yaml
     portfolio remove: {beats: [interact], attributes: [own_state]}
@@ -469,9 +475,6 @@ overrides:
   # keep concurrency:read; their write verbs carry own_state. Mirrors registry.
   prompt:
     save: {beats: [save], attributes: [own_state]}
-  dpt:
-    baseline: {beats: [snapshot, save], attributes: [composite, own_state]}
-    build: {beats: [interact], attributes: [own_state]}
   eval:
     create: {beats: [interact], attributes: [own_state]}
     run: {beats: [interact, verify, save], attributes: [composite, own_state]}

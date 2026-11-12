@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Engine Room</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#1B1917; --ink:#E7E3DA; --mut:#A69D90; --fnt:#6E675E;
+    --hair:rgba(231,227,218,0.14); --dot:rgba(231,227,218,0.32);
+    --sage:hsl(158,30%,55%); --clay:hsl(12,42%,58%);
+    --hover:#221F1C; --track:#2E2A26;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
+  }
+  html,body{ background:var(--bg); }
+  body{
+    font-family:var(--sans); font-size:12px; line-height:1.45; color:var(--ink);
+    font-variant-numeric:tabular-nums; min-width:1360px;
+  }
+  .m{ font-family:var(--mono); }
+  .mut{ color:var(--mut); }
+  .sage{ color:var(--sage); }
+  .clay{ color:var(--clay); }
+  .n{ text-align:right; }
+  .fig{ text-decoration:underline dotted var(--dot); text-underline-offset:3px; cursor:pointer; }
+  .fig:hover{ color:var(--sage); text-decoration-color:var(--sage); }
+  .clay .fig:hover, .fig.clay:hover{ color:var(--clay); text-decoration-color:var(--clay); }
+
+  /* ---------- masthead ---------- */
+  nav{
+    display:flex; align-items:baseline; gap:26px; padding:11px 24px 9px;
+    border-bottom:2px solid var(--ink);
+  }
+  .word{ font-size:13px; letter-spacing:.22em; text-transform:uppercase; font-weight:600; }
+  nav a{ color:var(--mut); text-decoration:none; font-size:12px; letter-spacing:.08em; text-transform:uppercase; padding-bottom:2px; }
+  nav a:hover{ color:var(--ink); }
+  nav a.on{ color:var(--ink); border-bottom:2px solid var(--sage); }
+  .navr{ margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--mut); letter-spacing:.02em; }
+
+  /* ---------- lede ---------- */
+  .lede{ padding:12px 24px 10px; border-bottom:1px solid var(--hair); }
+  .lede p{ font-family:var(--serif); font-size:19px; line-height:1.35; letter-spacing:.005em; }
+  .stamp{ margin-top:6px; font-family:var(--mono); font-size:12px; color:var(--mut); letter-spacing:.02em; }
+
+  /* ---------- sections ---------- */
+  main{ padding:0 24px; }
+  .sec{ padding:8px 0 10px; }
+  .band{ border-top:1px solid var(--hair); }
+  .sh{
+    display:flex; justify-content:space-between; align-items:baseline;
+    border-bottom:1px solid var(--hair); padding-bottom:3px; margin-bottom:5px;
+  }
+  .sh b{ font-weight:600; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--mut); }
+  .sh span{ font-family:var(--mono); font-size:12px; color:var(--mut); }
+
+  /* generic grid rows */
+  .r{ display:grid; column-gap:12px; align-items:baseline; padding:1px 0; }
+  .hd{ color:var(--mut); letter-spacing:.04em; text-transform:uppercase; font-size:12px; }
+  .rule{ border-top:1px solid var(--hair); margin:3px 0; }
+  .rows .r:hover{ background:var(--hover); }
+
+  .g-svc{ grid-template-columns:60px 84px 236px 78px 90px minmax(0,1fr) 300px 64px; }
+  .g-flow{ grid-template-columns:132px minmax(0,1fr) 52px 52px; }
+  .g-led{ grid-template-columns:60px minmax(0,1fr) 76px 56px 56px; }
+  .g-cyc{ grid-template-columns:26px 160px 44px 58px 56px minmax(0,1fr); }
+  .g-feed{ grid-template-columns:minmax(0,1fr) 78px 56px; }
+  .g-inc{ grid-template-columns:74px minmax(0,1.05fr) minmax(0,1.25fr) 64px; }
+  .g-eng{ grid-template-columns:84px minmax(0,1fr); }
+
+  /* multi-column bands */
+  .cols{ display:grid; }
+  .c2{ grid-template-columns:7.6fr 6fr; }
+  .c3{ grid-template-columns:4.9fr 5.4fr 4.4fr; }
+  .c3b{ grid-template-columns:6.6fr 4.4fr 3.2fr; }
+  .cols > .col{ padding:8px 16px 10px; min-width:0; }
+  .cols > .col + .col{ border-left:1px solid var(--hair); }
+  .cols > .col:first-child{ padding-left:0; }
+  .cols > .col:last-child{ padding-right:0; }
+
+  /* meter */
+  .meter{ position:relative; height:8px; background:var(--track); margin:5px 0 3px; }
+  .meter i{ position:absolute; left:0; top:0; bottom:0; width:49.4%; background:var(--sage); }
+  .meter b{ position:absolute; left:74.1%; top:-2px; bottom:-2px; width:1px; background:var(--ink); }
+
+  /* scheduler ticks */
+  .ticks{ display:grid; grid-template-columns:repeat(16,1fr); gap:3px; margin-top:7px; }
+  .tk{ height:12px; background:var(--mut); }
+  .tk.f{ background:transparent; border:1px solid rgba(231,227,218,0.30); }
+  .tk.nx{ background:transparent; border:1px solid var(--sage); }
+  .tk.x{ background:transparent; font-family:var(--mono); font-size:12px; line-height:12px; text-align:center; color:var(--clay); }
+  .tlab{ display:grid; grid-template-columns:repeat(16,1fr); gap:3px; font-family:var(--mono); font-size:12px; color:var(--mut); margin-top:2px; }
+
+  .big{ font-family:var(--mono); font-size:16px; letter-spacing:.02em; }
+  .foot-note{ color:var(--mut); margin-top:4px; }
+
+  /* control */
+  button.susp{
+    display:block; background:transparent; border:1px solid var(--clay); color:var(--clay);
+    font-family:var(--sans); font-size:12px; letter-spacing:.12em; text-transform:uppercase;
+    height:28px; padding:0 16px; cursor:pointer; margin:2px 0 6px;
+  }
+  button.susp:hover{ background:var(--hover); }
+
+  footer{
+    margin-top:2px; padding:8px 24px 12px; border-top:1px solid var(--hair);
+    display:flex; justify-content:space-between; align-items:baseline;
+  }
+  footer .l{ color:var(--mut); font-size:12px; letter-spacing:.04em; }
+  footer .r2{ color:var(--fnt); font-family:var(--mono); font-size:14px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="word">Palingenesis</span>
+  <a href="#">Today</a><a href="#">Pipeline</a><a href="#">Library</a><a href="#">Portfolio</a><a href="#">Simulation</a><a href="#" class="on">Engine Room</a>
+  <span class="navr">DAILY OFFICIAL LIST · No. 234 · 2026-08-22</span>
+</nav>
+
+<div class="lede">
+  <p>Ten cycles, ten clean closes: <span class="fig" title="lineage: led-06 · day ledger">$247.13</span> of the <span class="fig" title="lineage: governor · cap policy">$500</span> day spent, <span class="fig" title="lineage: arc-05 · day file">52</span> records filed, the patent feed <span class="fig clay" title="lineage: ing-01 · watcher log">41 minutes</span> silent, and the engine on pace to close at <span class="fig" title="lineage: led-06 · projection">$370.70</span>.</p>
+  <div class="stamp">OBSERVED 2026-08-22 15:06:12 −05:00 &nbsp;·&nbsp; SNAPSHOT <span class="fig">sn-0822-1506</span> &nbsp;·&nbsp; CYCLE <span class="fig">10/16</span> &nbsp;·&nbsp; NEXT OPEN <span class="fig">16:30:00</span> &nbsp;·&nbsp; EVERY UNDERLINED FIGURE OPENS ITS LINEAGE</div>
+</div>
+
+<main>
+
+  <!-- SERVICES -->
+  <section class="sec">
+    <div class="sh"><b>Services</b><span>6 OF 6 RUNNING · 0 UNPLANNED RESTARTS SINCE 05-24</span></div>
+    <div class="rows">
+      <div class="r g-svc hd"><span>ID</span><span>Service</span><span>Job</span><span>State</span><span>Since</span><span>Last act</span><span>Today</span><span class="n">$ today</span></div>
+      <div class="r g-svc"><span class="m">ing-01</span><span>Intake</span><span class="mut">reads six feeds, forwards what is new</span><span class="sage">running</span><span class="m mut">08-14 03:00</span><span><span class="m">15:00:07</span> opened c10 intake; patents refused, ran <span class="fig">5 of 6</span> feeds</span><span><span class="fig" title="lineage: ing-01 · pull log">1,412</span> pulled · <span class="fig">312</span> novel</span><span class="m n"><span class="fig">8.94</span></span></div>
+      <div class="r g-svc"><span class="m">scr-02</span><span>Screen</span><span class="mut">discards what cannot be used</span><span class="sage">running</span><span class="m mut">08-14 03:00</span><span><span class="m">15:01:24</span> passed 9 candidates from 31 novel items</span><span><span class="fig">312</span> read · <span class="fig">96</span> kept (<span class="fig">30.8%</span>)</span><span class="m n"><span class="fig">22.51</span></span></div>
+      <div class="r g-svc"><span class="m">gen-03</span><span>Generate</span><span class="mut">drafts innovations from candidates</span><span class="sage">running</span><span class="m mut">08-14 03:00</span><span><span class="m">15:03:58</span> drafted 5 of 9 candidates</span><span><span class="fig">96</span> in · <span class="fig">57</span> drafted · <span class="fig">39</span> declined</span><span class="m n"><span class="fig">118.62</span></span></div>
+      <div class="r g-svc"><span class="m">jdg-04</span><span>Judge</span><span class="mut">scores every draft, issues the verdict</span><span class="sage">running</span><span class="m mut">08-14 03:00</span><span><span class="m">15:05:02</span> issued 5 verdicts: 0 advance, 4 reject, 1 hold</span><span><span class="fig">57</span> verdicts · <span class="fig">9</span> advance · <span class="fig">41</span> reject · <span class="fig">7</span> hold</span><span class="m n"><span class="fig">74.89</span></span></div>
+      <div class="r g-svc"><span class="m">arc-05</span><span>Archive</span><span class="mut">files every record with its lineage</span><span class="sage">running</span><span class="m mut">08-14 03:00</span><span><span class="m">15:05:38</span> filed <span class="m">rec-41203</span>, lineage complete</span><span><span class="fig">52</span> filed · <span class="fig">5</span> merged · <span class="fig" title="lineage: arc-05 · store">41,203</span> total</span><span class="m n"><span class="fig">6.11</span></span></div>
+      <div class="r g-svc"><span class="m">led-06</span><span>Ledger</span><span class="mut">meters every call, enforces the cap</span><span class="sage">running</span><span class="m mut">08-14 03:00</span><span><span class="m">15:05:41</span> closed c10 at <span class="fig">$21.20</span>; cleared slot 12</span><span><span class="fig">483</span> entries · <span class="fig">10</span> clearances · <span class="fig">$247.13</span> metered</span><span class="m n"><span class="fig">16.06</span></span></div>
+    </div>
+  </section>
+
+  <!-- FLOWS · LEDGER · SCHEDULER -->
+  <section class="band">
+    <div class="cols c3">
+
+      <div class="col">
+        <div class="sh"><b>Flows</b><span>RING INTACT · 10 CIRCUITS</span></div>
+        <div class="rows">
+          <div class="r g-flow hd"><span>Route</span><span>Carries</span><span class="n">Today</span><span class="n">/cycle</span></div>
+          <div class="r g-flow"><span class="m">ing-01 → scr-02</span><span class="mut">novel items to screening</span><span class="m n"><span class="fig">312</span></span><span class="m n"><span class="fig">31.2</span></span></div>
+          <div class="r g-flow"><span class="m">scr-02 → gen-03</span><span class="mut">candidates cleared to draft</span><span class="m n"><span class="fig">96</span></span><span class="m n"><span class="fig">9.6</span></span></div>
+          <div class="r g-flow"><span class="m">gen-03 → jdg-04</span><span class="mut">drafts submitted for verdict</span><span class="m n"><span class="fig">57</span></span><span class="m n"><span class="fig">5.7</span></span></div>
+          <div class="r g-flow"><span class="m">jdg-04 → arc-05</span><span class="mut">verdicts filed with lineage</span><span class="m n"><span class="fig">57</span></span><span class="m n"><span class="fig">5.7</span></span></div>
+          <div class="r g-flow"><span class="m">arc-05 → led-06</span><span class="mut">costed records to the ledger</span><span class="m n"><span class="fig">52</span></span><span class="m n"><span class="fig">5.2</span></span></div>
+          <div class="r g-flow"><span class="m">led-06 → ing-01</span><span class="mut">budget clearances to open</span><span class="m n"><span class="fig">10</span></span><span class="m n"><span class="fig">1.0</span></span></div>
+        </div>
+        <div class="rule"></div>
+        <div class="foot-note">Every handoff receipted. Feed intake — <span class="fig">1,412</span> items, <span class="fig">141.2</span> / cycle — enters the ring at <span class="m">ing-01</span>.</div>
+      </div>
+
+      <div class="col">
+        <div class="sh"><b>The Day’s Ledger</b><span>CAP $500.00 HARD</span></div>
+        <div class="rows">
+          <div class="r g-led hd"><span>ID</span><span>Spend</span><span class="n">$ today</span><span class="n">share</span><span class="n">/cycle</span></div>
+          <div class="r g-led"><span class="m">ing-01</span><span class="mut">feed pulls, novelty checks</span><span class="m n"><span class="fig">8.94</span></span><span class="m n"><span class="fig">3.6%</span></span><span class="m n">0.89</span></div>
+          <div class="r g-led"><span class="m">scr-02</span><span class="mut">screening passes</span><span class="m n"><span class="fig">22.51</span></span><span class="m n"><span class="fig">9.1%</span></span><span class="m n">2.25</span></div>
+          <div class="r g-led"><span class="m">gen-03</span><span class="mut">drafting runs</span><span class="m n"><span class="fig">118.62</span></span><span class="m n"><span class="fig">48.0%</span></span><span class="m n">11.86</span></div>
+          <div class="r g-led"><span class="m">jdg-04</span><span class="mut">scoring &amp; verdicts</span><span class="m n"><span class="fig">74.89</span></span><span class="m n"><span class="fig">30.3%</span></span><span class="m n">7.49</span></div>
+          <div class="r g-led"><span class="m">arc-05</span><span class="mut">filing &amp; dedup</span><span class="m n"><span class="fig">6.11</span></span><span class="m n"><span class="fig">2.5%</span></span><span class="m n">0.61</span></div>
+          <div class="r g-led"><span class="m">led-06</span><span class="mut">metering &amp; audit</span><span class="m n"><span class="fig">16.06</span></span><span class="m n"><span class="fig">6.5%</span></span><span class="m n">1.61</span></div>
+        </div>
+        <div class="rule"></div>
+        <div class="r g-led"><span class="m">Σ</span><span>spent at 15:06</span><span class="m n"><span class="fig" title="lineage: led-06 · 483 metered entries">247.13</span></span><span class="m n">100.0%</span><span class="m n">24.71</span></div>
+        <div class="meter"><i></i><b title="projected close · 74.1% of cap"></b></div>
+        <div class="m mut">spent <span class="fig">49.4%</span> of $500.00 · tick = projected <span class="fig">74.1%</span> · headroom <span class="fig">$129.30</span></div>
+        <div class="mut" style="margin-top:4px">PACE <span class="m"><span class="fig">$24.71</span></span> / cycle · <span class="m"><span class="fig">$16.36</span></span> / h — <span class="fig">9.9%</span> lighter than yesterday’s $27.42 / cycle</div>
+        <div class="mut">PROJECTED CLOSE <span class="m"><span class="fig">$370.70</span></span> — 5 cycles remain at day average, <span class="fig">$129.30</span> under cap</div>
+        <div class="mut">YESTERDAY CLOSED <span class="m"><span class="fig">$438.75</span></span> · 16 of 16 cycles · never above <span class="fig">87.8%</span> of cap</div>
+      </div>
+
+      <div class="col">
+        <div class="sh"><b>Scheduler</b><span>DRIFT ±0 S</span></div>
+        <div class="big">CYCLE <span class="fig">10 / 16</span></div>
+        <div class="mut">executed / scheduled · slot 05 cancelled · 5 ahead</div>
+        <div style="margin-top:5px">
+          <div class="r g-eng"><span class="hd">cadence</span><span class="m"><span class="fig">90 min</span>, anchored 00:00:00</span></div>
+          <div class="r g-eng"><span class="hd">drift</span><span class="m"><span class="fig">±0 s</span> over 10 opens</span></div>
+          <div class="r g-eng"><span class="hd">last</span><span class="m">c10 · <span class="fig">15:00:00 → 15:05:41</span></span></div>
+          <div class="r g-eng"><span class="hd">next</span><span class="m">slot 12 · <span class="fig">16:30:00</span> · in <span class="fig">1 h 23 m 48 s</span></span></div>
+        </div>
+        <div class="ticks">
+          <div class="tk"></div><div class="tk"></div><div class="tk"></div><div class="tk"></div>
+          <div class="tk x">✕</div>
+          <div class="tk"></div><div class="tk"></div><div class="tk"></div><div class="tk"></div><div class="tk"></div><div class="tk"></div>
+          <div class="tk nx"></div>
+          <div class="tk f"></div><div class="tk f"></div><div class="tk f"></div><div class="tk f"></div>
+        </div>
+        <div class="tlab">
+          <span style="grid-column:1/5">00:00</span>
+          <span style="grid-column:5/9" class="clay">06:00</span>
+          <span style="grid-column:9/12">12:00</span>
+          <span style="grid-column:12/15" class="sage">16:30</span>
+          <span style="grid-column:15/17" class="n">22:30</span>
+        </div>
+        <div class="clay" style="margin-top:5px">slot 05 (06:00) cancelled — upstream maintenance; intake folded into 07:30</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- CYCLES · FEEDS + DATA -->
+  <section class="band">
+    <div class="cols c2">
+
+      <div class="col">
+        <div class="sh"><b>Cycles Today</b><span>10 COMPLETED · 1 CANCELLED · 5 AHEAD</span></div>
+        <div class="rows">
+          <div class="r g-cyc hd"><span>cy</span><span>Open → close</span><span class="n">dur</span><span class="n">cand/verd</span><span class="n">$</span><span>Note</span></div>
+          <div class="r g-cyc"><span class="m">01</span><span class="m"><span class="fig">00:00:00 → 00:05:38</span></span><span class="m n">5:38</span><span class="m n"><span class="fig">9 / 6</span></span><span class="m n"><span class="fig">24.90</span></span><span class="mut">clean</span></div>
+          <div class="r g-cyc"><span class="m">02</span><span class="m"><span class="fig">01:30:00 → 01:35:12</span></span><span class="m n">5:12</span><span class="m n"><span class="fig">8 / 5</span></span><span class="m n"><span class="fig">22.85</span></span><span class="mut">clean</span></div>
+          <div class="r g-cyc"><span class="m">03</span><span class="m"><span class="fig">03:00:00 → 03:05:47</span></span><span class="m n">5:47</span><span class="m n"><span class="fig">11 / 7</span></span><span class="m n"><span class="fig">27.61</span></span><span class="mut">clean</span></div>
+          <div class="r g-cyc"><span class="m">04</span><span class="m"><span class="fig">04:30:00 → 04:36:05</span></span><span class="m n">6:05</span><span class="m n"><span class="fig">10 / 6</span></span><span class="m n"><span class="fig">26.02</span></span><span class="mut">archive write retried ×1, absorbed</span></div>
+          <div class="r g-cyc clay"><span class="m">✕</span><span class="m"><span class="fig">06:00:00</span> → cancelled</span><span class="m n">—</span><span class="m n">0 / 0</span><span class="m n">0.00</span><span>slot 05 — upstream maintenance · 90 min lost</span></div>
+          <div class="r g-cyc"><span class="m">05</span><span class="m"><span class="fig">07:30:00 → 07:36:41</span></span><span class="m n">6:41</span><span class="m n"><span class="fig">12 / 7</span></span><span class="m n"><span class="fig">28.94</span></span><span class="mut">double intake after the cancelled slot</span></div>
+          <div class="r g-cyc"><span class="m">06</span><span class="m"><span class="fig">09:00:00 → 09:05:33</span></span><span class="m n">5:33</span><span class="m n"><span class="fig">10 / 6</span></span><span class="m n"><span class="fig">25.71</span></span><span class="mut">clean · 429 burst absorbed</span></div>
+          <div class="r g-cyc"><span class="m">07</span><span class="m"><span class="fig">10:30:00 → 10:35:52</span></span><span class="m n">5:52</span><span class="m n"><span class="fig">9 / 5</span></span><span class="m n"><span class="fig">23.88</span></span><span class="mut">clean</span></div>
+          <div class="r g-cyc"><span class="m">08</span><span class="m"><span class="fig">12:00:00 → 12:05:18</span></span><span class="m n">5:18</span><span class="m n"><span class="fig">8 / 5</span></span><span class="m n"><span class="fig">22.47</span></span><span class="mut">clean</span></div>
+          <div class="r g-cyc"><span class="m">09</span><span class="m"><span class="fig">13:30:00 → 13:35:44</span></span><span class="m n">5:44</span><span class="m n"><span class="fig">10 / 5</span></span><span class="m n"><span class="fig">23.55</span></span><span class="mut">clean</span></div>
+          <div class="r g-cyc"><span class="m">10</span><span class="m"><span class="fig">15:00:00 → 15:05:41</span></span><span class="m n">5:41</span><span class="m n"><span class="fig">9 / 5</span></span><span class="m n"><span class="fig">21.20</span></span><span class="mut">patents absent — lightest close of the day</span></div>
+        </div>
+        <div class="rule"></div>
+        <div class="r g-cyc"><span class="m">Σ</span><span class="mut">10 cycles · run time <span class="m"><span class="fig">57:31</span></span></span><span></span><span class="m n"><span class="fig">96 / 57</span></span><span class="m n"><span class="fig">247.13</span></span><span class="mut">9 advance across the day</span></div>
+        <div class="foot-note">Cycle numbers count executions; the cancelled 06:00 slot consumed no number. Yield = candidates in / verdicts out.</div>
+      </div>
+
+      <div class="col">
+        <div class="sh"><b>Feeds</b><span>5 OF 6 LIVE · 1,412 PULLED</span></div>
+        <div class="rows">
+          <div class="r g-feed hd"><span>Feed</span><span>Last item</span><span class="n">Today</span></div>
+          <div class="r g-feed"><span>arXiv + bioRxiv agronomy wire</span><span class="m"><span class="fig">15:00:03</span></span><span class="m n"><span class="fig">486</span></span></div>
+          <div class="r g-feed clay"><span>USPTO / EPO patent stream</span><span class="m"><span class="fig">14:25:11</span></span><span class="m n"><span class="fig">187</span></span></div>
+          <div class="clay" style="padding:0 0 2px 14px">silent <span class="fig">−41 min</span> · watcher restarted 15:02:04 · re-pull at the 16:30:00 open · c10 ran without patents</div>
+          <div class="r g-feed"><span>USDA / FAO bulletins</span><span class="m"><span class="fig">15:00:02</span></span><span class="m n"><span class="fig">118</span></span></div>
+          <div class="r g-feed"><span>Grower trial registries</span><span class="m"><span class="fig">15:00:04</span></span><span class="m n"><span class="fig">205</span></span></div>
+          <div class="r g-feed"><span>Commodity &amp; market wire</span><span class="m"><span class="fig">15:00:02</span></span><span class="m n"><span class="fig">342</span></span></div>
+          <div class="r g-feed"><span>Extension-service digests</span><span class="m"><span class="fig">15:00:05</span></span><span class="m n"><span class="fig">74</span></span></div>
+        </div>
+        <div class="rule"></div>
+        <div class="r g-feed"><span class="mut">Σ six feeds · <span class="fig">141.2</span> items / cycle · <span class="fig">312</span> novel</span><span></span><span class="m n"><span class="fig">1,412</span></span></div>
+
+        <div class="sh" style="margin-top:9px"><b>Data</b><span>SNAPSHOT 15:06:12</span></div>
+        <div>archive <span class="m"><span class="fig" title="lineage: arc-05 · store manifest">41,203</span></span> records · <span class="m"><span class="fig">+52</span></span> today (57 verdicts − 5 dedup merges) · store <span class="m"><span class="fig">3.2 GB</span></span></div>
+        <div class="mut">lineage backfill <span class="m"><span class="fig">92.0%</span></span> — 37,907 of 41,203 records trace to source · snapshot <span class="m">sn-0822-1506</span> written 15:06:12</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- INCIDENTS · ENGINE · CONTROL -->
+  <section class="band">
+    <div class="cols c3b">
+
+      <div class="col">
+        <div class="sh"><b>Incidents</b><span>4 TODAY · 91 MIN LOST · 1 LIVE</span></div>
+        <div class="rows">
+          <div class="r g-inc hd"><span>Time</span><span>What</span><span>Action taken</span><span class="n">Lost</span></div>
+          <div class="r g-inc"><span class="m"><span class="fig">04:34:52</span></span><span>archive write refused — lock contention, c04</span><span class="mut">one retry, succeeded 04:35:58</span><span class="m n"><span class="fig">1 min</span></span></div>
+          <div class="r g-inc"><span class="m"><span class="fig">05:52:10</span></span><span>upstream mirror called maintenance to 07:10</span><span class="mut">governor cancelled the 06:00 slot; intake doubled into 07:30</span><span class="m n"><span class="fig">90 min</span></span></div>
+          <div class="r g-inc"><span class="m"><span class="fig">09:03:17</span></span><span>model-API 429 burst — 3 calls, c06</span><span class="mut">backoff absorbed inside the cycle</span><span class="m n"><span class="fig">0 min</span></span></div>
+          <div class="r g-inc clay"><span class="m"><span class="fig">14:25:11</span></span><span>patent watcher went silent mid-tail</span><span>restarted 15:02:04 · re-pull 16:30:00 · c10 ran without patents</span><span class="m n"><span class="fig">0 min</span></span></div>
+        </div>
+        <div class="foot-note">Lost = scheduled machine-minutes not run. The patent silence costs coverage, not minutes — <span class="clay"><span class="fig">41 min</span> stale and counting</span>.</div>
+      </div>
+
+      <div class="col">
+        <div class="sh"><b>Engine</b><span>v3.8.2 · VERIFIED</span></div>
+        <div class="r g-eng"><span class="hd">core</span><span><span class="m">pal-core v3.8.2</span> · build 2026-08-14 · commit <span class="m"><span class="fig">9f3ce41</span></span></span></div>
+        <div class="r g-eng"><span class="hd">uptime</span><span class="m"><span class="fig">8 d 12 h 06 m</span> — since 08-14 03:00:12 (rollout)</span></div>
+        <div class="r g-eng"><span class="hd">restarts</span><span><span class="fig">1</span> this month, planned · <span class="fig">0</span> unplanned since 05-24</span></div>
+        <div class="r g-eng"><span class="hd">watchers</span><span><span class="fig">1</span> restart today — patents, 15:02:04</span></div>
+        <div class="r g-eng"><span class="hd">integrity</span><span>config <span class="m"><span class="fig">a41c…9e07</span></span> checksum-verified 15:06:00 against the signed manifest — <span class="sage">verified</span></span></div>
+      </div>
+
+      <div class="col">
+        <div class="sh"><b>Control</b><span>OWNER ONLY</span></div>
+        <button class="susp">Suspend generation</button>
+        <div class="mut">Halts drafting at the <span class="m">16:30:00</span> boundary, with intake, verdicts, archive, and ledger continuing untouched.</div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <span class="l">Every claim sourced · every cost computed · every verdict recorded</span>
+  <span class="r2">PALINGENESIS ENGINE ROOM · sn-0822-1506 · p. 1 / 1</span>
+</footer>
+
+</body>
+</html>

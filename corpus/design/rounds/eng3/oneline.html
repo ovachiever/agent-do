@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Engine Room · Palingenesis</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { background:#1B1917; }
+  body {
+    min-width:1440px;
+    color:#E7E3DA;
+    font:400 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { width:1360px; margin:0 auto; }
+  a { text-decoration:none; color:inherit; }
+  .mono { font-family:ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* ---------- top nav ---------- */
+  nav { border-bottom:1px solid rgba(231,227,218,0.14); }
+  .navrow { display:flex; align-items:center; justify-content:space-between; height:58px; }
+  .brand { font-family:Georgia, "Times New Roman", serif; font-size:19px; color:#E7E3DA; letter-spacing:0.01em; }
+  .links { display:flex; align-items:center; }
+  .links a {
+    display:inline-block; font-size:12px; text-transform:uppercase; letter-spacing:0.14em;
+    color:#A69D90; padding:11px 12px; margin-left:4px;
+  }
+  .links a:hover { color:#E7E3DA; }
+  .links a.active { color:#E7E3DA; border-bottom:2px solid hsl(158 30% 55%); padding-bottom:9px; }
+
+  /* ---------- lede ---------- */
+  .lede { margin:28px 0 6px; }
+  .klabel { font-size:12px; text-transform:uppercase; letter-spacing:0.16em; color:#A69D90; }
+  .lede h1 {
+    font-family:Georgia, "Times New Roman", serif; font-weight:400;
+    font-size:22px; line-height:1.5; color:#E7E3DA; margin:10px 0 8px; max-width:1180px;
+  }
+  .lede h1 .m { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:19px; }
+  .prov { font-size:12px; text-transform:uppercase; letter-spacing:0.12em; color:#A69D90; }
+  .prov .mono { color:#E7E3DA; }
+
+  /* ---------- section headers ---------- */
+  section { margin-top:30px; }
+  .shead { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; }
+  .slabel { font-size:12px; text-transform:uppercase; letter-spacing:0.16em; color:#A69D90; }
+  .legend { font-size:12px; text-transform:uppercase; letter-spacing:0.08em; color:#A69D90; }
+  .legend .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin:0 6px 0 14px; vertical-align:baseline; }
+  .legend .dot.run { background:hsl(158 30% 55%); }
+  .legend .dot.rest { border:1px solid #A69D90; }
+  .legend .sep { margin:0 10px; }
+  .legend .ul { border-bottom:1px solid rgba(231,227,218,0.3); padding-bottom:1px; }
+
+  /* ---------- the one-line diagram (SVG) ---------- */
+  svg { display:block; }
+  svg text { font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif; }
+  .sn   { font-size:12px; font-weight:600; letter-spacing:0.12em; fill:#E7E3DA; }
+  .sj   { font-size:12px; fill:#A69D90; }
+  .sf   { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:15px; font-weight:500; fill:#E7E3DA; }
+  .ss   { font-size:12px; fill:#A69D90; }
+  .sc   { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:14px; font-weight:500; fill:#E7E3DA; }
+  .snoun{ font-size:12px; font-weight:600; letter-spacing:0.06em; fill:#A69D90; }
+  .sact { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:12px; fill:#A69D90; }
+  .slog { font-size:12px; letter-spacing:0.1em; fill:#A69D90; }
+  .sclay{ font-size:12px; fill:hsl(12 42% 58%); }
+  .nbox { fill:#211E1B; stroke:rgba(231,227,218,0.14); }
+  .node { cursor:pointer; }
+  .node:hover .nbox { stroke:rgba(231,227,218,0.38); }
+  .edge { cursor:pointer; }
+  .uline { stroke:rgba(231,227,218,0.3); stroke-width:1; }
+  .edge:hover .uline, .node:hover .uline { stroke:hsl(158 30% 55%); }
+  .flow { stroke:hsl(158 30% 55%); stroke-width:1; fill:none; }
+  .ahead { fill:hsl(158 30% 55%); }
+
+  /* ---------- lower: ledger + side ---------- */
+  .lower { display:grid; grid-template-columns:1fr 440px; column-gap:56px; margin-top:34px; }
+
+  .lhead { display:flex; align-items:baseline; justify-content:space-between; }
+  .lcap { font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:#A69D90; }
+  .lcap .mono { color:#E7E3DA; }
+
+  .track { position:relative; height:12px; border:1px solid rgba(231,227,218,0.2); margin-top:34px; }
+  .fill  { position:absolute; top:0; bottom:0; left:0; background:hsl(158 30% 55%); }
+  .gdiv  { position:absolute; top:0; bottom:0; width:1px; background:#1B1917; }
+  .pace  { position:absolute; left:60.56%; top:-13px; bottom:-3px; width:1px; background:rgba(231,227,218,0.5); }
+  .pace span { position:absolute; left:7px; top:-16px; font-size:12px; letter-spacing:0.1em; color:#A69D90; white-space:nowrap; }
+  .scale { position:relative; height:16px; margin-top:6px; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:12px; color:#A69D90; }
+  .scale span { position:absolute; transform:translateX(-50%); }
+  .scale .z { left:0; transform:none; }
+  .scale .cap { right:0; left:auto; transform:none; color:#E7E3DA; }
+  .gsum { font-size:12px; color:#A69D90; margin:8px 0 18px; }
+  .gsum b { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-weight:500; color:#E7E3DA; }
+
+  .lrow { display:grid; grid-template-columns:118px 1fr 160px 84px; align-items:center; height:40px;
+          border-top:1px solid rgba(231,227,218,0.14); cursor:pointer; }
+  .lrow:hover { background:rgba(231,227,218,0.03); }
+  .lsvc { font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:#E7E3DA; }
+  .ldot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:9px; vertical-align:1px; }
+  .ldot.run { background:hsl(158 30% 55%); }
+  .ldot.rest { border:1px solid #A69D90; width:7px; height:7px; }
+  .lprov { font-size:12px; color:#A69D90; }
+  .lbar { position:relative; height:4px; background:rgba(231,227,218,0.08); margin-right:24px; }
+  .lbar i { position:absolute; left:0; top:0; bottom:0; background:rgba(231,227,218,0.32); }
+  .lamt { text-align:right; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:14px; color:#E7E3DA; }
+  .fig { border-bottom:1px solid rgba(231,227,218,0.3); padding-bottom:1px; cursor:pointer; }
+  .fig:hover { border-bottom-color:hsl(158 30% 55%); }
+  .ltotal { display:flex; align-items:baseline; justify-content:space-between;
+            border-top:1px solid rgba(231,227,218,0.25); padding:12px 0 2px; }
+  .ltl { font-size:12px; text-transform:uppercase; letter-spacing:0.12em; color:#A69D90; }
+  .tamt { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:16px; color:#E7E3DA; }
+  .tof { font-size:13px; color:#A69D90; }
+  .tof b { font-family:ui-monospace, "SF Mono", Menlo, monospace; font-weight:500; color:#E7E3DA; }
+
+  /* ---------- side panels ---------- */
+  .panel { border-top:1px solid rgba(231,227,218,0.14); padding-top:13px; margin-bottom:24px; }
+  .prow { display:flex; align-items:baseline; justify-content:space-between; }
+  .plabel { font-size:12px; text-transform:uppercase; letter-spacing:0.16em; color:#A69D90; }
+  .pmeta { font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:#A69D90; }
+  .pline { font-size:13px; color:#A69D90; margin-top:9px; }
+  .pline .v { font-family:ui-monospace, "SF Mono", Menlo, monospace; color:#E7E3DA; }
+  .cyc { display:flex; gap:5px; margin-top:12px; }
+  .cyc i { width:14px; height:6px; }
+  .cyc .done { background:rgba(231,227,218,0.35); }
+  .cyc .next { border:1px solid hsl(158 30% 55%); }
+  .cyc .todo { border:1px solid rgba(231,227,218,0.18); }
+  .minibar { position:relative; display:inline-block; width:120px; height:4px; background:rgba(231,227,218,0.08); margin-left:8px; vertical-align:2px; }
+  .minibar i { position:absolute; left:0; top:0; bottom:0; background:rgba(231,227,218,0.35); }
+  .imark { display:inline-block; width:7px; height:7px; margin-right:9px; vertical-align:1px; }
+  .imark.open { background:hsl(12 42% 58%); }
+  .imark.closed { border:1px solid #A69D90; }
+  .clay { color:hsl(12 42% 58%); }
+  .inc { cursor:pointer; }
+  .inc:hover { color:#E7E3DA; }
+
+  /* ---------- footer ---------- */
+  footer { border-top:1px solid rgba(231,227,218,0.14); margin-top:36px; }
+  .frow { height:50px; display:flex; align-items:center; justify-content:center;
+          font-size:12px; letter-spacing:0.08em; color:#A69D90; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap navrow">
+    <span class="brand">Palingenesis</span>
+    <span class="links">
+      <a href="#today">Today</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#library">Library</a>
+      <a href="#portfolio">Portfolio</a>
+      <a href="#simulation">Simulation</a>
+      <a class="active" href="#engine">Engine Room</a>
+    </span>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- verdict-first lede -->
+  <header class="lede">
+    <p class="klabel">Engine Room</p>
+    <h1>All well but one feed: six services on the line, cycle 10 of 16 closed on time,
+        <span class="m">$206.40</span> of the <span class="m">$500</span> day spent; the USPTO patent
+        feed runs 41 minutes behind, under watch.</h1>
+    <p class="prov">Observed <span class="mono">14:32</span> · Saturday 22 Aug 2026 · cadence 90 min · next cycle <span class="mono">15:30</span></p>
+  </header>
+
+  <!-- the single-line diagram -->
+  <section>
+    <div class="shead">
+      <span class="slabel">The Line</span>
+      <span class="legend"><i class="dot run"></i>Running<i class="dot rest"></i>Resting<span class="sep">·</span><span class="ul">Underlined</span>&nbsp;figures open lineage</span>
+    </div>
+
+    <svg viewBox="0 0 1360 232" width="1360" height="232" role="img" aria-label="One-line diagram: feeds through Scout, Reader, Council, Simulator, Archivist, Courier to the morning brief">
+
+      <!-- exception note (clay), at the intake edge -->
+      <text class="sclay" x="0" y="28">USPTO patent feed</text>
+      <text class="sclay" x="0" y="44">&#8722;41 min · polling 2&#215;</text>
+      <line x1="30" y1="50" x2="30" y2="110" stroke="hsl(12 42% 58%)" stroke-width="1"/>
+
+      <!-- intake stub -->
+      <g class="edge">
+        <line x1="8" y1="110" x2="8" y2="126" stroke="rgba(231,227,218,0.35)" stroke-width="1.5"/>
+        <line class="flow" x1="9" y1="118" x2="51" y2="118"/>
+        <polygon class="ahead" points="52,114 52,122 59,118"/>
+        <text class="snoun" x="30" y="141" text-anchor="middle">FEEDS</text>
+        <rect x="26.8" y="114.8" width="6.4" height="6.4" transform="rotate(45 30 118)" fill="hsl(12 42% 58%)"/>
+      </g>
+
+      <!-- node: SCOUT -->
+      <g class="node">
+        <rect class="nbox" x="60" y="62" width="138" height="112" rx="2"/>
+        <circle cx="79" cy="82" r="4" fill="hsl(158 30% 55%)"/>
+        <text class="sn" x="90" y="86">SCOUT</text>
+        <text class="sj" x="72" y="106">watches journals</text>
+        <text class="sj" x="72" y="121">and patent feeds</text>
+        <text class="sf" x="72" y="145">31 feeds</text>
+        <line class="uline" x1="72" y1="149.5" x2="144" y2="149.5"/>
+        <text class="ss" x="72" y="163">since Thu 09:12</text>
+      </g>
+
+      <!-- edge: papers -->
+      <g class="edge">
+        <text class="sc" x="237" y="104" text-anchor="middle">1,284</text>
+        <line class="uline" x1="214" y1="109" x2="260" y2="109"/>
+        <line class="flow" x1="198" y1="118" x2="267" y2="118"/>
+        <polygon class="ahead" points="268,114 268,122 275,118"/>
+        <text class="snoun" x="237" y="141" text-anchor="middle">PAPERS</text>
+      </g>
+
+      <!-- node: READER -->
+      <g class="node">
+        <rect class="nbox" x="276" y="62" width="138" height="112" rx="2"/>
+        <circle cx="295" cy="82" r="4" fill="hsl(158 30% 55%)"/>
+        <text class="sn" x="306" y="86">READER</text>
+        <text class="sj" x="288" y="106">turns papers</text>
+        <text class="sj" x="288" y="121">into evidence</text>
+        <text class="sf" x="288" y="145">217 evidence</text>
+        <line class="uline" x1="288" y1="149.5" x2="396" y2="149.5"/>
+        <text class="ss" x="288" y="163">since 04:12</text>
+      </g>
+
+      <!-- edge: candidates -->
+      <g class="edge">
+        <text class="sc" x="464" y="104" text-anchor="middle">41</text>
+        <line class="uline" x1="453" y1="109" x2="475" y2="109"/>
+        <line class="flow" x1="414" y1="118" x2="505" y2="118"/>
+        <polygon class="ahead" points="506,114 506,122 513,118"/>
+        <text class="snoun" x="464" y="141" text-anchor="middle">CANDIDATES</text>
+      </g>
+
+      <!-- node: COUNCIL -->
+      <g class="node">
+        <rect class="nbox" x="514" y="62" width="138" height="112" rx="2"/>
+        <circle cx="533" cy="82" r="4" fill="none" stroke="#A69D90" stroke-width="1.2"/>
+        <text class="sn" x="544" y="86">COUNCIL</text>
+        <text class="sj" x="526" y="106">deliberates and</text>
+        <text class="sj" x="526" y="121">writes verdicts</text>
+        <text class="sf" x="526" y="145">9 sittings</text>
+        <line class="uline" x1="526" y1="149.5" x2="616" y2="149.5"/>
+        <text class="ss" x="526" y="163">rested 14:07</text>
+      </g>
+
+      <!-- edge: verdicts -->
+      <g class="edge">
+        <text class="sc" x="691" y="104" text-anchor="middle">6</text>
+        <line class="uline" x1="683" y1="109" x2="699" y2="109"/>
+        <line class="flow" x1="652" y1="118" x2="721" y2="118"/>
+        <polygon class="ahead" points="722,114 722,122 729,118"/>
+        <text class="snoun" x="691" y="141" text-anchor="middle">VERDICTS</text>
+      </g>
+
+      <!-- node: SIMULATOR -->
+      <g class="node">
+        <rect class="nbox" x="730" y="62" width="138" height="112" rx="2"/>
+        <circle cx="749" cy="82" r="4" fill="hsl(158 30% 55%)"/>
+        <text class="sn" x="760" y="86">SIMULATOR</text>
+        <text class="sj" x="742" y="106">trials candidate</text>
+        <text class="sj" x="742" y="121">interventions</text>
+        <text class="sf" x="742" y="145">3 in flight</text>
+        <line class="uline" x1="742" y1="149.5" x2="841" y2="149.5"/>
+        <text class="ss" x="742" y="163">since 09:36</text>
+      </g>
+
+      <!-- edge: results -->
+      <g class="edge">
+        <text class="sc" x="907" y="104" text-anchor="middle">34</text>
+        <line class="uline" x1="896" y1="109" x2="918" y2="109"/>
+        <line class="flow" x1="868" y1="118" x2="937" y2="118"/>
+        <polygon class="ahead" points="938,114 938,122 945,118"/>
+        <text class="snoun" x="907" y="141" text-anchor="middle">RESULTS</text>
+      </g>
+
+      <!-- node: ARCHIVIST -->
+      <g class="node">
+        <rect class="nbox" x="946" y="62" width="138" height="112" rx="2"/>
+        <circle cx="965" cy="82" r="4" fill="hsl(158 30% 55%)"/>
+        <text class="sn" x="976" y="86">ARCHIVIST</text>
+        <text class="sj" x="958" y="106">writes the</text>
+        <text class="sj" x="958" y="121">permanent record</text>
+        <text class="sf" x="958" y="145">52 sealed</text>
+        <line class="uline" x1="958" y1="149.5" x2="1039" y2="149.5"/>
+        <text class="ss" x="958" y="163">since 00:04</text>
+      </g>
+
+      <!-- edge: records -->
+      <g class="edge">
+        <text class="sc" x="1123" y="104" text-anchor="middle">52</text>
+        <line class="uline" x1="1112" y1="109" x2="1134" y2="109"/>
+        <line class="flow" x1="1084" y1="118" x2="1153" y2="118"/>
+        <polygon class="ahead" points="1154,114 1154,122 1161,118"/>
+        <text class="snoun" x="1123" y="141" text-anchor="middle">RECORDS</text>
+      </g>
+
+      <!-- node: COURIER -->
+      <g class="node">
+        <rect class="nbox" x="1162" y="62" width="138" height="112" rx="2"/>
+        <circle cx="1181" cy="82" r="4" fill="none" stroke="#A69D90" stroke-width="1.2"/>
+        <text class="sn" x="1192" y="86">COURIER</text>
+        <text class="sj" x="1174" y="106">composes the</text>
+        <text class="sj" x="1174" y="121">morning brief</text>
+        <text class="sf" x="1174" y="145">1 brief</text>
+        <line class="uline" x1="1174" y1="149.5" x2="1237" y2="149.5"/>
+        <text class="ss" x="1174" y="163">rested 06:04</text>
+      </g>
+
+      <!-- delivery stub -->
+      <g class="edge">
+        <text class="snoun" x="1330" y="104" text-anchor="middle">BRIEF</text>
+        <line class="flow" x1="1300" y1="118" x2="1342" y2="118"/>
+        <polygon class="ahead" points="1343,114 1343,122 1350,118"/>
+        <circle cx="1355" cy="118" r="3" fill="none" stroke="hsl(158 30% 55%)" stroke-width="1"/>
+        <text class="sc" x="1330" y="142" text-anchor="middle" style="font-size:12px">06:02</text>
+        <line class="uline" x1="1309" y1="146.5" x2="1351" y2="146.5"/>
+      </g>
+
+      <!-- last-act telemetry row -->
+      <text class="slog" x="0" y="208">LAST ACT</text>
+      <g class="node"><text class="sact" x="72"   y="200">14:29 flagged</text><text class="sact" x="72"   y="216">WO2026/118442</text></g>
+      <g class="node"><text class="sact" x="288"  y="200">14:31 E-9312</text><text class="sact" x="288"  y="216">leaf senescence</text></g>
+      <g class="node"><text class="sact" x="526"  y="200">14:07 V-2481</text><text class="sact" x="526"  y="216">sent to trial</text></g>
+      <g class="node"><text class="sact" x="742"  y="200">14:24 S-1147</text><text class="sact" x="742"  y="216">midpoint clean</text></g>
+      <g class="node"><text class="sact" x="958"  y="200">14:18 sealed</text><text class="sact" x="958"  y="216">AR-0822-051</text></g>
+      <g class="node"><text class="sact" x="1174" y="200">06:02 sent</text><text class="sact" x="1174" y="216">14 items</text></g>
+    </svg>
+  </section>
+
+  <!-- ledger + operations column -->
+  <div class="lower">
+
+    <!-- THE DAY'S LEDGER -->
+    <section style="margin-top:0">
+      <div class="lhead">
+        <span class="slabel">The Day&#8217;s Ledger</span>
+        <span class="lcap">Hard cap <span class="mono">$500.00</span> · resets 00:00</span>
+      </div>
+
+      <div class="track">
+        <div class="pace"><span>DAY PACE</span></div>
+        <div class="fill" style="width:41.28%"></div>
+        <div class="gdiv" style="left:16.82%"></div>
+        <div class="gdiv" style="left:28.60%"></div>
+        <div class="gdiv" style="left:36.84%"></div>
+        <div class="gdiv" style="left:39.39%"></div>
+        <div class="gdiv" style="left:40.62%"></div>
+      </div>
+      <div class="scale">
+        <span class="z">0</span>
+        <span style="left:20%">100</span>
+        <span style="left:40%">200</span>
+        <span style="left:60%">300</span>
+        <span style="left:80%">400</span>
+        <span class="cap">500 · HARD CAP</span>
+      </div>
+      <p class="gsum"><b>41%</b> of cap at <b>61%</b> of the day · projected close <b>$340.84</b> · yesterday closed <b>$268.15</b> · metered at the gateway, recomputed 14:31</p>
+
+      <div class="lrow">
+        <span class="lsvc"><i class="ldot run"></i>Reader</span>
+        <span class="lprov">1,284 papers parsed · 41.2M tokens</span>
+        <span class="lbar"><i style="width:100%"></i></span>
+        <span class="lamt"><span class="fig">$84.10</span></span>
+      </div>
+      <div class="lrow">
+        <span class="lsvc"><i class="ldot rest"></i>Council</span>
+        <span class="lprov">9 sittings · 5.8M tokens</span>
+        <span class="lbar"><i style="width:70%"></i></span>
+        <span class="lamt"><span class="fig">$58.90</span></span>
+      </div>
+      <div class="lrow">
+        <span class="lsvc"><i class="ldot run"></i>Simulator</span>
+        <span class="lprov">38 runs · 214 CPU&#8209;h</span>
+        <span class="lbar"><i style="width:49%"></i></span>
+        <span class="lamt"><span class="fig">$41.20</span></span>
+      </div>
+      <div class="lrow">
+        <span class="lsvc"><i class="ldot run"></i>Scout</span>
+        <span class="lprov">8,204 feed checks · 312 fetches</span>
+        <span class="lbar"><i style="width:15%"></i></span>
+        <span class="lamt"><span class="fig">$12.75</span></span>
+      </div>
+      <div class="lrow">
+        <span class="lsvc"><i class="ldot run"></i>Archivist</span>
+        <span class="lprov">52 seals · 1.9 GB written</span>
+        <span class="lbar"><i style="width:7.3%"></i></span>
+        <span class="lamt"><span class="fig">$6.15</span></span>
+      </div>
+      <div class="lrow">
+        <span class="lsvc"><i class="ldot rest"></i>Courier</span>
+        <span class="lprov">1 brief · 116K tokens</span>
+        <span class="lbar"><i style="width:3.9%"></i></span>
+        <span class="lamt"><span class="fig">$3.30</span></span>
+      </div>
+
+      <div class="ltotal">
+        <span class="ltl">Total — six services</span>
+        <span><span class="tamt"><span class="fig">$206.40</span></span>&ensp;<span class="tof">of <b>$500.00</b> · headroom <b>$293.60</b></span></span>
+      </div>
+    </section>
+
+    <!-- SCHEDULER / DATA / INCIDENTS -->
+    <aside>
+      <div class="panel" style="margin-top:0">
+        <div class="prow">
+          <span class="plabel">Scheduler</span>
+          <span class="pmeta">16 cycles / day</span>
+        </div>
+        <p class="pline">cycle <span class="v">10</span> of <span class="v">16</span> closed <span class="v fig">14:07</span> · on time</p>
+        <p class="pline">next <span class="v fig">15:30</span> · cadence 90 min · drift <span class="v">&#177;0 s</span></p>
+        <div class="cyc">
+          <i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i>
+          <i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i>
+          <i class="next"></i><i class="todo"></i><i class="todo"></i><i class="todo"></i><i class="todo"></i><i class="todo"></i>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="prow">
+          <span class="plabel">Data</span>
+          <span class="pmeta">Snapshots hourly</span>
+        </div>
+        <p class="pline">snapshot <span class="v fig">14:00</span> · 11 s · clean</p>
+        <p class="pline">archive <span class="v">1,420,318</span> records · +52 today</p>
+        <p class="pline">backfill 1998&#8211;2004 field trials · <span class="v fig">82%</span><span class="minibar"><i style="width:82%"></i></span></p>
+      </div>
+
+      <div class="panel">
+        <div class="prow">
+          <span class="plabel">Incidents</span>
+          <span class="pmeta">1 open · 1 closed · 22 min lost</span>
+        </div>
+        <p class="pline inc"><i class="imark open"></i><span class="v">13:51</span> · USPTO patent feed <span class="clay">&#8722;41 min</span> · Scout polling 2&#215; · <span class="clay">watching</span></p>
+        <p class="pline inc"><i class="imark closed"></i><span class="v">09:14</span> · Simulator OOM on <span class="v">S-1131</span> · restarted · <span class="v fig">22 min</span> lost · closed <span class="v">09:36</span></p>
+      </div>
+    </aside>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap frow">Every claim sourced · every cost computed · every verdict recorded</div>
+</footer>
+
+</body>
+</html>

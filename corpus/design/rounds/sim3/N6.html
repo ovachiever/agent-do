@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palingenesis — Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1B1917;
+    --surface:#211E1B;
+    --ink:#E7E3DA;
+    --muted:#A69D90;
+    --faint:#6E675E;
+    --sage:hsl(158,30%,55%);
+    --clay:hsl(12,42%,58%);
+    --serif:'Source Serif 4', Georgia, serif;
+    --sans:'Source Sans 3', Arial, sans-serif;
+    --mono:'JetBrains Mono', 'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  html{background:var(--bg);}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none;}
+  .container{max-width:1320px;margin:0 auto;padding-inline:48px;}
+  section, header, footer{scroll-margin-top:104px;}
+
+  /* ---------- masthead ---------- */
+  .masthead{
+    background:var(--surface);
+    width:100%;
+  }
+  .mast-inner{
+    max-width:1320px;
+    margin:0 auto;
+    padding:22px 48px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:32px;
+  }
+  .brand{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:19px;
+    letter-spacing:0.2px;
+    color:var(--ink);
+    white-space:nowrap;
+  }
+  .nav{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    flex-wrap:wrap;
+  }
+  .nav a{
+    font-size:14px;
+    font-weight:500;
+    color:var(--muted);
+    padding:12px 14px;
+    border-radius:3px;
+    line-height:1;
+    transition:color .15s ease;
+  }
+  .nav a:hover{color:var(--ink);}
+  .nav a.active{color:var(--sage);font-weight:600;}
+  .clock{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--muted);
+    white-space:nowrap;
+    letter-spacing:0.2px;
+  }
+
+  /* ---------- hero ---------- */
+  .hero{padding:88px 0 0;}
+  .hero-grid{
+    display:grid;
+    grid-template-columns:1.15fr 1fr;
+    gap:64px;
+    align-items:start;
+  }
+  .room{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:68px;
+    line-height:1.02;
+    letter-spacing:-0.5px;
+    margin:0 0 24px;
+    color:var(--ink);
+  }
+  .lede{
+    font-size:19px;
+    line-height:1.55;
+    color:var(--ink);
+    max-width:46ch;
+    margin:0;
+  }
+  .surface{
+    background:var(--surface);
+    border-radius:4px;
+  }
+  .standing{
+    padding:36px 40px;
+  }
+  .standing-meta{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    margin-bottom:32px;
+  }
+  .standing-meta span{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--muted);
+    letter-spacing:0.2px;
+  }
+  .instrument-row{
+    display:grid;
+    gap:28px;
+  }
+  .instrument-row.primary{
+    grid-template-columns:repeat(3,1fr);
+    padding-bottom:28px;
+  }
+  .instrument-row.secondary{
+    grid-template-columns:repeat(2,1fr);
+    padding-top:28px;
+  }
+  .stat-label{
+    font-size:12px;
+    color:var(--muted);
+    line-height:1.4;
+    margin-bottom:10px;
+  }
+  .stat-figure{
+    font-family:var(--mono);
+    font-weight:500;
+    font-size:38px;
+    color:var(--sage);
+    line-height:1;
+    letter-spacing:-0.5px;
+  }
+  .stat-figure.small{
+    font-size:19px;
+    color:var(--ink);
+  }
+
+  /* ---------- section titles ---------- */
+  .section-title{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:27px;
+    color:var(--ink);
+    margin:0 0 36px;
+  }
+
+  /* ---------- runs ---------- */
+  .runs-section{margin-top:120px;}
+  .runs-grid{
+    display:grid;
+    gap:24px;
+  }
+  .runs-grid.primary-runs{grid-template-columns:repeat(3,1fr);}
+  .runs-grid.secondary-runs{grid-template-columns:repeat(2,1fr);margin-top:24px;}
+  .run{padding:30px 32px;display:flex;flex-direction:column;}
+  .run-id{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--muted);
+    letter-spacing:0.2px;
+    margin-bottom:14px;
+  }
+  .run-id .flag{color:var(--clay);font-weight:600;}
+  .run-title{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:21px;
+    line-height:1.32;
+    color:var(--ink);
+    margin:0 0 16px;
+  }
+  .run-result{
+    font-size:15.5px;
+    line-height:1.55;
+    margin:0;
+  }
+  .run-result .figure{font-weight:600;color:var(--sage);}
+  .run-result .rest{color:var(--muted);}
+  .run-result .flag{font-weight:600;color:var(--clay);}
+  .run-ens{
+    font-family:var(--mono);
+    font-size:14px;
+    color:var(--faint);
+    line-height:1.5;
+    margin-top:18px;
+    overflow-wrap:break-word;
+  }
+  .drill{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size:14px;
+    font-weight:500;
+    color:var(--sage);
+    margin-top:22px;
+    padding:8px 0;
+    align-self:flex-start;
+  }
+  .drill span{font-size:12px;}
+  .cannot .run-title{color:var(--ink);}
+
+  /* ---------- provenance ---------- */
+  .provenance{margin-top:56px;padding:40px 44px;}
+  .prov-title{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:20px;
+    color:var(--ink);
+    margin:0 0 20px;
+  }
+  .prov-body{
+    font-size:15.5px;
+    line-height:1.65;
+    color:var(--ink);
+    max-width:920px;
+    margin:0;
+  }
+  .prov-cannot{
+    font-family:var(--mono);
+    font-size:14px;
+    color:var(--faint);
+    line-height:1.6;
+    margin:22px 0 0;
+    letter-spacing:0.1px;
+  }
+
+  /* ---------- ledgers ---------- */
+  .hindcasts{margin-top:120px;}
+  .cores{margin-top:96px;}
+  .ledger{padding:8px 40px;}
+  .ledger-row{
+    padding:17px 0;
+    font-size:15px;
+    line-height:1.5;
+  }
+  .ledger-row .lead{
+    font-family:var(--mono);
+    font-weight:600;
+    color:var(--ink);
+  }
+  .ledger-row .rest{
+    font-family:var(--mono);
+    color:var(--faint);
+  }
+  .ledger-row .miss,
+  .ledger-row .flag{
+    font-family:var(--mono);
+    font-weight:600;
+    color:var(--clay);
+  }
+
+  /* ---------- colophon ---------- */
+  .colophon{
+    background:var(--surface);
+    width:100%;
+    margin-top:128px;
+  }
+  .colophon-inner{
+    max-width:1320px;
+    margin:0 auto;
+    padding:48px 48px 56px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:14px;
+    text-align:center;
+  }
+  .feeds{
+    font-family:var(--mono);
+    font-size:14px;
+    color:var(--faint);
+    letter-spacing:0.2px;
+  }
+  .motto{
+    font-size:14px;
+    color:var(--faint);
+  }
+  .footer-brand{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:19px;
+    color:var(--ink);
+    margin-top:10px;
+  }
+
+  /* ---------- narrow ---------- */
+  @media (max-width:760px){
+    .container{padding-inline:20px;}
+    .mast-inner{
+      flex-wrap:wrap;
+      row-gap:10px;
+      padding:18px 20px;
+    }
+    .brand{order:1;}
+    .clock{order:2;}
+    .nav{
+      order:3;
+      flex-basis:100%;
+      gap:0;
+      justify-content:flex-start;
+    }
+    .nav a{padding:10px 10px 10px 0;}
+    .hero{padding:56px 0 0;}
+    .hero-grid{grid-template-columns:1fr;gap:40px;}
+    .room{font-size:42px;}
+    .lede{font-size:17px;max-width:none;}
+    .standing{padding:28px 24px;}
+    .instrument-row.primary{grid-template-columns:repeat(3,1fr);gap:18px;}
+    .instrument-row.secondary{grid-template-columns:1fr;gap:20px;}
+    .stat-figure{font-size:26px;}
+    .runs-section{margin-top:72px;}
+    .runs-grid.primary-runs,
+    .runs-grid.secondary-runs{grid-template-columns:1fr;}
+    .provenance{padding:28px 24px;}
+    .hindcasts{margin-top:72px;}
+    .cores{margin-top:64px;}
+    .ledger{padding:4px 24px;}
+    .colophon{margin-top:80px;}
+    .colophon-inner{padding:40px 24px 48px;}
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead" data-group="masthead">
+  <div class="mast-inner">
+    <a class="brand" data-node="brand" href="#opening">Palingenesis</a>
+    <nav class="nav">
+      <a data-node="nav-today" href="#standing">Today</a>
+      <a data-node="nav-pipeline" href="#runs">Pipeline</a>
+      <a data-node="nav-library" href="#hindcasts">Library</a>
+      <a data-node="nav-portfolio" href="#cores">Portfolio</a>
+      <a data-node="nav-simulation" class="active" href="#opening">Simulation</a>
+      <a data-node="nav-engine" href="#colophon">Engine Room</a>
+    </nav>
+    <div class="clock" data-node="clock">17:26:08 · Fri 22 Aug</div>
+  </div>
+</header>
+
+<main class="container">
+
+  <section class="hero" id="opening" data-group="opening">
+    <div class="hero-grid">
+      <div class="hero-left">
+        <h1 class="room" data-node="room">Simulation</h1>
+        <p class="lede" data-node="lede">Nominal — three runs closed, two cannot simulate; litter core calibration due 30 Sep.</p>
+      </div>
+      <div class="hero-right surface standing" id="standing" data-group="standing">
+        <div class="standing-meta">
+          <span data-node="standing-model">Model · palingenesis-sim v0.9.3</span>
+          <span data-node="standing-site">Site · Majella House 4</span>
+        </div>
+        <div class="instrument-row primary">
+          <div class="stat">
+            <div class="stat-label" data-node="standing-tier-label">Tier</div>
+            <div class="stat-figure" data-node="standing-tier">T2</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label" data-node="standing-skill-label">Hindcast skill · 0.61 baseline</div>
+            <div class="stat-figure" data-node="standing-skill">0.82</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label" data-node="standing-cov-label">Coverage · n=41</div>
+            <div class="stat-figure" data-node="standing-cov">88%</div>
+          </div>
+        </div>
+        <div class="instrument-row secondary">
+          <div class="stat">
+            <div class="stat-label" data-node="standing-cal-label">Calibrated · 14 mo telemetry</div>
+            <div class="stat-figure small" data-node="standing-cal">2026-08-19</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label" data-node="standing-par-label">Site · published parameters</div>
+            <div class="stat-figure small" data-node="standing-par">67% / 33%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="runs-section" id="runs" data-group="runs">
+    <h2 class="section-title" data-node="runs-title">Runs today</h2>
+
+    <div class="runs-grid primary-runs">
+      <article class="run surface" data-group="run1">
+        <div class="run-id" data-node="r1-id">sim-4471 · T2</div>
+        <h3 class="run-title" data-node="r1-title">Biochar litter amendment, 12 t/ha equivalent bedding</h3>
+        <p class="run-result" data-node="r1-result"><span class="figure">Litter moisture −11%</span><span class="rest"> · interval −14…−8 · in-domain</span></p>
+        <div class="run-ens" data-node="r1-ens">40 seasons × 3 weather years (2019, 2022, 2024) × 3 price paths (2024–26)</div>
+        <a class="drill" data-node="r1-drill" href="#provenance">Provenance<span aria-hidden="true">▸</span></a>
+      </article>
+
+      <article class="run surface" data-group="run2">
+        <div class="run-id" data-node="r2-id"><span>sim-4472 · </span><span class="flag">T1 screening</span></div>
+        <h3 class="run-title" data-node="r2-title">Co-inoculated legume forage supplement</h3>
+        <p class="run-result" data-node="r2-result"><span class="figure">Feed-cost proxy −3…+1%</span><span class="rest"> · randomized: amino-acid digestibility unknown</span></p>
+        <a class="drill" data-node="r2-drill" href="#provenance">Provenance<span aria-hidden="true">▸</span></a>
+      </article>
+
+      <article class="run surface" data-group="run3">
+        <div class="run-id" data-node="r3-id">sim-4473 · T2</div>
+        <h3 class="run-title" data-node="r3-title">Summer ventilation setpoint +1.5°C</h3>
+        <p class="run-result" data-node="r3-result"><span class="figure">Heat stress hours −22%</span><span class="rest"> · interval −28…−15 · mortality Δ −0.2 pts (−0.4…0.0) · in-domain</span></p>
+        <a class="drill" data-node="r3-drill" href="#provenance">Provenance<span aria-hidden="true">▸</span></a>
+      </article>
+    </div>
+
+    <div class="runs-grid secondary-runs">
+      <article class="run surface cannot" data-group="run4">
+        <div class="run-id" data-node="r4-id">sim-4474</div>
+        <h3 class="run-title" data-node="r4-title">Novel probiotic X-17</h3>
+        <p class="run-result" data-node="r4-result"><span class="flag">Cannot simulate</span><span class="rest"> — no gut-microbiome core · routed: field-trial design</span></p>
+      </article>
+
+      <article class="run surface cannot" data-group="run5">
+        <div class="run-id" data-node="r5-id">sim-4475</div>
+        <h3 class="run-title" data-node="r5-title">Cage-free transition, House 4</h3>
+        <p class="run-result" data-node="r5-result"><span class="flag">Cannot simulate</span><span class="rest"> — outside calibration domain · routed: telemetry acquisition</span></p>
+      </article>
+    </div>
+
+    <div class="provenance surface" id="provenance" data-group="provenance">
+      <h3 class="prov-title" data-node="prov-title">Provenance · sim-4471</h3>
+      <p class="prov-body" data-node="prov-body">Model v0.9.3 · calibration Majella House 4, 14 mo, 2026-08-19 · parameters 67% site / 33% published · skill 0.82 vs 0.61 · coverage 88% (n=41) · in-domain yes</p>
+      <p class="prov-cannot" data-node="prov-cannot">Not modeled: gut microbiome · individual-bird behavior · neighboring-farm spillover · feed-mill supply shocks</p>
+    </div>
+  </section>
+
+  <section class="hindcasts" id="hindcasts" data-group="hindcasts">
+    <h2 class="section-title" data-node="hc-title">Hindcasts · 8 scored</h2>
+    <div class="ledger surface">
+      <div class="ledger-row" data-node="hc-1"><span class="lead">2026-07-01</span><span class="rest"> · lay rate wk 48 · 91.2–93.8% · 92.9 · inside · 0.84</span></div>
+      <div class="ledger-row" data-node="hc-2"><span class="lead">2026-07-01</span><span class="rest"> · feed intake g/hen/d · 108–114 · 111 · inside · 0.79</span></div>
+      <div class="ledger-row" data-node="hc-3"><span class="lead">2026-07-15</span><span class="rest"> · egg mass g/hen/d · 57.1–60.4 · 60.9 · </span><span class="miss">outside +0.5</span><span class="rest"> · 0.71</span></div>
+      <div class="ledger-row" data-node="hc-4"><span class="lead">2026-07-15</span><span class="rest"> · barn RH % · 61–69 · 66 · inside · 0.88</span></div>
+      <div class="ledger-row" data-node="hc-5"><span class="lead">2026-08-01</span><span class="rest"> · mortality cum % · 0.9–1.4 · 1.1 · inside · 0.83</span></div>
+      <div class="ledger-row" data-node="hc-6"><span class="lead">2026-08-01</span><span class="rest"> · shell thickness µm · 372–388 · 381 · inside · 0.80</span></div>
+      <div class="ledger-row" data-node="hc-7"><span class="lead">2026-08-15</span><span class="rest"> · margin $/dozen · 0.41–0.58 · 0.52 · inside · 0.77</span></div>
+      <div class="ledger-row" data-node="hc-8"><span class="lead">2026-08-15</span><span class="rest"> · water intake L/hen/d · 0.19–0.23 · 0.21 · inside · 0.86</span></div>
+    </div>
+  </section>
+
+  <section class="cores" id="cores" data-group="cores">
+    <h2 class="section-title" data-node="cores-title">Cores</h2>
+    <div class="ledger surface">
+      <div class="ledger-row" data-node="core-1"><span class="lead">Hen physiology</span><span class="rest"> · calibrated 2026-08-19 · skill 0.85 · T2</span></div>
+      <div class="ledger-row" data-node="core-2"><span class="lead">Barn environment</span><span class="rest"> · calibrated 2026-08-19 · skill 0.88 · T2</span></div>
+      <div class="ledger-row" data-node="core-3"><span class="lead">Health risk</span><span class="rest"> · published parameters · </span><span class="flag">T1</span></div>
+      <div class="ledger-row" data-node="core-4"><span class="lead">Economics</span><span class="rest"> · live to 2026-08-21 · T2</span></div>
+      <div class="ledger-row" data-node="core-5"><span class="lead">Litter / soil</span><span class="rest"> · calibration pending 30 Sep · </span><span class="flag">T1</span></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="colophon" id="colophon" data-group="colophon">
+  <div class="colophon-inner">
+    <div class="feeds" data-node="feeds">ERA5 · PRISM · SSURGO · USDA NASS · USDA AMS · NAEMS · site telemetry 14 mo</div>
+    <div class="motto" data-node="motto">Every claim sourced · every cost computed · every verdict recorded</div>
+    <div class="footer-brand" data-node="footer-brand">Palingenesis</div>
+  </div>
+</footer>
+
+</body>
+</html>
