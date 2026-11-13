@@ -6,7 +6,7 @@ source: null
 base_commit: 019eda07c9d6578804e6e65d5812cf3ae0cc5686
 scope: 'Design: repair dashboard briefs, provider preflight and publishable image ballots'
 inputs: []
-binding: sha256:5cf283d822954eb1a2d1e1faa880d2cca524d97a0320282042d0678eb11a1cf4
+binding: sha256:5f0a6b5075b44a5af748799daaefb3bd2f555a221ff4b4676a6565e94d734900
 ---
 
 # Handoff: Design: repair dashboard briefs, provider preflight and publishable image ballots
@@ -61,3 +61,13 @@ Earlier development runs exposed a shadowed variable and an audit-filename compa
 Chris's original machine, requests, outputs and exact installed revision were unavailable. This validates the repaired current product path, not a retroactive diagnosis of his dog images or billing. Actual Claude Artifact publication/readback remains a host capability, not simulated by local preparation. Chris should start a new round from the full approved facts; frozen older rounds retain their original prompts.
 
 The installed executable is /Users/erik/Custom-Coding/agent-do/agent-do; ~/.local/bin/agent-do links to it. No install is required on this host. Remote publication is separate from local activation. Main currently includes five earlier unpublished commits outside this item's scope.
+
+## Follow-up: latest image model, November 12
+
+User requested updating to the latest image generation family after the current round. I kept that round on 2.5 for consistency, then verified 2.6 separately. The official catalog retains "most capable" wording on 2.5 while listing 2.6 with a different description. Selection now uses the newest numbered Sunburst alias; snapshots and Flare speed tiers are excluded. The guide must explicitly document maximum quality for the selected generation. Text selection is unchanged.
+
+Commit: 77b5546. Provider regressions: 11 passed; two new regressions fail on the prior source (old model selected and new quality unsupported). Complete design suite: 98 passed in 192.241 seconds. Contracts validate: 103 tools, zero errors or warnings. Generated tools-doc check, staged diff check and staged gitleaks passed. Full root test.sh not run.
+
+Real provider-path validation: gpt-image-2.6-sunburst, max, 3360x1968 PNG; 1,099 input tokens, 11,576 image output tokens. Image decoded and visually inspected: relevant Holy workspace. Request, response, refreshed official authority and PNG retained in .dev/holy-ghost-design/model-2.6-live-check/. No automatic retry or fallback occurred for this request.
+
+Original Holy design round: six 2.5 images complete, after one HTTP 520 and an explicit resume. Ballot prepared and browser-audited as two parts (13,319,086 and 6,734,376 bytes); no hosted publication or owner approval claimed. Local installed agent-do uses the changed repository. No push or PR; remote release scope remains unanswered.
