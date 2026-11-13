@@ -50,14 +50,13 @@ def main(argv=None):
     builder.add_argument('--dry-run', action='store_true')
     builder.add_argument('--retry-uncertain', action='store_true')
     builder.add_argument('--json', action='store_true')
-    ballot = commands.add_parser('ballot', help='Hand a blind image/page ballot to Claude; import its verbatim Artifact readback')
+    ballot = commands.add_parser('ballot', help='Open a local interactive review or import its saved ruling; external hosting is forbidden')
     ballot.add_argument('kind', choices=('images','pages'))
     ballot.add_argument('--round', type=Path, required=True)
-    ballot.add_argument('--claude-session')
+    ballot.add_argument('--no-open', action='store_true', help='Start local review and print its URL without opening a browser')
     ballot.add_argument('--prepare-only', action='store_true', help='Build and audit the publication payload without notifying a peer')
-    ballot.add_argument('--publish', action='store_true', help='Prepare and hand off to Claude; this tool returns ballot pending')
-    ballot.add_argument('--submitted', type=Path, help='Exact HTML returned by Claude Artifact read')
-    ballot.add_argument('--receipt', type=Path, help='Claude read receipt with URL, version, hashes and explicit selection evidence')
+    ballot.add_argument('--submitted', type=Path, help='Exact HTML saved by the local review host')
+    ballot.add_argument('--receipt', type=Path, help='Local review receipt binding saved owner controls to this round')
     ballot.add_argument('--dry-run', action='store_true')
     ballot.add_argument('--json', action='store_true')
     polish = commands.add_parser('polish', help='Measure live text, SVG, clipping, alignment and overflow')
@@ -77,9 +76,16 @@ def main(argv=None):
     try:
         if args.verb == 'ballot':
             if bool(args.submitted)!=bool(args.receipt):raise DesignError('--submitted and --receipt are required together')
-            if args.publish and args.submitted:raise DesignError('choose handoff or ruling import, not both')
+            if args.prepare_only and args.submitted:raise DesignError('--prepare-only cannot import')
+            if args.no_open and (args.submitted or args.prepare_only):raise DesignError('--no-open is for local review only')
             with Round(args.round) as record:
-                result=import_ruling(record,args.kind,args.submitted,args.receipt,args.dry_run) if args.submitted else prepare_ballot(record,args.kind,args.claude_session,args.dry_run,prepare_only=args.prepare_only)
+                result=import_ruling(record,args.kind,args.submitted,args.receipt,args.dry_run) if args.submitted else prepare_ballot(record,args.kind,args.dry_run,prepare_only=True)
+            if not args.submitted and not args.prepare_only:
+                if args.dry_run:result['publication']='local HTTP review and default browser'
+                else:
+                    from design_preview import launch
+                    result['preview']=launch(args.round,args.kind,open_browser=not args.no_open)
+                    result['status']='local review ready'
             print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         if args.verb == 'reproduce':
             with Round(args.round) as record:

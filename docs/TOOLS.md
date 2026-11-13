@@ -1527,7 +1527,7 @@ Concurrency: `mixed`
 - freeze owner copy and facts into exact, half and open image prompts
 - generate images with current strongest-model authority and actual usage receipts
 - measure chosen images and reproduce them with independent browser repair checks
-- hand blind self-saving ballots to Claude Code and import verbatim owner rulings
+- open local interactive ballots automatically and preserve explicit owner rulings; external Artifact hosting is forbidden
 - measure rendered typography, inline text, SVG captions, clipping, controls and overflow
 - preserve audit evidence with viewport and threshold provenance
 
@@ -1537,7 +1537,7 @@ Concurrency: `mixed`
 - `imagine`: imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]
 - `measure`: measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]
 - `reproduce`: reproduce --round ROUND [--selected] [--dry-run] [--retry-uncertain] [--json]
-- `ballot`: ballot images|pages --round ROUND [--publish] [--prepare-only] [--claude-session ID] [--submitted HTML --receipt JSON] [--dry-run] [--json]
+- `ballot`: ballot images|pages --round ROUND [--prepare-only] [--no-open] [--submitted HTML --receipt JSON] [--dry-run] [--json]
 - `polish`: polish \<url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--dry-run] [--json]
 
 **Examples**

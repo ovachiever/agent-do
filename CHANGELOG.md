@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Design ballots now start a persistent local review server and open the default browser automatically. Notes and explicit selections are saved locally, all comparison parts remain required, and private round files are never served. `--no-open` prints the URL; `--prepare-only` remains headless. External Artifact publishing, peer handoff and receipt imports are forbidden and removed; local review has no external publishing-size cap. (mn-fd9577)
+
 - Design image authority now selects the latest catalogued Sunburst generation (currently GPT Image 2.6) even when an older catalog entry retains "most capable" wording. Quality parsing recognizes the guide's explicit family-level maximum settings and refuses undocumented generations. (mn-fd9577)
 
 - Design dashboard rounds now accept label-only content, keep local provenance out of provider prompts, validate the actual compiled prompt against the Images API limit before freezing or sending, and select maximum-quality image dimensions matching the requested viewport. Scroll framing remains explicit and frozen legacy rounds retain their behavior. Image ballots preserve original pixels with optional lossless WebP, split large rounds into bounded Artifact parts, and wait for explicit rulings on every part before advancing. `ballot --prepare-only` audits the publication payload without notifying another session. (mn-fd9577)

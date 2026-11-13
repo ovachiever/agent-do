@@ -73,10 +73,11 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(receipt['request_sha256'],digest(transport.call_args.args[0].data))
             self.assertEqual(receipt['prompt_characters'],len(prompt))
 
-    def test_ballot_payload_limit_and_webp_type(self):
+    def test_local_ballot_has_no_external_payload_limit_and_keeps_webp_type(self):
         s=make_ballot('test',[{'label':'1','kind':'images','bytes':b'fixture','width':1440,'height':1000,'mime':'image/webp'}])
         self.assertIn('data:image/webp;base64',s)
-        self.assertLess(validate_ballot_size(s),BALLOT_MAX_BYTES)
-        with self.assertRaises(DesignError):validate_ballot_size('x'*(BALLOT_MAX_BYTES+1))
+        self.assertEqual(validate_ballot_size(s),len(s.encode()))
+        self.assertIsNone(BALLOT_MAX_BYTES)
+        self.assertEqual(validate_ballot_size('x'*(16*1024*1024)),16*1024*1024)
 
 if __name__=='__main__':unittest.main()

@@ -50,23 +50,27 @@ One isolated vision-capable frontend builder receives each selected image, obser
 
 This reproduction surface is inspectable static HTML with navigation, rather than executable app code. Scripts, frames, canvas, raster text and editable form values cannot stand in for auditable page content. Every viewport must pass the exact copy/fact checker and complete live polish before a page becomes a ballot candidate. Each attempt, implementation decision, audit, render and provider usage receipt is retained. A page ballot is still the owner's judgment; passing mechanical checks is not approval.
 
-## Claude ballots
+## Local review only
 
 ```bash
+agent-do design ballot images --round .dev/design/new-surface
+agent-do design ballot pages --round .dev/design/new-surface
+# Both start local HTTP review and open the default browser automatically.
+agent-do design ballot images --round .dev/design/new-surface --no-open
+# Same persistent local review, URL only.
 agent-do design ballot images --round .dev/design/new-surface --prepare-only
-agent-do design ballot images --round .dev/design/new-surface --claude-session SESSION
-# Claude publishes /ballot, then reads the submitted page and returns real receipts.
-agent-do design ballot images --round .dev/design/new-surface --submitted submitted.html --receipt artifact-read.json
-# After measurement and passing reproduction:
-agent-do design ballot pages --round .dev/design/new-surface --claude-session SESSION
-agent-do design ballot pages --round .dev/design/new-surface --submitted page-submitted.html --receipt page-read.json
+# Prepare/audit only. No server or browser launch.
 ```
 
-The local command prepares, blinds and audits the ballot, then calls `agent-do coord drop add` for an active Claude Code session. If there is exactly one active Claude peer, it can be selected automatically. Publication remains **ballot pending**. The generated `CLAUDE-HANDOFF.md` tells that session to use `/ballot` with the Artifact capability, publish, verify readback, wait for Erik, and return the real submitted page and raw tool read receipt. There is no alternate publisher.
+**External Artifact hosting is forbidden.** There is no Claude publishing, peer handoff, cloud-host fallback or Artifact receipt import. Removed `--publish` and `--claude-session` flags fail rather than silently changing behavior. Historical receipts remain evidence on disk; they do not authorize new cloud activity.
 
-Candidates use neutral shuffled labels, separate sealed keys for images and pages, and original judging dimensions. Image metadata is removed from public copies without changing pixels. When an existing `cwebp` executable is available, public images are encoded losslessly at original dimensions (including exact transparent pixels); original PNGs remain untouched. The smaller representation is embedded. A conservative 15 MiB publication envelope targets the lower end of the 16–20 MiB limit reported in Chris's incident and reserves room for notes; actual publication still requires host readback. large rounds automatically split into separately publishable parts with stable global candidate labels. Each part has its own fingerprint, note keys and Artifact receipt. The round advances only after all parts have explicit rulings; partial or repeated imports never imply approval of unread parts. A single candidate that cannot fit losslessly refuses before handoff, preserving the evidence. `--prepare-only` builds and audits the real ballot without notifying a peer or claiming publication. No codec is installed automatically. Page copies are audited again after metadata removal and embedded in sandboxed frames without same-origin access. Independent source audits, exact frame bytes and viewport dimensions must match before frame coverage can pass the ballot-chrome audit.
+The command prepares, blinds and audits the comparison, starts a persistent server bound only to `127.0.0.1`, and opens the default browser. Repeat the command to reopen the same server. The page links every existing part and has a Stop preview button. Only public comparison pages are served, never the round directory, provider receipts or blind key. The server outlives the CLI command. Browser launch failure reports the working URL instead of claiming it opened.
 
-The self-saving runtime captures its original template at load and publishes only on Submit. It preserves note whitespace and typos, including safe handling of text containing `</script>`. Import checks the Claude URL/version/read receipt, exact candidate content, known note keys and full-note selection evidence. The raw Artifact read is supplied by the Claude host; this process cannot independently call that capability. Unknown or ambiguous selection stays pending. Each imported ruling archives the submitted page, receipt, exact notes and unsealed key; `labels.yaml` is the current projection of that append-only history.
+Notes survive reload. Save review records their exact text; candidate checkboxes plus explicit confirmation record selection, including rejecting all candidates. Notes alone never approve anything. Every part needs an explicit selection before advancing. Saved source, raw owner input and round-bound local receipts remain under `local-reviews/`. Unknown keys, foreign origins, changed candidate bytes and external-host receipts refuse. Later rounds cannot silently replace an accepted ruling. Local receipts can also be reimported idempotently with `--submitted HTML --receipt JSON`.
+
+Image comparisons contain raster concepts with interactive review controls, not working applications reconstructed from those images. Page comparisons embed the generated HTML in sandboxed frames. Candidates retain neutral shuffled labels and original judging dimensions. Public copies remove metadata without changing pixels; optional existing cwebp encoding is lossless. No codec is installed automatically. Local hosting has no external publishing-size cap; existing multipart rounds remain supported. Page copies are independently audited after metadata removal, with source hashes, viewport dimensions and exact frame bytes checked.
+
+The prepared HTML is a static export; its save button directs readers to the local review command. The served version supplies the local review runtime. Original candidate and ballot bytes remain immutable. Each ruling archives its exact submission, review receipt, raw owner controls and unsealed key; `labels.yaml` projects that append-only history.
 
 ## Five-beat contracts
 
@@ -76,7 +80,7 @@ The self-saving runtime captures its original template at load and publishes onl
 | imagine | Refreshed official model authority and private creds | Request and capability evidence | Each requested image generation | PNG content, dimensions and request outcome | Images, errors, raw usage and provider receipts |
 | measure | Owner-selected images | Original pixels and sourced regions | Canvas samples and TSV OCR | Real bounds, confidence and unavailable fields | JSON measurements, OCR, SVG overlay |
 | reproduce | Image ruling, measurements and strongest text model | Isolated image/content packet | Frontend construction and uncapped repair | Independent copy, facts and live polish at every viewport | All attempts, final HTML, renders and usage |
-| ballot | Passing candidates and active Claude recipient, or actual Artifact read | Shuffled key and immutable public payload | Coord handoff, or import exact notes | Candidate identity, audits, receipt and explicit choices | Pending handoff, or append-only ruling and unsealed key |
+| ballot | Passing candidates and local review or saved local input | Shuffled key and immutable public payload | Serve/open local review or import saved input | Candidate identity, audits, local receipt, origin and explicit choices | Persistent preview or append-only ruling and unsealed key |
 | polish | Dedicated browse session | Actual viewport, fonts and rendered text | Read-only geometry measurement | Sourced/relative thresholds and coverage | Complete clean/findings/incomplete audit |
 
 ## Polish
@@ -112,4 +116,4 @@ agent-do harness contracts validate
 ./test.sh
 ```
 
-The browser tests use the real browse command against local synthetic pages. Provider and Artifact transports are clearly marked test fixtures; their receipts are never rehearsal evidence. Tests do not spend tokens or publish ballots. A rehearsal requires a new surface and owner-approved copy/facts. Home remains evidence and regression material. No-spend dry runs emit prerequisites and planned work; they never invent images, votes or successful audits.
+The browser tests use the real browse command against local synthetic pages. Provider responses and synthetic owner inputs are clearly marked test fixtures; their receipts are never owner approval evidence. Tests do not spend tokens or publish ballots. A rehearsal requires a new surface and owner-approved copy/facts. Home remains evidence and regression material. No-spend dry runs emit prerequisites and planned work; they never invent images, votes or successful audits.

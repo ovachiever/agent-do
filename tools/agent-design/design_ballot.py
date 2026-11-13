@@ -1,4 +1,4 @@
-"""Blind ballots are handed to Claude; only an actual Artifact read supplies a ruling."""
+"""Local-only blind ballots with durable, explicit owner controls."""
 import base64
 from datetime import datetime
 import html
@@ -14,14 +14,14 @@ import struct
 from urllib.parse import urlparse
 import uuid
 
-from design_browser import agent_do,Browser,DesignError,TOOL
+from design_browser import Browser,DesignError,TOOL
 from design_contract import digest
 from design_provider import png_size
 from design_reproduce import audit_candidate
 from design_state import now,write_new
 
-# Conservative publication envelope, including space for saved owner feedback.
-BALLOT_MAX_BYTES=15*1024*1024
+# Local review has no external publishing envelope. Tests can exercise legacy multipart splitting.
+BALLOT_MAX_BYTES=None
 
 STATE=re.compile(r'(?<=</title>)\s*<script type="application/json" id="fb-state">([\s\S]*?)</script>')
 
@@ -54,8 +54,8 @@ def compact_png(path,data):
 
 def validate_ballot_size(source):
     size=len(source.encode('utf-8'))
-    if size>BALLOT_MAX_BYTES:
-        raise DesignError(f'ballot is {size} bytes, beyond the {BALLOT_MAX_BYTES}-byte publication envelope; originals preserved. Lossless compression could not fit this round; do not send an oversized Artifact.')
+    if BALLOT_MAX_BYTES is not None and size>BALLOT_MAX_BYTES:
+        raise DesignError(f'ballot exceeds the configured {BALLOT_MAX_BYTES}-byte part budget; originals preserved')
     return size
 
 
@@ -96,7 +96,7 @@ def ballot_parts(key,candidates):
     groups=[];current=[]
     for candidate in candidates:
         group_key=key+'-part'+str(len(groups)+1)
-        if len(make_ballot(group_key,current+[candidate]).encode())>BALLOT_MAX_BYTES and current:
+        if BALLOT_MAX_BYTES is not None and len(make_ballot(group_key,current+[candidate]).encode())>BALLOT_MAX_BYTES and current:
             groups.append(current);current=[]
             group_key=key+'-part'+str(len(groups)+1)
         current.append(candidate)
@@ -145,17 +145,6 @@ def ballot_fingerprint(source):
     return digest(json.dumps(parser.tokens,ensure_ascii=False))
 
 
-def claude_target(explicit=None):
-    status=json.loads(agent_do('coord','status','--json'))
-    peers=[p for p in status.get('active_peers',[]) if p.get('runtime')=='claude' and p.get('status')=='active']
-    if explicit:
-        matches=[p for p in peers if explicit in (p.get('agent_id'),p.get('alias'))]
-        if len(matches)==1:return matches[0]['agent_id']
-        raise DesignError('requested ballot recipient is not an active Claude Code session')
-    if len(peers)==1:return peers[0]['agent_id']
-    raise DesignError('ballot pending: select an active Claude Code recipient with --claude-session; no alternate host is available')
-
-
 def verify_candidates(record,kind):
     candidates=record.state[kind]
     if not candidates:raise DesignError('no candidates for '+kind+' ballot')
@@ -171,10 +160,13 @@ def verify_candidates(record,kind):
     return candidates
 
 
-def prepare_ballot(record,kind,recipient=None,dry_run=False,drop=None,target=claude_target,prepare_only=False):
+def prepare_ballot(record,kind,dry_run=False,prepare_only=False):
     ready,pending=('images_ready','image_ballot_pending') if kind=='images' else ('pages_ready','page_ballot_pending')
-    record.require(ready,pending);candidates=verify_candidates(record,kind)
-    if dry_run:return {'dry_run':True,'stage':kind,'candidates':len(candidates),'publication':'Claude Code /ballot via coord drop','paid_requests':0,'status':'ballot pending'}
+    allowed=[ready,pending]
+    if prepare_only and record.state['ballots'].get(kind):
+        allowed+=['images_ruled','measured','pages_ready','page_ballot_pending','ruled'] if kind=='images' else ['ruled']
+    record.require(*allowed);candidates=verify_candidates(record,kind)
+    if dry_run:return {'dry_run':True,'stage':kind,'candidates':len(candidates),'publication':'local HTTP review and default browser','paid_requests':0,'status':'ballot pending'}
     ballot=record.state['ballots'].get(kind)
     if not ballot:
         folder=record.attempt('ballots/'+kind);key='b-'+uuid.uuid4().hex
@@ -220,41 +212,7 @@ def prepare_ballot(record,kind,recipient=None,dry_run=False,drop=None,target=cla
     for part in parts:
         if digest((folder/part['file']).read_bytes())!=part['sha256']:raise DesignError('prepared ballot changed')
     publication=[{'path':str(folder/part['file']),'sha256':part['sha256'],'keys':part['keys'],'bytes':(folder/part['file']).stat().st_size} for part in parts]
-    if prepare_only:
-        return {'status':'ballot prepared, not published','ballot':str(folder/'ballot.html'),'bytes':len((folder/'ballot.html').read_bytes()),'stage':record.state['stage'],'parts':publication}
-    if not ballot.get('drop'):
-        recipient=target(recipient)
-        instructions=f'''# Claude Code ballot handoff
-
-Publish every part listed below as a separate Artifact; these are one round with globally unique candidate labels. Do not combine them into an oversized page. Return a receipt for each part. No selection advances until every part has an explicit ruling.
-
-{json.dumps(publication,indent=2)}
-
-Run `/ballot` for each listed file. Read `~/.claude/skills/ballot/SKILL.md`.
-Publish with `capabilities: {{"artifact": {{}}}}`, then read back the real Artifact and verify its ballot and note keys.
-This is a blind {kind} ballot. Do not inspect or publish blind-key.json before Erik submits. Do not replace hosting.
-The local tool records only "ballot pending". Give Erik the real URL. Wait for his ruling; elapsed time is no answer.
-
-When Erik submits, read the Artifact using its actual read capability. Save the exact returned HTML to a new file here.
-Preserve every note verbatim, including whitespace and typos. Save the raw Artifact tool read receipt too.
-Create a receipt JSON with host="claude", artifact_url, artifact_version, read_at (ISO timestamp),
-published_ballot_sha256 (the matching part SHA-256 listed above), readback_sha256 (SHA-256 of the saved returned HTML),
-and artifact_read_receipt (path to the saved raw tool read result).
-For explicit choices add selection_status="complete", selected_labels (list of neutral labels), and
-selection_evidence=[{{"label":"...","key":"...","quote":"the FULL original note, verbatim"}}].
-If the owner's selection is ambiguous, use selection_status="needs_clarification"; never infer approval from silence.
-Quote his notes and resolve the choice with him before completing that field. A rejection of all candidates is selected_labels=[].
-
-Import using `agent-do design ballot {kind} --round {record.path} --submitted RETURNED_HTML --receipt RECEIPT_JSON`.
-Keep the original, every submission, real URL/version, raw read receipt and ruling. Do not fabricate any receipt.
-Known note keys: {json.dumps(ballot['keys'])}
-'''
-        handoff=folder/'CLAUDE-HANDOFF.md'
-        if not handoff.exists():write_new(handoff,instructions)
-        raw=(drop or (lambda path,who,key:agent_do('coord','drop','add',str(path),'--for',who,'--key',key,'--note','Use /ballot to publish and read this owner ballot; return exact Artifact evidence')))(handoff,recipient,ballot['key'])
-        write_new(folder/'coord-drop.json',{'recipient':recipient,'returned':raw,'at':now()})
-        ballot['drop']=str((folder/'coord-drop.json').relative_to(record.path));ballot['recipient']=recipient;record.save('Claude ballot handoff recorded')
-    return {'status':'ballot pending','stage':record.state['stage'],'ballot':str(folder/'ballot.html'),'handoff':str(folder/'CLAUDE-HANDOFF.md'),'recipient':ballot.get('recipient'),'published_url':None,'parts':publication}
+    return {'status':'local ballot prepared','ballot':str(folder/'ballot.html'),'bytes':len((folder/'ballot.html').read_bytes()),'stage':record.state['stage'],'parts':publication}
 
 
 def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
@@ -263,29 +221,34 @@ def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
     if not ballot:raise DesignError('no prepared '+kind+' ballot exists for this round')
     folder=record.resolve(ballot['path'])
     source=Path(submitted).read_text();receipt=json.loads(Path(receipt_path).read_text())
+    if receipt.get('host')!='local':raise DesignError('design review is local-only; Artifact and external-host receipts are forbidden')
     part=next((p for p in ballot.get('parts',[ballot]) if ballot_fingerprint(source)==p['fingerprint']),None)
     if part is None:raise DesignError('submitted ballot changed content outside fb-state')
     state=json.loads(STATE.search(source)[1]);feedback=state.get('feedback')
-    if not state.get('submitted_at') or not isinstance(feedback,dict) or not feedback:raise DesignError('ballot has no submitted owner ruling')
+    if not state.get('submitted_at') or not isinstance(feedback,dict):raise DesignError('ballot has no submitted owner ruling')
     if set(feedback)-set(part['keys']) or any(not isinstance(v,str) for v in feedback.values()):raise DesignError('unknown note keys or non-text feedback')
-    host=urlparse(receipt.get('artifact_url',''))
-    if receipt.get('host')!='claude' or host.scheme!='https' or host.hostname!='claude.ai' or '/artifact/' not in host.path or not receipt.get('artifact_version'):
-        raise DesignError('a real Claude Artifact URL and version read receipt is required')
-    if receipt.get('published_ballot_sha256')!=part['sha256'] or receipt.get('readback_sha256')!=digest(source):raise DesignError('Artifact receipt does not bind the prepared and submitted ballots')
+    host=urlparse(receipt.get('review_url',''))
+    if receipt.get('published_ballot_sha256')!=part['sha256'] or receipt.get('readback_sha256')!=digest(source):raise DesignError('Review receipt does not bind the prepared and submitted ballots')
     try:datetime.fromisoformat(receipt['read_at'].replace('Z','+00:00'))
-    except (KeyError,ValueError,TypeError):raise DesignError('Artifact receipt needs its actual ISO read timestamp') from None
-    raw_path=Path(receipt.get('artifact_read_receipt',''))
+    except (KeyError,ValueError,TypeError):raise DesignError('Review receipt needs its actual ISO read timestamp') from None
+    raw_path=Path(receipt.get('owner_input',''))
     if not raw_path.is_absolute():raw_path=Path(receipt_path).resolve().parent/raw_path
-    if not raw_path.is_file() or not raw_path.read_bytes():raise DesignError('raw Artifact read receipt is missing')
+    if not raw_path.is_file() or not raw_path.read_bytes():raise DesignError('raw local owner input is missing')
     mapping=json.loads((folder/'blind-key.json').read_text())['mapping']
     mapping={label:value for label,value in mapping.items() if label in part.get('labels',mapping)}
     selected=receipt.get('selected_labels',[]);resolved=receipt.get('selection_status')=='complete'
     if not isinstance(selected,list) or len(selected)!=len(set(selected)) or any(label not in mapping for label in selected):raise DesignError('invalid selected ballot labels')
-    if resolved:
-        evidence=receipt.get('selection_evidence',[])
-        for label in selected:
-            if not any(e.get('label')==label and e.get('key') in feedback and e.get('quote')==feedback[e['key']] and e.get('quote','').strip() for e in evidence):
-                raise DesignError('selected candidate has no exact owner-note evidence: '+label)
+    expected=folder/'local-reviews'
+    parent=Path(receipt_path).resolve().parent
+    if (not parent.is_relative_to(expected.resolve()) or Path(submitted).resolve()!=parent/'submitted.html'
+            or Path(receipt_path).resolve()!=parent/'receipt.json' or raw_path.resolve()!=parent/'owner-input.json'
+            or host.scheme!='http' or host.hostname!='127.0.0.1' or receipt.get('review_version')!=parent.name):
+        raise DesignError('local receipt must come from this round preview host')
+    owner=json.loads(raw_path.read_text())
+    if (receipt.get('selection_method')!='explicit_local_controls' or owner.get('feedback')!=feedback
+            or owner.get('submitted_at')!=state['submitted_at'] or owner.get('selected_labels')!=selected
+            or type(owner.get('complete'))!=bool or owner['complete']!=resolved):
+        raise DesignError('local receipt does not match the saved owner controls')
     fingerprint=digest(source)
     # A host may first archive an ambiguous reading and then resolve the same
     # submitted notes. Preserve both readings; only identical dispositions are
@@ -301,10 +264,10 @@ def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
     if record.state['stage']==ruled:raise DesignError('a changed ruling after stage advancement needs a revised round; previous evidence stays intact')
     if dry_run:return {'dry_run':True,'feedback':feedback,'selection_resolved':resolved,'paid_requests':0}
     revision=record.attempt('rulings/'+kind)
-    write_new(revision/'submitted.html',source);write_new(revision/'artifact-receipt.json',receipt)
-    write_new(revision/'artifact-read-original',raw_path.read_bytes())
-    ruling={'stage':kind,'part_sha256':part['sha256'],'submitted_at':state['submitted_at'],'feedback':feedback,'artifact_url':receipt['artifact_url'],
-            'artifact_version':receipt['artifact_version'],'submitted_sha256':fingerprint,'blind_key':mapping,'key_unsealed':True,
+    write_new(revision/'submitted.html',source);write_new(revision/'review-receipt.json',receipt)
+    write_new(revision/'owner-input-original.json',raw_path.read_bytes())
+    ruling={'stage':kind,'part_sha256':part['sha256'],'submitted_at':state['submitted_at'],'feedback':feedback,'review_url':receipt['review_url'],
+            'review_version':receipt['review_version'],'submitted_sha256':fingerprint,'blind_key':mapping,'key_unsealed':True,
             'selected_labels':disposition,'selection_evidence':receipt.get('selection_evidence',[]),
             'path':str(revision.relative_to(record.path))}
     write_new(revision/'labels.yaml',ruling) # JSON is a YAML subset; avoids rewriting exact strings through a YAML emitter.
@@ -312,7 +275,7 @@ def import_ruling(record,kind,submitted,receipt_path,dry_run=False):
     record.state.setdefault('rulings',[]).append(ruling)
     projection=record.path/('.labels-'+uuid.uuid4().hex)
     write_new(projection,{'schema':1,'round':record.state['id'],'rulings':record.state['rulings']});os.replace(projection,record.path/'labels.yaml')
-    record.save('owner ruling imported verbatim from Claude Artifact read')
+    record.save('owner ruling imported verbatim from local review controls')
     complete=advance_rulings(record,kind,ballot,ruled) if resolved else False
     return {'status':('ruling recorded' if complete else 'part recorded; awaiting remaining rulings') if resolved else 'selection needs clarification','stage':record.state['stage'],'feedback':feedback,
             'selected':record.state.get('selected_'+kind),'key_unsealed':mapping,'labels':str(record.path/'labels.yaml')}
