@@ -46,6 +46,20 @@ class FakeProvider:
 
 
 class ProviderTests(unittest.TestCase):
+    def test_latest_sunburst_despite_old_catalog_superlative(self):
+        catalog=CATALOG+'\n- [Sunburst](/api/docs/models/gpt-image-2.6-sunburst.md): Image generation and editing for detailed visual work\n- [Flare](/api/docs/models/gpt-image-2.7-flare.md): Image generation for fast iteration'
+        self.assertEqual(select_model(catalog,'image'),'gpt-image-2.6-sunburst')
+        self.assertEqual(select_model(catalog,'text'),'gpt-6-astra')
+        catalog+='\n- [Sunburst](/api/docs/models/gpt-image-2.10-sunburst.md): Image generation and editing'
+        catalog+='\n- [Snapshot](/api/docs/models/gpt-image-2.11-sunburst-2026-11-12.md): Image generation and editing'
+        self.assertEqual(select_model(catalog,'image'),'gpt-image-2.10-sunburst')
+
+    def test_family_quality_must_explicitly_include_selected_generation(self):
+        guide=GUIDE+'\nFor the Sunburst and Flare models in both GPT-Image-2.6 and GPT-Image-2.5, the quality options are `low`, `medium`, `high`, `xhigh`, and `max`.'
+        self.assertEqual(image_limits(guide,'gpt-image-2.6-sunburst')['quality'],'max')
+        with self.assertRaises(DesignError):image_limits(guide,'gpt-image-2.7-sunburst')
+        with self.assertRaises(DesignError):image_limits(GUIDE,'gpt-image-2.6-sunburst')
+
     def test_strongest_models_not_speed_tiers(self):
         self.assertEqual(select_model(CATALOG,'image'),'gpt-image-2.5-sunburst')
         self.assertEqual(select_model(CATALOG,'text'),'gpt-6-astra')

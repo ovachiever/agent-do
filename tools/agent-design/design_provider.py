@@ -31,8 +31,20 @@ def refresh_doc(url):
 
 
 def select_model(catalog,kind):
+    entries=re.findall(r'\]\(/api/docs/models/([a-z0-9.-]+?)(?:\.md)?\):\s*([^\n]+)',catalog)
+    if kind=='image':
+        # The old generation may retain "most capable" after a new release.
+        # Prefer the latest catalogued precision-family alias, never a dated
+        # snapshot or the faster Flare tier. Its page/limits are verified below.
+        versions={}
+        for slug,description in entries:
+            slug=slug.removesuffix('.md')
+            match=re.fullmatch(r'gpt-image-(\d+(?:\.\d+)*)-sunburst',slug)
+            if match and 'image generation' in description.lower():
+                versions[tuple(map(int,match[1].split('.')))]=slug
+        if versions:return versions[max(versions)]
     candidates=set()
-    for slug,description in re.findall(r'\]\(/api/docs/models/([a-z0-9.-]+?)(?:\.md)?\):\s*([^\n]+)',catalog):
+    for slug,description in entries:
         words=description.lower()
         if 'most capable model' not in words:continue
         image='image generation' in words
@@ -56,8 +68,15 @@ def image_limits(guide,model):
     if not match or not ratio or ratio[1]!=ratio[2]:raise DesignError('published image area/aspect constraints are unreadable')
     area_min,area_max=[int(v.replace(',','')) for v in match.groups()]
     # Read which models support the highest quality from the guide's explicit sentence.
-    sentence=next((s for s in guide.splitlines() if 'add `xhigh` and `max` quality' in s),'')
-    quality='max' if '`'+model+'`' in sentence else None
+    quality=None
+    for sentence in guide.splitlines():
+        if 'add `xhigh` and `max` quality' in sentence and '`'+model+'`' in sentence:
+            quality='max'
+        family=re.fullmatch(r'gpt-image-(\d+(?:\.\d+)*)-sunburst',model)
+        if (family and 'Sunburst and Flare models' in sentence and
+                'quality options are' in sentence and '`max`' in sentence and
+                family[1] in re.findall(r'GPT-Image-(\d+(?:\.\d+)*)',sentence)):
+            quality='max'
     if model==FALLBACK and 'Earlier GPT Image models support quality settings up to `high`' in guide:quality='high'
     if quality is None:raise DesignError('strongest quality is not documented for '+model)
     return {'multiple':step,'max_edge':edge,'min_pixels':area_min,'max_pixels':area_max,'max_ratio':int(ratio[1]),'quality':quality,'source':IMAGE_GUIDE}
