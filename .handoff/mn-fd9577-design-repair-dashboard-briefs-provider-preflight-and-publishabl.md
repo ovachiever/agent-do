@@ -6,7 +6,7 @@ source: null
 base_commit: 019eda07c9d6578804e6e65d5812cf3ae0cc5686
 scope: 'Design: repair dashboard briefs, provider preflight and publishable image ballots'
 inputs: []
-binding: sha256:5f0a6b5075b44a5af748799daaefb3bd2f555a221ff4b4676a6565e94d734900
+binding: sha256:4aa1c0d44794940a42d7f9a2d4f1aee2c86e0ced0022c669ea657f34af350458
 ---
 
 # Handoff: Design: repair dashboard briefs, provider preflight and publishable image ballots
@@ -71,3 +71,15 @@ Commit: 77b5546. Provider regressions: 11 passed; two new regressions fail on th
 Real provider-path validation: gpt-image-2.6-sunburst, max, 3360x1968 PNG; 1,099 input tokens, 11,576 image output tokens. Image decoded and visually inspected: relevant Holy workspace. Request, response, refreshed official authority and PNG retained in .dev/holy-ghost-design/model-2.6-live-check/. No automatic retry or fallback occurred for this request.
 
 Original Holy design round: six 2.5 images complete, after one HTTP 520 and an explicit resume. Ballot prepared and browser-audited as two parts (13,319,086 and 6,734,376 bytes); no hosted publication or owner approval claimed. Local installed agent-do uses the changed repository. No push or PR; remote release scope remains unanswered.
+
+## Local-only interactive review, November 12
+
+Erik explicitly requires automatic local HTTP serving and browser opening, and bans external Artifacts entirely. This supersedes the prior Claude handoff/Artifact workflow. Commit ed12d46 implements persistent loopback review, explicit browser controls, verbatim local notes, reload persistence, confirmed candidate selections, rejection of all candidates, multipart completion gates, idempotent local imports and targeted Stop preview. Private round files are not served. External publishing flags and host receipts refuse; cloud callbacks and peer handoff code are removed. Local review has no external publishing-size cap. Existing historical records remain intact.
+
+Executed: full design suite 103 passed in 216.170 seconds; local receipt/ban suite 8 passed; real browser local controls suite 4 passed. Real CLI fixture verified detached lifetime, same-server reuse, HTTP content and targeted shutdown. Contracts validate passed (103 tools, zero errors/warnings), drift zero failing verbs, generated docs check passed, staged diff check and gitleaks passed. Full root test.sh not run. No model requests made for this change.
+
+Live: original Holy comparison reopened by the installed design ballot command, with default browser launch reported successful. HTTP retrieval verified the local runtime and absence of Claude API callbacks. No actual owner selections were submitted. Original six-image concepts remain unchanged. Static delivery copies were updated to remove cloud callbacks; retired source/exports are archived under repository .dev, not Transfer.
+
+Design feedback: Erik rejected the concepts as worse than current Holy. The generation request contained text only, not the screenshot image; generic prompts also prohibited icons/gradients and imposed fixed content order. These constraints are findings, not accepted aesthetic rules for a new round. Erik clarified that only the left sidebar and overall window appearance are in design scope; Ghostty terminal rendering, content and input remain unchanged. No replacement generation round has started.
+
+Registry/TOOLS ownership note: another lane held advisory claims. Only the design stanza and its generated documentation were edited; no other entries changed. Coordination publication records the narrow overlap. No pushes or PRs. The original item's remote-release scope is still pending.
