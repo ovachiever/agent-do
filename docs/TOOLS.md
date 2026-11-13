@@ -1537,7 +1537,7 @@ Concurrency: `mixed`
 - `imagine`: imagine --round ROUND [--per-level N] [--size WIDTHxHEIGHT] [--dry-run] [--retry-uncertain] [--json]
 - `measure`: measure --round ROUND [--regions JSON] [--selected] [--dry-run] [--json]
 - `reproduce`: reproduce --round ROUND [--selected] [--dry-run] [--retry-uncertain] [--json]
-- `ballot`: ballot images|pages --round ROUND [--publish] [--claude-session ID] [--submitted HTML --receipt JSON] [--dry-run] [--json]
+- `ballot`: ballot images|pages --round ROUND [--publish] [--prepare-only] [--claude-session ID] [--submitted HTML --receipt JSON] [--dry-run] [--json]
 - `polish`: polish \<url|html> --viewport WIDTHxHEIGHT [--session NAME] [--config JSON] [--out JSON] [--render PNG] [--dry-run] [--json]
 
 **Examples**

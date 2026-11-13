@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 from design_browser import Browser, DesignError, PageNotReady, settle_options
-from design_contract import compile_contract, prompts
+from design_contract import compile_contract, prompts, validate_prompts
 from design_state import Round
 from design_imagine import imagine
 from design_measure import measure
@@ -34,7 +34,7 @@ def main(argv=None):
     image = commands.add_parser('imagine', help='Generate every requested image using refreshed strongest-model authority')
     image.add_argument('--round', type=Path, required=True)
     image.add_argument('--per-level', type=int, default=2, help='Generations per prompt level; owner trial default is 2')
-    image.add_argument('--size', help='Portrait WIDTHxHEIGHT within current provider limits; defaults to maximum published area')
+    image.add_argument('--size', help='WIDTHxHEIGHT within current provider limits; defaults to maximum area at the brief aspect ratio')
     image.add_argument('--dry-run', action='store_true')
     image.add_argument('--retry-uncertain', action='store_true', help='Explicitly issue replacements for requests whose outcome was lost')
     image.add_argument('--json', action='store_true')
@@ -54,6 +54,7 @@ def main(argv=None):
     ballot.add_argument('kind', choices=('images','pages'))
     ballot.add_argument('--round', type=Path, required=True)
     ballot.add_argument('--claude-session')
+    ballot.add_argument('--prepare-only', action='store_true', help='Build and audit the publication payload without notifying a peer')
     ballot.add_argument('--publish', action='store_true', help='Prepare and hand off to Claude; this tool returns ballot pending')
     ballot.add_argument('--submitted', type=Path, help='Exact HTML returned by Claude Artifact read')
     ballot.add_argument('--receipt', type=Path, help='Claude read receipt with URL, version, hashes and explicit selection evidence')
@@ -78,7 +79,7 @@ def main(argv=None):
             if bool(args.submitted)!=bool(args.receipt):raise DesignError('--submitted and --receipt are required together')
             if args.publish and args.submitted:raise DesignError('choose handoff or ruling import, not both')
             with Round(args.round) as record:
-                result=import_ruling(record,args.kind,args.submitted,args.receipt,args.dry_run) if args.submitted else prepare_ballot(record,args.kind,args.claude_session,args.dry_run)
+                result=import_ruling(record,args.kind,args.submitted,args.receipt,args.dry_run) if args.submitted else prepare_ballot(record,args.kind,args.claude_session,args.dry_run,prepare_only=args.prepare_only)
             print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         if args.verb == 'reproduce':
             with Round(args.round) as record:
@@ -97,7 +98,7 @@ def main(argv=None):
             if args.dry_run:
                 contract=compile_contract(copy,facts,str(args.facts.resolve()))
                 result={'dry_run':True,'round':str(args.round),'paragraphs':len(contract['paragraphs']),
-                        'nodes':len(contract['nodes']),'levels':list(prompts(copy,contract)),'paid_requests':0}
+                        'nodes':len(contract['nodes']),'levels':list(prompts(copy,contract)),'prompt_characters':validate_prompts(prompts(copy,contract)),'paid_requests':0}
             else:
                 with Round(args.round,create=True) as record:
                     result=record.initialize(copy,facts,str(args.facts.resolve()),raw_facts)

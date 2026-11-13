@@ -18,8 +18,6 @@ def compile_contract(copy, facts, source='facts.json'):
     if not isinstance(facts, dict) or not isinstance(facts.get('nodes'), list) or not facts['nodes']:
         raise DesignError('facts must use the approved node-tagged brief shape with a nonempty nodes array')
     paragraphs=[{'id':f'p{i+1}','text':text} for i,text in enumerate(re.split(r'\n\s*\n',copy.strip())) if text.strip()]
-    if not paragraphs:
-        raise DesignError('the approved copy is empty')
     whole=normalize(copy)
     nodes=[]; values={}; ids=set()
     for index,raw in enumerate(facts['nodes']):
@@ -57,16 +55,38 @@ def compile_contract(copy, facts, source='facts.json'):
             'frame':facts.get('frame',{}),'viewports':views,'polish':facts.get('polish',{}),
             'exact_design':facts.get('exact_design'),
             'content_order':[p['id'] for p in paragraphs],
-            'source':source}
+            'source':source,'framing':facts.get('framing','viewport')}
+
+
+# Images API prompt maximum, not a local cost or token budget.
+# https://developers.openai.com/api/reference/resources/images/methods/generate
+MAX_PROMPT_CHARACTERS = 32000
+
+
+def validate_prompts(compiled):
+    sizes={level:len(text) for level,text in compiled.items()}
+    oversized={level:size for level,size in sizes.items() if size>MAX_PROMPT_CHARACTERS}
+    if oversized:
+        raise DesignError('compiled image prompt exceeds provider maximum of 32000 characters: '+json.dumps(oversized)+'. Preserve the brief; revise its representation before freezing or sending.')
+    return sizes
 
 
 def prompts(copy, contract):
-    content=json.dumps({'title':contract['title'],'nodes':contract['nodes'],'groups':contract['groups'],'facts':contract['facts']},ensure_ascii=False,indent=2)
-    framing=('A high-fidelity screenshot of a complete long-scrolling web page, as captured from a real browser. '
+    # Provenance remains in the local contract. Send each display value once,
+    # without filesystem paths or the duplicate flattened verification index.
+    nodes=[{k:v for k,v in node.items() if k!='source'} for node in contract['nodes']]
+    content=json.dumps({'title':contract['title'],'nodes':nodes,'groups':contract['groups']},ensure_ascii=False,separators=(',',':'))
+    mode=contract.get('framing','scroll') # Frozen legacy contracts retain their framing.
+    if mode not in ('viewport','scroll'):
+        raise DesignError('framing must be viewport or scroll')
+    view=contract['viewports'][0]
+    composition=(f"Show the complete {view['width']} by {view['height']} CSS pixel viewport, with the same aspect ratio. "
+                 if mode=='viewport' else 'Use portrait framing and include every section from beginning to end. ')
+    framing=('A high-fidelity screenshot of the requested web interface, as captured from a real browser. '
              f"Compose for the approved browser viewport width of {contract['viewports'][0]['width']} CSS pixels, "
-             'showing the entire scroll. This layout width is separate from the generated raster dimensions '
+             'This layout width is separate from the generated raster dimensions '
              'and must not appear as page text. '
-             'Use portrait framing and include every section from beginning to end. All text must be sharp and spelled exactly as supplied. '
+             + composition + 'All text must be sharp and spelled exactly as supplied. '
              'The intended product and content are specified below. A product name is plain text, never a decorative logo.\n\n')
     laws=('No icons, gradients, stock imagery, device frames, decorative logos, mottos, taglines, or invented text. '
           'No added sentences, captions, figures, or claims. Draw diagrams of the subject using only the supplied facts. '
@@ -76,6 +96,7 @@ def prompts(copy, contract):
     frozen=('APPROVED COPY, VERBATIM\n<approved-copy>\n'+copy+'\n</approved-copy>\n\n'
             'FACTS AND LABELS (identifiers and source paths are metadata, not visible copy)\n'+content+'\n')
     layout=(contract.get('exact_design') or
+            ('Use the supplied viewport as a dashboard canvas. Arrange navigation, controls, summaries and repeated data groups in a clear grid. Use only the supplied labels and values; do not add introductory prose.' if not contract['paragraphs'] else None) or
             'One centered content grid, two equal columns. Full-width navigation above the opening. '
             'The opening paragraph spans the grid. Each subsequent paragraph occupies the left column; '
             'its associated factual diagram or figures occupy the right. Keep group order and every '
@@ -96,7 +117,9 @@ def prompts(copy, contract):
     opened=('OPEN: Everything below must be on the page in order. Every choice about how it looks is yours: '
             'palette, typefaces, light or dark or both, grid, spacing, scroll rhythm, section treatments, '
             'diagram form and proportions. Create a compelling whole for this product. Content is fixed; design is entirely free.\n\n')
-    return {level:framing+direction+laws+frozen for level,direction in [('exact',exact),('half',half),('open',opened)]}
+    compiled={level:framing+direction+laws+frozen for level,direction in [('exact',exact),('half',half),('open',opened)]}
+    validate_prompts(compiled)
+    return compiled
 
 
 def check_copy(snapshot, contract):

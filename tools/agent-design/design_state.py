@@ -60,6 +60,7 @@ class Round:
     def initialize(self,copy,facts,source='facts.json',raw_facts=None):
         if self.state is not None:raise DesignError('round already initialized; use a new round for changed inputs')
         contract=compile_contract(copy,facts,source)
+        compiled=prompts(copy,contract) # Validate before writing an initialization intent.
         intent={'copy':copy,'facts':facts,'source':source,'raw_facts':raw_facts}
         marker=self.path/'initialization.json'
         if marker.exists():
@@ -77,7 +78,7 @@ class Round:
         for name,data in [('copy.md',copy),('facts.json',raw_facts if raw_facts is not None else facts),('contract.json',contract)]:
             self.state['inputs'][name]=preserve(self.path/'inputs'/name,data)
         self.state['prompts']={}
-        for level,text in prompts(copy,contract).items():
+        for level,text in compiled.items():
             self.state['prompts'][level]=preserve(self.path/'prompts'/(level+'.txt'),text)
         self.save('approved inputs compiled into three prompts')
         return self.state

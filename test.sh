@@ -113,6 +113,7 @@ check_cmd "design live browser polish tests" python3 "$SCRIPT_DIR/tools/agent-de
 check_cmd "design readiness unit tests (no browser)" python3 "$SCRIPT_DIR/tools/agent-design/test/test_settle.py"
 check_cmd "design live browser readiness tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_settle_browser.py"
 check_cmd "design copy contract and durable state tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_contract.py"
+check_cmd "design dashboard transport regressions" python3 "$SCRIPT_DIR/tools/agent-design/test/test_dashboard.py"
 check_cmd "design provider and image generation tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_provider.py"
 check_cmd "design image measurement tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_measure.py"
 check_cmd "design measured reproduction tests" python3 "$SCRIPT_DIR/tools/agent-design/test/test_reproduce.py"

@@ -13,7 +13,7 @@ import uuid
 import zlib
 
 from design_browser import agent_do, DesignError
-from design_contract import digest
+from design_contract import digest, validate_prompts
 from design_state import now, write_new
 
 CATALOG='https://developers.openai.com/api/docs/models.md'
@@ -83,6 +83,26 @@ def portrait_size(limits,requested=None):
     return f'{width}x{height}'
 
 
+def image_size(limits,requested=None,viewport=None):
+    if viewport is None:
+        return portrait_size(limits,requested)
+    step=limits['multiple'];edge=limits['max_edge']
+    def valid(w,h):
+        return (0<w<=edge and 0<h<=edge and w%step==0 and h%step==0 and
+                limits['min_pixels']<=w*h<=limits['max_pixels'] and
+                max(w,h)<=min(w,h)*limits['max_ratio'])
+    if requested:
+        try:w,h=map(int,requested.lower().split('x'))
+        except (TypeError,ValueError):raise DesignError('size must be WIDTHxHEIGHT')
+        if not valid(w,h):raise DesignError('size violates the current published image limits')
+    else:
+        ratio=viewport['width']/viewport['height']
+        candidates=((w,h) for w in range(step,edge+1,step) for h in range(step,edge+1,step) if valid(w,h))
+        try:w,h=min(candidates,key=lambda wh:(abs(wh[0]/wh[1]-ratio),-wh[0]*wh[1]))
+        except ValueError:raise DesignError('no provider size fits the viewport') from None
+    return f'{w}x{h}'
+
+
 def text_limits(page):
     sentence=next((line for line in page.splitlines() if '`reasoning.effort` supports' in line),'')
     efforts=re.findall(r'`([^`]+)`',sentence)[1:]
@@ -125,13 +145,19 @@ class Provider:
         return value
 
     def post(self,endpoint,payload,folder):
+        if endpoint=='images/generations':validate_prompts({'request':payload.get('prompt','')})
         folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
         if self._key is None:
             self._key=agent_do('creds','get','OPENAI_API_KEY','--reveal').strip()
             if not self._key:raise DesignError('OpenAI credential did not resolve through agent-do creds')
         request_id=str(uuid.uuid4())
-        write_new(folder/'request.json',{'endpoint':endpoint,'client_request_id':request_id,'started_at':now(),'payload':self.redact(payload)})
-        request=urllib.request.Request('https://api.openai.com/v1/'+endpoint,json.dumps(payload).encode(),
+        body=json.dumps(payload).encode()
+        write_new(folder/'request.json',{'endpoint':endpoint,'client_request_id':request_id,'started_at':now(),
+                  'request_bytes':len(body),'request_sha256':digest(body),
+                  'prompt_characters':len(payload['prompt']) if isinstance(payload.get('prompt'),str) else None,
+                  'prompt_sha256':digest(payload['prompt']) if isinstance(payload.get('prompt'),str) else None,
+                  'payload':self.redact(payload)})
+        request=urllib.request.Request('https://api.openai.com/v1/'+endpoint,body,
                 {'Content-Type':'application/json','Authorization':'Bearer '+self._key,'X-Client-Request-Id':request_id},method='POST')
         try:
             # Deliberately no local timeout, token budget, price gate, or retry loop.

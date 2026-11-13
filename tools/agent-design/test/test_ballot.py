@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 TOOL=Path(__file__).resolve().parents[1];sys.path.insert(0,str(TOOL))
 from design_ballot import prepare_ballot,import_ruling,STATE,ballot_fingerprint
@@ -48,6 +49,44 @@ class BallotTests(unittest.TestCase):
                  'selected_labels':['1'],'selection_evidence':[{'label':'1','key':field,'quote':note}]}
         receipt_path=self.root/'receipt.json';receipt_path.write_text(json.dumps(receipt))
         return submitted,receipt_path,note,field
+
+    def test_multipart_waits_for_every_ruling_and_rejects_cross_part_choice(self):
+        original=self.r.state['images'][0]
+        self.r.state['images']=[{**original,'id':f'image-{i}'} for i in range(3)]
+        # Force one candidate per page through the real preparation/audit path.
+        from design_ballot import make_ballot
+        sample={'label':'1','kind':'images','bytes':(self.r.path/'fixture.png').read_bytes(),'width':64,'height':96}
+        limit=len(make_ballot('b-'+'a'*32+'-part1',[sample]).encode())+10
+        with patch('design_ballot.BALLOT_MAX_BYTES',limit):result=self.prepare()
+        ballot=self.r.state['ballots']['images'];self.assertEqual(len(ballot['parts']),3)
+        folder=self.r.resolve(ballot['path'])
+        imported=[]
+        for index,part in enumerate(ballot['parts']):
+            label=part['labels'][0];key=part['keys'][0];note='Choose '+label
+            source=(folder/part['file']).read_text()
+            state={'feedback':{key:note},'submitted_at':'2026-11-13T01:00:00Z'}
+            source=STATE.sub('<script type="application/json" id="fb-state">'+json.dumps(state)+'</script>',source)
+            submitted=self.root/f'part-{index}.html';submitted.write_text(source)
+            raw=self.root/f'raw-{index}.json';raw.write_text(json.dumps({'fixture_only':True,'html':source}))
+            receipt={'host':'claude','artifact_url':f'https://claude.ai/artifact/fixture-{index}',
+                     'artifact_version':'fixture','read_at':'2026-11-13T01:00:00Z',
+                     'published_ballot_sha256':part['sha256'],'readback_sha256':digest(source),
+                     'artifact_read_receipt':str(raw),'selection_status':'complete','selected_labels':[label],
+                     'selection_evidence':[{'label':label,'key':key,'quote':note}]}
+            rp=self.root/f'receipt-{index}.json';rp.write_text(json.dumps(receipt))
+            if index==0:
+                bad={**receipt,'selected_labels':[ballot['parts'][1]['labels'][0]]}
+                rp.write_text(json.dumps(bad))
+                with self.assertRaises(DesignError):import_ruling(self.r,'images',submitted,rp)
+                rp.write_text(json.dumps(receipt))
+            import_ruling(self.r,'images',submitted,rp);imported.append((submitted,rp))
+            if index<2:
+                self.assertEqual(self.r.state['stage'],'image_ballot_pending')
+                import_ruling(self.r,'images',submitted,rp)
+                self.assertEqual(self.r.state['stage'],'image_ballot_pending')
+        self.assertEqual(self.r.state['stage'],'images_ruled')
+        self.assertEqual(set(self.r.state['selected_images']),{'image-0','image-1','image-2'})
+        self.assertEqual(len(self.r.state['rulings']),3)
 
     def test_pending_handoff_and_verbatim_self_saving_readback(self):
         submitted,receipt,note,field=self.submission()
