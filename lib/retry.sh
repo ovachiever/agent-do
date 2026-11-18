@@ -242,8 +242,8 @@ with_retry() {
 # Usage:
 #   stall_detect 90 some_long_command
 #
-# Kills the command if no output for N seconds.
-# Prints warning at N/2 seconds.
+# Kills the command if it is still running after N seconds (wall clock from
+# launch; output is not inspected). Prints a warning at N/2 seconds.
 stall_detect() {
     local timeout="$1"
     shift
@@ -251,25 +251,31 @@ stall_detect() {
 
     "$@" &
     local pid=$!
-    local last_size=0
-    local stall_start=""
+    local stall_start
+    stall_start=$(date +%s)
     local warned=false
+    # Poll fast first, then back off: a command that finishes in 300 ms used
+    # to wait out a fixed `sleep 5` before its exit was noticed, so every
+    # caller paid >=5 s per call. The clock now starts at launch, not at the
+    # first check (which also made the real limit timeout+5).
+    local interval=0.05
 
     while kill -0 "$pid" 2>/dev/null; do
-        sleep 5
+        sleep "$interval"
+        case "$interval" in
+            0.05) interval=0.1 ;;
+            0.1) interval=0.25 ;;
+            0.25) interval=0.5 ;;
+            *) interval=1 ;;
+        esac
 
-        # Check if process produced output (via /proc or lsof — simplified here)
         local now
         now=$(date +%s)
-
-        if [[ -z "$stall_start" ]]; then
-            stall_start="$now"
-        fi
 
         local stall_duration=$((now - stall_start))
 
         if [[ $stall_duration -ge $warn_at && "$warned" == "false" ]]; then
-            echo "Warning: No output for ${stall_duration}s" >&2
+            echo "Warning: still running after ${stall_duration}s (limit ${timeout}s)" >&2
             warned=true
         fi
 
