@@ -38,6 +38,9 @@ Commands:
     worktree add warns and tells you to run board commands from here.
   worktree list
   worktree remove <path>
+  worktree prune [--dry-run]
+    Clear registrations whose directory no longer exists (lists each path;
+    `worktree list --json` marks them "prunable"). Locked ones are kept.
   snap list|diff
   snap restore <file> [--in-place]
   conflicts        List unmerged files and conflict-marker counts
@@ -476,7 +479,8 @@ for line in os.environ.get("WORKTREES", "").splitlines():
     if line.startswith("worktree "):
         if current:
             items.append(current)
-        current = {"path": line[9:], "head": None, "branch": None, "bare": False, "detached": False}
+        current = {"path": line[9:], "head": None, "branch": None, "bare": False, "detached": False,
+                   "locked": False, "prunable": None}
     elif current is not None and line.startswith("HEAD "):
         current["head"] = line[5:]
     elif current is not None and line.startswith("branch refs/heads/"):
@@ -485,6 +489,10 @@ for line in os.environ.get("WORKTREES", "").splitlines():
         current["bare"] = True
     elif current is not None and line == "detached":
         current["detached"] = True
+    elif current is not None and (line == "locked" or line.startswith("locked ")):
+        current["locked"] = True
+    elif current is not None and line.startswith("prunable"):
+        current["prunable"] = line[len("prunable"):].strip() or "prunable"
 if current:
     items.append(current)
 print(json.dumps({"ok": True, "worktrees": items}))
@@ -762,6 +770,61 @@ cmd_worktree_remove() {
     fi
 }
 
+# Registrations whose directory is gone (agents working in /private/tmp,
+# mktemp checkouts) cannot be removed with `worktree remove` — there is no
+# tree left. `git worktree prune` clears them; this wraps it, reports exactly
+# which paths went (from the porcelain `prunable` lines, read first), and
+# drops their zpc bindings. Locked worktrees are never pruned (git's rule).
+cmd_worktree_prune() {
+    local dry_run=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run|-n) dry_run=1; shift ;;
+            *) echo "Usage: agent-git worktree prune [--dry-run] [--json]" >&2; return 2 ;;
+        esac
+    done
+    local candidates
+    candidates=$(git worktree list --porcelain | python3 -c '
+import sys
+path = None
+for line in sys.stdin.read().splitlines():
+    if line.startswith("worktree "):
+        path = line[9:]
+    elif line.startswith("prunable") and path:
+        print(path + "\t" + (line[len("prunable"):].strip() or "prunable"))
+') || return 1
+    if [[ "$dry_run" == "0" ]]; then
+        local output
+        output=$(git worktree prune -v 2>&1) || {
+            [[ "$JSON_MODE" == "1" ]] && json_fail "$output" || echo "$output" >&2
+            return 1
+        }
+        local path reason
+        while IFS=$'\t' read -r path reason; do
+            [[ -n "$path" ]] && _git_unbind_worktree_zpc "$path"
+        done <<< "$candidates"
+    fi
+    if [[ "$JSON_MODE" == "1" ]]; then
+        CANDIDATES="$candidates" DRY="$dry_run" python3 -c '
+import json, os
+rows = [l.split("\t", 1) for l in os.environ["CANDIDATES"].splitlines() if l]
+dry = os.environ["DRY"] == "1"
+entries = [{"path": p, "reason": r} for p, r in rows]
+# A dry run names its list for what it is, so a caller printing it never
+# reports work that did not happen.
+print(json.dumps({"ok": True, "dry_run": dry, ("would_prune" if dry else "pruned"): entries}))'
+    elif [[ -z "$candidates" ]]; then
+        echo "No stale worktree registrations."
+    else
+        local verb="Pruned"
+        [[ "$dry_run" == "1" ]] && verb="Would prune"
+        local path reason
+        while IFS=$'\t' read -r path reason; do
+            echo "$verb: $path ($reason)"
+        done <<< "$candidates"
+    fi
+}
+
 cmd_worktree() {
     local subcommand="${1:-list}"
     shift || true
@@ -769,7 +832,8 @@ cmd_worktree() {
         add) cmd_worktree_add "$@" ;;
         list) cmd_worktree_list ;;
         remove) cmd_worktree_remove "$@" ;;
-        *) echo "Usage: agent-git worktree add|list|remove" >&2; return 1 ;;
+        prune) cmd_worktree_prune "$@" ;;
+        *) echo "Usage: agent-git worktree add|list|remove|prune" >&2; return 1 ;;
     esac
 }
 
