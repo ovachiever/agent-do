@@ -140,6 +140,31 @@ def test_classify_maintainer_state() -> None:
             "latest submitted review must win")
 
 
+def test_normalize_pr_conversation() -> None:
+    gh = load_agent_gh()
+    comments = [
+        {"user": {"login": "a"}, "body": "later", "created_at": "2026-04-02T00:00:00Z",
+         "updated_at": "2026-04-03T00:00:00Z", "html_url": "u2"},
+        {"user": {"login": "b"}, "body": None, "created_at": "2026-04-01T00:00:00Z",
+         "updated_at": "2026-04-01T00:00:00Z", "html_url": "u1"},
+    ]
+    reviews = [
+        {"user": {"login": "c"}, "state": "COMMENTED", "body": "", "submitted_at": "2026-04-01T12:00:00Z"},
+        {"user": {"login": "c"}, "state": "PENDING", "body": "draft", "submitted_at": None},
+        {"user": {"login": "c"}, "state": "COMMENTED", "body": "summary", "submitted_at": "2026-04-01T13:00:00Z", "html_url": "r1"},
+        {"user": {"login": "d"}, "state": "APPROVED", "body": "", "submitted_at": "2026-04-04T00:00:00Z", "html_url": "r2"},
+    ]
+    items = gh.normalize_pr_conversation(comments, reviews)
+    require([i["url"] for i in items] == ["u1", "r1", "u2", "r2"],
+            f"expected chronological merge dropping bodiless COMMENTED and PENDING reviews: {items}")
+    require(items[0]["body"] == "" and items[0]["kind"] == "comment", f"null body should normalize to empty: {items[0]}")
+    require(items[2]["updated_at"] == "2026-04-03T00:00:00Z", f"edit time must be kept: {items[2]}")
+    require(items[3]["state"] == "APPROVED" and items[3]["updated_at"] is None, f"verdict review kept: {items[3]}")
+    require(gh.normalize_pr_conversation([], []) == [], "empty conversation")
+    require(gh.terminal_safe("ok\x1b[2J\x1b]0;x\x07 tab\tline\nend\x9b") == "ok[2J]0;x tab\tline\nend",
+            "control characters other than newline and tab must be stripped for terminal output")
+
+
 def test_portfolio_patterns() -> None:
     gh = load_agent_gh()
     for good in ("acme/widgets", "acme/*", "a1/b.c-d_e"):
@@ -276,6 +301,16 @@ elif args[:3] == ["api", "--paginate", "--slurp"]:
     reviews_fixture = json.loads({json.dumps(sweep_reviews)!r})
     if "/user/repos" in path:
         emit([repos_fixture])
+    elif "/issues/" in path and "/comments" in path:
+        scoped = path.split("repos/", 1)[1].split("/comments", 1)[0]
+        owner_repo, _, number = scoped.partition("/issues/")
+        if owner_repo + "#" + number == "ovachiever/agent-do#8":
+            emit([[
+                {{"user": {{"login": "ctyrrell-versova"}}, "body": "second look", "created_at": "2026-04-29T09:00:00Z", "updated_at": "2026-04-29T09:30:00Z", "html_url": "https://github.com/ovachiever/agent-do/pull/8#issuecomment-2"}},
+                {{"user": {{"login": "ovachiever"}}, "body": "first look", "created_at": "2026-04-01T09:00:00Z", "updated_at": "2026-04-01T09:00:00Z", "html_url": "https://github.com/ovachiever/agent-do/pull/8#issuecomment-1"}},
+            ]])
+        else:
+            emit([[]])
     elif "/reviews" in path:
         scoped = path.split("repos/", 1)[1].split("/reviews", 1)[0]
         owner_repo, _, number = scoped.partition("/pulls/")
@@ -651,6 +686,21 @@ else:
         threads_payload = json.loads(threads.stdout)
         require(threads_payload["count"] == 1, f"expected unresolved-only thread list: {threads_payload}")
 
+        convo = run([str(AGENT_DO), "gh", "comments", "ovachiever/agent-do#8", "--json"], cwd=ROOT, env=env)
+        require(convo.returncode == 0, f"comments failed: {convo.stderr}")
+        convo_payload = json.loads(convo.stdout)
+        require(convo_payload["ref"] == "ovachiever/agent-do#8" and convo_payload["count"] == 4,
+                f"expected 2 issue comments + 2 verdict reviews: {convo_payload}")
+        require([(i["kind"], i["author"]) for i in convo_payload["items"]] == [
+            ("comment", "ovachiever"), ("review", "ovachiever"), ("review", "ovachiever"), ("comment", "ctyrrell-versova"),
+        ], f"expected chronological order across comments and reviews: {convo_payload}")
+        convo_only = run([str(AGENT_DO), "gh", "comments", "ovachiever/agent-do#8", "--no-reviews", "--json"], cwd=ROOT, env=env)
+        require(convo_only.returncode == 0 and json.loads(convo_only.stdout)["count"] == 2,
+                f"--no-reviews should return issue comments only: {convo_only.stdout} {convo_only.stderr}")
+        convo_text = run([str(AGENT_DO), "gh", "comments", "ovachiever/agent-do#8"], cwd=ROOT, env=env)
+        require("[comment] ctyrrell-versova 2026-04-29T09:00:00Z (updated 2026-04-29T09:30:00Z)" in convo_text.stdout
+                and "second look" in convo_text.stdout, f"unexpected text rendering: {convo_text.stdout}")
+
         audit = run([str(AGENT_DO), "gh", "audit", "ovachiever/agent-do#3", "--json"], cwd=ROOT, env=env)
         require(audit.returncode == 0, f"audit failed: {audit.stderr}")
         audit_payload = json.loads(audit.stdout)
@@ -811,6 +861,7 @@ else:
     test_classify_risk()
     test_merge_gate()
     test_classify_maintainer_state()
+    test_normalize_pr_conversation()
     test_portfolio_patterns()
     test_graphql_inbox()
     test_next_action_mapping()

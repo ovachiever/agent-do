@@ -572,6 +572,63 @@ def pr_diff_text(ref: PrRef) -> str:
     return run_gh(["pr", "diff", *pr_gh_args(ref)])
 
 
+def pr_conversation(ref: PrRef, *, include_reviews: bool = True) -> list[dict[str, Any]]:
+    """Top-level PR conversation: issue comments plus submitted review summaries.
+
+    Inline review comments live in review threads (see pr_threads); these are
+    the comments posted on the Conversation tab, which `pr` does not carry.
+    Both endpoints are paginated in full.
+    """
+    if not ref.repo or not ref.number:
+        raise GhError("comments requires an explicit PR reference")
+    comments = gh_json_pages(f"repos/{ref.repo}/issues/{ref.number}/comments?per_page=100")
+    reviews = gh_json_pages(f"repos/{ref.repo}/pulls/{ref.number}/reviews?per_page=100") if include_reviews else []
+    return normalize_pr_conversation(comments, reviews)
+
+
+def normalize_pr_conversation(comments: list[dict[str, Any]], reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge issue comments and review summaries into one chronological list.
+
+    A review is kept when it has a body or a verdict (APPROVED,
+    CHANGES_REQUESTED, DISMISSED). A bodiless COMMENTED review only wraps
+    inline comments, which `threads` already shows; PENDING reviews are
+    unsubmitted drafts.
+    """
+    items: list[dict[str, Any]] = []
+    for comment in comments:
+        items.append(
+            {
+                "kind": "comment",
+                "author": (comment.get("user") or {}).get("login"),
+                "state": None,
+                "created_at": comment.get("created_at"),
+                "updated_at": comment.get("updated_at"),
+                "body": comment.get("body") or "",
+                "url": comment.get("html_url"),
+            }
+        )
+    for review in reviews:
+        state = str(review.get("state") or "").upper()
+        body = review.get("body") or ""
+        if state == "PENDING":
+            continue
+        if not body.strip() and state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            continue
+        items.append(
+            {
+                "kind": "review",
+                "author": (review.get("user") or {}).get("login"),
+                "state": state or None,
+                "created_at": review.get("submitted_at"),
+                "updated_at": None,
+                "body": body,
+                "url": review.get("html_url"),
+            }
+        )
+    items.sort(key=lambda item: str(item.get("created_at") or ""))
+    return items
+
+
 def pr_threads(ref: PrRef, *, all_threads: bool = False) -> list[dict[str, Any]]:
     if not ref.repo or not ref.number:
         raise GhError("threads requires an explicit PR reference")
@@ -2120,6 +2177,42 @@ def cmd_threads(args: argparse.Namespace) -> None:
         print_table(rows, ["path", "line", "resolved", "author", "body"])
 
 
+# Comment text is authored by anyone who can comment on the PR. In text mode
+# it reaches a terminal (or an agent's context) verbatim, so strip C0/C1
+# control characters other than newline and tab: an embedded escape sequence
+# must not be able to rewrite what the reader sees. --json output is already
+# escaped by the encoder and keeps the original text.
+_TERMINAL_UNSAFE_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def terminal_safe(text: str) -> str:
+    return _TERMINAL_UNSAFE_RE.sub("", text)
+
+
+def cmd_comments(args: argparse.Namespace) -> None:
+    ref = parse_pr_ref(args.pr)
+    items = pr_conversation(ref, include_reviews=not args.no_reviews)
+    payload = {"ref": f"{ref.repo}#{ref.number}", "count": len(items), "items": items}
+    if args.json:
+        print_json(payload)
+        return
+    if not items:
+        print(f"{payload['ref']}: no conversation comments")
+        return
+    for index, item in enumerate(items):
+        if index:
+            print()
+        label = item["kind"] if not item.get("state") else f"{item['kind']} {item['state']}"
+        header = terminal_safe(f"[{label}] {item.get('author')} {item.get('created_at')}")
+        if item.get("updated_at") and item.get("updated_at") != item.get("created_at"):
+            header += f" (updated {item['updated_at']})"
+        print(header)
+        if item.get("body"):
+            print(terminal_safe(item["body"].rstrip()))
+        if item.get("url"):
+            print(terminal_safe(item["url"]))
+
+
 def cmd_checks(args: argparse.Namespace) -> None:
     ref = parse_pr_ref(args.pr)
     checks = pr_checks(ref)
@@ -2624,6 +2717,12 @@ def build_parser() -> argparse.ArgumentParser:
     threads.add_argument("--json", action="store_true")
     threads.set_defaults(func=cmd_threads)
 
+    comments = sub.add_parser("comments", help="Show PR conversation comments and review summaries")
+    comments.add_argument("pr")
+    comments.add_argument("--no-reviews", action="store_true", help="Issue comments only; omit review summaries")
+    comments.add_argument("--json", action="store_true")
+    comments.set_defaults(func=cmd_comments)
+
     checks = sub.add_parser("checks", help="Show PR checks")
     checks.add_argument("pr")
     checks.add_argument("--json", action="store_true")
@@ -2754,6 +2853,7 @@ Commands:
   issue comment <issue> --body-file F  Comment on an issue
   diff <pr>                      Show PR diff
   threads <pr>                   Show unresolved PR review threads
+  comments <pr> [--no-reviews]   Show PR conversation comments and review summaries
   checks <pr>                    Show PR checks
   review <pr>                    Summarize a PR: state, checks, risk tier, doctrine
   audit <pr> [--reply]           Audit a PR and generate fix-oriented review text

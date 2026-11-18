@@ -3265,7 +3265,7 @@ tools:
     - create, list, assign, unassign, label, close, and comment on GitHub issues
     - create pull requests with committed provenance declarations and a local preview
     - list actionable pull requests across repos
-    - inspect pull request details, diffs, checks, and unresolved review threads
+    - inspect pull request details, diffs, checks, unresolved review threads, and conversation comments
     - classify changed files by review-risk tier (critical/elevated/standard)
     - audit PR review risks and generate fix-oriented engineering review replies
     - surface the built-in review doctrine on every review
@@ -3289,6 +3289,7 @@ tools:
       issue comment: Comment on an issue with --body or --body-file, then read it back
       diff: Show PR diff
       threads: Show unresolved PR review threads
+      comments: Show PR conversation comments and review summaries (--no-reviews for issue comments only)
       checks: Show PR checks
       review: Summarize a PR for review — state, checks, risk tier, and the review doctrine
       audit: Audit a PR for review risks and generate request-changes-ready reply text
@@ -3329,6 +3330,8 @@ tools:
       command: agent-gh review ovachiever/agent-do#3 --summary
     - intent: show unresolved GitHub review comments
       command: agent-gh threads ovachiever/agent-do#3
+    - intent: read the comments posted on a pull request's conversation
+      command: agent-gh comments ovachiever/agent-do#3
     - intent: approve this GitHub PR
       command: agent-gh approve ovachiever/agent-do#3 --body "LGTM"
     - intent: close accidental pull request and delete branch
@@ -3358,6 +3361,7 @@ tools:
       - pr review
       - review my pr
       - review comments
+      - pr comments
       - unresolved threads
       - requested review
       - awaiting review
@@ -3390,6 +3394,7 @@ tools:
       - issue list
       - diff
       - threads
+      - comments
       - checks
       - review
       - doctrine
