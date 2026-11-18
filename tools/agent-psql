@@ -1126,6 +1126,12 @@ print(json.dumps({
     # Parse CSV output into JSON
     python3 -c "
 import csv, json, sys, io
+# Default csv field limit is 131072 bytes; one json_agg or text column can
+# exceed it (_csv.Error: field larger than field limit). Lift it.
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:
+    csv.field_size_limit(2**31 - 1)
 from datetime import datetime, date
 raw = sys.stdin.read().strip()
 elapsed = int(sys.argv[1])
@@ -1198,6 +1204,12 @@ cmd_sample() {
 
     python3 -c "
 import csv, json, sys, io
+# Default csv field limit is 131072 bytes; one json_agg or text column can
+# exceed it (_csv.Error: field larger than field limit). Lift it.
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:
+    csv.field_size_limit(2**31 - 1)
 raw = sys.stdin.read().strip()
 table = sys.argv[1]
 total = sys.argv[2]
