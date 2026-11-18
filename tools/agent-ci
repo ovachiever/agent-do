@@ -56,7 +56,7 @@ agent-ci - CI/CD pipeline management
 Commands:
   status [workflow]          Show workflow status
   runs [workflow]            List recent runs
-  trigger <workflow>         Trigger workflow
+  trigger <workflow> [ref]   Trigger workflow (-f key=value per workflow_dispatch input)
   logs <run-id>              View run logs
   cancel <run-id>            Cancel running workflow
   artifacts <run-id>         Download artifacts
@@ -179,18 +179,55 @@ cmd_runs() {
 
 cmd_trigger() {
     check_gh
-    local workflow="${1:-}"
-    local ref="${2:-$(git branch --show-current)}"
+    local workflow="" ref="" positional_ref=""
+    # workflow_dispatch inputs, passed to `gh workflow run` as raw string
+    # fields (-f): no @file expansion, so a value is never read from disk.
+    local -a fields=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--field|--input)
+                local pair="${2:-}"
+                if [[ ! "$pair" =~ ^[A-Za-z_][A-Za-z0-9_-]*=.*$ ]]; then
+                    echo "Error: $1 takes key=value (got '${pair}')" >&2
+                    return 2
+                fi
+                fields+=(-f "$pair")
+                shift 2
+                ;;
+            -r|--ref)
+                ref="${2:-}"
+                [[ -n "$ref" ]] || { echo "Error: $1 needs a branch or tag" >&2; return 2; }
+                shift 2
+                ;;
+            -*)
+                echo "Error: unknown trigger option '$1'" >&2
+                return 2
+                ;;
+            *)
+                if [[ -z "$workflow" ]]; then
+                    workflow="$1"
+                elif [[ -z "$positional_ref" ]]; then
+                    positional_ref="$1"
+                else
+                    echo "Error: unexpected argument '$1'" >&2
+                    return 2
+                fi
+                shift
+                ;;
+        esac
+    done
+    [[ -z "$ref" ]] && ref="$positional_ref"
+    [[ -z "$ref" ]] && ref="$(git branch --show-current 2>/dev/null)"
     local repo
     repo=$(get_repo)
 
     if [[ -z "$workflow" ]]; then
         if [[ "$OUTPUT_FORMAT" == "json" ]]; then
-            emit_json_error "Workflow file required (usage: agent-ci trigger <workflow.yml> [ref])"
+            emit_json_error "Workflow file required (usage: agent-ci trigger <workflow.yml> [ref] [-f key=value]...)"
             return 1
         fi
         echo "Error: Workflow file required"
-        echo "Usage: agent-ci trigger <workflow.yml> [ref]"
+        echo "Usage: agent-ci trigger <workflow.yml> [ref|--ref R] [-f key=value]..."
         return 1
     fi
 
@@ -199,18 +236,22 @@ cmd_trigger() {
         return 1
     fi
 
+    local -a gh_args=(workflow run "$workflow" --ref "$ref" --repo "$repo" ${fields[@]+"${fields[@]}"})
+    local inputs_note=""
+    (( ${#fields[@]} > 0 )) && inputs_note=" with $(( ${#fields[@]} / 2 )) input(s)"
+
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
         local out
-        out=$(gh workflow run "$workflow" --ref "$ref" --repo "$repo" 2>&1) || {
+        out=$(gh "${gh_args[@]}" 2>&1) || {
             emit_json_error "$out"
             return 1
         }
-        emit_json_text "Triggered $workflow on $ref"
+        emit_json_text "Triggered $workflow on $ref$inputs_note"
         return 0
     fi
 
-    gh workflow run "$workflow" --ref "$ref" --repo "$repo"
-    echo "Triggered $workflow on $ref"
+    gh "${gh_args[@]}" || return 1
+    echo "Triggered $workflow on $ref$inputs_note"
 }
 
 cmd_logs() {
