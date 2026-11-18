@@ -12,11 +12,13 @@ human-facing clients may consume hash-current values through `manna state`.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import sys
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -115,9 +117,19 @@ def load_cache(slug: str) -> dict[str, dict[str, Any]]:
 
 def save_cache(slug: str, rows: dict[str, dict[str, Any]]) -> None:
     path = cache_path(slug)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"version": 1, "digests": rows}, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    # Unique temp name per writer: the digest thread and a request thread can
+    # save the same slug at once, and a shared .tmp name loses one writer's
+    # file to the other's os.replace (FileNotFoundError). Same directory keeps
+    # the replace an atomic same-filesystem rename.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"version": 1, "digests": rows}, indent=1, sort_keys=True) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def validate(text: Any, issue: dict[str, Any]) -> str | None:
