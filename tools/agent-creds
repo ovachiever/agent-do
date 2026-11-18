@@ -188,9 +188,13 @@ cmd_get() {
     fi
 
     if [[ "$reveal" == "true" ]]; then
+        # Exactly the value and one newline, whatever the backend appends:
+        # macOS `security -w` already ends with a newline, so a bare printf
+        # after it produced a second, blank line and `$(… | tail -1)` captured
+        # an empty string (silent 401s downstream).
         # Exactly one secret read. Denial propagates without a retry or fallback.
-        creds_get "$key" explicit || return $?
-        printf '\n'
+        value="$(creds_get "$key" explicit)" || return $?
+        printf '%s\n' "$value"
         return 0
     fi
 
