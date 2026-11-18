@@ -384,6 +384,11 @@ cmd_issues() {
         esac
     done
 
+    if [[ ! "$limit" =~ ^[0-9]+$ ]] || (( limit < 1 || limit > 100 )); then
+        echo "Error: --limit must be 1-100 (Sentry's page size)" >&2
+        return 2
+    fi
+
     # Prepend project filter to query string if specified
     if [[ -n "$project" ]]; then
         query="project:${project} ${query}"
@@ -403,18 +408,30 @@ print(urllib.parse.quote(os.environ['SENTRY_QUERY']))
 
     if $_json_mode; then
         _emit_json "$result"
-        return
+        # Sentry answers an unknown project (or bad query) with {"detail": …};
+        # printing it is right, exiting 0 made it look like a valid result.
+        if printf '%s' "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+sys.exit(0 if isinstance(d, dict) and 'detail' in d else 1)
+" 2>/dev/null; then
+            return 1
+        fi
+        return 0
     fi
 
     printf '%s' "$result" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
+limit = int(sys.argv[1])
 if isinstance(data, dict) and 'detail' in data:
     print('Error:', data['detail'], file=sys.stderr)
     sys.exit(1)
 if not data:
     print('No issues found.')
     sys.exit(0)
+if len(data) >= limit:
+    print(f'Showing the first {len(data)} (the --limit); more may exist. Raise --limit (max 100).', file=sys.stderr)
 fmt = '{:<22} {:<50} {:<6} {:<6} {:<12}'
 print(fmt.format('ID', 'TITLE', 'EVENTS', 'USERS', 'LAST SEEN'))
 print('-' * 96)
@@ -426,7 +443,7 @@ for i in data:
         str(i.get('userCount', ''))[:6],
         (i.get('lastSeen', '') or '')[:12],
     ))
-"
+" "$limit"
 }
 
 cmd_issue() {
