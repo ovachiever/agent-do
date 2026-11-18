@@ -1502,12 +1502,51 @@ def merge_gate(ref: PrRef) -> dict[str, Any]:
     if merge_state and merge_state not in {"CLEAN", "UNKNOWN"}:
         blocks.append({"gate": "mergeable", "reason": f"merge state is {merge_state}, not CLEAN"})
 
+    # GitHub's reviewDecision is one of APPROVED, CHANGES_REQUESTED or
+    # REVIEW_REQUIRED, or null. Null means GitHub published no decision —
+    # which happens when the base branch requires zero approvals, even when
+    # reviews (including a changes request) exist. So:
+    #   - CHANGES_REQUESTED / REVIEW_REQUIRED block, as before;
+    #   - null passes only when no latest review requests changes, and then
+    #     only with a note (blocking on null refused every PR in repos that
+    #     require no approval: a sole author cannot approve their own PR, so
+    #     --force, the emergency path, became the routine one);
+    #   - any other value blocks — the gate fails closed on what it does not
+    #     understand.
+    # Other zero-approval rules (code owners, approve-latest-push) surface as
+    # merge state BLOCKED, which the mergeable gate above already rejects.
+    notes: list[dict[str, str]] = []
     decision = str(detail.get("review_decision") or "").upper()
-    if decision != "APPROVED":
+    latest = [r for r in detail.get("latest_reviews") or [] if isinstance(r, dict)]
+    changes_requested = sorted({
+        str(r.get("author") or "unknown") for r in latest
+        if str(r.get("state") or "").upper() == "CHANGES_REQUESTED"
+    })
+    if decision == "CHANGES_REQUESTED":
+        blocks.append({"gate": "approval", "reason": "a reviewer requested changes"})
+    elif decision == "REVIEW_REQUIRED":
         blocks.append({
             "gate": "approval",
-            "reason": f"no approving review recorded (review_decision={decision or 'none'})",
+            "reason": "the base branch requires an approving review and none is recorded",
         })
+    elif decision == "APPROVED":
+        pass
+    elif decision:
+        blocks.append({"gate": "approval", "reason": f"unrecognised review decision {decision!r}"})
+    elif changes_requested:
+        blocks.append({
+            "gate": "approval",
+            "reason": "changes requested by " + ", ".join(changes_requested)
+                      + " (the branch requires no approval, so GitHub reports no decision)",
+        })
+    else:
+        approvers = sorted({
+            str(r.get("author") or "unknown") for r in latest
+            if str(r.get("state") or "").upper() == "APPROVED"
+        })
+        reason = "GitHub reports no review decision (the base branch requires no approval)"
+        reason += "; approved by " + ", ".join(approvers) if approvers else "; no approving review — merging on the author's authority"
+        notes.append({"gate": "approval", "reason": reason})
 
     risk = classify_risk(changed_paths(detail))
     if risk["tier"] == "critical":
@@ -1517,7 +1556,7 @@ def merge_gate(ref: PrRef) -> dict[str, Any]:
             "reason": f"critical-tier paths changed ({crit}) — pass --confirm-risk after tracing the control flow",
         })
 
-    return {"allowed": not blocks, "blocks": blocks, "warnings": warnings, "risk": risk}
+    return {"allowed": not blocks, "blocks": blocks, "warnings": warnings, "notes": notes, "risk": risk}
 
 
 def add_finding(
@@ -2244,6 +2283,9 @@ def cmd_merge(args: argparse.Namespace) -> None:
                     file=sys.stderr,
                 )
         sys.exit(2)
+
+    for note in gate.get("notes", []):
+        print(f"  NOTE   [{note['gate']}] {note['reason']}", file=sys.stderr)
 
     if args.force and gate["blocks"]:
         bypassed = ", ".join(block["gate"] for block in gate["blocks"])
