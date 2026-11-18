@@ -26,37 +26,45 @@ _emit_json() {
     printf '%s' "$1" | python3 -m json.tool 2>/dev/null || printf '%s\n' "$1"
 }
 
+# _emit_action_json <action> <raw-response> [requested-id]
+# The org bulk endpoint (used by `ignore`) answers with the changed fields
+# only — no shortId, no id — so the id the caller asked for is the fallback.
 _emit_action_json() {
     local action="$1"
     local raw="$2"
+    local requested="${3:-}"
     if $_json_mode; then
         printf '%s' "$raw" | python3 -c "
 import json, sys
-action = sys.argv[1]
+action, requested = sys.argv[1], sys.argv[2]
 d = json.load(sys.stdin)
 if 'detail' in d:
     print(json.dumps({'ok': False, 'error': d['detail']}, indent=2))
     sys.exit(1)
-print(json.dumps({'ok': True, 'action': action, 'issue': d}, indent=2))
-" "$action"
+out = {'ok': True, 'action': action, 'issue': d}
+if requested:
+    out['requested_id'] = requested
+print(json.dumps(out, indent=2))
+" "$action" "$requested"
         return
     fi
     printf '%s' "$raw" | python3 -c "
 import sys, json
-action = sys.argv[1]
+action, requested = sys.argv[1], sys.argv[2]
 d = json.load(sys.stdin)
 if 'detail' in d:
     print('Error:', d['detail'], file=sys.stderr)
     sys.exit(1)
 label = {'resolve': 'resolved', 'unresolve': 'reopened', 'ignore': 'ignored', 'assign': 'assigned'}.get(action, action)
-sid = d.get('shortId', d.get('id', ''))
+sid = d.get('shortId') or requested or d.get('id') or '(unknown id)'
 if action == 'assign':
     assignee = d.get('assignedTo') or {}
     who = assignee.get('email') or assignee.get('name', 'nobody')
     print('Issue', sid, 'assigned to', who)
 else:
-    print('Issue', sid, label + '.')
-" "$action"
+    substatus = d.get('substatus')
+    print('Issue', sid, label + (' (' + substatus + ')' if substatus else '') + '.')
+" "$action" "$requested"
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -496,7 +504,7 @@ cmd_resolve() {
 
     local result
     result=$(sentry_put "${base_url}/organizations/${org}/issues/${issue_id}/" '{"status":"resolved"}') || return 1
-    _emit_action_json resolve "$result"
+    _emit_action_json resolve "$result" "$short_id"
 }
 
 cmd_unresolve() {
@@ -513,7 +521,7 @@ cmd_unresolve() {
 
     local result
     result=$(sentry_put "${base_url}/organizations/${org}/issues/${issue_id}/" '{"status":"unresolved"}') || return 1
-    _emit_action_json unresolve "$result"
+    _emit_action_json unresolve "$result" "$short_id"
 }
 
 cmd_ignore() {
@@ -544,7 +552,7 @@ elif isinstance(raw, list):
 else:
     print(json.dumps(raw))
 ")
-    _emit_action_json ignore "$result"
+    _emit_action_json ignore "$result" "$short_id"
 }
 
 cmd_assign() {
@@ -568,7 +576,7 @@ print(json.dumps({'assignedTo': os.environ['SENTRY_ASSIGN_EMAIL']}))
 
     local result
     result=$(sentry_put "${base_url}/organizations/${org}/issues/${issue_id}/" "$payload") || return 1
-    _emit_action_json assign "$result"
+    _emit_action_json assign "$result" "$short_id"
 }
 
 cmd_alerts() {
